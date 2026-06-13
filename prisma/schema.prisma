@@ -251,8 +251,15 @@ enum ShippingCountry {
 model Order {
   id            String          @id @default(cuid())
   userId        String
-  status        OrderStatus     @default(PENDING)
+  status        OrderStatus     @default(PENDING_PAYMENT)
+  /// 주문 당시 마켓 코드 — 변경 불가 동결값
+  marketCode    String          @default("KR")
+  /// 주문 당시 통화 코드 — 변경 불가 동결값
+  currency      String          @default("KRW")
+  /// 총 주문금액 = Σ(unitPrice × quantity) + shippingFee, 최소단위 정수, 동결
   totalAmount   Int
+  /// 배송비, 최소단위 정수 (현재 0; 향후 배송비 정책 시 활성화)
+  shippingFee   Int             @default(0)
   paymentId     String?
   paymentMethod String?
   paymentStatus PaymentStatus   @default(PENDING)
@@ -287,7 +294,8 @@ model Order {
 }
 
 enum OrderStatus {
-  PENDING
+  PENDING_PAYMENT  // 주문 생성 완료, 결제 대기 — 초기 상태
+  PENDING          // 결제 완료, 처리 대기 (결제 3/3에서 전환)
   CONFIRMED
   MANUFACTURING
   SHIPPED
