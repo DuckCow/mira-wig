@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# local upload staging (mock S3)
+/uploads/
+
+# macOS folder artifacts
+무제\ 폴더/
