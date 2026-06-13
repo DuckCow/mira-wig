@@ -5,18 +5,22 @@ import {
   CATEGORY_LABELS,
   type WigStyleSummary,
 } from "@/lib/catalog";
+import { getCurrentMarketCode } from "@/lib/market";
 import { storage } from "@/lib/storage";
 import { StyleCard } from "@/components/features/StyleCard";
+import type { MarketCode } from "@/lib/market/types";
 
 // ── URL 파라미터 파싱 ─────────────────────────────────────────
 
 type PageSearchParams = Promise<{ category?: string; q?: string }>;
 
 function parseParams(raw: { category?: string; q?: string }) {
-  const category = typeof raw.category === "string" && isWigCategory(raw.category)
-    ? raw.category
-    : undefined;
-  const query = typeof raw.q === "string" && raw.q.trim() ? raw.q.trim() : undefined;
+  const category =
+    typeof raw.category === "string" && isWigCategory(raw.category)
+      ? raw.category
+      : undefined;
+  const query =
+    typeof raw.q === "string" && raw.q.trim() ? raw.q.trim() : undefined;
   return { category, query };
 }
 
@@ -44,9 +48,10 @@ function buildAllHref(currentQuery?: string) {
 
 interface StyleGridProps {
   styles: (WigStyleSummary & { imageUrl: string | null })[];
+  marketCode: MarketCode;
 }
 
-function StyleGrid({ styles }: StyleGridProps) {
+function StyleGrid({ styles, marketCode }: StyleGridProps) {
   if (styles.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-gray-400">
@@ -67,6 +72,7 @@ function StyleGrid({ styles }: StyleGridProps) {
             tags={style.tags}
             imageUrl={style.imageUrl}
             basePrice={style.basePrice}
+            marketCode={marketCode}
           />
         </li>
       ))}
@@ -81,10 +87,13 @@ export default async function StylesPage({
 }: {
   searchParams: PageSearchParams;
 }) {
-  const raw = await searchParams;
+  const [raw, marketCode] = await Promise.all([
+    searchParams,
+    getCurrentMarketCode(),
+  ]);
   const { category, query } = parseParams(raw);
 
-  const styles = await getWigStyles({ category, query });
+  const styles = await getWigStyles({ category, query }, marketCode);
 
   const stylesWithUrls = await Promise.all(
     styles.map(async (s) => ({
@@ -148,7 +157,7 @@ export default async function StylesPage({
         ))}
       </nav>
 
-      <StyleGrid styles={stylesWithUrls} />
+      <StyleGrid styles={stylesWithUrls} marketCode={marketCode} />
     </main>
   );
 }

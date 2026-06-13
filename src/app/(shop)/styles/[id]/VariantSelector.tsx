@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { WigVariantDetail } from "@/lib/catalog.types";
 import { getLengthLabel, getCurlLabel } from "@/lib/wig-option-labels";
 import { addToCart } from "@/app/actions/cart";
+import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
 import {
   getAvailableColors,
   getAvailableLengths,
@@ -166,6 +167,7 @@ function AddToCartPanel({
   quantity,
   isPending,
   feedback,
+  marketCode,
   onQuantityChange,
   onAddToCart,
 }: {
@@ -173,15 +175,17 @@ function AddToCartPanel({
   quantity: number;
   isPending: boolean;
   feedback: { ok: boolean; msg: string } | null;
+  marketCode: MarketCode;
   onQuantityChange: (n: number) => void;
   onAddToCart: () => void;
 }) {
+  const { currency } = MARKET_CONFIGS[marketCode];
   const canAdd = variant !== null && variant.stock > 0 && !isPending;
   return (
     <div className="space-y-4">
       {variant && (
         <p className="text-lg font-semibold text-gray-900">
-          {variant.price.toLocaleString("ko-KR")}원
+          {formatPrice(variant.price, currency)}
           {variant.stock === 0 && <span className="ml-2 text-sm font-normal text-red-500">품절</span>}
         </p>
       )}
@@ -203,9 +207,11 @@ function AddToCartPanel({
 export function VariantSelector({
   variants,
   wigStyleId,
+  marketCode,
 }: {
   variants: WigVariantDetail[];
   wigStyleId: string;
+  marketCode: MarketCode;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -243,6 +249,7 @@ export function VariantSelector({
         quantity={quantity}
         isPending={isPending}
         feedback={feedback}
+        marketCode={marketCode}
         onQuantityChange={setQuantity}
         onAddToCart={() => { void handleAddToCart(); }}
       />

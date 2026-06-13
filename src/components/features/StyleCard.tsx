@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { CATEGORY_LABELS, type WigCategory } from "@/lib/catalog.types";
+import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
 
 export interface StyleCardProps {
   id: string;
@@ -11,7 +12,9 @@ export interface StyleCardProps {
   category: WigCategory;
   tags: string[];
   imageUrl: string | null;
+  /** 현재 마켓 최소단위 정수 금액 */
   basePrice: number;
+  marketCode: MarketCode;
 }
 
 function ImageArea({ imageUrl, name }: { imageUrl: string | null; name: string }) {
@@ -42,7 +45,16 @@ function ImageArea({ imageUrl, name }: { imageUrl: string | null; name: string }
   );
 }
 
-export function StyleCard({ id, name, category, imageUrl, basePrice }: StyleCardProps) {
+export function StyleCard({
+  id,
+  name,
+  category,
+  imageUrl,
+  basePrice,
+  marketCode,
+}: StyleCardProps) {
+  const { currency } = MARKET_CONFIGS[marketCode];
+
   return (
     <article className="rounded-lg overflow-hidden border border-gray-200 bg-white hover:shadow-md transition-shadow">
       <Link href={`/styles/${id}`} aria-label={`${name} 상세 보기`}>
@@ -53,7 +65,7 @@ export function StyleCard({ id, name, category, imageUrl, basePrice }: StyleCard
           </span>
           <h2 className="text-sm font-semibold text-gray-900 truncate">{name}</h2>
           <p className="text-sm text-gray-700 mt-1">
-            {basePrice.toLocaleString("ko-KR")}원~
+            {formatPrice(basePrice, currency)}~
           </p>
         </div>
       </Link>

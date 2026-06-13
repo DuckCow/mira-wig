@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { getCartItemCount } from "@/lib/cart";
+import { getCurrentMarketCode } from "@/lib/market";
 import { SignOutButton } from "./SignOutButton";
+import { MarketSelector } from "./MarketSelector";
 
 async function CartLink({ userId }: { userId: string }) {
   const count = await getCartItemCount(userId);
@@ -59,7 +61,10 @@ function UserMenu({
 }
 
 export async function Header() {
-  const session = await getSession();
+  const [session, marketCode] = await Promise.all([
+    getSession(),
+    getCurrentMarketCode(),
+  ]);
 
   return (
     <header className="sticky top-0 z-10 bg-white border-b border-gray-200">
@@ -72,7 +77,9 @@ export async function Header() {
           Mira
         </Link>
 
-        <nav aria-label="사용자 메뉴">
+        <nav aria-label="사용자 메뉴" className="flex items-center gap-3">
+          <MarketSelector current={marketCode} />
+
           {session ? (
             <UserMenu
               name={session.user.name ?? "사용자"}

@@ -75,6 +75,55 @@ model VerificationToken {
 }
 
 // ============================================================
+// 마켓 (Market) — 통화·배송권역·가격의 단일 출처
+// ============================================================
+
+model Market {
+  code               String   @id       // "KR" | "US" | "JP"
+  currency           String             // "KRW" | "USD" | "JPY"
+  shippableCountries String[]           // 배송 가능 국가 코드 목록
+  defaultLocale      String             // "ko" | "en" | "ja"
+  isActive           Boolean  @default(true)
+
+  // ── 향후 확장 슬롯 (이번에 구현하지 않음) ────────────────────
+  // taxConfig     : 세율·세금 유형 (미국 sales tax, 일본 소비세 등)
+  // paymentConfig : 결제 수단 목록 (토스/Stripe/PayPay 등)
+  taxConfig          Json?
+  paymentConfig      Json?
+
+  variantPrices   VariantMarketPrice[]
+  availableStyles WigStyleMarket[]
+}
+
+/// 변형(Variant) × 마켓 별 가격.
+/// amount는 해당 통화의 최소단위 정수:
+///   KRW(zero-decimal): ₩30,000 → 30000
+///   USD(2-decimal):    $29.99  → 2999
+///   JPY(zero-decimal): ¥1,500  → 1500
+model VariantMarketPrice {
+  variantId  String
+  marketCode String
+  amount     Int      // 최소단위 정수 — float 절대 금지
+
+  variant WigVariant @relation(fields: [variantId],  references: [id], onDelete: Cascade)
+  market  Market     @relation(fields: [marketCode], references: [code], onDelete: Cascade)
+
+  @@id([variantId, marketCode])
+}
+
+/// 스타일별 마켓 가용성. isActive=false 이면 해당 마켓에서 미노출.
+model WigStyleMarket {
+  wigStyleId String
+  marketCode String
+  isActive   Boolean @default(true)
+
+  wigStyle WigStyle @relation(fields: [wigStyleId], references: [id], onDelete: Cascade)
+  market   Market   @relation(fields: [marketCode], references: [code], onDelete: Cascade)
+
+  @@id([wigStyleId, marketCode])
+}
+
+// ============================================================
 // 가발 카탈로그
 // ============================================================
 
@@ -99,11 +148,12 @@ model WigStyle {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  variants      WigVariant[]
-  tryOns        TryOn[]
-  reviews       Review[]
-  wishlistItems WishlistItem[]
-  cartItems     CartItem[]
+  variants         WigVariant[]
+  tryOns           TryOn[]
+  reviews          Review[]
+  wishlistItems    WishlistItem[]
+  cartItems        CartItem[]
+  availableMarkets WigStyleMarket[]
 }
 
 model WigVariant {
@@ -113,14 +163,16 @@ model WigVariant {
   colorHex   String?
   length     String
   curl       String
+  /// KRW 기준가 (장바구니 하위 호환용). 카탈로그 표시는 VariantMarketPrice를 사용할 것.
   price      Int
   stock      Int     @default(0)
   sku        String  @unique
   isActive   Boolean @default(true)
 
-  wigStyle   WigStyle    @relation(fields: [wigStyleId], references: [id], onDelete: Cascade)
-  cartItems  CartItem[]
-  orderItems OrderItem[]
+  wigStyle     WigStyle             @relation(fields: [wigStyleId], references: [id], onDelete: Cascade)
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+  marketPrices VariantMarketPrice[]
 }
 
 // ============================================================

@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { getWigStyleById, CATEGORY_LABELS } from "@/lib/catalog";
+import { getCurrentMarketCode } from "@/lib/market";
 import { storage } from "@/lib/storage";
 import type { WigStyleDetail } from "@/lib/catalog.types";
+import type { MarketCode } from "@/lib/market/types";
 import { VariantSelector } from "./VariantSelector";
 
 // ── 내부 헬퍼 ────────────────────────────────────────────────
@@ -37,7 +39,15 @@ function CoverImage({ url, name }: { url: string | null; name: string }) {
   );
 }
 
-function StyleInfo({ style, coverUrl }: { style: WigStyleDetail; coverUrl: string | null }) {
+function StyleInfo({
+  style,
+  coverUrl,
+  marketCode,
+}: {
+  style: WigStyleDetail;
+  coverUrl: string | null;
+  marketCode: MarketCode;
+}) {
   return (
     <div className="space-y-4">
       <div>
@@ -45,9 +55,6 @@ function StyleInfo({ style, coverUrl }: { style: WigStyleDetail; coverUrl: strin
           {CATEGORY_LABELS[style.category]}
         </span>
         <h1 className="text-2xl font-bold text-gray-900">{style.name}</h1>
-        <p className="text-lg text-gray-500 mt-1">
-          {style.basePrice.toLocaleString("ko-KR")}원~
-        </p>
       </div>
 
       {style.description && (
@@ -59,7 +66,11 @@ function StyleInfo({ style, coverUrl }: { style: WigStyleDetail; coverUrl: strin
         <CoverImage url={coverUrl} name={style.name} />
       </div>
 
-      <VariantSelector variants={style.variants} wigStyleId={style.id} />
+      <VariantSelector
+        variants={style.variants}
+        wigStyleId={style.id}
+        marketCode={marketCode}
+      />
     </div>
   );
 }
@@ -73,8 +84,8 @@ export default async function StyleDetailPage({
 }: {
   params: PageParams;
 }) {
-  const { id } = await params;
-  const style = await getWigStyleById(id);
+  const [{ id }, marketCode] = await Promise.all([params, getCurrentMarketCode()]);
+  const style = await getWigStyleById(id, marketCode);
   if (!style) notFound();
 
   const coverUrl = await resolveCoverUrl(style.coverImageKey);
@@ -94,7 +105,7 @@ export default async function StyleDetailPage({
         <div className="hidden md:block">
           <CoverImage url={coverUrl} name={style.name} />
         </div>
-        <StyleInfo style={style} coverUrl={coverUrl} />
+        <StyleInfo style={style} coverUrl={coverUrl} marketCode={marketCode} />
       </div>
     </main>
   );
