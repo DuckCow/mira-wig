@@ -152,11 +152,13 @@ describe("validateAndBuildLines — 스타일 마켓 비활성", () => {
 describe("validateAndBuildLines — 마켓 가격 없음", () => {
   it("marketPrices가 빈 배열이면 VARIANT_PRICE_UNAVAILABLE 예외를 던진다", () => {
     const items = [makeItem({ marketPrices: [] })];
-    try {
-      validateAndBuildLines(items, "KRW");
-      expect.fail("예외가 던져져야 합니다");
-    } catch (e) {
-      expect(e instanceof OrderException && e.code).toBe("VARIANT_PRICE_UNAVAILABLE");
+    expect(() => validateAndBuildLines(items, "KRW")).toThrow(OrderException);
+    let caught: unknown;
+    try { validateAndBuildLines(items, "KRW"); } catch (e) { caught = e; }
+    if (caught instanceof OrderException) {
+      expect(caught.code).toBe("VARIANT_PRICE_UNAVAILABLE");
+    } else {
+      expect.unreachable("OrderException이 던져져야 합니다");
     }
   });
 });
@@ -166,11 +168,13 @@ describe("validateAndBuildLines — 마켓 가격 없음", () => {
 describe("validateAndBuildLines — 재고 부족", () => {
   it("수량이 재고를 초과하면 STOCK_INSUFFICIENT 예외를 던진다", () => {
     const items = [makeItem({ quantity: 10, stock: 5 })];
-    try {
-      validateAndBuildLines(items, "KRW");
-      expect.fail("예외가 던져져야 합니다");
-    } catch (e) {
-      expect(e instanceof OrderException && e.code).toBe("STOCK_INSUFFICIENT");
+    expect(() => validateAndBuildLines(items, "KRW")).toThrow(OrderException);
+    let caught: unknown;
+    try { validateAndBuildLines(items, "KRW"); } catch (e) { caught = e; }
+    if (caught instanceof OrderException) {
+      expect(caught.code).toBe("STOCK_INSUFFICIENT");
+    } else {
+      expect.unreachable("OrderException이 던져져야 합니다");
     }
   });
 
@@ -181,11 +185,13 @@ describe("validateAndBuildLines — 재고 부족", () => {
 
   it("수량 = 1, 재고 = 0 이면 STOCK_INSUFFICIENT", () => {
     const items = [makeItem({ quantity: 1, stock: 0 })];
-    try {
-      validateAndBuildLines(items, "KRW");
-      expect.fail("예외가 던져져야 합니다");
-    } catch (e) {
-      expect(e instanceof OrderException && e.code).toBe("STOCK_INSUFFICIENT");
+    expect(() => validateAndBuildLines(items, "KRW")).toThrow(OrderException);
+    let caught: unknown;
+    try { validateAndBuildLines(items, "KRW"); } catch (e) { caught = e; }
+    if (caught instanceof OrderException) {
+      expect(caught.code).toBe("STOCK_INSUFFICIENT");
+    } else {
+      expect.unreachable("OrderException이 던져져야 합니다");
     }
   });
 });
