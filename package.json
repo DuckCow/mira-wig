@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:setup": "createdb -U $USER wig_platform_test 2>/dev/null || true && dotenv -e .env.test -- npx prisma migrate deploy",
     "verify": "npm run typecheck && npm run lint && npm run test"
   },
   "prisma": {
@@ -35,6 +36,7 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.7",
     "eslint-import-resolver-typescript": "^4.4.5",

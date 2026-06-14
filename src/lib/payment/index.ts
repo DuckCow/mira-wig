@@ -1,24 +1,31 @@
 // ============================================================
-// lib/payment/index.ts
-// 결제 공급자 팩토리
+// lib/payment/index.ts — 결제 공급자 팩토리
 // ------------------------------------------------------------
-// 사용처 (주문 확정 API):
-//   import { paymentProvider } from "@/lib/payment";
-//   // 1) DB에서 주문 금액 조회 후 input.amount와 대조 검증
-//   // 2) 검증 통과 시에만 승인 호출
-//   const result = await paymentProvider.confirmPayment({ ... });
+// 사용처 (processPayment):
+//   import { getPaymentProvider } from "@/lib/payment";
+//   const provider = getPaymentProvider(marketCode);
+//   const result = await provider.initiate({ ... });
+// ------------------------------------------------------------
+// 현재: mock 단일 구현.
+// 향후: 마켓 코드 또는 PAYMENT_PROVIDER env로 공급자 분기.
 // ============================================================
 
+import { MockPaymentProvider } from "./mock";
 import type { PaymentProvider } from "./types";
-import { TossPaymentProvider } from "./toss";
 
-// 현재는 토스 단일 구현. 향후 PG 추가 시 PAYMENT_PROVIDER env로 분기.
-export const paymentProvider: PaymentProvider = new TossPaymentProvider();
+/**
+ * 현재 환경에 맞는 결제 공급자를 반환한다.
+ * @param _marketCode 향후 마켓별 공급자 선택 슬롯 (현재 미사용)
+ */
+export function getPaymentProvider(_marketCode?: string): PaymentProvider {
+  return new MockPaymentProvider();
+}
 
 export type {
   PaymentProvider,
-  ConfirmPaymentInput,
+  InitiateInput,
+  InitiateResult,
+  ConfirmInput,
   PaymentResult,
   PaymentStatus,
-  RefundInput,
 } from "./types";
