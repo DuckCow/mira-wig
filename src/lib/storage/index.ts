@@ -10,9 +10,14 @@
 
 import type { StorageProvider } from "./types";
 import { S3StorageProvider } from "./s3";
+import { MockStorageProvider } from "./mock";
 
-// 현재는 S3 단일 구현. 향후 CloudFront/다른 백엔드 추가 시 여기서 분기.
-export const storage: StorageProvider = new S3StorageProvider();
+// STORAGE_PROVIDER=mock → 로컬 개발용 MockStorageProvider (AWS 자격증명 불필요)
+// 그 외           → S3StorageProvider (AWS_REGION / AWS_S3_BUCKET 필수)
+export const storage: StorageProvider =
+  process.env.STORAGE_PROVIDER === "mock"
+    ? new MockStorageProvider()
+    : new S3StorageProvider();
 
 export type {
   StorageProvider,

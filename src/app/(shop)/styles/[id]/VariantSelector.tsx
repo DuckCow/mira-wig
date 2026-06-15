@@ -6,6 +6,8 @@ import type { WigVariantDetail } from "@/lib/catalog.types";
 import { getLengthLabel, getCurlLabel } from "@/lib/wig-option-labels";
 import { addToCart } from "@/app/actions/cart";
 import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import { getFittingLocale } from "@/lib/fitting/locale";
+import { FittingModal } from "@/components/features/FittingModal";
 import {
   getAvailableColors,
   getAvailableLengths,
@@ -218,8 +220,10 @@ export function VariantSelector({
   const [sel, setSel] = useState<Selection>({ color: null, length: null, curl: null });
   const [quantity, setQuantity] = useState(1);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [isFittingOpen, setIsFittingOpen] = useState(false);
 
   const selected = findSelectedVariant(variants, sel);
+  const t = getFittingLocale(MARKET_CONFIGS[marketCode].defaultLocale);
 
   function handleAddToCart() {
     if (!selected) return;
@@ -244,6 +248,17 @@ export function VariantSelector({
         onLength={(l) => { setSel((s) => ({ ...s, length: l, curl: null })); setFeedback(null); }}
         onCurl={(c) => { setSel((s) => ({ ...s, curl: c })); setFeedback(null); }}
       />
+
+      {selected && (
+        <button
+          type="button"
+          onClick={() => setIsFittingOpen(true)}
+          className="w-full py-2.5 border border-gray-900 text-gray-900 font-medium rounded-xl hover:bg-gray-50 transition-colors text-sm"
+        >
+          {t.cta}
+        </button>
+      )}
+
       <AddToCartPanel
         variant={selected}
         quantity={quantity}
@@ -253,6 +268,15 @@ export function VariantSelector({
         onQuantityChange={setQuantity}
         onAddToCart={() => { void handleAddToCart(); }}
       />
+
+      {isFittingOpen && selected && (
+        <FittingModal
+          variantId={selected.id}
+          wigStyleId={wigStyleId}
+          t={t}
+          onClose={() => setIsFittingOpen(false)}
+        />
+      )}
     </div>
   );
 }

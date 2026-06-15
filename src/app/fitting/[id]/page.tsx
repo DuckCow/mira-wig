@@ -1,0 +1,117 @@
+// ============================================================
+// app/fitting/[id]/page.tsx — 개인 피팅 결과 조회 (서버 컴포넌트)
+// ------------------------------------------------------------
+// authz: 본인 소유 Fitting만 조회 가능. 타인/비로그인 → 404.
+// presigned URL은 서버에서만 생성 (규칙 4-4·4-5).
+// 퍼블릭 공유 없음 — 이번 범위에서 제외.
+// ============================================================
+
+import { notFound, redirect } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
+import { getSession } from "@/lib/session";
+import { db } from "@/lib/db";
+import { storage } from "@/lib/storage";
+
+type PageParams = Promise<{ id: string }>;
+
+// ── 서브컴포넌트 ─────────────────────────────────────────────
+
+function FittingImagePair({
+  sourceUrl,
+  resultUrl,
+}: {
+  sourceUrl: string | null;
+  resultUrl: string | null;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {sourceUrl && (
+        <figure>
+          <figcaption className="text-xs text-center text-gray-500 mb-2">원본</figcaption>
+          <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
+            <Image src={sourceUrl} alt="원본 사진" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+          </div>
+        </figure>
+      )}
+      {resultUrl && (
+        <figure>
+          <figcaption className="text-xs text-center text-gray-500 mb-2">피팅</figcaption>
+          <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
+            <Image src={resultUrl} alt="피팅 결과" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+          </div>
+        </figure>
+      )}
+    </div>
+  );
+}
+
+function FittingStatusSection({
+  status,
+  sourceUrl,
+  resultUrl,
+}: {
+  status: string;
+  sourceUrl: string | null;
+  resultUrl: string | null;
+}) {
+  if (status === "PENDING") return <p className="text-sm text-gray-500">아직 처리 중입니다. 잠시 후 새로고침하세요.</p>;
+  if (status === "FAILED") return <p className="text-sm text-red-500">피팅에 실패했습니다.</p>;
+  return <FittingImagePair sourceUrl={sourceUrl} resultUrl={resultUrl} />;
+}
+
+// ── 페이지 ────────────────────────────────────────────────────
+
+export default async function FittingResultPage({ params }: { params: PageParams }) {
+  const [{ id }, session] = await Promise.all([params, getSession()]);
+  if (!session) redirect("/login");
+
+  const fitting = await db.fitting.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      resultImageKey: true,
+      sourceImageKey: true,
+      variant: {
+        select: {
+          color: true,
+          length: true,
+          curl: true,
+          wigStyle: { select: { id: true, name: true } },
+        },
+      },
+    },
+  });
+
+  if (!fitting || fitting.userId !== session.user.id) notFound();
+
+  const [resultUrl, sourceUrl] = await Promise.all([
+    fitting.resultImageKey ? storage.getViewUrl(fitting.resultImageKey) : Promise.resolve(null),
+    fitting.sourceImageKey ? storage.getViewUrl(fitting.sourceImageKey) : Promise.resolve(null),
+  ]);
+
+  return (
+    <main className="max-w-2xl mx-auto px-4 py-8">
+      <nav aria-label="뒤로가기" className="mb-6">
+        <Link href={`/styles/${fitting.variant.wigStyle.id}`} className="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
+          ← {fitting.variant.wigStyle.name}
+        </Link>
+      </nav>
+
+      <h1 className="text-xl font-bold text-gray-900 mb-2">피팅 결과</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        {fitting.variant.color} · {fitting.variant.length} · {fitting.variant.curl}
+      </p>
+
+      <FittingStatusSection status={fitting.status} sourceUrl={sourceUrl} resultUrl={resultUrl} />
+
+      <div className="mt-8">
+        <Link href={`/styles/${fitting.variant.wigStyle.id}`} className="inline-block px-6 py-2.5 bg-gray-900 text-white rounded-xl text-sm hover:bg-gray-700 transition-colors">
+          상품 페이지로 돌아가기
+        </Link>
+      </div>
+    </main>
+  );
+}

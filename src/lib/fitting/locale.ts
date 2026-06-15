@@ -4,18 +4,17 @@
 // i18n 라이브러리 없이 단순 맵으로 관리.
 // MARKET_CONFIGS[marketCode].defaultLocale → getFittingLocale()로 텍스트 선택.
 // 에러는 코드를 키로 하여 이 맵에서 문구로 변환한다.
-// 매핑되지 않는 코드는 UNKNOWN 항목으로 폴백 — 한국어 raw string 누출 없음.
 // ============================================================
 
 import type { FittingErrorCode } from "./types";
+import type { UploadUrlErrorCode } from "@/app/actions/fitting";
 
-// UNSUPPORTED_TYPE은 업로드 전용 코드 (FittingErrorCode 범주 밖).
 export type ClientErrorCode =
-  | "FILE_TOO_LARGE"    // 클라이언트 가드: 10MB 초과
-  | "INVALID_TYPE"      // 클라이언트 가드: 이미지가 아닌 파일
-  | "UPLOAD_FAILED"     // S3 PUT 실패 또는 폴링 타임아웃
-  | "UNSUPPORTED_TYPE"  // 허용되지 않는 MIME 타입
-  | FittingErrorCode;   // UNAUTHENTICATED | PROVIDER_ERROR | UNKNOWN | …
+  | "FILE_TOO_LARGE"  // 클라이언트 가드: 10MB 초과
+  | "INVALID_TYPE"    // 클라이언트 가드: 이미지가 아닌 파일
+  | "UPLOAD_FAILED"   // S3 PUT 실패 또는 폴링 타임아웃
+  | FittingErrorCode
+  | UploadUrlErrorCode;
 
 export interface FittingLocale {
   cta: string;
