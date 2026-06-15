@@ -91,6 +91,7 @@ export default tseslint.config(
       "src/lib/payment/**/*.ts",
       "src/lib/ai/**/*.ts",
       "src/lib/storage/**/*.ts",
+      "src/lib/fitting/**/*.ts",
       "src/lib/auth.ts",
       "src/app/api/orders/**/*.ts",
       "src/app/api/payments/**/*.ts",

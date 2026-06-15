@@ -1,31 +1,43 @@
 // ============================================================
-// lib/ai/mock.ts
-// MockFittingProvider — 초기 MVP용 가짜 구현체
+// lib/ai/mock.ts — MockFittingProvider (server-async)
+// 실제 AI API 연동 전 개발/테스트용 즉시 결과 시뮬레이터
 // ------------------------------------------------------------
-// AI API 연동 전까지 UX를 먼저 완성하기 위한 mock.
-// 실제로는 원본 이미지를 그대로 결과로 돌려주거나,
-// 미리 준비된 샘플 결과 이미지 key를 반환한다.
+// 실패 시뮬: AI_MOCK_FORCE_FAIL=true 환경변수 (이 mock의 자체 config).
+//            공유 인터페이스 시그니처에 들어가지 않는다.
+// 처리 지연: AI_MOCK_DELAY_MS 환경변수 (기본 0 — 테스트 결정성 보장).
 // ============================================================
 
-import type { FittingInput, FittingProvider, FittingResult } from "./types";
+import { randomUUID } from "crypto";
+import type { FittingJobStatus, FittingProvider } from "./types";
+
+/** canned 샘플 결과 이미지 key (URL 아님 — 규칙 4-4) */
+export const MOCK_RESULT_KEY = "tryon-result/sample/mock-result.jpg";
 
 export class MockFittingProvider implements FittingProvider {
+  readonly mode = "server-async" as const;
   readonly name = "mock";
+  private readonly delayMs: number;
 
-  async applyStyle(input: FittingInput): Promise<FittingResult> {
-    const start = Date.now();
+  /** @param delayMs 처리 지연(ms). 기본 0 — 테스트에서 즉시 terminal 상태 반환. */
+  constructor(delayMs = 0) {
+    this.delayMs = delayMs;
+  }
 
-    // 실제 AI 처리를 흉내내기 위한 인위적 지연 (로딩 UX 테스트용)
-    await new Promise((r) => setTimeout(r, 1200));
+  requestFitting(_input: {
+    sourceImageKey: string;
+    variantId: string;
+  }): Promise<{ providerJobId: string }> {
+    return Promise.resolve({ providerJobId: `mock-job-${randomUUID()}` });
+  }
 
-    // TODO(real provider): 외부 AI API 호출로 교체.
-    // mock 단계에서는 원본 이미지를 결과로 그대로 사용한다.
-    // (실제 합성 대신, 흐름과 UX를 검증하는 것이 목적)
-    return {
-      status: "COMPLETED",
-      resultImageKey: input.originalImageKey,
-      providerRequestId: `mock_${Date.now()}`,
-      processingMs: Date.now() - start,
-    };
+  async getJob(_providerJobId: string): Promise<FittingJobStatus> {
+    if (this.delayMs > 0) {
+      await new Promise((r) => setTimeout(r, this.delayMs));
+    }
+    // 실패 시뮬 — 공유 인터페이스가 아닌 이 mock의 자체 환경변수로만 제어
+    if (process.env.AI_MOCK_FORCE_FAIL === "true") {
+      return { status: "failed", reason: "AI_MOCK_FORCE_FAIL=true" };
+    }
+    return { status: "succeeded", result: { resultImageKey: MOCK_RESULT_KEY } };
   }
 }

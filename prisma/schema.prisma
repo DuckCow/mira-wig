@@ -26,7 +26,7 @@ model User {
 
   accounts      Account[]
   sessions      Session[]
-  tryOns        TryOn[]
+  fittings      Fitting[]
   orders        Order[]
   reviews       Review[]
   wishlistItems WishlistItem[]
@@ -149,7 +149,6 @@ model WigStyle {
   updatedAt     DateTime    @updatedAt
 
   variants         WigVariant[]
-  tryOns           TryOn[]
   reviews          Review[]
   wishlistItems    WishlistItem[]
   cartItems        CartItem[]
@@ -173,37 +172,38 @@ model WigVariant {
   cartItems    CartItem[]
   orderItems   OrderItem[]
   marketPrices VariantMarketPrice[]
+  fittings     Fitting[]
 }
 
 // ============================================================
-// AI 가상 피팅
+// 피팅 (Fitting) — AI 가상 피팅 결과 영속
 // ============================================================
 
-model TryOn {
-  id                String      @id @default(cuid())
-  userId            String
-  wigStyleId        String
-  wigVariantId      String?
-  originalImageKey  String
-  resultImageKey    String?
-  status            TryOnStatus @default(PENDING)
-  providerName      String?
-  providerRequestId String?
-  processingMs      Int?
-  appliedOptions    Json?
-  errorMessage      String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wigStyle WigStyle @relation(fields: [wigStyleId], references: [id])
+enum FittingStatus {
+  PENDING    // provider에 요청 완료, 결과 대기
+  SUCCEEDED  // 성공 — resultImageKey 저장됨
+  FAILED     // 실패 — failureReason 저장됨
 }
 
-enum TryOnStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
+/// 사용자 1회 피팅 시도. sourceImageKey/resultImageKey는 S3 key (URL 금지).
+model Fitting {
+  id             String        @id @default(cuid())
+  userId         String
+  variantId      String
+  status         FittingStatus @default(PENDING)
+  /// 소스(얼굴) 이미지 S3 key — 보존 정책상 나중에 삭제 가능 (nullable)
+  sourceImageKey String?
+  /// 결과 이미지 S3 key — SUCCEEDED 시 저장
+  resultImageKey String?
+  /// 외부 AI provider가 발급한 job ID
+  providerJobId  String?
+  /// FAILED 시 실패 이유 (provider 응답)
+  failureReason  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  variant WigVariant @relation(fields: [variantId], references: [id])
 }
 
 // ============================================================
