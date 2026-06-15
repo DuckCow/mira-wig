@@ -207,11 +207,13 @@ async function handleFailure(
  * @param orderId 처리할 주문 ID
  * @param userId 요청 유저 ID (소유권 검증용)
  * @param idempotencyKey 클라이언트가 생성한 멱등성 키 (UUID 권장)
+ * @param shouldSucceed @mock-only mock 성공/실패 제어. 실제 PG 연동 시 제거.
  */
 export async function processPayment(
   orderId: string,
   userId: string,
   idempotencyKey: string,
+  shouldSucceed?: boolean,
 ): Promise<ProcessPaymentResult> {
   const idempotencyHit = await checkIdempotency(idempotencyKey);
   if (idempotencyHit) return idempotencyHit;
@@ -220,7 +222,7 @@ export async function processPayment(
   if (!eligibility.eligible) return eligibility.result;
 
   const { order } = eligibility;
-  const provider = getPaymentProvider(order.marketCode);
+  const provider = getPaymentProvider(order.marketCode, shouldSucceed);
   const result = await provider.initiate({
     orderId, amount: order.totalAmount, currency: order.currency, idempotencyKey,
   });

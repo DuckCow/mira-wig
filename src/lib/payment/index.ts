@@ -16,9 +16,13 @@ import type { PaymentProvider } from "./types";
 /**
  * 현재 환경에 맞는 결제 공급자를 반환한다.
  * @param _marketCode 향후 마켓별 공급자 선택 슬롯 (현재 미사용)
+ * @param shouldSucceed @mock-only mock 성공/실패 제어. 실제 PG 연동 시 제거.
  */
-export function getPaymentProvider(_marketCode?: string): PaymentProvider {
-  return new MockPaymentProvider();
+export function getPaymentProvider(
+  _marketCode?: string,
+  shouldSucceed?: boolean,
+): PaymentProvider {
+  return new MockPaymentProvider(shouldSucceed ?? true);
 }
 
 export type {

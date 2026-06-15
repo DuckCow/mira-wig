@@ -138,7 +138,7 @@ export function CheckoutForm({
     startTransition(async () => {
       const result = await createOrderAction(submitted);
       if (result.success) {
-        router.push(`/orders/${result.orderId}`);
+        router.push(`/orders/${result.orderId}/payment`);
       } else {
         setServerError(result.error);
       }
