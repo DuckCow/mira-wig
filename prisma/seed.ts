@@ -192,7 +192,6 @@ async function main() {
   await prisma.cartItem.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
-  await prisma.tryOn.deleteMany();
   await prisma.wishlistItem.deleteMany();
   await prisma.review.deleteMany();
   await prisma.wigStyleMarket.deleteMany();
