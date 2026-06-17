@@ -8,22 +8,16 @@ import "server-only";
 
 import type { Session } from "next-auth";
 import { getSession } from "./session";
+import { isAdminRole } from "./admin-role";
+
+// isAdminRole은 admin-role.ts에서 정의 — Edge 미들웨어도 그쪽을 import한다.
+export { isAdminRole };
 
 // ── 타입 ─────────────────────────────────────────────────────
 
 export type AdminGuardResult =
   | { success: false; errorCode: "UNAUTHENTICATED" | "FORBIDDEN" }
   | { success: true; session: Session };
-
-// ── 순수 판정 (I/O 없음 — 미들웨어에서도 재사용 가능) ─────────
-
-/**
- * JWT/세션에서 꺼낸 role 값만 보고 ADMIN 여부를 판정한다.
- * I/O 없이 순수하게 동작하므로 미들웨어·server action 양쪽에서 사용할 수 있다.
- */
-export function isAdminRole(role: string | undefined | null): boolean {
-  return role === "ADMIN";
-}
 
 // ── 서버 액션용 가드 (I/O 포함) ──────────────────────────────
 
