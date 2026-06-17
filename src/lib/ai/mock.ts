@@ -10,8 +10,17 @@
 import { randomUUID } from "crypto";
 import type { FittingJobStatus, FittingProvider } from "./types";
 
-/** canned 샘플 결과 이미지 key (URL 아님 — 규칙 4-4) */
+/** canned 샘플 결과 이미지 key (URL 아님 — 규칙 4-4).
+ *  jobVariantMap에 variantId가 없을 때(직접 getJob 호출 등)의 폴백. */
 export const MOCK_RESULT_KEY = "tryon-result/sample/mock-result.jpg";
+
+// ── 데모 전용 — 실 VTO provider 연동 시 제거 ─────────────────
+//
+// requestFitting이 받은 variantId를 providerJobId에 매핑해 두었다가
+// getJob에서 variant별 canned 결과 키를 돌려준다.
+// 인메모리: 서버 재시작 시 초기화됨(데모 용도로 무방).
+const DEMO_RESULT_PREFIX = "demo-fitting-result";
+const jobVariantMap = new Map<string, string>(); // providerJobId → variantId
 
 export class MockFittingProvider implements FittingProvider {
   readonly mode = "server-async" as const;
@@ -23,14 +32,18 @@ export class MockFittingProvider implements FittingProvider {
     this.delayMs = delayMs;
   }
 
-  requestFitting(_input: {
+  requestFitting(input: {
     sourceImageKey: string;
     variantId: string;
+    variantSku?: string;
   }): Promise<{ providerJobId: string }> {
-    return Promise.resolve({ providerJobId: `mock-job-${randomUUID()}` });
+    const providerJobId = `mock-job-${randomUUID()}`;
+    // 데모: sku 보관(없으면 variantId 폴백) — 실 VTO provider 연동 시 제거
+    jobVariantMap.set(providerJobId, input.variantSku ?? input.variantId);
+    return Promise.resolve({ providerJobId });
   }
 
-  async getJob(_providerJobId: string): Promise<FittingJobStatus> {
+  async getJob(providerJobId: string): Promise<FittingJobStatus> {
     if (this.delayMs > 0) {
       await new Promise((r) => setTimeout(r, this.delayMs));
     }
@@ -38,6 +51,12 @@ export class MockFittingProvider implements FittingProvider {
     if (process.env.AI_MOCK_FORCE_FAIL === "true") {
       return { status: "failed", reason: "AI_MOCK_FORCE_FAIL=true" };
     }
-    return { status: "succeeded", result: { resultImageKey: MOCK_RESULT_KEY } };
+    // 데모: variantId 있으면 canned 키, 없으면(직접 getJob 호출 등) MOCK_RESULT_KEY 폴백
+    // 실 VTO provider 연동 시 이 분기 제거
+    const variantId = jobVariantMap.get(providerJobId);
+    const resultImageKey = variantId
+      ? `${DEMO_RESULT_PREFIX}/${variantId}`
+      : MOCK_RESULT_KEY;
+    return { status: "succeeded", result: { resultImageKey } };
   }
 }

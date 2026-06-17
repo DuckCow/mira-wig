@@ -25,10 +25,11 @@ type StoredFitting = {
 
 // ── startFitting 헬퍼 ─────────────────────────────────────────
 
-async function checkVariantForMarket(variantId: string, marketCode: string): Promise<void> {
+async function checkVariantForMarket(variantId: string, marketCode: string): Promise<string> {
   const variant = await db.wigVariant.findUnique({
     where: { id: variantId },
     select: {
+      sku: true,
       isActive: true,
       wigStyle: {
         select: {
@@ -43,6 +44,7 @@ async function checkVariantForMarket(variantId: string, marketCode: string): Pro
   if (variant.wigStyle.availableMarkets[0]?.isActive !== true) {
     throw new FittingException("VARIANT_UNAVAILABLE", "현재 마켓에서 제공하지 않는 스타일입니다.");
   }
+  return variant.sku;
 }
 
 async function createPendingFitting(
@@ -61,9 +63,10 @@ async function requestAndSaveJobId(
   fittingId: string,
   sourceImageKey: string,
   variantId: string,
+  variantSku: string,
 ): Promise<void> {
   const provider = getFittingProvider();
-  const { providerJobId } = await provider.requestFitting({ sourceImageKey, variantId });
+  const { providerJobId } = await provider.requestFitting({ sourceImageKey, variantId, variantSku });
   await db.fitting.update({ where: { id: fittingId }, data: { providerJobId } });
 }
 
@@ -125,9 +128,9 @@ export async function startFitting(
   marketCode: string,
 ): Promise<string> {
   validateSourceKey(sourceImageKey);
-  await checkVariantForMarket(variantId, marketCode);
+  const variantSku = await checkVariantForMarket(variantId, marketCode);
   const fittingId = await createPendingFitting(userId, variantId, sourceImageKey);
-  await requestAndSaveJobId(fittingId, sourceImageKey, variantId);
+  await requestAndSaveJobId(fittingId, sourceImageKey, variantId, variantSku);
   return fittingId;
 }
 

@@ -36,6 +36,8 @@ export interface ServerAsyncFittingProvider {
   requestFitting(input: {
     sourceImageKey: string;
     variantId: string;
+    /** 데모 canned 결과 파일명 키 (mock 전용 — 실 provider는 무시). */
+    variantSku?: string;
   }): Promise<{ providerJobId: string }>;
 
   /** job 상태를 조회한다. terminal 상태이면 이후 폴링은 중단해야 한다. */

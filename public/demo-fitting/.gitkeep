@@ -1,0 +1,14 @@
+# 데모 피팅 결과 이미지 (사람이 채울 것)
+#
+# 파일명 규칙: {variantSku}.jpg  (WigVariant.sku — 재시드해도 변하지 않는 안정 키)
+# 데모 5종 (seed.ts makeVariants 기준):
+#   HL-SLKST-NBR-L-ST.jpg   실크 스트레이트 / 자연갈색 / long / straight
+#   FA-BCHWV-HON-L-WV.jpg   비치 웨이브 / 허니블론드 / long / wavy
+#   FA-LYRGL-BRG-M-CU.jpg   레이어드 글램 / 버건디 / medium / curly
+#   CS-NTCL-PNK-L-CU.jpg    내추럴 컬 풀 볼륨 / 로즈핑크 / long / curly
+#   CS-LZCL-WHT-S-CU.jpg    루즈 컬 쇼트 / 화이트 / short / curly
+#
+# 이 이미지가 있으면 mock 피팅 결과 화면의 "after"로 표시된다.
+# 없는 sku는 회색 PNG 폴백으로 안 깨짐.
+#
+# 실 VTO provider 연동 시 이 디렉터리 전체 제거(핸드오프 §8 대상).
