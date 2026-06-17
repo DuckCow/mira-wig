@@ -4,8 +4,8 @@
 // S3 자격증명 없이 피팅 플로우를 개발할 때 사용한다.
 // STORAGE_PROVIDER=mock 환경변수로 활성화한다.
 //
-// 업로드 URL: {NEXTAUTH_URL}/api/__mock-storage?key=...
-// 브라우저가 해당 경로에 PUT하면 src/app/api/__mock-storage/route.ts 가 받는다.
+// 업로드 URL: {NEXTAUTH_URL}/api/mock-storage?key=...
+// 브라우저가 해당 경로에 PUT하면 src/app/api/mock-storage/route.ts 가 받는다.
 // 같은 origin 요청이므로 CORS 불필요.
 // ============================================================
 
@@ -45,7 +45,7 @@ export class MockStorageProvider implements StorageProvider {
   }): Promise<PresignedUploadResult> {
     const ext = extFromContentType(params.contentType);
     const key = buildMockKey(params.purpose, ext, params.ownerId);
-    const uploadUrl = `${this.baseUrl()}/api/__mock-storage?key=${encodeURIComponent(key)}`;
+    const uploadUrl = `${this.baseUrl()}/api/mock-storage?key=${encodeURIComponent(key)}`;
     return Promise.resolve({
       uploadUrl,
       key,
@@ -56,7 +56,7 @@ export class MockStorageProvider implements StorageProvider {
 
   getViewUrl(key: string): Promise<string> {
     return Promise.resolve(
-      `${this.baseUrl()}/api/__mock-storage?key=${encodeURIComponent(key)}`,
+      `${this.baseUrl()}/api/mock-storage?key=${encodeURIComponent(key)}`,
     );
   }
 

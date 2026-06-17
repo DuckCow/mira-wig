@@ -9,7 +9,6 @@
 // ============================================================
 
 import { useRef, useTransition } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useFitting, type FittingStage } from "@/hooks/useFitting";
 import { addToCart } from "@/app/actions/cart";
@@ -95,14 +94,14 @@ function ResultView({
           <figure>
             <figcaption className="text-xs text-center text-gray-500 mb-1">{t.before}</figcaption>
             <div className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
-              <Image src={stage.sourceUrl} alt={t.before} fill className="object-cover" sizes="50vw" />
+              <img src={stage.sourceUrl} alt={t.before} className="absolute inset-0 w-full h-full object-cover" />
             </div>
           </figure>
         )}
         <figure>
           <figcaption className="text-xs text-center text-gray-500 mb-1">{t.after}</figcaption>
           <div className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
-            <Image src={stage.resultUrl} alt={t.after} fill className="object-cover" sizes="50vw" />
+            <img src={stage.resultUrl} alt={t.after} className="absolute inset-0 w-full h-full object-cover" />
           </div>
         </figure>
       </div>

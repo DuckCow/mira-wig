@@ -7,7 +7,6 @@
 // ============================================================
 
 import { notFound, redirect } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
@@ -30,7 +29,7 @@ function FittingImagePair({
         <figure>
           <figcaption className="text-xs text-center text-gray-500 mb-2">원본</figcaption>
           <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
-            <Image src={sourceUrl} alt="원본 사진" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+            <img src={sourceUrl} alt="원본 사진" className="absolute inset-0 w-full h-full object-cover" />
           </div>
         </figure>
       )}
@@ -38,7 +37,7 @@ function FittingImagePair({
         <figure>
           <figcaption className="text-xs text-center text-gray-500 mb-2">피팅</figcaption>
           <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
-            <Image src={resultUrl} alt="피팅 결과" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+            <img src={resultUrl} alt="피팅 결과" className="absolute inset-0 w-full h-full object-cover" />
           </div>
         </figure>
       )}
