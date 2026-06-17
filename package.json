@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:setup": "createdb -U $USER wig_platform_test 2>/dev/null || true && dotenv -e .env.test -- npx prisma migrate deploy",
-    "verify": "npm run typecheck && npm run lint && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run test",
+    "make-admin": "tsx scripts/make-admin.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
