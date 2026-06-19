@@ -1,14 +1,19 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getStyleDetail } from "@/lib/admin-catalog-data";
+import { getStyleDetail, getStyleMarketData } from "@/lib/admin-catalog-data";
 import { StyleEditForm } from "./StyleEditForm";
 import { VariantSection } from "./VariantSection";
+import { MarketAvailabilitySection } from "./MarketAvailabilitySection";
+import { MarketPriceSection } from "./MarketPriceSection";
 
 type Params = Promise<{ id: string }>;
 
 export default async function StyleDetailPage({ params }: { params: Params }) {
   const { id } = await params;
-  const style = await getStyleDetail(id);
+  const [style, marketData] = await Promise.all([
+    getStyleDetail(id),
+    getStyleMarketData(id),
+  ]);
   if (!style) notFound();
   return (
     <div className="space-y-8">
@@ -19,6 +24,8 @@ export default async function StyleDetailPage({ params }: { params: Params }) {
       </div>
       <StyleEditForm style={style} />
       <VariantSection variants={style.variants} wigStyleId={style.id} />
+      <MarketAvailabilitySection wigStyleId={style.id} markets={marketData.markets} />
+      <MarketPriceSection variantPrices={marketData.variantPrices} />
     </div>
   );
 }

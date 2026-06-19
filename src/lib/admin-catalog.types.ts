@@ -33,3 +33,26 @@ export interface StyleDetail {
   isActive: boolean;
   variants: VariantRow[];
 }
+
+// ── 마켓 가격·가용성 뷰 타입 ──────────────────────────────────
+
+export interface MarketAvailabilityRow {
+  marketCode: string;
+  isActive: boolean;
+}
+
+export interface VariantMarketPriceRow {
+  marketCode: string;
+  amount: number;
+}
+
+export interface VariantPriceRow {
+  id: string;
+  sku: string;
+  prices: VariantMarketPriceRow[];
+}
+
+export interface StyleMarketData {
+  markets: MarketAvailabilityRow[];
+  variantPrices: VariantPriceRow[];
+}

@@ -4,7 +4,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import type { StyleRow, StyleDetail } from "./admin-catalog.types";
+import type { StyleRow, StyleDetail, StyleMarketData } from "./admin-catalog.types";
 
 const VARIANT_SELECT = {
   id: true,
@@ -53,4 +53,30 @@ export async function getStyleDetail(id: string): Promise<StyleDetail | null> {
       },
     },
   });
+}
+
+export async function getStyleMarketData(wigStyleId: string): Promise<StyleMarketData> {
+  const [markets, variantRows] = await Promise.all([
+    db.wigStyleMarket.findMany({
+      where: { wigStyleId },
+      select: { marketCode: true, isActive: true },
+    }),
+    db.wigVariant.findMany({
+      where: { wigStyleId, isActive: true },
+      select: {
+        id: true,
+        sku: true,
+        marketPrices: { select: { marketCode: true, amount: true } },
+      },
+      orderBy: { sku: "asc" },
+    }),
+  ]);
+  return {
+    markets,
+    variantPrices: variantRows.map((v) => ({
+      id: v.id,
+      sku: v.sku,
+      prices: v.marketPrices,
+    })),
+  };
 }
