@@ -21,14 +21,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 
-// ── 프로덕션/실-provider 가드 ─────────────────────────────────
-// mock+비프로덕션 외에는 이 라우트가 존재하지 않는 것처럼 동작한다.
+// ── 프로덕션 가드 ────────────────────────────────────────────
+// 프로덕션에서만 이 라우트를 닫는다.
+// STORAGE_PROVIDER는 보지 않는다 — catalogStorage/fittingStorage 분리 후
+// fittingStorage는 항상 Mock이고 STORAGE_PROVIDER 값과 무관하게 이 라우트에
+// 의존한다. STORAGE_PROVIDER=s3(카탈로그 전환)여도 피팅 데모가 작동해야 한다.
 
 function mockGuard(): NextResponse | null {
-  if (
-    process.env.STORAGE_PROVIDER !== "mock" ||
-    process.env.NODE_ENV === "production"
-  ) {
+  if (process.env.NODE_ENV === "production") {
     return new NextResponse(null, { status: 404 });
   }
   return null;
