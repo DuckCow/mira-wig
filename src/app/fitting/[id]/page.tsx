@@ -10,7 +10,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
-import { storage } from "@/lib/storage";
+import { fittingStorage } from "@/lib/storage";
 
 type PageParams = Promise<{ id: string }>;
 
@@ -87,8 +87,8 @@ export default async function FittingResultPage({ params }: { params: PageParams
   if (!fitting || fitting.userId !== session.user.id) notFound();
 
   const [resultUrl, sourceUrl] = await Promise.all([
-    fitting.resultImageKey ? storage.getViewUrl(fitting.resultImageKey) : Promise.resolve(null),
-    fitting.sourceImageKey ? storage.getViewUrl(fitting.sourceImageKey) : Promise.resolve(null),
+    fitting.resultImageKey ? fittingStorage.getViewUrl(fitting.resultImageKey) : Promise.resolve(null),
+    fitting.sourceImageKey ? fittingStorage.getViewUrl(fitting.sourceImageKey) : Promise.resolve(null),
   ]);
 
   return (

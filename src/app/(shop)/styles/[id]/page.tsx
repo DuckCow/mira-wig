@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { getWigStyleById, CATEGORY_LABELS } from "@/lib/catalog";
 import { getCurrentMarketCode } from "@/lib/market";
-import { storage } from "@/lib/storage";
+import { catalogStorage } from "@/lib/storage";
 import type { WigStyleDetail } from "@/lib/catalog.types";
 import type { MarketCode } from "@/lib/market/types";
 import { VariantSelector } from "./VariantSelector";
@@ -12,7 +12,7 @@ import { VariantSelector } from "./VariantSelector";
 
 async function resolveCoverUrl(key: string | null): Promise<string | null> {
   if (!key) return null;
-  return storage.getViewUrl(key).catch(() => null);
+  return catalogStorage.getViewUrl(key).catch(() => null);
 }
 
 // ── 서브컴포넌트 ─────────────────────────────────────────────

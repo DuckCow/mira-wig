@@ -6,7 +6,7 @@ import {
   type WigStyleSummary,
 } from "@/lib/catalog";
 import { getCurrentMarketCode } from "@/lib/market";
-import { storage } from "@/lib/storage";
+import { catalogStorage } from "@/lib/storage";
 import { StyleCard } from "@/components/features/StyleCard";
 import type { MarketCode } from "@/lib/market/types";
 
@@ -28,7 +28,7 @@ function parseParams(raw: { category?: string; q?: string }) {
 
 async function resolveImageUrl(key: string | null): Promise<string | null> {
   if (!key) return null;
-  return storage.getViewUrl(key).catch(() => null);
+  return catalogStorage.getViewUrl(key).catch(() => null);
 }
 
 // ── 필터 UI 헬퍼 ─────────────────────────────────────────────

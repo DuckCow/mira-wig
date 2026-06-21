@@ -17,7 +17,7 @@ const mockPollFitting = vi.fn();
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 
 vi.mock("@/lib/storage", () => ({
-  storage: {
+  fittingStorage: {
     getUploadUrl: vi.fn().mockResolvedValue({
       uploadUrl: "https://mock-bucket/upload",
       key: "user-upload/uid1/abc.jpg",

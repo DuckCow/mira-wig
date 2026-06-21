@@ -5,7 +5,7 @@ import { getSession } from "@/lib/session";
 import { getCart } from "@/lib/cart";
 import { getCurrentMarketCode } from "@/lib/market";
 import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types";
-import { storage } from "@/lib/storage";
+import { catalogStorage } from "@/lib/storage";
 import { getLengthLabel, getCurlLabel } from "@/lib/wig-option-labels";
 import { RemoveButton, QuantityControl } from "./CartItemActions";
 import type { CartItemView } from "@/lib/cart";
@@ -84,7 +84,7 @@ async function resolveImageUrls(items: CartItemView[]): Promise<(string | null)[
   return Promise.all(
     items.map((item) =>
       item.coverImageKey
-        ? storage.getViewUrl(item.coverImageKey).catch(() => null)
+        ? catalogStorage.getViewUrl(item.coverImageKey).catch(() => null)
         : Promise.resolve(null),
     ),
   );

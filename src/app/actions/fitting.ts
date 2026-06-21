@@ -11,7 +11,7 @@
 
 import { getSession } from "@/lib/session";
 import { getCurrentMarketCode } from "@/lib/market";
-import { storage } from "@/lib/storage";
+import { fittingStorage } from "@/lib/storage";
 import { startFitting, pollFitting, FittingException, type FittingErrorCode } from "@/lib/fitting";
 
 // ── getUploadUrlAction ────────────────────────────────────────
@@ -32,7 +32,7 @@ export async function getUploadUrlAction(contentType: string): Promise<UploadUrl
   if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
     return { success: false, errorCode: "UNSUPPORTED_TYPE" };
   }
-  const result = await storage.getUploadUrl({
+  const result = await fittingStorage.getUploadUrl({
     purpose: "user-upload",
     contentType,
     ownerId: session.user.id,
@@ -83,8 +83,8 @@ export async function pollFittingAction(fittingId: string): Promise<PollResult> 
     if (result.status === "failed") {
       return { success: true, status: "failed", errorCode: "PROVIDER_ERROR" };
     }
-    const resultUrl = await storage.getViewUrl(result.resultImageKey);
-    const sourceUrl = result.sourceImageKey ? await storage.getViewUrl(result.sourceImageKey) : null;
+    const resultUrl = await fittingStorage.getViewUrl(result.resultImageKey);
+    const sourceUrl = result.sourceImageKey ? await fittingStorage.getViewUrl(result.sourceImageKey) : null;
     return { success: true, status: "succeeded", resultUrl, sourceUrl };
   } catch (e) {
     if (e instanceof FittingException) return { success: false, errorCode: e.code };
