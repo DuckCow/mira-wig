@@ -13,6 +13,16 @@ import { CatalogAdminException } from "@/lib/catalog-admin/types";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
+vi.mock("@/lib/storage", () => ({
+  catalogStorage: {
+    getUploadUrl: vi.fn().mockResolvedValue({
+      uploadUrl: "https://mock-s3/wig-style/abc.jpg?presign",
+      key: "wig-style/abc.jpg",
+      requiredHeaders: { "Content-Type": "image/jpeg" },
+      expiresInSeconds: 300,
+    }),
+  },
+}));
 
 const mockCreateWigStyle = vi.fn();
 const mockUpdateWigStyle = vi.fn();
@@ -41,6 +51,7 @@ import {
   createVariantAction,
   updateStockAction,
   deactivateVariantAction,
+  getCoverImageUploadUrlAction,
 } from "../admin/catalog";
 
 const mockGetSession = vi.mocked(getSession);
@@ -179,5 +190,67 @@ describe("updateStyleAction — ADMIN 성공", () => {
     const result = await updateStyleAction("nonexistent", { name: "새이름" });
     expect(result.success).toBe(false);
     if (!result.success) expect(result.errorCode).toBe("STYLE_NOT_FOUND");
+  });
+
+  it("coverImageKey를 함께 전달하면 lib에 그대로 넘긴다", async () => {
+    mockUpdateWigStyle.mockResolvedValue(undefined);
+    const result = await updateStyleAction("style-1", { coverImageKey: "wig-style/abc.jpg" });
+    expect(result.success).toBe(true);
+    expect(mockUpdateWigStyle).toHaveBeenCalledWith(
+      "style-1",
+      expect.objectContaining({ coverImageKey: "wig-style/abc.jpg" }),
+    );
+  });
+
+  it("coverImageKey=null로 이미지를 제거할 수 있다", async () => {
+    mockUpdateWigStyle.mockResolvedValue(undefined);
+    const result = await updateStyleAction("style-1", { coverImageKey: null });
+    expect(result.success).toBe(true);
+    expect(mockUpdateWigStyle).toHaveBeenCalledWith(
+      "style-1",
+      expect.objectContaining({ coverImageKey: null }),
+    );
+  });
+});
+
+// ── getCoverImageUploadUrlAction ──────────────────────────────
+
+describe("getCoverImageUploadUrlAction — 가드", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("세션 없으면 UNAUTHENTICATED를 반환한다", async () => {
+    mockGetSession.mockResolvedValue(null);
+    const result = await getCoverImageUploadUrlAction("image/jpeg");
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.errorCode).toBe("UNAUTHENTICATED");
+  });
+
+  it("CUSTOMER이면 FORBIDDEN을 반환한다", async () => {
+    mockGetSession.mockResolvedValue(CUSTOMER_SESSION);
+    const result = await getCoverImageUploadUrlAction("image/jpeg");
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.errorCode).toBe("FORBIDDEN");
+  });
+});
+
+describe("getCoverImageUploadUrlAction — MIME 검증", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSession.mockResolvedValue(ADMIN_SESSION);
+  });
+
+  it.each(["image/jpeg", "image/png", "image/webp"])("%s → 허용, uploadUrl 반환", async (ct) => {
+    const result = await getCoverImageUploadUrlAction(ct);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.uploadUrl).toBeTruthy();
+      expect(result.key).toMatch(/^wig-style\//);
+    }
+  });
+
+  it.each(["image/gif", "image/bmp", "application/pdf"])("%s → UNSUPPORTED_TYPE", async (ct) => {
+    const result = await getCoverImageUploadUrlAction(ct);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.errorCode).toBe("UNSUPPORTED_TYPE");
   });
 });

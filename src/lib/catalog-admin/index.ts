@@ -64,23 +64,25 @@ export async function createWigStyle(input: CreateStyleInput): Promise<{ id: str
   });
 }
 
+function buildStyleUpdateData(input: UpdateStyleInput) {
+  return {
+    ...(input.name !== undefined && { name: input.name.trim() }),
+    ...(input.description !== undefined && { description: input.description }),
+    ...(input.category !== undefined && { category: input.category }),
+    ...(input.tags !== undefined && { tags: input.tags }),
+    ...(input.sortOrder !== undefined && { sortOrder: input.sortOrder }),
+    ...(input.isActive !== undefined && { isActive: input.isActive }),
+    ...(input.coverImageKey !== undefined && { coverImageKey: input.coverImageKey }),
+  };
+}
+
 /** WigStyle 텍스트 메타를 수정한다. 이미지 필드는 제외. */
 export async function updateWigStyle(styleId: string, input: UpdateStyleInput): Promise<void> {
   if (input.name !== undefined) assertNonEmpty(input.name, "이름");
   if (input.category !== undefined) assertValidCategory(input.category);
   const existing = await db.wigStyle.findUnique({ where: { id: styleId }, select: { id: true } });
   if (!existing) throw new CatalogAdminException("STYLE_NOT_FOUND", "스타일을 찾을 수 없습니다.");
-  await db.wigStyle.update({
-    where: { id: styleId },
-    data: {
-      ...(input.name !== undefined && { name: input.name.trim() }),
-      ...(input.description !== undefined && { description: input.description }),
-      ...(input.category !== undefined && { category: input.category }),
-      ...(input.tags !== undefined && { tags: input.tags }),
-      ...(input.sortOrder !== undefined && { sortOrder: input.sortOrder }),
-      ...(input.isActive !== undefined && { isActive: input.isActive }),
-    },
-  });
+  await db.wigStyle.update({ where: { id: styleId }, data: buildStyleUpdateData(input) });
 }
 
 /**

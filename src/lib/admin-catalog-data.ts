@@ -47,6 +47,7 @@ export async function getStyleDetail(id: string): Promise<StyleDetail | null> {
       tags: true,
       sortOrder: true,
       isActive: true,
+      coverImageKey: true,
       variants: {
         select: VARIANT_SELECT,
         orderBy: { sku: "asc" },

@@ -31,6 +31,8 @@ export interface StyleDetail {
   tags: string[];
   sortOrder: number;
   isActive: boolean;
+  /** S3 key (URL 아님 — 규칙 4-4). null이면 커버 이미지 미설정. */
+  coverImageKey: string | null;
   variants: VariantRow[];
 }
 

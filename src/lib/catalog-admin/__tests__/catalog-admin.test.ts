@@ -97,6 +97,24 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     await updateWigStyle("style-1", { name: "새이름" });
     expect(mockStyleUpdate).toHaveBeenCalledOnce();
   });
+
+  it("coverImageKey를 넘기면 data에 포함된다", async () => {
+    mockStyleFindUnique.mockResolvedValue({ id: "style-1" });
+    mockStyleUpdate.mockResolvedValue({});
+    await updateWigStyle("style-1", { coverImageKey: "wig-style/abc.jpg" });
+    expect(mockStyleUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { coverImageKey: "wig-style/abc.jpg" } }),
+    );
+  });
+
+  it("coverImageKey=null이면 이미지 제거가 data에 반영된다", async () => {
+    mockStyleFindUnique.mockResolvedValue({ id: "style-1" });
+    mockStyleUpdate.mockResolvedValue({});
+    await updateWigStyle("style-1", { coverImageKey: null });
+    expect(mockStyleUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { coverImageKey: null } }),
+    );
+  });
 });
 
 // ── deactivateWigStyle ────────────────────────────────────────

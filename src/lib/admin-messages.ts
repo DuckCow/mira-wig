@@ -13,6 +13,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_INPUT: "입력값이 올바르지 않습니다.",
   MARKET_NOT_FOUND: "유효하지 않은 마켓 코드입니다.",
   INVALID_AMOUNT: "금액은 0 이상의 정수여야 합니다.",
+  UNSUPPORTED_TYPE: "지원하지 않는 파일 형식입니다. (JPEG/PNG/WEBP만 허용)",
 };
 
 export function getAdminErrorMessage(errorCode: string): string {

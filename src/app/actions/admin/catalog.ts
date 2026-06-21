@@ -9,6 +9,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
+import { catalogStorage } from "@/lib/storage";
 import {
   createWigStyle,
   updateWigStyle,
@@ -27,7 +28,7 @@ import {
 
 // ── 공통 타입 ─────────────────────────────────────────────────
 
-type AdminErrorCode = CatalogAdminErrorCode | "UNAUTHENTICATED" | "FORBIDDEN";
+type AdminErrorCode = CatalogAdminErrorCode | "UNAUTHENTICATED" | "FORBIDDEN" | "UNSUPPORTED_TYPE";
 
 type ActionResult<T extends Record<string, unknown> = Record<never, never>> =
   | ({ success: true } & T)
@@ -39,6 +40,27 @@ function handleError(e: unknown): { success: false; errorCode: AdminErrorCode } 
 }
 
 const ADMIN_PATH = "/admin/styles";
+
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+// ── 이미지 업로드 액션 ────────────────────────────────────────
+
+export async function getCoverImageUploadUrlAction(
+  contentType: string,
+): Promise<ActionResult<{ uploadUrl: string; key: string; requiredHeaders: Record<string, string> }>> {
+  const guard = await requireAdmin();
+  if (!guard.success) return guard;
+  if (!ALLOWED_IMAGE_TYPES.has(contentType)) {
+    return { success: false, errorCode: "UNSUPPORTED_TYPE" };
+  }
+  const result = await catalogStorage.getUploadUrl({ purpose: "wig-style", contentType });
+  return {
+    success: true,
+    uploadUrl: result.uploadUrl,
+    key: result.key,
+    requiredHeaders: result.requiredHeaders ?? {},
+  };
+}
 
 // ── WigStyle 액션 ─────────────────────────────────────────────
 
