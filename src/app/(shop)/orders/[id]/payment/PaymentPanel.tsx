@@ -28,7 +28,17 @@ export function PaymentPanel({ orderId, totalAmount, currency, isFailed }: Payme
     startTransition(async () => {
       const result = await payOrderAction(orderId);
       // 성공 시 redirect가 발생해 여기에 도달하지 않는다.
-      setError(result.error);
+      switch (result.status) {
+        case "failed":
+        case "unconfirmed":
+          setError(result.error);
+          return;
+        case "pending":
+          setError(result.error || null);
+          return;
+      }
+      const _exhaustive: never = result;
+      return _exhaustive;
     });
   }
 

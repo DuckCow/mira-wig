@@ -1,13 +1,6 @@
 // ============================================================
 // lib/payment/process.ts — 결제 처리 (STRICT 존)
 // server-only: DB, Prisma 트랜잭션 포함
-// ------------------------------------------------------------
-// 흐름:
-//   1. idempotency 가드
-//   2. 주문 상태 검증
-//   3. provider.initiate() 호출
-//   4. 성공 → 재고 원자 차감 + PAID + 카트 비우기 + Payment SUCCEEDED
-//   5. 실패 → PAYMENT_FAILED + Payment FAILED
 // ============================================================
 import "server-only";
 
@@ -16,35 +9,26 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getPaymentProvider } from "./index";
 import { validateOrderForPayment, canDecrementStock, isAlreadyProcessed } from "./core";
+import { paidOrderResult, paidOrderResultOrEmpty, reconciliationRequired } from "./reconciliation";
 
 // ── 공개 결과 타입 ────────────────────────────────────────────
-
 export type ProcessPaymentResult =
   | { status: "success"; success: true; paymentId: string }
   | { status: "pending"; success: false; orderId: string; amount: number; currency: string }
+  | { status: "unconfirmed"; success: false; error: string; orderId: string; providerTransactionId: string | null }
   | { status: "failed"; success: false; error: string };
 
-export type ConfirmPaymentInput = {
-  orderId: string;
-  userId: string;
-  paymentKey: string;
-  redirectAmount: number;
-};
+export type ConfirmPaymentInput = { orderId: string; userId: string; paymentKey: string; redirectAmount: number };
 
 // ── 내부 타입 ────────────────────────────────────────────────
 
 type LoadedOrder = {
-  status: string;
-  totalAmount: number;
-  currency: string;
-  marketCode: string;
-  userId: string;
+  status: string; totalAmount: number; currency: string;
+  marketCode: string; userId: string;
   items: Array<{ variantId: string; quantity: number }>;
 };
 
-type OrderEligibility =
-  | { eligible: true; order: LoadedOrder }
-  | { eligible: false; result: ProcessPaymentResult };
+type OrderEligibility = { eligible: true; order: LoadedOrder } | { eligible: false; result: ProcessPaymentResult };
 
 // ── 주문 로딩 ────────────────────────────────────────────────
 
@@ -86,8 +70,7 @@ async function decrementStock(
 
 type SuccessTxInput = {
   orderId: string; userId: string; idempotencyKey: string;
-  providerTransactionId: string | null; amount: number;
-  currency: string; provider: string;
+  providerTransactionId: string | null; amount: number; currency: string; provider: string;
   items: Array<{ variantId: string; quantity: number }>;
 };
 
@@ -118,8 +101,8 @@ async function runSuccessTransaction(input: SuccessTxInput): Promise<string> {
 
 type FailureTxInput = {
   orderId: string; idempotencyKey: string;
-  providerTransactionId: string | null;
-  amount: number; currency: string; provider: string; errorMessage: string;
+  providerTransactionId: string | null; amount: number;
+  currency: string; provider: string; errorMessage: string;
 };
 
 async function runFailureTransaction(input: FailureTxInput): Promise<string> {
@@ -159,15 +142,6 @@ async function checkOrderEligibility(
   const v = validateOrderForPayment(order.status);
   if (!v.valid) return { eligible: false, result: { status: "failed", success: false, error: v.reason ?? "결제 불가" } };
   return { eligible: true, order };
-}
-
-async function getSucceededPaymentId(orderId: string): Promise<string> {
-  const payment = await db.payment.findFirst({
-    where: { orderId, status: "SUCCEEDED" },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  return payment?.id ?? "";
 }
 
 // ── 성공 경로 ────────────────────────────────────────────────
@@ -216,6 +190,37 @@ async function handleFailure(
     provider: providerName, errorMessage: "공급자 결제 실패",
   });
   return { status: "failed", success: false, error: "결제에 실패했습니다. 다시 시도해 주세요." };
+}
+
+async function handleConfirmFailure(
+  orderId: string, idempotencyKey: string,
+  providerTxId: string | null, order: LoadedOrder, providerName: string,
+): Promise<ProcessPaymentResult> {
+  const paid = await paidOrderResult(orderId);
+  if (paid) return paid;
+  return handleFailure(orderId, idempotencyKey, providerTxId, order, providerName);
+}
+
+async function handleConfirmedSuccess(
+  input: ConfirmPaymentInput, idempotencyKey: string,
+  providerTxId: string | null, order: LoadedOrder, providerName: string,
+): Promise<ProcessPaymentResult> {
+  try {
+    const paymentId = await runSuccessTransaction({
+      orderId: input.orderId, userId: input.userId, idempotencyKey,
+      providerTransactionId: providerTxId, amount: order.totalAmount,
+      currency: order.currency, provider: providerName, items: order.items,
+    });
+    return { status: "success", success: true, paymentId };
+  } catch (error) {
+    const paid = await paidOrderResult(input.orderId);
+    if (paid) return paid;
+    return reconciliationRequired({
+      orderId: input.orderId, paymentKey: input.paymentKey,
+      providerTransactionId: providerTxId, provider: providerName,
+      amount: order.totalAmount, currency: order.currency, error,
+    });
+  }
 }
 
 function pendingResult(orderId: string, order: LoadedOrder): ProcessPaymentResult {
@@ -267,8 +272,7 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
   if (!order) return { status: "failed", success: false, error: "주문을 찾을 수 없습니다." };
   if (order.userId !== input.userId) return { status: "failed", success: false, error: "접근 권한이 없습니다." };
   if (order.status === "PAID") {
-    const paymentId = await getSucceededPaymentId(input.orderId);
-    return { status: "success", success: true, paymentId };
+    return paidOrderResultOrEmpty(input.orderId);
   }
   const validation = validateOrderForPayment(order.status);
   if (!validation.valid) {
@@ -277,7 +281,7 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
   const provider = getPaymentProvider(order.marketCode);
   const idempotencyKey = randomUUID();
   if (order.totalAmount !== input.redirectAmount) {
-    return handleFailure(input.orderId, idempotencyKey, input.paymentKey, order, provider.name);
+    return handleConfirmFailure(input.orderId, idempotencyKey, input.paymentKey, order, provider.name);
   }
   const result = await provider.confirm({
     orderId: input.orderId,
@@ -285,8 +289,8 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
     providerTransactionId: input.paymentKey,
     idempotencyKey,
   });
-  if (result.status === "SUCCEEDED") {
-    return handleSuccess(input.orderId, input.userId, idempotencyKey, result.providerTransactionId, order, provider.name);
+  if (result.status !== "SUCCEEDED") {
+    return handleConfirmFailure(input.orderId, idempotencyKey, result.providerTransactionId, order, provider.name);
   }
-  return handleFailure(input.orderId, idempotencyKey, result.providerTransactionId, order, provider.name);
+  return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider.name);
 }

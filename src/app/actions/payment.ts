@@ -21,6 +21,7 @@ import type { OrderView } from "@/lib/order/types";
 
 export type PayOrderResult =
   | { status: "pending"; success: false; error: string; orderId: string; amount: number; currency: string; orderName: string }
+  | { status: "unconfirmed"; success: false; error: string; orderId: string }
   | { status: "failed"; success: false; error: string };
 
 function buildOrderName(order: OrderView): string {
@@ -55,6 +56,9 @@ export async function payOrderAction(orderId: string): Promise<PayOrderResult> {
       currency: result.currency,
       orderName: buildOrderName(order),
     };
+  }
+  if (result.status === "unconfirmed") {
+    return { status: "unconfirmed", success: false, error: result.error, orderId: result.orderId };
   }
 
   return { status: "failed", success: false, error: result.error };
