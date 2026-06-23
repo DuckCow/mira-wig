@@ -89,7 +89,7 @@ async function runSuccessTransaction(input: SuccessTxInput): Promise<string> {
     }
     const updated = await tx.order.updateMany({
       where: { id: input.orderId, status: "PENDING_PAYMENT" },
-      data: { status: "PAID" },
+      data: { status: "PAID", paymentStatus: "PAID" },
     });
     if (updated.count === 0) throw new Error("주문 상태 전이 실패 — 동시 결제 충돌");
     await tx.cartItem.deleteMany({ where: { userId: input.userId } });
@@ -117,7 +117,7 @@ async function runFailureTransaction(input: FailureTxInput): Promise<string> {
   return db.$transaction(async (tx) => {
     await tx.order.updateMany({
       where: { id: input.orderId, status: "PENDING_PAYMENT" },
-      data: { status: "PAYMENT_FAILED" },
+      data: { status: "PAYMENT_FAILED", paymentStatus: "FAILED" },
     });
     const payment = await tx.payment.create({
       data: {

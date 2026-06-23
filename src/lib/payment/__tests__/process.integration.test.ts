@@ -98,10 +98,11 @@ describe("processPayment — 결제 성공", () => {
   beforeEach(async () => { ctx = await setupFixtures(10); });
   afterEach(async () => { await cleanupFixtures(ctx); });
 
-  it("주문 상태가 PAID로 전이된다", async () => {
+  it("주문 상태와 결제 상태가 PAID로 전이된다", async () => {
     await processPayment(ctx.orderId, ctx.userId, makeKey());
     const order = await db.order.findUniqueOrThrow({ where: { id: ctx.orderId } });
     expect(order.status).toBe("PAID");
+    expect(order.paymentStatus).toBe("PAID");
   });
 
   it("재고가 주문 수량(1)만큼 차감된다", async () => {
@@ -143,10 +144,11 @@ describe("processPayment — 재고 부족(stock=0)", () => {
     expect(result.success).toBe(false);
   });
 
-  it("주문 상태가 PAYMENT_FAILED로 전이된다", async () => {
+  it("주문 상태가 PAYMENT_FAILED, 결제 상태가 FAILED로 전이된다", async () => {
     await processPayment(ctx.orderId, ctx.userId, makeKey());
     const order = await db.order.findUniqueOrThrow({ where: { id: ctx.orderId } });
     expect(order.status).toBe("PAYMENT_FAILED");
+    expect(order.paymentStatus).toBe("FAILED");
   });
 
   it("재고는 변하지 않는다 (0 유지)", async () => {
