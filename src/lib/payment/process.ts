@@ -11,6 +11,7 @@
 // ============================================================
 import "server-only";
 
+import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getPaymentProvider } from "./index";
@@ -19,8 +20,16 @@ import { validateOrderForPayment, canDecrementStock, isAlreadyProcessed } from "
 // ── 공개 결과 타입 ────────────────────────────────────────────
 
 export type ProcessPaymentResult =
-  | { success: true; paymentId: string }
-  | { success: false; error: string };
+  | { status: "success"; success: true; paymentId: string }
+  | { status: "pending"; success: false; orderId: string; amount: number; currency: string }
+  | { status: "failed"; success: false; error: string };
+
+export type ConfirmPaymentInput = {
+  orderId: string;
+  userId: string;
+  paymentKey: string;
+  redirectAmount: number;
+};
 
 // ── 내부 타입 ────────────────────────────────────────────────
 
@@ -137,7 +146,7 @@ async function runFailureTransaction(input: FailureTxInput): Promise<string> {
 async function checkIdempotency(key: string): Promise<ProcessPaymentResult | null> {
   const existing = await db.payment.findUnique({ where: { idempotencyKey: key } });
   if (!existing || !isAlreadyProcessed(existing)) return null;
-  return { success: true, paymentId: existing.id };
+  return { status: "success", success: true, paymentId: existing.id };
 }
 
 async function checkOrderEligibility(
@@ -145,11 +154,20 @@ async function checkOrderEligibility(
   userId: string,
 ): Promise<OrderEligibility> {
   const order = await loadOrder(orderId);
-  if (!order) return { eligible: false, result: { success: false, error: "주문을 찾을 수 없습니다." } };
-  if (order.userId !== userId) return { eligible: false, result: { success: false, error: "접근 권한이 없습니다." } };
+  if (!order) return { eligible: false, result: { status: "failed", success: false, error: "주문을 찾을 수 없습니다." } };
+  if (order.userId !== userId) return { eligible: false, result: { status: "failed", success: false, error: "접근 권한이 없습니다." } };
   const v = validateOrderForPayment(order.status);
-  if (!v.valid) return { eligible: false, result: { success: false, error: v.reason ?? "결제 불가" } };
+  if (!v.valid) return { eligible: false, result: { status: "failed", success: false, error: v.reason ?? "결제 불가" } };
   return { eligible: true, order };
+}
+
+async function getSucceededPaymentId(orderId: string): Promise<string> {
+  const payment = await db.payment.findFirst({
+    where: { orderId, status: "SUCCEEDED" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  return payment?.id ?? "";
 }
 
 // ── 성공 경로 ────────────────────────────────────────────────
@@ -170,7 +188,7 @@ async function handleSuccess(
         amount: order.totalAmount, currency: order.currency,
         provider: providerName, errorMessage: "재고 부족",
       });
-      return { success: false, error: "재고가 부족하여 결제를 완료할 수 없습니다." };
+      return { status: "failed", success: false, error: "재고가 부족하여 결제를 완료할 수 없습니다." };
     }
   }
   try {
@@ -179,10 +197,10 @@ async function handleSuccess(
       amount: order.totalAmount, currency: order.currency,
       provider: providerName, items: order.items,
     });
-    return { success: true, paymentId };
+    return { status: "success", success: true, paymentId };
   } catch (e) {
-    if (e instanceof Error) return { success: false, error: e.message };
-    return { success: false, error: "결제 처리 중 오류" };
+    if (e instanceof Error) return { status: "failed", success: false, error: e.message };
+    return { status: "failed", success: false, error: "결제 처리 중 오류" };
   }
 }
 
@@ -197,7 +215,17 @@ async function handleFailure(
     amount: order.totalAmount, currency: order.currency,
     provider: providerName, errorMessage: "공급자 결제 실패",
   });
-  return { success: false, error: "결제에 실패했습니다. 다시 시도해 주세요." };
+  return { status: "failed", success: false, error: "결제에 실패했습니다. 다시 시도해 주세요." };
+}
+
+function pendingResult(orderId: string, order: LoadedOrder): ProcessPaymentResult {
+  return {
+    status: "pending",
+    success: false,
+    orderId,
+    amount: order.totalAmount,
+    currency: order.currency,
+  };
 }
 
 // ── 공개 엔트리포인트 ─────────────────────────────────────────
@@ -225,8 +253,40 @@ export async function processPayment(
     orderId, amount: order.totalAmount, currency: order.currency, idempotencyKey,
   });
 
+  if (result.status === "PENDING" || result.redirectUrl) {
+    return pendingResult(orderId, order);
+  }
   if (result.status === "SUCCEEDED") {
     return handleSuccess(orderId, userId, idempotencyKey, result.providerTransactionId, order, provider.name);
   }
   return handleFailure(orderId, idempotencyKey, result.providerTransactionId, order, provider.name);
+}
+
+export async function confirmPayment(input: ConfirmPaymentInput): Promise<ProcessPaymentResult> {
+  const order = await loadOrder(input.orderId);
+  if (!order) return { status: "failed", success: false, error: "주문을 찾을 수 없습니다." };
+  if (order.userId !== input.userId) return { status: "failed", success: false, error: "접근 권한이 없습니다." };
+  if (order.status === "PAID") {
+    const paymentId = await getSucceededPaymentId(input.orderId);
+    return { status: "success", success: true, paymentId };
+  }
+  const validation = validateOrderForPayment(order.status);
+  if (!validation.valid) {
+    return { status: "failed", success: false, error: validation.reason ?? "결제 불가" };
+  }
+  const provider = getPaymentProvider(order.marketCode);
+  const idempotencyKey = randomUUID();
+  if (order.totalAmount !== input.redirectAmount) {
+    return handleFailure(input.orderId, idempotencyKey, input.paymentKey, order, provider.name);
+  }
+  const result = await provider.confirm({
+    orderId: input.orderId,
+    amount: order.totalAmount,
+    providerTransactionId: input.paymentKey,
+    idempotencyKey,
+  });
+  if (result.status === "SUCCEEDED") {
+    return handleSuccess(input.orderId, input.userId, idempotencyKey, result.providerTransactionId, order, provider.name);
+  }
+  return handleFailure(input.orderId, idempotencyKey, result.providerTransactionId, order, provider.name);
 }

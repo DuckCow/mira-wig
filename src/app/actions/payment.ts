@@ -17,17 +17,25 @@ import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
 import { getOrderById } from "@/lib/order";
 import { processPayment } from "@/lib/payment/process";
+import type { OrderView } from "@/lib/order/types";
 
-export type PayOrderResult = { success: false; error: string };
+export type PayOrderResult =
+  | { status: "pending"; success: false; error: string; orderId: string; amount: number; currency: string; orderName: string }
+  | { status: "failed"; success: false; error: string };
+
+function buildOrderName(order: OrderView): string {
+  const first = order.items[0]?.snapshotData.styleName ?? "Mira 주문";
+  return order.items.length > 1 ? `${first} 외 ${order.items.length - 1}건` : first;
+}
 
 /** @param orderId 결제할 주문 ID */
 export async function payOrderAction(orderId: string): Promise<PayOrderResult> {
   const session = await getSession();
-  if (!session) return { success: false, error: "로그인이 필요합니다." };
+  if (!session) return { status: "failed", success: false, error: "로그인이 필요합니다." };
 
   // ownership 확인 — getOrderById는 userId 불일치 시 null 반환
   const order = await getOrderById(orderId, session.user.id);
-  if (!order) return { success: false, error: "주문을 찾을 수 없습니다." };
+  if (!order) return { status: "failed", success: false, error: "주문을 찾을 수 없습니다." };
 
   const idempotencyKey = randomUUID();
   const result = await processPayment(orderId, session.user.id, idempotencyKey);
@@ -37,5 +45,17 @@ export async function payOrderAction(orderId: string): Promise<PayOrderResult> {
     redirect(`/orders/${orderId}`); // 성공 → 영수증 뷰(throws, 클라이언트 이동)
   }
 
-  return { success: false, error: result.error };
+  if (result.status === "pending") {
+    return {
+      status: "pending",
+      success: false,
+      error: "",
+      orderId: result.orderId,
+      amount: result.amount,
+      currency: result.currency,
+      orderName: buildOrderName(order),
+    };
+  }
+
+  return { status: "failed", success: false, error: result.error };
 }
