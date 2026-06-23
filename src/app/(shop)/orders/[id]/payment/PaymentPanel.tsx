@@ -1,8 +1,9 @@
 "use client";
 
 // ============================================================
-// 결제 인터랙션 패널 — mock 전용 성공/실패 버튼
+// 결제 인터랙션 패널 — 현재 Mock 모드 (단일 "결제하기" 버튼)
 // 실제 PG 연동 시 이 컴포넌트 전체를 PG SDK 호출로 교체한다.
+// 실패 시뮬레이션은 env PAYMENT_MOCK_FORCE_FAIL=1 로 제어한다.
 // ============================================================
 
 import { useState, useTransition } from "react";
@@ -13,7 +14,7 @@ interface PaymentPanelProps {
   orderId: string;
   totalAmount: number;
   currency: string;
-  isFailed: boolean; // PAYMENT_FAILED 상태 여부
+  isFailed: boolean;
 }
 
 export function PaymentPanel({ orderId, totalAmount, currency, isFailed }: PaymentPanelProps) {
@@ -22,10 +23,10 @@ export function PaymentPanel({ orderId, totalAmount, currency, isFailed }: Payme
   const currencyMeta = CURRENCY_META[currency];
   const formattedAmount = currencyMeta ? formatPrice(totalAmount, currencyMeta) : `${totalAmount}`;
 
-  function handlePay(shouldSucceed: boolean) {
+  function handlePay() {
     setError(null);
     startTransition(async () => {
-      const result = await payOrderAction(orderId, shouldSucceed);
+      const result = await payOrderAction(orderId);
       // 성공 시 redirect가 발생해 여기에 도달하지 않는다.
       setError(result.error);
     });
@@ -46,24 +47,14 @@ export function PaymentPanel({ orderId, totalAmount, currency, isFailed }: Payme
 
       {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
 
-      {/* mock 전용 — 실제 PG 연동 시 이 블록을 PG 결제창 호출로 교체한다 */}
-      <div className="space-y-2">
-        <button
-          onClick={() => handlePay(true)}
-          disabled={isPending}
-          aria-busy={isPending}
-          className="w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          {isPending ? "결제 처리 중…" : "결제하기"}
-        </button>
-        <button
-          onClick={() => handlePay(false)}
-          disabled={isPending}
-          className="w-full py-3 border border-gray-300 text-gray-600 text-sm rounded-xl hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          결제 실패 시뮬레이션 (mock)
-        </button>
-      </div>
+      <button
+        onClick={handlePay}
+        disabled={isPending}
+        aria-busy={isPending}
+        className="w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        {isPending ? "결제 처리 중…" : "결제하기"}
+      </button>
     </section>
   );
 }

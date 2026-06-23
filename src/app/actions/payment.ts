@@ -20,14 +20,8 @@ import { processPayment } from "@/lib/payment/process";
 
 export type PayOrderResult = { success: false; error: string };
 
-/**
- * @param orderId 결제할 주문 ID
- * @param shouldSucceed @mock-only mock 성공/실패 제어. 실제 PG 연동 시 제거.
- */
-export async function payOrderAction(
-  orderId: string,
-  shouldSucceed: boolean,
-): Promise<PayOrderResult> {
+/** @param orderId 결제할 주문 ID */
+export async function payOrderAction(orderId: string): Promise<PayOrderResult> {
   const session = await getSession();
   if (!session) return { success: false, error: "로그인이 필요합니다." };
 
@@ -36,7 +30,7 @@ export async function payOrderAction(
   if (!order) return { success: false, error: "주문을 찾을 수 없습니다." };
 
   const idempotencyKey = randomUUID();
-  const result = await processPayment(orderId, session.user.id, idempotencyKey, shouldSucceed);
+  const result = await processPayment(orderId, session.user.id, idempotencyKey);
 
   if (result.success) {
     revalidatePath(`/orders/${orderId}`);
