@@ -4,6 +4,7 @@
 // ============================================================
 
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 type PaymentSuccessResult = { status: "success"; success: true; paymentId: string };
 type PaymentUnconfirmedResult = {
@@ -17,7 +18,7 @@ type PaymentUnconfirmedResult = {
 type ReconciliationInput = {
   orderId: string;
   paymentKey: string;
-  providerTransactionId: string | null;
+  providerTransactionId: string;
   provider: string;
   amount: number;
   currency: string;
@@ -26,6 +27,24 @@ type ReconciliationInput = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "알 수 없는 결제 확정 오류";
+}
+
+function unconfirmedError(): string {
+  return "결제가 승인되었지만 주문 확정이 지연 중입니다. 고객센터에서 확인 중입니다.";
+}
+
+function unconfirmedResult(orderId: string, providerTransactionId: string): PaymentUnconfirmedResult {
+  return {
+    status: "unconfirmed",
+    success: false,
+    error: unconfirmedError(),
+    orderId,
+    providerTransactionId,
+  };
+}
+
+function markerKey(orderId: string, providerTransactionId: string): string {
+  return `unconfirmed:${orderId}:${providerTransactionId}`;
 }
 
 export async function paidOrderResult(orderId: string): Promise<PaymentSuccessResult | null> {
@@ -46,7 +65,57 @@ export async function paidOrderResultOrEmpty(orderId: string): Promise<PaymentSu
   return (await paidOrderResult(orderId)) ?? { status: "success", success: true, paymentId: "" };
 }
 
-export function reconciliationRequired(input: ReconciliationInput): PaymentUnconfirmedResult {
+export async function orderHasUnreconciledPayment(orderId: string): Promise<boolean> {
+  const payment = await db.payment.findFirst({
+    where: { orderId, status: "PENDING", providerTransactionId: { not: null } },
+    select: { id: true },
+  });
+  return payment !== null;
+}
+
+export async function unreconciledPaymentResult(
+  orderId: string,
+  providerTransactionId: string | null,
+): Promise<PaymentUnconfirmedResult | null> {
+  if (!providerTransactionId) return null;
+  const exists = await db.payment.findFirst({
+    where: { orderId, status: "PENDING", providerTransactionId },
+    select: { id: true },
+  });
+  return exists ? unconfirmedResult(orderId, providerTransactionId) : null;
+}
+
+async function ensureUnreconciledMarker(input: ReconciliationInput): Promise<void> {
+  const idempotencyKey = markerKey(input.orderId, input.providerTransactionId);
+  const existing = await db.payment.findFirst({
+    where: { orderId: input.orderId, status: "PENDING", providerTransactionId: input.providerTransactionId },
+    select: { id: true },
+  });
+  if (existing) return;
+  try {
+    await db.payment.create({
+      data: {
+        orderId: input.orderId,
+        provider: input.provider,
+        providerTransactionId: input.providerTransactionId,
+        idempotencyKey,
+        status: "PENDING",
+        amount: input.amount,
+        currency: input.currency,
+        errorMessage: errorMessage(input.error),
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existingMarker = await unreconciledPaymentResult(input.orderId, input.providerTransactionId);
+      if (existingMarker) return;
+    }
+    throw error;
+  }
+}
+
+export async function reconciliationRequired(input: ReconciliationInput): Promise<PaymentUnconfirmedResult> {
+  await ensureUnreconciledMarker(input);
   const error = errorMessage(input.error);
   console.error("PAYMENT_RECONCILIATION_REQUIRED", {
     orderId: input.orderId,
@@ -57,11 +126,5 @@ export function reconciliationRequired(input: ReconciliationInput): PaymentUncon
     currency: input.currency,
     error,
   });
-  return {
-    status: "unconfirmed",
-    success: false,
-    error: "결제가 승인되었지만 주문 확정이 지연 중입니다. 고객센터에서 확인 중입니다.",
-    orderId: input.orderId,
-    providerTransactionId: input.providerTransactionId,
-  };
+  return unconfirmedResult(input.orderId, input.providerTransactionId);
 }

@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getPaymentProvider } from "./index";
 import { validateOrderForPayment, canDecrementStock, isAlreadyProcessed } from "./core";
-import { paidOrderResult, paidOrderResultOrEmpty, reconciliationRequired } from "./reconciliation";
+import { paidOrderResult, paidOrderResultOrEmpty, reconciliationRequired, unreconciledPaymentResult } from "./reconciliation";
 
 // ── 공개 결과 타입 ────────────────────────────────────────────
 export type ProcessPaymentResult =
@@ -194,10 +194,12 @@ async function handleFailure(
 
 async function handleConfirmFailure(
   orderId: string, idempotencyKey: string,
-  providerTxId: string | null, order: LoadedOrder, providerName: string,
+  providerTxId: string | null, markerTxId: string | null, order: LoadedOrder, providerName: string,
 ): Promise<ProcessPaymentResult> {
   const paid = await paidOrderResult(orderId);
   if (paid) return paid;
+  const unconfirmed = await unreconciledPaymentResult(orderId, markerTxId);
+  if (unconfirmed) return unconfirmed;
   return handleFailure(orderId, idempotencyKey, providerTxId, order, providerName);
 }
 
@@ -216,9 +218,8 @@ async function handleConfirmedSuccess(
     const paid = await paidOrderResult(input.orderId);
     if (paid) return paid;
     return reconciliationRequired({
-      orderId: input.orderId, paymentKey: input.paymentKey,
-      providerTransactionId: providerTxId, provider: providerName,
-      amount: order.totalAmount, currency: order.currency, error,
+      orderId: input.orderId, paymentKey: input.paymentKey, providerTransactionId: providerTxId ?? input.paymentKey,
+      provider: providerName, amount: order.totalAmount, currency: order.currency, error,
     });
   }
 }
@@ -281,7 +282,7 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
   const provider = getPaymentProvider(order.marketCode);
   const idempotencyKey = randomUUID();
   if (order.totalAmount !== input.redirectAmount) {
-    return handleConfirmFailure(input.orderId, idempotencyKey, input.paymentKey, order, provider.name);
+    return handleConfirmFailure(input.orderId, idempotencyKey, input.paymentKey, input.paymentKey, order, provider.name);
   }
   const result = await provider.confirm({
     orderId: input.orderId,
@@ -290,7 +291,7 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
     idempotencyKey,
   });
   if (result.status !== "SUCCEEDED") {
-    return handleConfirmFailure(input.orderId, idempotencyKey, result.providerTransactionId, order, provider.name);
+    return handleConfirmFailure(input.orderId, idempotencyKey, result.providerTransactionId, input.paymentKey, order, provider.name);
   }
   return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider.name);
 }

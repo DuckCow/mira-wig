@@ -19,6 +19,7 @@ vi.mock("../index", async (importOriginal) => {
 });
 
 import { confirmPayment } from "../process";
+import { orderHasUnreconciledPayment } from "../reconciliation";
 
 interface Ctx {
   userId: string;
@@ -136,6 +137,7 @@ describe("confirmPayment — concurrent finalize reconciliation", () => {
     expect(variant.stock).toBe(ctx!.initialStock - 1);
     expect(payments).toHaveLength(1);
     expect(payments[0]?.status).toBe("SUCCEEDED");
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
   });
 });
 
@@ -144,7 +146,7 @@ describe("confirmPayment — local finalize unconfirmed", () => {
   beforeEach(async () => { ctx = await setupFixtures(1); });
   afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
 
-  it("PG 성공 후 finalize 미확정이면 unconfirmed와 알림 로그를 남긴다", async () => {
+  it("PG 성공 후 finalize 미확정이면 마커를 남기고 재진입도 unconfirmed로 수렴한다", async () => {
     await db.wigVariant.update({ where: { id: ctx!.variantId }, data: { stock: 0 } });
     providerState.provider = testProvider((input) => Promise.resolve({
       status: "SUCCEEDED",
@@ -152,17 +154,26 @@ describe("confirmPayment — local finalize unconfirmed", () => {
     })).provider;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await confirmPayment({ orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "pay_stock_out", redirectAmount: 85000 });
+    providerState.provider = testProvider((input) => Promise.resolve({
+      status: "FAILED",
+      providerTransactionId: input.providerTransactionId,
+    })).provider;
+    const second = await confirmPayment({ orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "pay_stock_out", redirectAmount: 85000 });
     const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
     const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
     const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
     expect(result.status).toBe("unconfirmed");
+    expect(second.status).toBe("unconfirmed");
     expect(errorSpy).toHaveBeenCalledWith("PAYMENT_RECONCILIATION_REQUIRED", expect.objectContaining({
       orderId: ctx!.orderId,
       paymentKey: "pay_stock_out",
     }));
     expect(order.status).toBe("PENDING_PAYMENT");
     expect(variant.stock).toBe(0);
-    expect(payments).toHaveLength(0);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]?.status).toBe("PENDING");
+    expect(payments[0]?.providerTransactionId).toBe("pay_stock_out");
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(true);
     errorSpy.mockRestore();
   });
 });
