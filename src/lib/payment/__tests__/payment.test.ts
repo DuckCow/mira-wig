@@ -5,7 +5,7 @@
 // processPayment(process.ts)는 DB 트랜잭션을 포함하므로
 // 통합 테스트(실제 DB) 환경에서 검증해야 한다 — 여기서는 제외.
 // ============================================================
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   validateOrderForPayment,
   canDecrementStock,
@@ -13,6 +13,11 @@ import {
   computeRemainingStock,
 } from "../core";
 import { MockPaymentProvider } from "../mock";
+import { getPaymentProvider } from "../index";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 // ── validateOrderForPayment ───────────────────────────────────
 
@@ -160,6 +165,19 @@ describe("MockPaymentProvider — initiate", () => {
 
   it("name은 'mock'이다", () => {
     expect(new MockPaymentProvider().name).toBe("mock");
+  });
+});
+
+describe("getPaymentProvider — live market gate", () => {
+  it("PAYMENT_LIVE_MARKETS 미설정이면 KR도 mock을 반환한다", () => {
+    vi.stubEnv("PAYMENT_LIVE_MARKETS", "");
+    expect(getPaymentProvider("KR").name).toBe("mock");
+  });
+
+  it("PAYMENT_LIVE_MARKETS=KR이면 KR은 toss를 반환한다", () => {
+    vi.stubEnv("PAYMENT_LIVE_MARKETS", "KR");
+    vi.stubEnv("TOSS_SECRET_KEY", "test_secret");
+    expect(getPaymentProvider("KR").name).toBe("toss");
   });
 });
 

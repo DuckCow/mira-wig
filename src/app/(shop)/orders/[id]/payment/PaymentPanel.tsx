@@ -7,8 +7,11 @@
 // ============================================================
 
 import { useState, useTransition } from "react";
+import { loadTossPayments } from "@tosspayments/tosspayments-sdk";
 import { CURRENCY_META, formatPrice } from "@/lib/market/types";
-import { payOrderAction } from "@/app/actions/payment";
+import { payOrderAction, type PayOrderResult } from "@/app/actions/payment";
+
+type PendingPayOrderResult = Extract<PayOrderResult, { status: "pending" }>;
 
 interface PaymentPanelProps {
   orderId: string;
@@ -23,6 +26,32 @@ export function PaymentPanel({ orderId, totalAmount, currency, isFailed }: Payme
   const currencyMeta = CURRENCY_META[currency];
   const formattedAmount = currencyMeta ? formatPrice(totalAmount, currencyMeta) : `${totalAmount}`;
 
+  async function openTossPayment(result: PendingPayOrderResult): Promise<void> {
+    const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY;
+    if (!clientKey) throw new Error("토스페이먼츠 클라이언트 키가 설정되지 않았습니다.");
+    if (result.currency !== "KRW") throw new Error("현재 토스 결제창은 KRW 주문만 지원합니다.");
+    const tossPayments = await loadTossPayments(clientKey);
+    const payment = tossPayments.payment({ customerKey: result.orderId });
+    const successUrl = new URL(`/orders/${result.orderId}/payment/callback`, window.location.origin);
+    const failUrl = new URL(`/orders/${result.orderId}/payment`, window.location.origin);
+    failUrl.searchParams.set("error", "결제가 취소되었거나 실패했습니다.");
+    try {
+      await payment.requestPayment({
+        method: "CARD",
+        amount: { currency: result.currency, value: result.amount },
+        orderId: result.orderId,
+        orderName: result.orderName,
+        successUrl: successUrl.toString(),
+        failUrl: failUrl.toString(),
+        card: { flowMode: "DEFAULT" },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "결제가 취소되었거나 실패했습니다.";
+      failUrl.searchParams.set("error", message);
+      window.location.assign(failUrl.toString());
+    }
+  }
+
   function handlePay() {
     setError(null);
     startTransition(async () => {
@@ -34,7 +63,11 @@ export function PaymentPanel({ orderId, totalAmount, currency, isFailed }: Payme
           setError(result.error);
           return;
         case "pending":
-          setError(result.error || null);
+          try {
+            await openTossPayment(result);
+          } catch (error) {
+            setError(error instanceof Error ? error.message : "결제창을 열 수 없습니다.");
+          }
           return;
       }
       const _exhaustive: never = result;
