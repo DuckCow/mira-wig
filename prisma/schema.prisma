@@ -377,6 +377,8 @@ model Payment {
   provider              String
   /// 공급자가 발급한 거래 ID (mock은 null 가능)
   providerTransactionId String?
+  /// 웹훅 검증용 공급자 secret (Toss Payment.secret 등). mock/기존 행은 null.
+  providerWebhookSecret String?
   /// 클라이언트가 생성한 멱등성 키 — 중복 결제 방지
   idempotencyKey        String               @unique
   status                PaymentAttemptStatus @default(PENDING)
@@ -419,6 +421,24 @@ model PaymentAdjustment {
 
   @@unique([paymentId, providerRefundId])
   @@index([paymentId, status])
+}
+
+// ============================================================
+// 결제 웹훅 이벤트 기록 (재전송 멱등 처리)
+// ============================================================
+
+/// PG 웹훅 수신 이벤트를 기록한다. transmissionId @unique 로 재전송 중복 처리를 방지한다.
+model PaymentWebhookEvent {
+  id                    String    @id @default(cuid())
+  provider              String
+  transmissionId        String    @unique
+  eventType             String
+  orderId               String?
+  providerTransactionId String?
+  status                String?
+  receivedAt            DateTime  @default(now())
+  processedAt           DateTime?
+  raw                   Json?
 }
 
 // ============================================================
