@@ -97,10 +97,14 @@ export default tseslint.config(
       "src/app/api/payments/**/*.ts",
     ],
     rules: {
-      // 핵심 로직은 더 엄격: 함수 40줄, 복잡도 8
+      // 핵심 로직은 더 엄격: 함수 40줄, 파일 300줄, 복잡도 8
       "max-lines-per-function": [
         "error",
         { max: 40, skipBlankLines: true, skipComments: true },
+      ],
+      "max-lines": [
+        "error",
+        { max: 300, skipBlankLines: true, skipComments: true },
       ],
       complexity: ["error", 8],
       // STRICT 존에서는 any 관련 우회를 추가로 차단
@@ -108,6 +112,18 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-call": "error",
       "@typescript-eslint/no-unsafe-member-access": "error",
       "@typescript-eslint/no-unsafe-return": "error",
+    },
+  },
+
+  // --------------------------------------------------------
+  // 테스트 파일 — 시나리오 서술력을 보존하되 타입/안전 규칙은 유지.
+  // --------------------------------------------------------
+  {
+    files: ["src/**/__tests__/**/*.ts", "src/**/*.test.ts", "src/**/*.integration.test.ts"],
+    rules: {
+      "max-lines-per-function": "off",
+      "max-lines": "off",
+      complexity: ["error", 10],
     },
   },
 

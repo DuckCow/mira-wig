@@ -67,6 +67,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 에러 삼키기 금지(빈 `try/catch`·무의미 fallback·호출부 방어코드 금지 — 경계에서만 처리, 그 외 throw).
 - `as any` / `as unknown as` 금지(타입가드로 드러냄).
 - 함수 ≤50줄, 파일 ≤300줄, 3단계 이상 중첩 금지(early return으로 평탄화).
+- **STRICT 프로덕션 코드**는 함수 ≤40줄, 파일 ≤300줄, 복잡도 ≤8을 기본 상한으로 본다(공통 함수 50줄의 더 엄격한 override).
+- **테스트 파일**은 줄 한도(파일·함수)를 적용하지 않는다 — 테스트는 명시성 우선(DAMP > DRY), setup→act→assert가 길어지는 게 자연스럽다. 단 행동 검증·타입 안전·외부 경계 mock 원칙은 그대로 지킨다.
 - **새 function/helper/shape 만들기 전 기존 것 먼저 찾는다(SSOT).** 죽은 코드·목적 없는 re-export 금지(barrel `index.ts`만 예외).
 - 순환 의존 금지(import는 상위 레이어 → 하위 레이어만).
 - 판단 애매하면 더 엄격한 쪽을 택하거나 질문.
