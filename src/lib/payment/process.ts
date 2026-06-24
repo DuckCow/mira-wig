@@ -9,7 +9,8 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getPaymentProvider } from "./index";
 import { validateOrderForPayment, canDecrementStock, isAlreadyProcessed } from "./core";
-import { paidOrderResult, paidOrderResultOrEmpty, reconciliationRequired, unreconciledPaymentResult } from "./reconciliation";
+import { compensateUnconfirmedPayment, paidOrderResult, paidOrderResultOrEmpty, reconciliationRequired, unreconciledPaymentResult } from "./reconciliation";
+import type { PaymentProvider } from "./types";
 
 // ── 공개 결과 타입 ────────────────────────────────────────────
 export type ProcessPaymentResult =
@@ -205,43 +206,41 @@ async function handleConfirmFailure(
 
 async function handleConfirmedSuccess(
   input: ConfirmPaymentInput, idempotencyKey: string,
-  providerTxId: string | null, order: LoadedOrder, providerName: string,
+  providerTxId: string | null, order: LoadedOrder, provider: PaymentProvider,
 ): Promise<ProcessPaymentResult> {
   try {
     const paymentId = await runSuccessTransaction({
       orderId: input.orderId, userId: input.userId, idempotencyKey,
       providerTransactionId: providerTxId, amount: order.totalAmount,
-      currency: order.currency, provider: providerName, items: order.items,
+      currency: order.currency, provider: provider.name, items: order.items,
     });
     return { status: "success", success: true, paymentId };
   } catch (error) {
     const paid = await paidOrderResult(input.orderId);
     if (paid) return paid;
+    const confirmedProviderTxId = providerTxId ?? input.paymentKey;
+    await compensateUnconfirmedPayment({
+      orderId: input.orderId,
+      paymentKey: input.paymentKey,
+      providerTransactionId: confirmedProviderTxId,
+      provider,
+      amount: order.totalAmount,
+      currency: order.currency,
+      error,
+    });
     return reconciliationRequired({
-      orderId: input.orderId, paymentKey: input.paymentKey, providerTransactionId: providerTxId ?? input.paymentKey,
-      provider: providerName, amount: order.totalAmount, currency: order.currency, error,
+      orderId: input.orderId, paymentKey: input.paymentKey, providerTransactionId: confirmedProviderTxId,
+      provider: provider.name, amount: order.totalAmount, currency: order.currency, error,
     });
   }
 }
 
 function pendingResult(orderId: string, order: LoadedOrder): ProcessPaymentResult {
-  return {
-    status: "pending",
-    success: false,
-    orderId,
-    amount: order.totalAmount,
-    currency: order.currency,
-  };
+  return { status: "pending", success: false, orderId, amount: order.totalAmount, currency: order.currency };
 }
 
 // ── 공개 엔트리포인트 ─────────────────────────────────────────
 
-/**
- * PENDING_PAYMENT 주문에 대한 결제를 처리한다.
- * @param orderId 처리할 주문 ID
- * @param userId 요청 유저 ID (소유권 검증용)
- * @param idempotencyKey 멱등성 키 (UUID 권장, 서버에서 생성)
- */
 export async function processPayment(
   orderId: string,
   userId: string,
@@ -285,13 +284,11 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
     return handleConfirmFailure(input.orderId, idempotencyKey, input.paymentKey, input.paymentKey, order, provider.name);
   }
   const result = await provider.confirm({
-    orderId: input.orderId,
-    amount: order.totalAmount,
-    providerTransactionId: input.paymentKey,
-    idempotencyKey,
+    orderId: input.orderId, amount: order.totalAmount,
+    providerTransactionId: input.paymentKey, idempotencyKey,
   });
   if (result.status !== "SUCCEEDED") {
     return handleConfirmFailure(input.orderId, idempotencyKey, result.providerTransactionId, input.paymentKey, order, provider.name);
   }
-  return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider.name);
+  return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider);
 }

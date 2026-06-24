@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
-import type { ConfirmInput, PaymentProvider, PaymentResult } from "../types";
+import type { ConfirmInput, PaymentProvider, PaymentResult, RefundInput, RefundResult } from "../types";
 
 const providerState = vi.hoisted((): { provider: PaymentProvider | null } => ({ provider: null }));
 
@@ -31,6 +31,7 @@ interface Ctx {
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
 type ConfirmHandler = (input: ConfirmInput) => Promise<PaymentResult>;
+type RefundHandler = (input: RefundInput) => Promise<RefundResult>;
 
 const TEST_SNAPSHOT = {
   styleName: "테스트", color: "블랙", colorHex: null,
@@ -43,8 +44,9 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
-function testProvider(confirm: ConfirmHandler) {
+function testProvider(confirm: ConfirmHandler, refund?: RefundHandler) {
   let confirmCalls = 0;
+  let refundCalls = 0;
   const provider: PaymentProvider = {
     name: "test-provider",
     initiate: () => Promise.resolve({ status: "PENDING", providerTransactionId: null }),
@@ -52,8 +54,14 @@ function testProvider(confirm: ConfirmHandler) {
       confirmCalls += 1;
       return confirm(input);
     },
+    refund: refund
+      ? async (input) => {
+        refundCalls += 1;
+        return refund(input);
+      }
+      : undefined,
   };
-  return { provider, get confirmCalls() { return confirmCalls; } };
+  return { provider, get confirmCalls() { return confirmCalls; }, get refundCalls() { return refundCalls; } };
 }
 
 async function setupFixtures(stock = 10): Promise<Ctx> {
@@ -115,6 +123,59 @@ async function waitForConfirmCall(wrapped: { confirmCalls: number }): Promise<vo
   throw new Error("confirm 호출 대기 실패");
 }
 
+async function forceStockOut(ctx: Ctx): Promise<void> {
+  await db.wigVariant.update({ where: { id: ctx.variantId }, data: { stock: 0 } });
+}
+
+function confirmSucceeded(input: ConfirmInput): Promise<PaymentResult> {
+  return Promise.resolve({ status: "SUCCEEDED", providerTransactionId: input.providerTransactionId });
+}
+
+function confirmFailed(input: ConfirmInput): Promise<PaymentResult> {
+  return Promise.resolve({ status: "FAILED", providerTransactionId: input.providerTransactionId });
+}
+
+function refundSucceeded(providerRefundId: string): RefundHandler {
+  return (input) => Promise.resolve({
+    providerTransactionId: input.providerTransactionId,
+    providerRefundId,
+    status: "SUCCEEDED",
+    amount: input.amount,
+    currency: input.currency,
+    refundableAmount: 0,
+  });
+}
+
+function refundFailed(input: RefundInput): Promise<RefundResult> {
+  return Promise.resolve({
+    providerTransactionId: input.providerTransactionId,
+    status: "FAILED",
+    amount: input.amount,
+    currency: input.currency,
+    errorMessage: "refund failed",
+  });
+}
+
+function confirm(ctx: Ctx, paymentKey: string) {
+  return confirmPayment({ orderId: ctx.orderId, userId: ctx.userId, paymentKey, redirectAmount: 85000 });
+}
+
+async function adjustmentsFor(ctx: Ctx) {
+  return db.paymentAdjustment.findMany({ where: { payment: { orderId: ctx.orderId } } });
+}
+
+async function expectUnconfirmedMarker(ctx: Ctx, paymentKey: string): Promise<void> {
+  const order = await db.order.findUniqueOrThrow({ where: { id: ctx.orderId } });
+  const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx.variantId } });
+  const payments = await db.payment.findMany({ where: { orderId: ctx.orderId } });
+  expect(order.status).toBe("PENDING_PAYMENT");
+  expect(variant.stock).toBe(0);
+  expect(payments).toHaveLength(1);
+  expect(payments[0]?.status).toBe("PENDING");
+  expect(payments[0]?.providerTransactionId).toBe(paymentKey);
+  expect(await orderHasUnreconciledPayment(ctx.orderId)).toBe(true);
+}
+
 describe("confirmPayment — concurrent finalize reconciliation", () => {
   let ctx: Ctx | null = null;
   beforeEach(async () => { ctx = await setupFixtures(1); });
@@ -141,39 +202,83 @@ describe("confirmPayment — concurrent finalize reconciliation", () => {
   });
 });
 
-describe("confirmPayment — local finalize unconfirmed", () => {
+describe("confirmPayment — local finalize unconfirmed marker", () => {
   let ctx: Ctx | null = null;
   beforeEach(async () => { ctx = await setupFixtures(1); });
   afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
 
   it("PG 성공 후 finalize 미확정이면 마커를 남기고 재진입도 unconfirmed로 수렴한다", async () => {
-    await db.wigVariant.update({ where: { id: ctx!.variantId }, data: { stock: 0 } });
-    providerState.provider = testProvider((input) => Promise.resolve({
-      status: "SUCCEEDED",
-      providerTransactionId: input.providerTransactionId,
-    })).provider;
+    await forceStockOut(ctx!);
+    const wrapped = testProvider(confirmSucceeded, refundSucceeded("cancel_stock_out"));
+    providerState.provider = wrapped.provider;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = await confirmPayment({ orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "pay_stock_out", redirectAmount: 85000 });
-    providerState.provider = testProvider((input) => Promise.resolve({
-      status: "FAILED",
-      providerTransactionId: input.providerTransactionId,
-    })).provider;
-    const second = await confirmPayment({ orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "pay_stock_out", redirectAmount: 85000 });
-    const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
-    const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
-    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    const result = await confirm(ctx!, "pay_stock_out");
+    providerState.provider = testProvider(confirmFailed).provider;
+    const second = await confirm(ctx!, "pay_stock_out");
+    const adjustments = await adjustmentsFor(ctx!);
     expect(result.status).toBe("unconfirmed");
     expect(second.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith("PAYMENT_AUTO_REFUND_SUCCEEDED", expect.objectContaining({
+      orderId: ctx!.orderId,
+      providerTransactionId: "pay_stock_out",
+      providerRefundId: "cancel_stock_out",
+    }));
     expect(errorSpy).toHaveBeenCalledWith("PAYMENT_RECONCILIATION_REQUIRED", expect.objectContaining({
       orderId: ctx!.orderId,
       paymentKey: "pay_stock_out",
     }));
-    expect(order.status).toBe("PENDING_PAYMENT");
-    expect(variant.stock).toBe(0);
-    expect(payments).toHaveLength(1);
-    expect(payments[0]?.status).toBe("PENDING");
-    expect(payments[0]?.providerTransactionId).toBe("pay_stock_out");
-    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(true);
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]?.status).toBe("SUCCEEDED");
+    expect(adjustments[0]?.amount).toBe(85000);
+    expect(adjustments[0]?.currency).toBe("KRW");
+    expect(adjustments[0]?.providerRefundId).toBe("cancel_stock_out");
+    await expectUnconfirmedMarker(ctx!, "pay_stock_out");
+    errorSpy.mockRestore();
+  });
+});
+
+describe("confirmPayment — local finalize auto refund idempotency", () => {
+  let ctx: Ctx | null = null;
+  beforeEach(async () => { ctx = await setupFixtures(1); });
+  afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
+
+  it("같은 unconfirmed 재진입은 자동 보상을 중복 호출하지 않는다", async () => {
+    await forceStockOut(ctx!);
+    const wrapped = testProvider(confirmSucceeded, refundSucceeded("cancel_once"));
+    providerState.provider = wrapped.provider;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = await confirm(ctx!, "pay_retry");
+    const second = await confirm(ctx!, "pay_retry");
+    const adjustments = await adjustmentsFor(ctx!);
+    expect(first.status).toBe("unconfirmed");
+    expect(second.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(1);
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]?.idempotencyKey).toBe(`auto-refund:${ctx!.orderId}:pay_retry`);
+    errorSpy.mockRestore();
+  });
+});
+
+describe("confirmPayment — local finalize auto refund failure", () => {
+  let ctx: Ctx | null = null;
+  beforeEach(async () => { ctx = await setupFixtures(1); });
+  afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
+
+  it("자동 보상이 실패해도 unconfirmed를 반환하고 실패 기록을 남긴다", async () => {
+    await forceStockOut(ctx!);
+    providerState.provider = testProvider(confirmSucceeded, refundFailed).provider;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await confirm(ctx!, "pay_refund_fail");
+    const adjustments = await adjustmentsFor(ctx!);
+    expect(result.status).toBe("unconfirmed");
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]?.status).toBe("FAILED");
+    expect(errorSpy).toHaveBeenCalledWith("PAYMENT_AUTO_REFUND_FAILED", expect.objectContaining({
+      orderId: ctx!.orderId,
+      providerTransactionId: "pay_refund_fail",
+      error: "refund failed",
+    }));
     errorSpy.mockRestore();
   });
 });

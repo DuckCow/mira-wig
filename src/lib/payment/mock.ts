@@ -9,6 +9,8 @@ import type {
   InitiateResult,
   PaymentProvider,
   PaymentResult,
+  RefundInput,
+  RefundResult,
 } from "./types";
 
 /**
@@ -45,6 +47,26 @@ export class MockPaymentProvider implements PaymentProvider {
       providerTransactionId: null,
       status: "FAILED",
       errorMessage: "mock 결제 실패 (shouldSucceed=false)",
+    });
+  }
+
+  refund(input: RefundInput): Promise<RefundResult> {
+    if (this.shouldSucceed) {
+      return Promise.resolve({
+        providerTransactionId: input.providerTransactionId,
+        providerRefundId: `mock_refund_${input.idempotencyKey}`,
+        status: "SUCCEEDED",
+        amount: input.amount,
+        currency: input.currency,
+        refundableAmount: 0,
+      });
+    }
+    return Promise.resolve({
+      providerTransactionId: input.providerTransactionId,
+      status: "FAILED",
+      amount: input.amount,
+      currency: input.currency,
+      errorMessage: "mock 환불 실패 (shouldSucceed=false)",
     });
   }
 }

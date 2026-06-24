@@ -15,6 +15,8 @@ import type {
   InitiateResult,
   PaymentProvider,
   PaymentResult,
+  RefundInput,
+  RefundResult,
 } from "./types";
 
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
@@ -27,10 +29,63 @@ function getString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+function getNumber(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
+
+function latestCancel(data: Record<string, unknown>): Record<string, unknown> | null {
+  const cancels = data.cancels;
+  if (!Array.isArray(cancels)) return null;
+  for (let i = cancels.length - 1; i >= 0; i -= 1) {
+    const cancel: unknown = cancels[i];
+    if (isRecord(cancel)) return cancel;
+  }
+  return null;
+}
+
+function refundStatus(cancel: Record<string, unknown> | null): RefundResult["status"] {
+  const status = getString(cancel?.cancelStatus);
+  if (status && status !== "DONE") return "PENDING";
+  return "SUCCEEDED";
+}
+
 async function parseJson(res: Response): Promise<Record<string, unknown>> {
   const raw: unknown = await res.json();
   if (!isRecord(raw)) throw new Error(`Toss API 응답이 객체가 아닙니다 (HTTP ${res.status})`);
   return raw;
+}
+
+function refundBody(input: RefundInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    cancelReason: input.reason,
+    currency: input.currency,
+  };
+  if (input.amount !== undefined) body.cancelAmount = input.amount;
+  return body;
+}
+
+function failedRefund(input: RefundInput, data: Record<string, unknown>, status: number): RefundResult {
+  return {
+    providerTransactionId: input.providerTransactionId,
+    status: "FAILED",
+    amount: input.amount,
+    currency: input.currency,
+    raw: data,
+    errorMessage: getString(data.message) ?? `결제 취소 실패 (HTTP ${status})`,
+  };
+}
+
+function successfulRefund(input: RefundInput, data: Record<string, unknown>): RefundResult {
+  const cancel = latestCancel(data);
+  return {
+    providerTransactionId: getString(data.paymentKey) ?? input.providerTransactionId,
+    providerRefundId: getString(cancel?.transactionKey),
+    status: refundStatus(cancel),
+    amount: getNumber(cancel?.cancelAmount) ?? input.amount,
+    currency: getString(data.currency) ?? input.currency,
+    refundableAmount: getNumber(cancel?.refundableAmount) ?? getNumber(data.balanceAmount),
+    raw: data,
+  };
 }
 
 export class TossPaymentProvider implements PaymentProvider {
@@ -77,5 +132,23 @@ export class TossPaymentProvider implements PaymentProvider {
       providerTransactionId: getString(data.paymentKey) ?? input.providerTransactionId,
       status: "SUCCEEDED",
     };
+  }
+
+  async refund(input: RefundInput): Promise<RefundResult> {
+    const res = await fetch(
+      `${TOSS_API_BASE}/payments/${encodeURIComponent(input.providerTransactionId)}/cancel`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: this.authHeader,
+          "Content-Type": "application/json",
+          "Idempotency-Key": input.idempotencyKey,
+        },
+        body: JSON.stringify(refundBody(input)),
+      },
+    );
+    const data = await parseJson(res);
+    if (!res.ok) return failedRefund(input, data, res.status);
+    return successfulRefund(input, data);
   }
 }

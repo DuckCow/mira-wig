@@ -42,6 +42,31 @@ export interface PaymentResult {
   errorMessage?: string;
 }
 
+export type RefundInput = {
+  orderId: string;
+  providerTransactionId: string;   // Toss paymentKey, PayPal captureId
+  amount?: number;                 // 없으면 전액(최소단위 정수, zero-decimal 그대로)
+  currency: string;
+  reason: string;
+  idempotencyKey: string;
+};
+
+export type RefundResult = {
+  providerTransactionId: string;
+  providerRefundId?: string;       // Toss transactionKey, PayPal refund id
+  status: "SUCCEEDED" | "PENDING" | "FAILED";
+  amount?: number;
+  currency?: string;
+  refundableAmount?: number;
+  raw?: unknown;
+  errorMessage?: string;
+};
+
+export type WebhookResult =
+  | { verified: false; reason: string }
+  | { verified: true; eventId?: string; eventType: string; orderId?: string;
+      providerTransactionId?: string; status?: string; occurredAt?: Date; raw: unknown };
+
 /** 결제 공급자 인터페이스 */
 export interface PaymentProvider {
   readonly name: string;
@@ -60,8 +85,14 @@ export interface PaymentProvider {
   confirm(input: ConfirmInput): Promise<PaymentResult>;
 
   /**
+   * 승인된 결제를 전액 또는 부분 취소/환불한다.
+   * amount가 없으면 공급자 전액 취소 API를 사용한다.
+   */
+  refund?(input: RefundInput): Promise<RefundResult>;
+
+  /**
    * PG 웹훅 처리 슬롯. 실제 공급자가 필요 시 구현한다.
    * @see PaymentProvider 구현체별 문서
    */
-  handleWebhook?(payload: unknown): Promise<PaymentResult>;
+  handleWebhook?(input: { headers: Headers | Record<string, string>; rawBody: string }): Promise<WebhookResult>;
 }
