@@ -30,7 +30,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 인증 | NextAuth + Google OAuth | JWT 전략, `session.user.role` |
 | 스토리지 | AWS S3 (카탈로그) | 선택 메커니즘은 §2. `fittingStorage`는 항상 mock. |
 | AI 피팅 | 외부 VTO 추상화, 현재 mock | `AI_PROVIDER` |
-| 결제 | **멀티 provider** (현재 구현=Mock·Toss, **PayPal 미구현**) | 라우팅은 §2. 목표: KR=토스, US·JP=PayPal, EU=후속. |
+| 결제 | **멀티 provider** (현재 구현=Mock·Toss·PayPal) | 라우팅은 §2. KR=토스, US·JP=PayPal, EU=후속. |
 
 > mutation 진입점은 **server action(`src/app/actions`) 중심**이다. Route Handler(`src/app/api/**`)는 현재 auth 콜백·mock-storage 정도뿐 — "API Routes 중심"이 아니다.
 
@@ -40,9 +40,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **스토리지** = named provider(`catalogStorage` / `fittingStorage`, 호출처가 직접 import).
   - `catalogStorage`: env 분기로 mock/S3 선택 — `STORAGE_PROVIDER === "mock"`이면 mock, **그 외/미설정이면 S3**. (`.env.example` 기본값은 `"mock"`.)
   - `fittingStorage`: **env 무관 항상 mock**.
-- **결제** = factory `getPaymentProvider(marketCode)` + `LIVE_PROVIDER_MARKETS` 맵(키: `KR`/`JP`/`US`, **현재 전부 `false` → 전부 mock**).
-  - 구현체는 `MockPaymentProvider` · `TossPaymentProvider`뿐. **PayPal은 미구현** — `JP`/`US` 플래그를 켜면 안 됨.
-  - `KR`만 실 provider(Toss) 연결 준비됨(플래그 `true` 시 Toss로 라우팅).
+- **결제** = factory `getPaymentProvider(marketCode)` + `PAYMENT_LIVE_MARKETS` env 파싱(예: `"KR,US,JP"`).
+  - 구현체는 `MockPaymentProvider` · `TossPaymentProvider` · `PayPalPaymentProvider`.
+  - env 미설정/빈 값이면 전 마켓 mock. `KR` 활성화 시 Toss, `US`/`JP` 활성화 시 PayPal로 라우팅.
   - mock 성공/실패 제어는 `PAYMENT_MOCK_FORCE_FAIL` env.
   - 이 marketCode 맵 기반 선택을 단순 이진 삼항으로 바꾸지 마라(멀티 마켓·멀티 provider 구조).
 

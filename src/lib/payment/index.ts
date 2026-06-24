@@ -11,6 +11,7 @@
 // ============================================================
 
 import { MockPaymentProvider } from "./mock";
+import { PayPalPaymentProvider } from "./paypal";
 import { TossPaymentProvider } from "./toss";
 import type { PaymentProvider } from "./types";
 
@@ -36,7 +37,9 @@ export function getPaymentProvider(marketCode?: string): PaymentProvider {
   if (marketCode === "KR" && liveMarkets().has("KR")) {
     return new TossPaymentProvider();
   }
-  // JP, US, 기타: 각 어댑터 준비 완료 시 분기 추가
+  if ((marketCode === "US" || marketCode === "JP") && liveMarkets().has(marketCode)) {
+    return new PayPalPaymentProvider();
+  }
   return buildMockProvider();
 }
 
