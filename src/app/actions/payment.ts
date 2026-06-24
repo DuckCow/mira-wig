@@ -20,7 +20,7 @@ import { processPayment } from "@/lib/payment/process";
 import type { OrderView } from "@/lib/order/types";
 
 export type PayOrderResult =
-  | { status: "pending"; success: false; error: string; orderId: string; amount: number; currency: string; orderName: string }
+  | { status: "pending"; success: false; error: string; orderId: string; amount: number; currency: string; orderName: string; providerTransactionId: string | null; provider: string; redirectUrl?: string }
   | { status: "unconfirmed"; success: false; error: string; orderId: string }
   | { status: "failed"; success: false; error: string };
 
@@ -55,6 +55,9 @@ export async function payOrderAction(orderId: string): Promise<PayOrderResult> {
       amount: result.amount,
       currency: result.currency,
       orderName: buildOrderName(order),
+      providerTransactionId: result.providerTransactionId,
+      provider: result.provider,
+      redirectUrl: result.redirectUrl,
     };
   }
   if (result.status === "unconfirmed") {

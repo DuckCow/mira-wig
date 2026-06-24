@@ -15,7 +15,7 @@ import type { PaymentProvider } from "./types";
 // ── 공개 결과 타입 ────────────────────────────────────────────
 export type ProcessPaymentResult =
   | { status: "success"; success: true; paymentId: string }
-  | { status: "pending"; success: false; orderId: string; amount: number; currency: string }
+  | { status: "pending"; success: false; orderId: string; amount: number; currency: string; providerTransactionId: string | null; provider: string; redirectUrl?: string }
   | { status: "unconfirmed"; success: false; error: string; orderId: string; providerTransactionId: string | null }
   | { status: "failed"; success: false; error: string };
 
@@ -238,8 +238,8 @@ async function handleConfirmedSuccess(
   }
 }
 
-function pendingResult(orderId: string, order: LoadedOrder): ProcessPaymentResult {
-  return { status: "pending", success: false, orderId, amount: order.totalAmount, currency: order.currency };
+function pendingResult(orderId: string, order: LoadedOrder, provider: string, providerTransactionId: string | null, redirectUrl?: string): ProcessPaymentResult {
+  return { status: "pending", success: false, orderId, amount: order.totalAmount, currency: order.currency, providerTransactionId, provider, redirectUrl };
 }
 
 // ── 공개 엔트리포인트 ─────────────────────────────────────────
@@ -262,7 +262,7 @@ export async function processPayment(
   });
 
   if (result.status === "PENDING" || result.redirectUrl) {
-    return pendingResult(orderId, order);
+    return pendingResult(orderId, order, provider.name, result.providerTransactionId, result.redirectUrl);
   }
   if (result.status === "SUCCEEDED") {
     return handleSuccess(orderId, userId, idempotencyKey, result.providerTransactionId, order, provider.name);

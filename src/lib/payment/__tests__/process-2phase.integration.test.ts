@@ -43,12 +43,12 @@ const TEST_SNAPSHOT = {
 
 function makeKey(): string { return `test_idem_${randomUUID()}`; }
 
-function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatus, providerWebhookSecret?: string) {
+function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatus, providerWebhookSecret?: string, initiateProviderTransactionId: string | null = null, redirectUrl?: string) {
   let confirmCalls = 0;
   const provider: PaymentProvider = {
     name: "test-provider",
     initiate(_input: InitiateInput): Promise<InitiateResult> {
-      return Promise.resolve({ status: initiateStatus, providerTransactionId: null });
+      return Promise.resolve({ status: initiateStatus, providerTransactionId: initiateProviderTransactionId, redirectUrl });
     },
     confirm(input: ConfirmInput): Promise<PaymentResult> {
       confirmCalls += 1;
@@ -131,12 +131,16 @@ describe("processPayment — 2-phase initiate", () => {
   beforeEach(async () => { ctx = await setupFixtures(10); });
   afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
 
-  it("PENDING provider는 pending 결과를 반환하고 DB를 변경하지 않는다", async () => {
-    providerState.provider = testProvider("PENDING", "SUCCEEDED").provider;
+  it("PENDING provider는 providerTransactionId/redirectUrl을 보존하고 DB를 변경하지 않는다", async () => {
+    providerState.provider = testProvider("PENDING", "SUCCEEDED", undefined, "paypal_order_123", "https://paypal.test/approve").provider;
     const result = await processPayment(ctx!.orderId, ctx!.userId, makeKey());
     expect(result.status).toBe("pending");
     if (result.status === "pending") {
-      expect(result).toMatchObject({ orderId: ctx!.orderId, amount: 85000, currency: "KRW" });
+      expect(result).toMatchObject({
+        orderId: ctx!.orderId, amount: 85000, currency: "KRW",
+        provider: "test-provider", providerTransactionId: "paypal_order_123",
+        redirectUrl: "https://paypal.test/approve",
+      });
     }
     const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
     const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
