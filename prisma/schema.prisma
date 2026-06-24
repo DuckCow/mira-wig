@@ -313,13 +313,25 @@ enum PaymentStatus {
   PAID
   FAILED
   CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
 }
 
 /// 개별 결제 시도(Payment 레코드)의 상태
 enum PaymentAttemptStatus {
-  PENDING    // 시도 중
-  SUCCEEDED  // 성공
-  FAILED     // 실패
+  PENDING             // 시도 중
+  SUCCEEDED           // 성공
+  FAILED              // 실패
+  CANCELLED           // 결제 취소
+  REFUNDED            // 전액 환불
+  PARTIALLY_REFUNDED  // 부분 환불
+}
+
+/// 개별 취소·환불 조정 기록의 처리 상태
+enum PaymentAdjustmentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
 }
 
 model OrderItem {
@@ -376,7 +388,37 @@ model Payment {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  order Order @relation(fields: [orderId], references: [id])
+  order       Order               @relation(fields: [orderId], references: [id])
+  adjustments PaymentAdjustment[]
+}
+
+// ============================================================
+// 결제 취소·환불 기록 (부분 환불 누적 지원)
+// ============================================================
+
+/// PG 취소·환불 결과를 결제 시도별로 누적 기록한다.
+/// amount 합산으로 누적 환불액을 계산하고, refundableAmount는 PG가 보고한 잔액 스냅샷이다.
+model PaymentAdjustment {
+  id               String                  @id @default(cuid())
+  paymentId        String
+  /// PG가 발급한 취소·환불 거래 ID (Toss transactionKey, PayPal refund id)
+  providerRefundId String?
+  /// 취소·환불 금액. 최소단위 정수(KRW/JPY는 zero-decimal 그대로)
+  amount           Int
+  currency         String
+  reason           String
+  status           PaymentAdjustmentStatus @default(PENDING)
+  /// 취소·환불 요청 멱등성 키 — 중복 보상 방지
+  idempotencyKey   String                  @unique
+  /// PG가 응답한 남은 환불 가능 금액 스냅샷. 제공하지 않는 PG는 null.
+  refundableAmount Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, providerRefundId])
+  @@index([paymentId, status])
 }
 
 // ============================================================
