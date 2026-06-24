@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "crypto";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
+import { orderHasUnreconciledPayment } from "@/lib/payment/reconciliation";
 import { POST } from "./route";
 import type { PaymentAttemptStatus } from "@prisma/client";
 
@@ -79,14 +80,20 @@ async function cleanupFixtures(ctx: Ctx | null): Promise<void> {
   await db.user.deleteMany({ where: { id: ctx.userId } });
 }
 
-async function createStoredPayment(ctx: Ctx, paymentKey: string, secret: string | null, status: PaymentAttemptStatus = "PENDING"): Promise<void> {
+async function createStoredPayment(
+  ctx: Ctx,
+  paymentKey: string,
+  secret: string | null,
+  status: PaymentAttemptStatus = "PENDING",
+  idempotencyKey = `stored:${ctx.orderId}:${paymentKey}:${status}`,
+): Promise<void> {
   await db.payment.create({
     data: {
       orderId: ctx.orderId,
       provider: "toss",
       providerTransactionId: paymentKey,
       providerWebhookSecret: secret,
-      idempotencyKey: `stored:${ctx.orderId}:${paymentKey}:${status}`,
+      idempotencyKey,
       status,
       amount: 85000,
       currency: "KRW",
@@ -123,6 +130,22 @@ describe("POST /api/payments/toss/webhook", () => {
     expect(order.paymentStatus).toBe("PAID");
     expect(variant.stock).toBe(ctx!.initialStock - 1);
     expect(event.processedAt).not.toBeNull();
+  });
+
+  it("unconfirmed 마커의 secret으로 검증하고 복구 성공 후 마커를 해소한다", async () => {
+    await createStoredPayment(
+      ctx!,
+      "pay_unconfirmed_webhook",
+      "secret_unconfirmed",
+      "PENDING",
+      `unconfirmed:${ctx!.orderId}:pay_unconfirmed_webhook`,
+    );
+    const response = await post(ctx!, "pay_unconfirmed_webhook", "secret_unconfirmed", "tr_unconfirmed");
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId }, orderBy: { createdAt: "asc" } });
+    expect(response.status).toBe(200);
+    expect(payments.map((payment) => payment.status)).toEqual(["CANCELLED", "SUCCEEDED"]);
+    expect(payments[0]?.providerWebhookSecret).toBe("secret_unconfirmed");
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
   });
 
   it("같은 transmissionId 재전송은 재처리하지 않는다", async () => {

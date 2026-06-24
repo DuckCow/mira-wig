@@ -19,7 +19,7 @@ vi.mock("../index", async (importOriginal) => {
 });
 
 import { confirmPayment } from "../process";
-import { orderHasUnreconciledPayment } from "../reconciliation";
+import { orderHasUnreconciledPayment, resolveUnreconciledMarker } from "../reconciliation";
 
 interface Ctx {
   userId: string;
@@ -131,8 +131,12 @@ function confirmSucceeded(input: ConfirmInput): Promise<PaymentResult> {
   return Promise.resolve({ status: "SUCCEEDED", providerTransactionId: input.providerTransactionId });
 }
 
-function confirmFailed(input: ConfirmInput): Promise<PaymentResult> {
-  return Promise.resolve({ status: "FAILED", providerTransactionId: input.providerTransactionId });
+function confirmSucceededWithSecret(secret: string): ConfirmHandler {
+  return (input) => Promise.resolve({
+    status: "SUCCEEDED",
+    providerTransactionId: input.providerTransactionId,
+    providerWebhookSecret: secret,
+  });
 }
 
 function refundSucceeded(providerRefundId: string): RefundHandler {
@@ -164,7 +168,7 @@ async function adjustmentsFor(ctx: Ctx) {
   return db.paymentAdjustment.findMany({ where: { payment: { orderId: ctx.orderId } } });
 }
 
-async function expectUnconfirmedMarker(ctx: Ctx, paymentKey: string): Promise<void> {
+async function expectUnconfirmedMarker(ctx: Ctx, paymentKey: string, providerWebhookSecret: string | null): Promise<void> {
   const order = await db.order.findUniqueOrThrow({ where: { id: ctx.orderId } });
   const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx.variantId } });
   const payments = await db.payment.findMany({ where: { orderId: ctx.orderId } });
@@ -173,6 +177,7 @@ async function expectUnconfirmedMarker(ctx: Ctx, paymentKey: string): Promise<vo
   expect(payments).toHaveLength(1);
   expect(payments[0]?.status).toBe("PENDING");
   expect(payments[0]?.providerTransactionId).toBe(paymentKey);
+  expect(payments[0]?.providerWebhookSecret).toBe(providerWebhookSecret);
   expect(await orderHasUnreconciledPayment(ctx.orderId)).toBe(true);
 }
 
@@ -202,22 +207,41 @@ describe("confirmPayment — concurrent finalize reconciliation", () => {
   });
 });
 
+describe("orderHasUnreconciledPayment", () => {
+  let ctx: Ctx | null = null;
+  beforeEach(async () => { ctx = await setupFixtures(1); });
+  afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
+
+  it("일반 PENDING 결제행은 unconfirmed 가드로 보지 않는다", async () => {
+    await db.payment.create({
+      data: {
+        orderId: ctx!.orderId,
+        provider: "test-provider",
+        providerTransactionId: "pay_regular_pending",
+        idempotencyKey: `regular:${ctx!.orderId}:pay_regular_pending`,
+        status: "PENDING",
+        amount: 85000,
+        currency: "KRW",
+      },
+    });
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
+  });
+});
+
 describe("confirmPayment — local finalize unconfirmed marker", () => {
   let ctx: Ctx | null = null;
   beforeEach(async () => { ctx = await setupFixtures(1); });
   afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
 
-  it("PG 성공 후 finalize 미확정이면 마커를 남기고 재진입도 unconfirmed로 수렴한다", async () => {
+  it("PG 성공 후 finalize 미확정 + 보상 성공이면 secret 저장 후 마커를 REFUNDED로 해소한다", async () => {
     await forceStockOut(ctx!);
-    const wrapped = testProvider(confirmSucceeded, refundSucceeded("cancel_stock_out"));
+    const wrapped = testProvider(confirmSucceededWithSecret("secret_stock_out"), refundSucceeded("cancel_stock_out"));
     providerState.provider = wrapped.provider;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await confirm(ctx!, "pay_stock_out");
-    providerState.provider = testProvider(confirmFailed).provider;
-    const second = await confirm(ctx!, "pay_stock_out");
     const adjustments = await adjustmentsFor(ctx!);
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
     expect(result.status).toBe("unconfirmed");
-    expect(second.status).toBe("unconfirmed");
     expect(wrapped.refundCalls).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith("PAYMENT_AUTO_REFUND_SUCCEEDED", expect.objectContaining({
       orderId: ctx!.orderId,
@@ -233,7 +257,13 @@ describe("confirmPayment — local finalize unconfirmed marker", () => {
     expect(adjustments[0]?.amount).toBe(85000);
     expect(adjustments[0]?.currency).toBe("KRW");
     expect(adjustments[0]?.providerRefundId).toBe("cancel_stock_out");
-    await expectUnconfirmedMarker(ctx!, "pay_stock_out");
+    expect(payments).toHaveLength(1);
+    expect(payments[0]?.status).toBe("REFUNDED");
+    expect(payments[0]?.providerTransactionId).toBe("pay_stock_out");
+    expect(payments[0]?.providerWebhookSecret).toBe("secret_stock_out");
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
+    await resolveUnreconciledMarker(ctx!.orderId, "pay_stock_out", "REFUNDED");
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
     errorSpy.mockRestore();
   });
 });
@@ -279,6 +309,7 @@ describe("confirmPayment — local finalize auto refund failure", () => {
       providerTransactionId: "pay_refund_fail",
       error: "refund failed",
     }));
+    await expectUnconfirmedMarker(ctx!, "pay_refund_fail", null);
     errorSpy.mockRestore();
   });
 });

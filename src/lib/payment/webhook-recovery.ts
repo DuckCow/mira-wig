@@ -5,7 +5,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { paidOrderResult, paidOrderResultOrEmpty } from "./reconciliation";
+import { paidOrderResult, paidOrderResultOrEmpty, resolveUnreconciledMarker } from "./reconciliation";
 import { runSuccessTransaction } from "./process";
 
 export type RecoverPaymentFromWebhookInput = {
@@ -64,6 +64,7 @@ async function recoverDonePayment(
       providerTransactionId: input.paymentKey, amount: order.totalAmount, currency: order.currency,
       provider: input.provider ?? "toss", providerWebhookSecret: input.providerWebhookSecret, items: order.items,
     });
+    await resolveUnreconciledMarker(input.orderId, input.paymentKey, "CANCELLED");
     return { status: "success", success: true, paymentId };
   } catch (error) {
     const paid = await paidOrderResult(input.orderId);

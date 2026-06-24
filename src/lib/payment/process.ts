@@ -229,10 +229,11 @@ async function handleConfirmedSuccess(
       amount: order.totalAmount,
       currency: order.currency,
       error,
+      providerWebhookSecret,
     });
     return reconciliationRequired({
       orderId: input.orderId, paymentKey: input.paymentKey, providerTransactionId: confirmedProviderTxId,
-      provider: provider.name, amount: order.totalAmount, currency: order.currency, error,
+      provider: provider.name, amount: order.totalAmount, currency: order.currency, error, providerWebhookSecret,
     });
   }
 }

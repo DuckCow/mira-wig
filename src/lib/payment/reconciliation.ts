@@ -4,7 +4,7 @@
 // ============================================================
 
 import { db } from "@/lib/db";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PaymentAttemptStatus } from "@prisma/client";
 import type { PaymentProvider, RefundResult } from "./types";
 
 type PaymentSuccessResult = { status: "success"; success: true; paymentId: string };
@@ -24,6 +24,7 @@ type ReconciliationInput = {
   amount: number;
   currency: string;
   error: unknown;
+  providerWebhookSecret?: string;
 };
 
 type RefundAdjustmentInput = ReconciliationInput & {
@@ -40,6 +41,7 @@ type CompensationInput = {
   amount: number;
   currency: string;
   error: unknown;
+  providerWebhookSecret?: string;
 };
 
 const AUTO_REFUND_REASON = "AUTO_RECONCILIATION_REFUND: PG confirmed but local finalize failed";
@@ -130,37 +132,55 @@ export async function paidOrderResultOrEmpty(orderId: string): Promise<PaymentSu
 
 export async function orderHasUnreconciledPayment(orderId: string): Promise<boolean> {
   const payment = await db.payment.findFirst({
-    where: { orderId, status: "PENDING", providerTransactionId: { not: null } },
+    where: {
+      orderId,
+      status: "PENDING",
+      providerTransactionId: { not: null },
+      idempotencyKey: { startsWith: "unconfirmed:" },
+    },
     select: { id: true },
   });
   return payment !== null;
 }
 
-export async function unreconciledPaymentResult(
-  orderId: string,
-  providerTransactionId: string | null,
-): Promise<PaymentUnconfirmedResult | null> {
+export async function unreconciledPaymentResult(orderId: string, providerTransactionId: string | null): Promise<PaymentUnconfirmedResult | null> {
   if (!providerTransactionId) return null;
   const exists = await db.payment.findFirst({
-    where: { orderId, status: "PENDING", providerTransactionId },
+    where: { orderId, status: "PENDING", providerTransactionId, idempotencyKey: { startsWith: "unconfirmed:" } },
     select: { id: true },
   });
   return exists ? unconfirmedResult(orderId, providerTransactionId) : null;
 }
 
+async function existingMarkerId(idempotencyKey: string, input: ReconciliationInput): Promise<string | null> {
+  const existing = await db.payment.findUnique({
+    where: { idempotencyKey },
+    select: { id: true, status: true, providerWebhookSecret: true },
+  });
+  if (!existing) return null;
+  if (existing.status === "PENDING" && !existing.providerWebhookSecret && input.providerWebhookSecret) {
+    await db.payment.update({ where: { id: existing.id }, data: { providerWebhookSecret: input.providerWebhookSecret } });
+  }
+  return existing.id;
+}
+
+async function markerCreatedByRace(error: unknown, idempotencyKey: string): Promise<string | null> {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return null;
+  const existing = await db.payment.findUnique({ where: { idempotencyKey }, select: { id: true } });
+  return existing?.id ?? null;
+}
+
 async function ensureUnreconciledMarker(input: ReconciliationInput): Promise<string> {
   const idempotencyKey = markerKey(input.orderId, input.providerTransactionId);
-  const existing = await db.payment.findFirst({
-    where: { orderId: input.orderId, status: "PENDING", providerTransactionId: input.providerTransactionId },
-    select: { id: true },
-  });
-  if (existing) return existing.id;
+  const existingId = await existingMarkerId(idempotencyKey, input);
+  if (existingId) return existingId;
   try {
     const payment = await db.payment.create({
       data: {
         orderId: input.orderId,
         provider: input.provider,
         providerTransactionId: input.providerTransactionId,
+        providerWebhookSecret: input.providerWebhookSecret ?? null,
         idempotencyKey,
         status: "PENDING",
         amount: input.amount,
@@ -171,15 +191,26 @@ async function ensureUnreconciledMarker(input: ReconciliationInput): Promise<str
     });
     return payment.id;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const existingMarker = await db.payment.findFirst({
-        where: { orderId: input.orderId, status: "PENDING", providerTransactionId: input.providerTransactionId },
-        select: { id: true },
-      });
-      if (existingMarker) return existingMarker.id;
-    }
+    const racedId = await markerCreatedByRace(error, idempotencyKey);
+    if (racedId) return racedId;
     throw error;
   }
+}
+
+export async function resolveUnreconciledMarker(
+  orderId: string,
+  providerTransactionId: string,
+  status: Extract<PaymentAttemptStatus, "SUCCEEDED" | "CANCELLED" | "REFUNDED" | "PARTIALLY_REFUNDED">,
+): Promise<void> {
+  await db.payment.updateMany({
+    where: {
+      orderId,
+      providerTransactionId,
+      status: "PENDING",
+      idempotencyKey: { startsWith: "unconfirmed:" },
+    },
+    data: { status },
+  });
 }
 
 export async function paymentAdjustmentExists(idempotencyKey: string): Promise<boolean> {
@@ -240,6 +271,9 @@ export async function compensateUnconfirmedPayment(input: CompensationInput): Pr
     idempotencyKey,
     result,
   });
+  if (result.status === "SUCCEEDED") {
+    await resolveUnreconciledMarker(input.orderId, input.providerTransactionId, "REFUNDED");
+  }
   logAutoRefundResult(input, idempotencyKey, result);
 }
 
