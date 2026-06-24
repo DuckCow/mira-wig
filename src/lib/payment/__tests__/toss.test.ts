@@ -65,6 +65,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("confirm 성공 응답의 secret을 providerWebhookSecret으로 매핑한다", async () => {
+  mockFetch({ paymentKey: "pay_confirm", secret: "secret_confirm" });
+  const result = await new TossPaymentProvider().confirm({
+    orderId: "order_1",
+    amount: 85000,
+    providerTransactionId: "pay_confirm",
+    idempotencyKey: "confirm_key",
+  });
+  expect(result).toMatchObject({
+    providerTransactionId: "pay_confirm",
+    status: "SUCCEEDED",
+    providerWebhookSecret: "secret_confirm",
+  });
+});
+
 it("전액 취소는 cancelAmount 없이 취소 API를 호출하고 transactionKey를 매핑한다", async () => {
   const fetchMock = mockFetch({
     paymentKey: "pay_full", currency: "KRW", balanceAmount: 0,
@@ -109,4 +124,41 @@ it("Toss HTTP 실패는 FAILED 결과와 errorMessage로 반환한다", async ()
     currency: "KRW",
     errorMessage: "취소 불가",
   });
+});
+
+it("PAYMENT_STATUS_CHANGED 웹훅은 필드를 추출해 verified true를 반환한다", async () => {
+  const rawBody = JSON.stringify({
+    eventType: "PAYMENT_STATUS_CHANGED",
+    data: {
+      orderId: "order_1",
+      paymentKey: "pay_webhook",
+      status: "DONE",
+      totalAmount: 85000,
+      currency: "KRW",
+      secret: "secret_webhook",
+    },
+  });
+  const result = await new TossPaymentProvider().handleWebhook({
+    headers: { "tosspayments-webhook-transmission-id": "tr_1" },
+    rawBody,
+  });
+  expect(result).toMatchObject({
+    verified: true,
+    eventId: "tr_1",
+    eventType: "PAYMENT_STATUS_CHANGED",
+    orderId: "order_1",
+    providerTransactionId: "pay_webhook",
+    status: "DONE",
+    amount: 85000,
+    currency: "KRW",
+    providerWebhookSecret: "secret_webhook",
+  });
+});
+
+it("형식 불량 웹훅은 verified false를 반환한다", async () => {
+  const result = await new TossPaymentProvider().handleWebhook({
+    headers: {},
+    rawBody: JSON.stringify({ eventType: "PAYMENT_STATUS_CHANGED", data: { orderId: "order_1" } }),
+  });
+  expect(result).toEqual({ verified: false, reason: "missing_payment_fields" });
 });

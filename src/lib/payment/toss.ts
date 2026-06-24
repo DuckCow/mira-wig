@@ -17,6 +17,7 @@ import type {
   PaymentResult,
   RefundInput,
   RefundResult,
+  WebhookResult,
 } from "./types";
 
 const TOSS_API_BASE = "https://api.tosspayments.com/v1";
@@ -31,6 +32,12 @@ function getString(v: unknown): string | undefined {
 
 function getNumber(v: unknown): number | undefined {
   return typeof v === "number" ? v : undefined;
+}
+
+function headerValue(headers: Headers | Record<string, string>, name: string): string | undefined {
+  if (headers instanceof Headers) return headers.get(name) ?? undefined;
+  const lowerName = name.toLowerCase();
+  return Object.entries(headers).find(([key]) => key.toLowerCase() === lowerName)?.[1];
 }
 
 function latestCancel(data: Record<string, unknown>): Record<string, unknown> | null {
@@ -88,6 +95,34 @@ function successfulRefund(input: RefundInput, data: Record<string, unknown>): Re
   };
 }
 
+function parseWebhookBody(rawBody: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(rawBody);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function paymentStatusChangedResult(
+  payload: Record<string, unknown>,
+  data: Record<string, unknown>,
+  transmissionId: string | undefined,
+): Extract<WebhookResult, { verified: true }> {
+  return {
+    verified: true,
+    eventId: transmissionId,
+    eventType: "PAYMENT_STATUS_CHANGED",
+    orderId: getString(data.orderId),
+    providerTransactionId: getString(data.paymentKey),
+    status: getString(data.status),
+    amount: getNumber(data.totalAmount),
+    currency: getString(data.currency),
+    providerWebhookSecret: getString(data.secret),
+    raw: payload,
+  };
+}
+
 export class TossPaymentProvider implements PaymentProvider {
   readonly name = "toss";
   private readonly authHeader: string;
@@ -131,6 +166,7 @@ export class TossPaymentProvider implements PaymentProvider {
     return {
       providerTransactionId: getString(data.paymentKey) ?? input.providerTransactionId,
       status: "SUCCEEDED",
+      providerWebhookSecret: getString(data.secret),
     };
   }
 
@@ -150,5 +186,23 @@ export class TossPaymentProvider implements PaymentProvider {
     const data = await parseJson(res);
     if (!res.ok) return failedRefund(input, data, res.status);
     return successfulRefund(input, data);
+  }
+
+  handleWebhook(input: { headers: Headers | Record<string, string>; rawBody: string }): Promise<WebhookResult> {
+    const payload = parseWebhookBody(input.rawBody);
+    if (!payload) return Promise.resolve({ verified: false, reason: "invalid_json" });
+    if (getString(payload.eventType) !== "PAYMENT_STATUS_CHANGED") {
+      return Promise.resolve({ verified: false, reason: "unsupported_event_type" });
+    }
+    if (!isRecord(payload.data)) return Promise.resolve({ verified: false, reason: "invalid_payment_data" });
+    const result = paymentStatusChangedResult(
+      payload,
+      payload.data,
+      headerValue(input.headers, "tosspayments-webhook-transmission-id"),
+    );
+    if (!result.orderId || !result.providerTransactionId || !result.status) {
+      return Promise.resolve({ verified: false, reason: "missing_payment_fields" });
+    }
+    return Promise.resolve(result);
   }
 }

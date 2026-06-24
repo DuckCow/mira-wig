@@ -72,10 +72,11 @@ async function decrementStock(
 type SuccessTxInput = {
   orderId: string; userId: string; idempotencyKey: string;
   providerTransactionId: string | null; amount: number; currency: string; provider: string;
+  providerWebhookSecret?: string;
   items: Array<{ variantId: string; quantity: number }>;
 };
 
-async function runSuccessTransaction(input: SuccessTxInput): Promise<string> {
+export async function runSuccessTransaction(input: SuccessTxInput): Promise<string> {
   return db.$transaction(async (tx) => {
     for (const item of input.items) {
       await decrementStock(tx, item.variantId, item.quantity);
@@ -90,6 +91,7 @@ async function runSuccessTransaction(input: SuccessTxInput): Promise<string> {
       data: {
         orderId: input.orderId, provider: input.provider,
         providerTransactionId: input.providerTransactionId,
+        providerWebhookSecret: input.providerWebhookSecret ?? null,
         idempotencyKey: input.idempotencyKey,
         status: "SUCCEEDED", amount: input.amount, currency: input.currency,
       },
@@ -206,13 +208,13 @@ async function handleConfirmFailure(
 
 async function handleConfirmedSuccess(
   input: ConfirmPaymentInput, idempotencyKey: string,
-  providerTxId: string | null, order: LoadedOrder, provider: PaymentProvider,
+  providerTxId: string | null, order: LoadedOrder, provider: PaymentProvider, providerWebhookSecret?: string,
 ): Promise<ProcessPaymentResult> {
   try {
     const paymentId = await runSuccessTransaction({
       orderId: input.orderId, userId: input.userId, idempotencyKey,
       providerTransactionId: providerTxId, amount: order.totalAmount,
-      currency: order.currency, provider: provider.name, items: order.items,
+      currency: order.currency, provider: provider.name, providerWebhookSecret, items: order.items,
     });
     return { status: "success", success: true, paymentId };
   } catch (error) {
@@ -290,5 +292,5 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
   if (result.status !== "SUCCEEDED") {
     return handleConfirmFailure(input.orderId, idempotencyKey, result.providerTransactionId, input.paymentKey, order, provider.name);
   }
-  return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider);
+  return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider, result.providerWebhookSecret);
 }

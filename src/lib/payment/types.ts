@@ -39,6 +39,7 @@ export interface ConfirmInput {
 export interface PaymentResult {
   providerTransactionId: string | null;
   status: PaymentStatus;
+  providerWebhookSecret?: string;
   errorMessage?: string;
 }
 
@@ -65,7 +66,8 @@ export type RefundResult = {
 export type WebhookResult =
   | { verified: false; reason: string }
   | { verified: true; eventId?: string; eventType: string; orderId?: string;
-      providerTransactionId?: string; status?: string; occurredAt?: Date; raw: unknown };
+      providerTransactionId?: string; status?: string; occurredAt?: Date;
+      amount?: number; currency?: string; providerWebhookSecret?: string; raw: unknown };
 
 /** 결제 공급자 인터페이스 */
 export interface PaymentProvider {

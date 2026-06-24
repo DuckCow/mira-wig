@@ -123,6 +123,7 @@ describe("processPayment — 결제 성공", () => {
     expect(result.success).toBe(true);
     const payment = await db.payment.findUnique({ where: { idempotencyKey: key } });
     expect(payment?.status).toBe("SUCCEEDED");
+    expect(payment?.providerWebhookSecret).toBeNull();
   });
 
   it("성공 결과에 paymentId가 포함된다", async () => {

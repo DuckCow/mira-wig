@@ -26,6 +26,7 @@ vi.mock("../index", async (importOriginal) => {
 });
 
 import { confirmPayment, processPayment } from "../process";
+import { recoverPaymentFromWebhook } from "../webhook-recovery";
 
 interface Ctx {
   userId: string;
@@ -42,7 +43,7 @@ const TEST_SNAPSHOT = {
 
 function makeKey(): string { return `test_idem_${randomUUID()}`; }
 
-function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatus) {
+function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatus, providerWebhookSecret?: string) {
   let confirmCalls = 0;
   const provider: PaymentProvider = {
     name: "test-provider",
@@ -54,6 +55,7 @@ function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatu
       return Promise.resolve({
         status: confirmStatus,
         providerTransactionId: input.providerTransactionId,
+        providerWebhookSecret,
       });
     },
   };
@@ -154,7 +156,7 @@ describe("confirmPayment — 2-phase confirm success", () => {
   afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
 
   it("confirm SUCCEEDED면 성공 트랜잭션 효과를 적용하고 재confirm은 멱등 성공이다", async () => {
-    const wrapped = testProvider("PENDING", "SUCCEEDED");
+    const wrapped = testProvider("PENDING", "SUCCEEDED", "secret_confirm");
     providerState.provider = wrapped.provider;
     const first = await confirmPayment({ orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "pay_ok", redirectAmount: 85000 });
     const second = await confirmPayment({ orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "pay_ok", redirectAmount: 85000 });
@@ -171,6 +173,67 @@ describe("confirmPayment — 2-phase confirm success", () => {
     expect(cart).toHaveLength(0);
     expect(payments).toHaveLength(1);
     expect(payments[0]?.status).toBe("SUCCEEDED");
+    expect(payments[0]?.providerWebhookSecret).toBe("secret_confirm");
+  });
+});
+
+describe("recoverPaymentFromWebhook — DONE recovery", () => {
+  let ctx: Ctx | null = null;
+  beforeEach(async () => { ctx = await setupFixtures(10); });
+  afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
+
+  it("PENDING_PAYMENT 주문은 DONE 웹훅으로 성공 트랜잭션 효과를 적용한다", async () => {
+    const result = await recoverPaymentFromWebhook({
+      orderId: ctx!.orderId, paymentKey: "pay_webhook_ok", amount: 85000, currency: "KRW",
+      status: "DONE", providerWebhookSecret: "secret_webhook",
+    });
+    const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
+    const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
+    const cart = await db.cartItem.findMany({ where: { userId: ctx!.userId } });
+    const payment = await db.payment.findFirst({ where: { orderId: ctx!.orderId } });
+    expect(result.success).toBe(true);
+    expect(order.status).toBe("PAID");
+    expect(order.paymentStatus).toBe("PAID");
+    expect(variant.stock).toBe(ctx!.initialStock - 1);
+    expect(cart).toHaveLength(0);
+    expect(payment?.providerTransactionId).toBe("pay_webhook_ok");
+    expect(payment?.providerWebhookSecret).toBe("secret_webhook");
+  });
+
+  it("이미 PAID면 멱등 성공으로 수렴하고 중복 차감하지 않는다", async () => {
+    await recoverPaymentFromWebhook({
+      orderId: ctx!.orderId, paymentKey: "pay_webhook_once", amount: 85000, currency: "KRW", status: "DONE",
+    });
+    const second = await recoverPaymentFromWebhook({
+      orderId: ctx!.orderId, paymentKey: "pay_webhook_once", amount: 85000, currency: "KRW", status: "DONE",
+    });
+    const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    expect(second.success).toBe(true);
+    expect(variant.stock).toBe(ctx!.initialStock - 1);
+    expect(payments).toHaveLength(1);
+  });
+
+  it("금액 불일치면 상태를 변경하지 않는다", async () => {
+    const result = await recoverPaymentFromWebhook({
+      orderId: ctx!.orderId, paymentKey: "pay_bad_amount", amount: 1, currency: "KRW", status: "DONE",
+    });
+    const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    expect(result.status).toBe("failed");
+    expect(order.status).toBe("PENDING_PAYMENT");
+    expect(payments).toHaveLength(0);
+  });
+
+  it("DONE이 아닌 상태는 무시하고 상태를 변경하지 않는다", async () => {
+    const result = await recoverPaymentFromWebhook({
+      orderId: ctx!.orderId, paymentKey: "pay_ready", amount: 85000, currency: "KRW", status: "IN_PROGRESS",
+    });
+    const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    expect(result.status).toBe("ignored");
+    expect(order.status).toBe("PENDING_PAYMENT");
+    expect(payments).toHaveLength(0);
   });
 });
 
