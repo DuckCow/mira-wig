@@ -62,6 +62,31 @@ function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatu
   return { provider, get confirmCalls() { return confirmCalls; } };
 }
 
+function captureProvider(result: PaymentResult) {
+  let confirmCalls = 0;
+  let refundCalls = 0;
+  const provider: PaymentProvider = {
+    name: "paypal",
+    initiate: () => Promise.resolve({ status: "PENDING", providerTransactionId: "paypal_order" }),
+    confirm: () => {
+      confirmCalls += 1;
+      return Promise.resolve(result);
+    },
+    refund: (input) => {
+      refundCalls += 1;
+      return Promise.resolve({
+        providerTransactionId: input.providerTransactionId,
+        providerRefundId: "refund_capture",
+        status: "SUCCEEDED",
+        amount: input.amount,
+        currency: input.currency,
+        refundableAmount: 0,
+      });
+    },
+  };
+  return { provider, get confirmCalls() { return confirmCalls; }, get refundCalls() { return refundCalls; } };
+}
+
 async function setupUser(runId: string): Promise<string> {
   const id = `test_${runId}`;
   await db.user.create({ data: { id, email: `${runId}@test.com`, role: "CUSTOMER" } });
@@ -178,6 +203,64 @@ describe("confirmPayment — 2-phase confirm success", () => {
     expect(payments).toHaveLength(1);
     expect(payments[0]?.status).toBe("SUCCEEDED");
     expect(payments[0]?.providerWebhookSecret).toBe("secret_confirm");
+  });
+
+  it("capture 금액/통화/reference_id가 주문 기대값과 맞으면 확정한다", async () => {
+    const wrapped = captureProvider({
+      status: "SUCCEEDED",
+      providerTransactionId: "capture_ok",
+      capturedAmount: 85000,
+      capturedCurrency: "KRW",
+      captureReferenceId: ctx!.orderId,
+    });
+    providerState.provider = wrapped.provider;
+    const result = await confirmPayment({
+      orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "paypal_order_ok", redirectAmount: 85000,
+    });
+    const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
+    const payment = await db.payment.findFirst({ where: { orderId: ctx!.orderId } });
+    expect(result.success).toBe(true);
+    expect(wrapped.refundCalls).toBe(0);
+    expect(order.status).toBe("PAID");
+    expect(payment?.providerTransactionId).toBe("capture_ok");
+    expect(payment?.status).toBe("SUCCEEDED");
+  });
+});
+
+describe("confirmPayment — capture verification mismatch", () => {
+  let ctx: Ctx | null = null;
+  beforeEach(async () => { ctx = await setupFixtures(10); });
+  afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
+
+  it.each([
+    ["amount", { capturedAmount: 85001, capturedCurrency: "KRW", captureReferenceId: "ORDER" }],
+    ["currency", { capturedAmount: 85000, capturedCurrency: "USD", captureReferenceId: "ORDER" }],
+    ["reference", { capturedAmount: 85000, capturedCurrency: "KRW", captureReferenceId: "wrong_order" }],
+  ])("capture %s 불일치면 확정하지 않고 위험 상태로 남긴다", async (_case, captured) => {
+    const wrapped = captureProvider({
+      status: "SUCCEEDED",
+      providerTransactionId: "capture_bad",
+      ...captured,
+      captureReferenceId: captured.captureReferenceId === "ORDER" ? ctx!.orderId : captured.captureReferenceId,
+    });
+    providerState.provider = wrapped.provider;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await confirmPayment({
+      orderId: ctx!.orderId, userId: ctx!.userId, paymentKey: "paypal_order_bad", redirectAmount: 85000,
+    });
+    const order = await db.order.findUniqueOrThrow({ where: { id: ctx!.orderId } });
+    const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    expect(result.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(1);
+    expect(order.status).toBe("PENDING_PAYMENT");
+    expect(variant.stock).toBe(ctx!.initialStock);
+    expect(payments.every((payment) => payment.status !== "SUCCEEDED")).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith("PAYMENT_CAPTURE_VERIFICATION_FAILED", expect.objectContaining({
+      orderId: ctx!.orderId,
+      providerTransactionId: "capture_bad",
+    }));
+    errorSpy.mockRestore();
   });
 });
 

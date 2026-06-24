@@ -40,6 +40,9 @@ export interface PaymentResult {
   providerTransactionId: string | null;
   status: PaymentStatus;
   providerWebhookSecret?: string;
+  capturedAmount?: number;
+  capturedCurrency?: string;
+  captureReferenceId?: string;
   errorMessage?: string;
 }
 

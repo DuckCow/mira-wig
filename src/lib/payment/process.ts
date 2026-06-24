@@ -3,16 +3,15 @@
 // server-only: DB, Prisma 트랜잭션 포함
 // ============================================================
 import "server-only";
-
 import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getPaymentProvider } from "./index";
+import { capturedPaymentFailureResult } from "./capture-reconciliation";
 import { validateOrderForPayment, canDecrementStock, isAlreadyProcessed } from "./core";
 import { compensateUnconfirmedPayment, paidOrderResult, paidOrderResultOrEmpty, reconciliationRequired, unreconciledPaymentResult } from "./reconciliation";
 import type { PaymentProvider } from "./types";
 
-// ── 공개 결과 타입 ────────────────────────────────────────────
 export type ProcessPaymentResult =
   | { status: "success"; success: true; paymentId: string }
   | { status: "pending"; success: false; orderId: string; amount: number; currency: string; providerTransactionId: string | null; provider: string; redirectUrl?: string }
@@ -21,8 +20,6 @@ export type ProcessPaymentResult =
 
 export type ConfirmPaymentInput = { orderId: string; userId: string; paymentKey: string; redirectAmount: number };
 
-// ── 내부 타입 ────────────────────────────────────────────────
-
 type LoadedOrder = {
   status: string; totalAmount: number; currency: string;
   marketCode: string; userId: string;
@@ -30,6 +27,9 @@ type LoadedOrder = {
 };
 
 type OrderEligibility = { eligible: true; order: LoadedOrder } | { eligible: false; result: ProcessPaymentResult };
+type ConfirmEligibility =
+  | { eligible: true; order: LoadedOrder; provider: PaymentProvider; idempotencyKey: string }
+  | { eligible: false; result: ProcessPaymentResult };
 
 // ── 주문 로딩 ────────────────────────────────────────────────
 
@@ -145,6 +145,16 @@ async function checkOrderEligibility(
   const v = validateOrderForPayment(order.status);
   if (!v.valid) return { eligible: false, result: { status: "failed", success: false, error: v.reason ?? "결제 불가" } };
   return { eligible: true, order };
+}
+
+async function checkConfirmEligibility(input: ConfirmPaymentInput): Promise<ConfirmEligibility> {
+  const order = await loadOrder(input.orderId);
+  if (!order) return { eligible: false, result: { status: "failed", success: false, error: "주문을 찾을 수 없습니다." } };
+  if (order.userId !== input.userId) return { eligible: false, result: { status: "failed", success: false, error: "접근 권한이 없습니다." } };
+  if (order.status === "PAID") return { eligible: false, result: await paidOrderResultOrEmpty(input.orderId) };
+  const validation = validateOrderForPayment(order.status);
+  if (!validation.valid) return { eligible: false, result: { status: "failed", success: false, error: validation.reason ?? "결제 불가" } };
+  return { eligible: true, order, provider: getPaymentProvider(order.marketCode), idempotencyKey: randomUUID() };
 }
 
 // ── 성공 경로 ────────────────────────────────────────────────
@@ -271,18 +281,9 @@ export async function processPayment(
 }
 
 export async function confirmPayment(input: ConfirmPaymentInput): Promise<ProcessPaymentResult> {
-  const order = await loadOrder(input.orderId);
-  if (!order) return { status: "failed", success: false, error: "주문을 찾을 수 없습니다." };
-  if (order.userId !== input.userId) return { status: "failed", success: false, error: "접근 권한이 없습니다." };
-  if (order.status === "PAID") {
-    return paidOrderResultOrEmpty(input.orderId);
-  }
-  const validation = validateOrderForPayment(order.status);
-  if (!validation.valid) {
-    return { status: "failed", success: false, error: validation.reason ?? "결제 불가" };
-  }
-  const provider = getPaymentProvider(order.marketCode);
-  const idempotencyKey = randomUUID();
+  const eligibility = await checkConfirmEligibility(input);
+  if (!eligibility.eligible) return eligibility.result;
+  const { order, provider, idempotencyKey } = eligibility;
   if (order.totalAmount !== input.redirectAmount) {
     return handleConfirmFailure(input.orderId, idempotencyKey, input.paymentKey, input.paymentKey, order, provider.name);
   }
@@ -293,5 +294,7 @@ export async function confirmPayment(input: ConfirmPaymentInput): Promise<Proces
   if (result.status !== "SUCCEEDED") {
     return handleConfirmFailure(input.orderId, idempotencyKey, result.providerTransactionId, input.paymentKey, order, provider.name);
   }
+  const captureFailure = await capturedPaymentFailureResult(input, result, order, provider);
+  if (captureFailure) return captureFailure;
   return handleConfirmedSuccess(input, idempotencyKey, result.providerTransactionId, order, provider, result.providerWebhookSecret);
 }

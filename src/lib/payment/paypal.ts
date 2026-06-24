@@ -26,6 +26,7 @@ const PAYPAL_API_BASE = {
 
 type PayPalEnv = keyof typeof PAYPAL_API_BASE;
 type PayPalApiResult = { ok: true; data: Record<string, unknown> } | { ok: false; data: Record<string, unknown>; status: number };
+type CaptureDetails = { id: string; amount: number; currency: string; referenceId: string };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -52,11 +53,15 @@ export function formatPayPalAmount(amount: number, currency: string): string {
   return meta.decimals === 0 ? String(amount) : (amount / divisor).toFixed(meta.decimals);
 }
 
-function parsePayPalAmount(value: string | undefined, currency: string): number | undefined {
-  if (!value) return undefined;
+export function parsePayPalAmount(value: string, currency: string): number {
   const meta = CURRENCY_META[currency];
-  if (!meta) return undefined;
-  return Math.round(Number(value) * 10 ** meta.decimals);
+  if (!meta) throw new Error(`지원하지 않는 PayPal 통화입니다: ${currency}`);
+  if (!/^\d+(\.\d+)?$/.test(value)) throw new Error(`PayPal 금액 형식 오류: ${value}`);
+  const [wholeRaw, fractionRaw = ""] = value.split(".");
+  if (fractionRaw.length > meta.decimals) throw new Error(`PayPal 금액 소수점 오류: ${value}`);
+  const whole = Number.parseInt(wholeRaw ?? "0", 10);
+  const fraction = Number.parseInt(fractionRaw.padEnd(meta.decimals, "0") || "0", 10);
+  return whole * 10 ** meta.decimals + fraction;
 }
 
 async function parseJson(res: Response): Promise<Record<string, unknown>> {
@@ -79,13 +84,45 @@ function approveUrl(data: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function firstCapture(data: Record<string, unknown>): Record<string, unknown> | null {
+function captureAmount(capture: Record<string, unknown>): { amount: number; currency: string } | null {
+  if (!isRecord(capture.amount)) return null;
+  const value = getString(capture.amount.value);
+  const currency = getString(capture.amount.currency_code);
+  if (!value || !currency) return null;
+  try {
+    return { amount: parsePayPalAmount(value, currency), currency };
+  } catch {
+    return null;
+  }
+}
+
+function captureDetails(capture: unknown, referenceId: string): CaptureDetails | null {
+  if (!isRecord(capture) || getString(capture.status) !== "COMPLETED") return null;
+  const id = getString(capture.id);
+  const amount = captureAmount(capture);
+  if (!id || !amount) return null;
+  return { id, referenceId, ...amount };
+}
+
+function completedCaptureFromUnit(unit: Record<string, unknown>): CaptureDetails | null {
+  if (!isRecord(unit.payments)) return null;
+  const referenceId = getString(unit.reference_id);
+  const captures = unit.payments.captures;
+  if (!Array.isArray(captures) || !referenceId) return null;
+  for (const capture of captures) {
+    const details = captureDetails(capture, referenceId);
+    if (details) return details;
+  }
+  return null;
+}
+
+function firstCompletedCapture(data: Record<string, unknown>): CaptureDetails | null {
   const units = data.purchase_units;
   if (!Array.isArray(units)) return null;
   for (const unit of units) {
-    if (!isRecord(unit) || !isRecord(unit.payments)) continue;
-    const captures = unit.payments.captures;
-    if (Array.isArray(captures) && isRecord(captures[0])) return captures[0];
+    if (!isRecord(unit)) continue;
+    const capture = completedCaptureFromUnit(unit);
+    if (capture) return capture;
   }
   return null;
 }
@@ -152,11 +189,17 @@ export class PayPalPaymentProvider implements PaymentProvider {
     );
     if (!result.ok) return this.failedPayment(input.providerTransactionId, result.data, `PayPal capture 실패 (HTTP ${result.status})`);
     const { data } = result;
-    const capture = firstCapture(data);
-    if (getString(data.status) !== "COMPLETED" || !getString(capture?.id)) {
+    const capture = firstCompletedCapture(data);
+    if (getString(data.status) !== "COMPLETED" || !capture) {
       return this.failedPayment(input.providerTransactionId, data, "PayPal capture 실패");
     }
-    return { providerTransactionId: getString(capture?.id) ?? input.providerTransactionId, status: "SUCCEEDED" };
+    return {
+      providerTransactionId: capture.id,
+      status: "SUCCEEDED",
+      capturedAmount: capture.amount,
+      capturedCurrency: capture.currency,
+      captureReferenceId: capture.referenceId,
+    };
   }
 
   async refund(input: RefundInput): Promise<RefundResult> {
@@ -169,11 +212,12 @@ export class PayPalPaymentProvider implements PaymentProvider {
     const { data } = result;
     const status = refundStatus(getString(data.status));
     const currency = getString(isRecord(data.amount) ? data.amount.currency_code : undefined) ?? input.currency;
+    const refundedValue = getString(isRecord(data.amount) ? data.amount.value : undefined);
     return {
       providerTransactionId: input.providerTransactionId,
       providerRefundId: getString(data.id),
       status,
-      amount: parsePayPalAmount(getString(isRecord(data.amount) ? data.amount.value : undefined), currency) ?? input.amount,
+      amount: refundedValue ? parsePayPalAmount(refundedValue, currency) : input.amount,
       currency,
       raw: data,
       ...(status === "FAILED" && { errorMessage: errorMessage(data, "PayPal refund 실패") }),

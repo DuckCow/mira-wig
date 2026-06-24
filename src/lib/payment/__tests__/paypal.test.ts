@@ -3,7 +3,7 @@
 // ============================================================
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPaymentProvider } from "../index";
-import { formatPayPalAmount, PayPalPaymentProvider } from "../paypal";
+import { formatPayPalAmount, parsePayPalAmount, PayPalPaymentProvider } from "../paypal";
 import type { ConfirmInput, InitiateInput, RefundInput } from "../types";
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
@@ -94,6 +94,18 @@ describe("formatPayPalAmount", () => {
   });
 });
 
+describe("parsePayPalAmount", () => {
+  it("USD 표시 단위 문자열을 최소단위 정수로 변환한다", () => {
+    expect(parsePayPalAmount("77.99", "USD")).toBe(7799);
+    expect(parsePayPalAmount("0.01", "USD")).toBe(1);
+  });
+
+  it("JPY는 decimal 없이 그대로 최소단위 정수로 변환한다", () => {
+    expect(parsePayPalAmount("1500", "JPY")).toBe(1500);
+    expect(parsePayPalAmount("0", "JPY")).toBe(0);
+  });
+});
+
 it("initiate는 Orders v2 create order 형식으로 호출하고 order id를 PENDING으로 반환한다", async () => {
   const fetchMock = mockFetch(oauthResponse(), response({
     id: "paypal_order_1",
@@ -122,13 +134,28 @@ it("confirm은 PayPal order capture를 호출하고 capture id를 SUCCEEDED로 �
   const fetchMock = mockFetch(oauthResponse(), response({
     id: "paypal_order_1",
     status: "COMPLETED",
-    purchase_units: [{ payments: { captures: [{ id: "capture_1", status: "COMPLETED" }] } }],
+    purchase_units: [{
+      reference_id: "order_1",
+      payments: {
+        captures: [{
+          id: "capture_1",
+          status: "COMPLETED",
+          amount: { currency_code: "USD", value: "77.99" },
+        }],
+      },
+    }],
   }));
   const result = await new PayPalPaymentProvider().confirm(confirmInput());
   const capture = fetchCall(fetchMock, 1);
   expect(capture.url).toBe("https://api-m.sandbox.paypal.com/v2/checkout/orders/paypal_order_1/capture");
   expect(headerValue(capture.init, "PayPal-Request-Id")).toBe("idem_capture");
-  expect(result).toEqual({ providerTransactionId: "capture_1", status: "SUCCEEDED" });
+  expect(result).toEqual({
+    providerTransactionId: "capture_1",
+    status: "SUCCEEDED",
+    capturedAmount: 7799,
+    capturedCurrency: "USD",
+    captureReferenceId: "order_1",
+  });
 });
 
 it("confirm 실패 응답은 FAILED 결과로 반환한다", async () => {
