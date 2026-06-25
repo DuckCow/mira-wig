@@ -11,6 +11,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 > 위 Next 관리 블록은 건드리지 않는다(Next 업데이트가 그 구역만 덮어씀). 아래는 그 바깥이라 안전하다.
 > **에이전트 규칙의 단일 출처(SSOT)는 이 파일이다.** (CLAUDE.md는 `@AGENTS.md`로 이 파일을 불러온다.)
 > Next API 정확성은 위 블록 + 번들 docs가 맡는다. 아래는 프로젝트 아키텍처·존·결제 규칙이다.
+> **사람-에이전트 협업 루프**(정찰 → 설계 잠금 → 격리 빌드 → 검수 → 격리 커밋)와 **교차검토 판정**은 `docs/collaboration-protocol.md` 참조.
 
 프로젝트: AI 맞춤 가발 e-커머스 — 사진에 가발을 합성해보고(피팅) 마음에 들면 주문(탐색·전환).
 
@@ -18,6 +19,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - 너는 **구현 · 코드 탐색 · 런타임 테스트**를 한다. 제품/설계 결정은 작업 프롬프트에 담겨 온다 — 스스로 만들지 않는다.
 - 불확실하면 추측해서 구현하지 말고 멈추고 **질문한다**.
+- **STRICT(§4)·되돌리기 비싼 변경은 빌드 전 read-only 정찰부터** — 코드 변경 없이 현 사실·시그니처·기존 패턴·무엇이 비었는지 먼저 보고한다. 가정하고 빌드하지 않는다.
 - **기본 동작: 변경 후 `npm run verify`(§5) 초록을 확인하면 거기서 멈춘다. `git add`/`commit`/`push` 하지 마라** — 사람이 검토하고 직접 커밋한다. 프롬프트가 명시적으로 커밋을 지시할 때만 예외.
 
 ## 1. 기술 스택 (현행)
@@ -32,7 +34,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | AI 피팅 | 외부 VTO 추상화, 현재 mock | `AI_PROVIDER` |
 | 결제 | **멀티 provider** (현재 구현=Mock·Toss·PayPal) | 라우팅은 §2. KR=토스, US·JP=PayPal, EU=후속. |
 
-> mutation 진입점은 **server action(`src/app/actions`) 중심**이다. Route Handler(`src/app/api/**`)는 현재 auth 콜백·mock-storage 정도뿐 — "API Routes 중심"이 아니다.
+> mutation 진입점은 **server action(`src/app/actions`) 중심**이다. Route Handler(`src/app/api/**`)는 현재 auth 콜백·mock-storage·결제 웹훅 정도뿐 — "API Routes 중심"이 아니다.
 
 ## 2. 추상화 계층 (절대 규칙)
 
@@ -45,6 +47,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - env 미설정/빈 값이면 전 마켓 mock. `KR` 활성화 시 Toss, `US`/`JP` 활성화 시 PayPal로 라우팅.
   - mock 성공/실패 제어는 `PAYMENT_MOCK_FORCE_FAIL` env.
   - 이 marketCode 맵 기반 선택을 단순 이진 삼항으로 바꾸지 마라(멀티 마켓·멀티 provider 구조).
+  - **웹훅**은 공통 helper(`handlePaymentWebhook`) + provider별 검증 strategy(`WebhookValidationStrategy`) 주입 구조다. 새 PG의 웹훅은 **독립 라우트가 아니라 strategy를 추가**한다(검증 방식만 다름: 토스=본문 secret 대조 / PayPal=헤더 서명 verify API 등). strategy는 `parse` → `authenticateDelivery`(전송자 진위, 멱등 기록 *전*) → `authorizeEvent`(이벤트 내용 대조, 멱등 기록 *후*) → `toRecoveryInput`(provider 상태를 내부 `DONE`으로 정규화) 4축으로 나뉜다.
 
 ## 3. 절대 규칙
 
@@ -73,10 +76,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 순환 의존 금지(import는 상위 레이어 → 하위 레이어만).
 - 판단 애매하면 더 엄격한 쪽을 택하거나 질문.
 
+> **이 강도 규칙·줄 한도 자체를 바꾸려면** 기능 변경과 **분리**하고 먼저 합의/질문한다(헌법 변경은 기능 커밋에 묻지 않는다). 한도를 넘으면 **한도를 올리지 말고 분리(extract)하거나 압축**한다 — 한도는 "쪼갤 때냐?"를 묻는 트리거지 초과 시 푸는 값이 아니다. 카테고리 차원의 근거가 논증된 경우만 예외(예: 테스트는 명시성 우선이라 줄 한도 면제).
+
 ## 5. 검증 게이트
 
 - 매 변경 끝 **`npm run verify`** (typecheck + lint + **test**) — 반드시 초록. tsc+lint만이 아니라 **test 포함**.
-- 스키마 변경은 **반드시 migration** 생성. 수동 DB 조작 금지.
+- 스키마 변경은 **반드시 migration** 생성. 수동 DB 조작 금지. 프로덕션 배포 시 `prisma migrate deploy`로 스키마를 올린다(안 올리면 새 컬럼/테이블에 의존하는 기능 — 예: 웹훅 — 이 조용히 실패).
 
 ## 6. 런타임 검증 — verify 초록 ≠ 작동
 
@@ -85,12 +90,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 이미지 업로드 미리보기는 blob일 수 있다 — **"미리보기 떴다 ≠ 저장됐다."** 새로고침 후에도 뜨나 + 실 저장소에 있나로 검증.
 - 어긋나면 **추측 수정 전 read-only 진단부터**(`git status --short`, `git log --oneline`, grep, 파일 읽기). 멀쩡한 걸 덮을 위험.
 
-## 7. 데이터 모델 / 결제 코어 (출처 우선)
+## 7. 데이터 모델 / 결제 코어 / 외부 API (출처 우선)
 
 - **데이터 모델의 출처는 `prisma/schema.prisma` + migration이다.** 어떤 산문 요약도 신뢰하지 말고 스키마를 읽어라.
+- **외부 서드파티 API(토스·PayPal 등) 사실은 공식 문서만** 출처로 삼는다 — 2차 블로그(Velog 등) 금지. API 필드·엔드포인트·웹훅 스펙·서명 검증 방식을 인용할 땐 출처를 밝히고, 불확실하면 추측하지 말고 공식 문서를 확인한다.
 - **결제 코어(`src/lib/payment/process.ts`)의 구조·순서를 바꾸지 마라.** 실제 구조:
   - **트랜잭션 밖(선실행):** idempotency 가드(이미 `SUCCEEDED`면 즉시 반환) → 주문 소유권·상태 검증 → `provider.initiate()`.
   - **성공 트랜잭션(한 `db.$transaction`):** 재고 원자 차감(`updateMany` + `stock gte`) → 주문 `PENDING_PAYMENT → PAID` 전이 → 카트 비우기 → `Payment SUCCEEDED` 생성.
   - **실패 경로(별도 트랜잭션):** 주문 `PAYMENT_FAILED` 전이 → `Payment FAILED` 생성.
   - 이 경계(무엇이 트랜잭션 안/밖인지)와 순서를 "리팩터링"하지 마라.
+  - 불가피하게 성공 트랜잭션을 건드려야 하면 **"필드 하나 추가" 수준으로 최소화**하고, 로직·순서 불변 + 원자성을 행동 테스트로 고정한다(예: 웹훅 secret 저장은 `Payment.create`에 필드 추가만).
 - **금액 표현 (중요 — 100배 버그 주의):** 최소단위 정수. **zero-decimal 통화(KRW/JPY)는 ×100 하지 않는다**(₩85,000 → `85000`), USD만 센트(×100). 저장·검증은 통화 무관 "정수·음수아님"만, 소수 자릿수는 **display 계층(`CURRENCY_META`)에서만**. 일반 Money로 *모든 통화 ×100* 하지 마라.
