@@ -132,6 +132,7 @@ function createOrderBody(input: InitiateInput): Record<string, unknown> {
     intent: "CAPTURE",
     purchase_units: [{
       reference_id: input.orderId,
+      custom_id: input.orderId,
       amount: {
         currency_code: input.currency,
         value: formatPayPalAmount(input.amount, input.currency),

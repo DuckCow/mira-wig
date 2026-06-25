@@ -121,6 +121,7 @@ it("initiate는 Orders v2 create order 형식으로 호출하고 order id를 PEN
   expect(body.intent).toBe("CAPTURE");
   expect(body.purchase_units).toEqual([{
     reference_id: "order_1",
+    custom_id: "order_1",
     amount: { currency_code: "USD", value: "77.99" },
   }]);
   expect(result).toEqual({
