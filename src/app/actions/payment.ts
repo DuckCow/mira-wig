@@ -16,13 +16,32 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
 import { getOrderById } from "@/lib/order";
-import { processPayment } from "@/lib/payment/process";
+import { confirmPayment, processPayment } from "@/lib/payment/process";
 import type { OrderView } from "@/lib/order/types";
 
 export type PayOrderResult =
   | { status: "pending"; success: false; error: string; orderId: string; amount: number; currency: string; orderName: string; providerTransactionId: string | null; provider: string; redirectUrl?: string }
   | { status: "unconfirmed"; success: false; error: string; orderId: string }
   | { status: "failed"; success: false; error: string };
+
+export type CapturePayPalOrderResult =
+  | { status: "success"; success: true; orderId: string }
+  | { status: "unconfirmed"; success: false; error: string; orderId: string }
+  | { status: "failed"; success: false; error: string };
+
+type CapturePayPalOrderInput = { orderId: string; paypalOrderId: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseCaptureInput(input: unknown): CapturePayPalOrderInput | null {
+  if (!isRecord(input)) return null;
+  const { orderId, paypalOrderId } = input;
+  if (typeof orderId !== "string" || typeof paypalOrderId !== "string") return null;
+  if (!orderId.trim() || !paypalOrderId.trim()) return null;
+  return { orderId, paypalOrderId };
+}
 
 function buildOrderName(order: OrderView): string {
   const first = order.items[0]?.snapshotData.styleName ?? "Mira 주문";
@@ -65,4 +84,33 @@ export async function payOrderAction(orderId: string): Promise<PayOrderResult> {
   }
 
   return { status: "failed", success: false, error: result.error };
+}
+
+export async function capturePayPalOrderAction(input: unknown): Promise<CapturePayPalOrderResult> {
+  const parsed = parseCaptureInput(input);
+  if (!parsed) return { status: "failed", success: false, error: "PayPal 결제 정보가 올바르지 않습니다." };
+
+  const session = await getSession();
+  if (!session) return { status: "failed", success: false, error: "로그인이 필요합니다." };
+
+  const order = await getOrderById(parsed.orderId, session.user.id);
+  if (!order) return { status: "failed", success: false, error: "주문을 찾을 수 없습니다." };
+
+  const result = await confirmPayment({
+    orderId: parsed.orderId,
+    userId: session.user.id,
+    paymentKey: parsed.paypalOrderId,
+    redirectAmount: order.totalAmount,
+  });
+
+  if (result.status === "success") {
+    revalidatePath(`/orders/${parsed.orderId}`);
+    return { status: "success", success: true, orderId: parsed.orderId };
+  }
+  if (result.status === "unconfirmed") {
+    revalidatePath(`/orders/${parsed.orderId}/payment`);
+    return { status: "unconfirmed", success: false, error: result.error, orderId: result.orderId };
+  }
+  if (result.status === "failed") return { status: "failed", success: false, error: result.error };
+  return { status: "failed", success: false, error: "PayPal 결제를 확정할 수 없습니다." };
 }
