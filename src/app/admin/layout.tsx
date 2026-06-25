@@ -21,6 +21,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           >
             스타일 관리
           </Link>
+          <Link
+            href="/admin/orders"
+            className="text-sm text-gray-600 hover:text-gray-900"
+          >
+            주문 관리
+          </Link>
         </nav>
         <main className="max-w-5xl mx-auto px-6 py-8">{children}</main>
       </div>
