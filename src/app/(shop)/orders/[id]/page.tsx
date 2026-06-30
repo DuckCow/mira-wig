@@ -8,6 +8,20 @@ import type { OrderItemView } from "@/lib/order/types";
 
 type PageParams = Promise<{ id: string }>;
 
+const ORDER_HEADER_COPY: Record<string, { title: string; badge: string; helper?: string }> = {
+  PENDING_PAYMENT: { title: "주문이 접수됐습니다", badge: "결제 대기", helper: "결제를 완료해야 제작이 시작됩니다." },
+  PAID: { title: "결제가 완료됐습니다", badge: "결제 완료" },
+  PAYMENT_FAILED: { title: "결제에 실패했습니다", badge: "결제 실패" },
+  CONFIRMED: { title: "주문이 확인됐습니다", badge: "제작 확정" },
+  MANUFACTURING: { title: "가발을 제작 중입니다", badge: "제작 중" },
+  SHIPPED: { title: "배송 중입니다", badge: "배송 중" },
+  DELIVERED: { title: "배송이 완료됐습니다", badge: "배송 완료" },
+  CANCELLED: { title: "주문이 취소됐습니다", badge: "취소" },
+  REFUNDED: { title: "환불이 완료됐습니다", badge: "환불" },
+};
+
+const COMPLETED_ORDER_STATUSES = new Set(["PAID", "CONFIRMED", "MANUFACTURING", "SHIPPED", "DELIVERED"]);
+
 function OrderItemRow({ item }: { item: OrderItemView }) {
   const { snapshotData, quantity, unitPrice } = item;
   const currency = CURRENCY_META[snapshotData.currencyCode];
@@ -31,31 +45,16 @@ function OrderItemRow({ item }: { item: OrderItemView }) {
 // ── status별 헤더 ─────────────────────────────────────────────
 
 function OrderHeader({ status, orderId }: { status: string; orderId: string }) {
-  if (status === "PAID") {
-    return (
-      <div className="text-center space-y-2">
-        <p className="text-4xl">✓</p>
-        <h1 className="text-2xl font-bold text-gray-900">결제가 완료됐습니다</h1>
-        <p className="text-xs text-gray-400 font-mono">주문번호: {orderId}</p>
-        <span className="inline-block px-3 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
-          결제 완료
-        </span>
-      </div>
-    );
-  }
-  if (status === "PAYMENT_FAILED") {
-    return (
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-gray-900">결제에 실패했습니다</h1>
-        <p className="text-xs text-gray-400 font-mono">주문번호: {orderId}</p>
-      </div>
-    );
-  }
+  const copy = ORDER_HEADER_COPY[status] ?? { title: "주문 상태를 확인 중입니다", badge: status };
   return (
     <div className="text-center space-y-2">
-      <h1 className="text-2xl font-bold text-gray-900">주문이 접수됐습니다</h1>
+      {COMPLETED_ORDER_STATUSES.has(status) && <p className="text-4xl">✓</p>}
+      <h1 className="text-2xl font-bold text-gray-900">{copy.title}</h1>
       <p className="text-xs text-gray-400 font-mono">주문번호: {orderId}</p>
-      <p className="text-xs text-gray-400">결제를 완료해야 제작이 시작됩니다.</p>
+      <span className="inline-block px-3 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+        {copy.badge}
+      </span>
+      {copy.helper && <p className="text-xs text-gray-400">{copy.helper}</p>}
     </div>
   );
 }
@@ -63,7 +62,7 @@ function OrderHeader({ status, orderId }: { status: string; orderId: string }) {
 // ── status별 하단 액션 ────────────────────────────────────────
 
 function OrderActions({ status, orderId }: { status: string; orderId: string }) {
-  if (status === "PAID") {
+  if (COMPLETED_ORDER_STATUSES.has(status) || status === "CANCELLED" || status === "REFUNDED") {
     return (
       <div className="flex gap-3">
         <Link

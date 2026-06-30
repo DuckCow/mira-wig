@@ -4,6 +4,8 @@ import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { getAdminOrderDetail, type AdminOrderDetail } from "@/lib/admin-orders-data";
 import { CURRENCY_META, formatPrice } from "@/lib/market/types";
+import { getNextOrderStatus } from "@/lib/order/status-transition";
+import { OrderStatusTransitionButton } from "./OrderStatusTransitionButton";
 
 type Params = Promise<{ id: string }>;
 
@@ -18,6 +20,13 @@ const STATUS_LABELS: Record<string, string> = {
   DELIVERED: "배송 완료",
   CANCELLED: "취소",
   REFUNDED: "환불",
+};
+
+const TRANSITION_ACTION_LABELS: Record<string, string> = {
+  PAID: "제작 확정",
+  CONFIRMED: "제작 시작",
+  MANUFACTURING: "배송 처리",
+  SHIPPED: "배송 완료 처리",
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -84,6 +93,27 @@ function Address({ order }: { order: AdminOrderDetail }) {
         <Field label="주소">{order.addressLine1} {order.addressLine2 ?? ""}</Field>
         <Field label="메모">{order.memo ?? "-"}</Field>
       </dl>
+    </Card>
+  );
+}
+
+function StatusTransition({ order }: { order: AdminOrderDetail }) {
+  const nextStatus = getNextOrderStatus(order.status);
+  if (!nextStatus) return null;
+  const actionLabel = TRANSITION_ACTION_LABELS[order.status] ?? "다음 상태로 전이";
+  return (
+    <Card title="주문 상태 전이">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-gray-600">
+          현재 {STATUS_LABELS[order.status] ?? order.status} → {STATUS_LABELS[nextStatus] ?? nextStatus}
+        </p>
+        <OrderStatusTransitionButton
+          orderId={order.id}
+          currentStatus={order.status}
+          targetStatus={nextStatus}
+          label={`${actionLabel} (${STATUS_LABELS[nextStatus] ?? nextStatus})`}
+        />
+      </div>
     </Card>
   );
 }
@@ -198,6 +228,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Params 
         <span className="text-sm text-gray-700 font-medium">{result.data.id}</span>
       </div>
       <Summary order={result.data} />
+      <StatusTransition order={result.data} />
       <Items order={result.data} />
       <Address order={result.data} />
       <Payments order={result.data} />
