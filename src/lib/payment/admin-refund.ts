@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma, type PaymentAdjustmentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getPaymentProvider } from "@/lib/payment";
+import { calculateRefundableAmount } from "@/lib/payment/refundable";
 import type { RefundInput, RefundResult } from "@/lib/payment/types";
 import type {
   AdminRefundErrorCode,
@@ -97,7 +98,7 @@ function resolveRefundAmount(
   requestedAmount: number | undefined,
   payment: RefundablePayment,
 ): AmountResult {
-  const refundableAmount = payment.amount - sumAmounts(payment.adjustments);
+  const refundableAmount = calculateRefundableAmount(payment.amount, payment.adjustments);
   if (requestedAmount === undefined) {
     if (refundableAmount <= 0) return { success: false, result: failed("INSUFFICIENT_REFUNDABLE", { refundableAmount }) };
     return { success: true, refundAmount: refundableAmount };
@@ -241,10 +242,6 @@ async function succeededAdjustmentTotal(paymentId: string, tx: Prisma.Transactio
     _sum: { amount: true },
   });
   return aggregate._sum.amount ?? 0;
-}
-
-function sumAmounts(adjustments: Array<{ amount: number }>): number {
-  return adjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0);
 }
 
 function already(existing: { id: string; status: PaymentAdjustmentStatus }): PrepareResult {
