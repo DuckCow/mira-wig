@@ -4,14 +4,7 @@ import type { OrderStatus } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { transitionOrderStatusAction } from "@/app/actions/admin/orders";
-
-const ERROR_MESSAGES = {
-  UNAUTHENTICATED: "로그인이 필요합니다.",
-  FORBIDDEN: "관리자 권한이 필요합니다.",
-  NOT_FOUND: "주문을 찾을 수 없습니다.",
-  INVALID_TRANSITION: "현재 상태에서는 이 전이를 할 수 없습니다.",
-  CONFLICT: "주문 상태가 이미 바뀌었습니다. 새로고침 후 다시 확인하세요.",
-} as const;
+import { getAdminErrorMessage } from "@/lib/admin-messages";
 
 type Props = {
   orderId: string;
@@ -33,7 +26,7 @@ export function OrderStatusTransitionButton({ orderId, currentStatus, targetStat
         router.refresh();
         return;
       }
-      setError(ERROR_MESSAGES[result.errorCode]);
+      setError(getAdminErrorMessage(result.errorCode));
     });
   }
 
