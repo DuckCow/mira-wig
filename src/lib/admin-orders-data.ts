@@ -4,6 +4,7 @@ import "server-only";
 import { Prisma, type OrderStatus, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { MARKET_CODES, type MarketCode } from "@/lib/market/types";
+import { calculateRefundableAmountFromAllAdjustments } from "@/lib/payment/refundable";
 import { requireAdmin } from "./admin";
 
 export const ADMIN_ORDER_STATUSES = [
@@ -88,6 +89,7 @@ export type AdminOrderDetail = AdminOrderListItem & {
     status: string;
     amount: number;
     currency: string;
+    refundableAmount: number;
     errorMessage: string | null;
     idempotencyKey: string;
     createdAt: Date;
@@ -269,7 +271,10 @@ function toDetail(row: OrderDetailRow): AdminOrderDetail {
     addressLine2: row.addressLine2,
     memo: row.memo,
     items: row.items.map((item) => ({ ...item, snapshotData: parseSnapshotData(item.snapshotData) })),
-    payments: row.payments,
+    payments: row.payments.map((payment) => ({
+      ...payment,
+      refundableAmount: calculateRefundableAmountFromAllAdjustments(payment.amount, payment.adjustments),
+    })),
   };
 }
 

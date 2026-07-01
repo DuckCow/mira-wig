@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
@@ -6,6 +7,7 @@ import { getAdminOrderDetail, type AdminOrderDetail } from "@/lib/admin-orders-d
 import { CURRENCY_META, formatPrice } from "@/lib/market/types";
 import { getNextOrderStatus } from "@/lib/order/status-transition";
 import { OrderStatusTransitionButton } from "./OrderStatusTransitionButton";
+import { RefundPaymentForm } from "./RefundPaymentForm";
 
 type Params = Promise<{ id: string }>;
 
@@ -158,6 +160,7 @@ function Manufacturing({ request }: { request: AdminOrderDetail["items"][number]
 }
 
 function Payments({ order }: { order: AdminOrderDetail }) {
+  const orderRefunded = order.status === "REFUNDED" || order.paymentStatus === "REFUNDED";
   return (
     <Card title="결제 / 환불 기록">
       {order.payments.length === 0 ? (
@@ -176,6 +179,16 @@ function Payments({ order }: { order: AdminOrderDetail }) {
                 <Field label="에러">{payment.errorMessage ?? "-"}</Field>
               </div>
               <Adjustments adjustments={payment.adjustments} />
+              {!orderRefunded && payment.refundableAmount > 0 && (
+                <RefundPaymentForm
+                  orderId={order.id}
+                  paymentId={payment.id}
+                  currency={payment.currency}
+                  refundableAmount={payment.refundableAmount}
+                  formattedRefundableAmount={money(payment.refundableAmount, payment.currency)}
+                  idempotencyKey={`admin_refund:${payment.id}:${randomUUID()}`}
+                />
+              )}
             </div>
           ))}
         </div>

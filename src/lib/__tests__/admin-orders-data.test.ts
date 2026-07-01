@@ -183,6 +183,7 @@ describe("getAdminOrderDetail", () => {
     if (result.success && result.data) {
       expect(result.data.items[0]?.manufacturingRequest?.id).toBe("mfg-1");
       expect(result.data.payments[0]?.adjustments[0]?.providerRefundId).toBe("refund-1");
+      expect(result.data.payments[0]?.refundableAmount).toBe(75000);
     }
   });
 });
