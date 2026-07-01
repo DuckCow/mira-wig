@@ -120,21 +120,33 @@
 ## 5-bis. 코드로 닫아야 하는 것 (라이브 전 필수 — §5와 다른 계열)
 
 §5는 "코드는 옳고 라이브에서 확인만" 하는 자리였다. 아래는 반대 —
-코드에 실재하는 결함이라 라이브 전 수정이 필요하다.
+코드에 실재하는 결함/공백이라 라이브 전 수정이 필요하다. (§6-2 일반 규약
+추출과도 별개: 이건 실돈 운영 안전이라 못 미룬다.)
 
-### compensate 자기 재시도 이중환불 창
-### 5-3. compensate 자기 재시도 이중환불 창 (라이브 전 필수 — 코드 보강)
-- 증상: compensateUnconfirmedPayment가 provider.refund 성공 후 auto-refund
-  adjustment 기록 전 크래시하면, 다음 진입 시 auto-refund 키가 없어 provider.
-  refund가 재차 나감 → 실고객 이중환불. confirm·웹훅 복구가 공유하는 창.
+### 5-bis-1. compensate 자기 재시도 이중환불 창 (STRICT 결제 코어)
+- 증상: `compensateUnconfirmedPayment`가 `provider.refund` 성공 후 auto-refund
+  adjustment 기록 전 크래시하면, 다음 진입 시 `auto-refund:${orderId}:${providerTransactionId}`
+  키가 없어 `provider.refund`가 재차 나감 → 실고객 이중환불. confirm·웹훅 복구가
+  공유하는 창(웹훅 종국-실패 대칭화가 진입점을 늘렸으나 창 자체는 하나).
 - 현 가드: 기록된 auto-refund adjustment 존재 확인뿐. provider transaction 단위
-  기존 환불 조회나 provider 상태 조회 없음.
-- 필요: provider refund 호출 전, provider transaction 단위로 기존 환불 여부를
-  (조정기록 or provider 상태 조회로) 확인하는 가드 추가. STRICT 결제 코어 변경이라
-  기능과 분리된 독립 과제로. §6-2 일반 규약(패턴 추출)과는 별개 — 이건 실돈
-  이중환불이라 라이브 전 필수.
-- [ ] 별도 STRICT 과제로 착수 → 행동 테스트(refund 성공 후 기록 전 크래시
-  시뮬 → 재진입 시 provider.refund 재호출 안 됨)로 고정.
+  기존 환불 조회나 provider 상태 조회는 없음.
+- 필요: `provider.refund` 호출 **전**, provider transaction 단위로 기존 환불 여부를
+  (조정기록 or provider 상태 조회로) 확인하는 가드 추가. STRICT 결제 코어라 기능과
+  분리된 독립 과제. compensate는 confirm도 쓰는 공유 코어 — 변경 시 confirm 회귀를
+  행동 테스트로 고정.
+- [ ] 별도 STRICT 과제 착수 → 행동 테스트(refund 성공 후 기록 전 크래시 시뮬 →
+  재진입 시 provider.refund 재호출 안 됨)로 고정.
+
+### 5-bis-2. 미확정 marker 능동 가시화 (어드민 UI — 강도는 5-bis-1 아래)
+- 증상: 웹훅 종국-실패가 200으로 종결될 때 남기는 PENDING reconciliation marker +
+  FAILED auto-refund adjustment(=고객 돈 PG에 묶임)를 어드민 **주문 상세를 열면**
+  볼 수 있으나(Payment/adjustment 전부 렌더됨), **목록/대시보드에 능동적으로 안 뜬다.**
+  목록은 "결제 대기"까지만 → 정상 이탈 주문 더미에 섞여 잠복, 인지가 우연에 의존.
+- 필요: `unconfirmed:` Payment 또는 `auto-refund`/`FAILED` adjustment가 있는 order를
+  목록 배지/조회 신호 하나로 드러냄. 새 대시보드 아니라 기존 주문 목록 플래그 수준.
+  (greppable 로그 `PAYMENT_AUTO_REFUND_FAILED`·`PAYMENT_RECONCILIATION_REQUIRED`는
+  있으나 능동 신호 아님 — 모니터링 붙기 전엔 사실상 안 보임.)
+- [ ] 어드민 주문 목록/상세에 미확정·환불실패 플래그 추가.
 
 ## 6. 알려진 후속 (라이브 차단 아님 — 백로그)
 
