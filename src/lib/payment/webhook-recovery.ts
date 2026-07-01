@@ -5,7 +5,14 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { paidOrderResult, paidOrderResultOrEmpty, resolveUnreconciledMarker } from "./reconciliation";
+import { getPaymentProvider } from "./index";
+import {
+  compensateUnconfirmedPayment,
+  paidOrderResult,
+  paidOrderResultOrEmpty,
+  reconciliationRequired,
+  resolveUnreconciledMarker,
+} from "./reconciliation";
 import { runSuccessTransaction } from "./process";
 
 export type RecoverPaymentFromWebhookInput = {
@@ -20,11 +27,12 @@ export type RecoverPaymentFromWebhookInput = {
 
 export type RecoverPaymentFromWebhookResult =
   | { status: "success"; success: true; paymentId: string }
+  | { status: "unconfirmed"; success: false; error: string; orderId: string; providerTransactionId: string | null }
   | { status: "ignored"; success: false; reason: string }
   | { status: "failed"; success: false; error: string };
 
 type WebhookOrder = {
-  status: string; totalAmount: number; currency: string; userId: string;
+  status: string; totalAmount: number; currency: string; marketCode: string; userId: string;
   items: Array<{ variantId: string; quantity: number }>;
 };
 
@@ -36,7 +44,7 @@ async function loadWebhookOrder(orderId: string): Promise<WebhookOrder | null> {
   return db.order.findUnique({
     where: { id: orderId },
     select: {
-      status: true, totalAmount: true, currency: true, userId: true,
+      status: true, totalAmount: true, currency: true, marketCode: true, userId: true,
       items: { select: { variantId: true, quantity: true } },
     },
   });
@@ -46,8 +54,32 @@ function amountMatches(order: WebhookOrder, input: RecoverPaymentFromWebhookInpu
   return order.totalAmount === input.amount && order.currency === input.currency;
 }
 
-function failureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "웹훅 결제 복구 중 오류";
+async function compensateWebhookFailure(
+  input: RecoverPaymentFromWebhookInput,
+  order: WebhookOrder,
+  error: unknown,
+): Promise<RecoverPaymentFromWebhookResult> {
+  const provider = getPaymentProvider(order.marketCode);
+  await compensateUnconfirmedPayment({
+    orderId: input.orderId,
+    paymentKey: input.paymentKey,
+    providerTransactionId: input.paymentKey,
+    provider,
+    amount: order.totalAmount,
+    currency: order.currency,
+    error,
+    providerWebhookSecret: input.providerWebhookSecret,
+  });
+  return reconciliationRequired({
+    orderId: input.orderId,
+    paymentKey: input.paymentKey,
+    providerTransactionId: input.paymentKey,
+    provider: provider.name,
+    amount: order.totalAmount,
+    currency: order.currency,
+    error,
+    providerWebhookSecret: input.providerWebhookSecret,
+  });
 }
 
 async function recoverDonePayment(
@@ -69,7 +101,7 @@ async function recoverDonePayment(
   } catch (error) {
     const paid = await paidOrderResult(input.orderId);
     if (paid) return paid;
-    return { status: "failed", success: false, error: failureMessage(error) };
+    return compensateWebhookFailure(input, order, error);
   }
 }
 

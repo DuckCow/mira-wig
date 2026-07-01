@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import {
   handlePaymentWebhook,
@@ -23,6 +23,16 @@ const SNAPSHOT = {
   styleName: "웹훅", color: "블랙", colorHex: null,
   length: "long", curl: "straight", coverImageKey: null, currencyCode: "KRW",
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function responseJson(response: Response): Promise<Record<string, unknown>> {
+  const parsed: unknown = JSON.parse(await response.text());
+  if (!isRecord(parsed)) throw new Error("response json 형식 오류");
+  return parsed;
+}
 
 function request(body = "{}"): NextRequest {
   return new NextRequest("http://localhost/api/payments/mock/webhook", {
@@ -146,6 +156,7 @@ describe("handlePaymentWebhook — strategy injection", () => {
 
   afterEach(async () => {
     await cleanupFixtures(ctx);
+    vi.unstubAllEnvs();
     ctx = null;
   });
 
@@ -205,5 +216,29 @@ describe("handlePaymentWebhook — strategy injection", () => {
     const webhooks = await db.paymentWebhookEvent.findMany({ where: { orderId: ctx!.orderId } });
     expect(response.status).toBe(400);
     expect(webhooks).toHaveLength(0);
+  });
+
+  it("복구 finalize가 실패하고 provider refund도 실패하면 200으로 종결하고 처리 기록을 남긴다", async () => {
+    vi.stubEnv("PAYMENT_MOCK_FORCE_FAIL", "1");
+    await db.wigVariant.update({ where: { id: ctx!.variantId }, data: { stock: 0 } });
+    const response = await handlePaymentWebhook(
+      request(),
+      strategy({ ok: true, event: event(ctx!, "mock_unconfirmed_refund_failed", "mock_capture_refund_failed") }),
+    );
+    const body = await responseJson(response);
+    const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
+    const webhook = await db.paymentWebhookEvent.findUniqueOrThrow({ where: { transmissionId: "mock_unconfirmed_refund_failed" } });
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    const adjustments = await db.paymentAdjustment.findMany({ where: { payment: { orderId: ctx!.orderId } } });
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true, result: "unconfirmed" });
+    expect(webhook.processedAt).not.toBeNull();
+    expect(variant.stock).toBe(0);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]?.status).toBe("PENDING");
+    expect(payments[0]?.providerTransactionId).toBe("mock_capture_refund_failed");
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]?.status).toBe("FAILED");
+    expect(adjustments[0]?.idempotencyKey).toBe(`auto-refund:${ctx!.orderId}:mock_capture_refund_failed`);
   });
 });

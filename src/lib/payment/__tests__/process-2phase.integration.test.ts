@@ -12,6 +12,8 @@ import type {
   PaymentProvider,
   PaymentResult,
   PaymentStatus,
+  RefundInput,
+  RefundResult,
 } from "../types";
 
 const providerState = vi.hoisted((): { provider: PaymentProvider | null } => ({ provider: null }));
@@ -43,8 +45,18 @@ const TEST_SNAPSHOT = {
 
 function makeKey(): string { return `test_idem_${randomUUID()}`; }
 
-function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatus, providerWebhookSecret?: string, initiateProviderTransactionId: string | null = null, redirectUrl?: string) {
+type RefundHandler = (input: RefundInput) => Promise<RefundResult>;
+
+function testProvider(
+  initiateStatus: PaymentStatus,
+  confirmStatus: PaymentStatus,
+  providerWebhookSecret?: string,
+  initiateProviderTransactionId: string | null = null,
+  redirectUrl?: string,
+  refund?: RefundHandler,
+) {
   let confirmCalls = 0;
+  let refundCalls = 0;
   const provider: PaymentProvider = {
     name: "test-provider",
     initiate(_input: InitiateInput): Promise<InitiateResult> {
@@ -58,8 +70,14 @@ function testProvider(initiateStatus: PaymentStatus, confirmStatus: PaymentStatu
         providerWebhookSecret,
       });
     },
+    refund: refund
+      ? (input) => {
+        refundCalls += 1;
+        return refund(input);
+      }
+      : undefined,
   };
-  return { provider, get confirmCalls() { return confirmCalls; } };
+  return { provider, get confirmCalls() { return confirmCalls; }, get refundCalls() { return refundCalls; } };
 }
 
 function captureProvider(result: PaymentResult) {
@@ -85,6 +103,17 @@ function captureProvider(result: PaymentResult) {
     },
   };
   return { provider, get confirmCalls() { return confirmCalls; }, get refundCalls() { return refundCalls; } };
+}
+
+function refundSucceeded(providerRefundId: string): RefundHandler {
+  return (input) => Promise.resolve({
+    providerTransactionId: input.providerTransactionId,
+    providerRefundId,
+    status: "SUCCEEDED",
+    amount: input.amount,
+    currency: input.currency,
+    refundableAmount: 0,
+  });
 }
 
 async function setupUser(runId: string): Promise<string> {
@@ -310,6 +339,56 @@ describe("recoverPaymentFromWebhook — DONE recovery", () => {
     expect(result.status).toBe("failed");
     expect(order.status).toBe("PENDING_PAYMENT");
     expect(payments).toHaveLength(0);
+  });
+
+  it("재고 소진으로 복구 finalize가 실패하면 자동 보상을 시도하고 unconfirmed로 수렴한다", async () => {
+    await db.wigVariant.update({ where: { id: ctx!.variantId }, data: { stock: 0 } });
+    const wrapped = testProvider("PENDING", "SUCCEEDED", undefined, null, undefined, refundSucceeded("refund_webhook_stock_out"));
+    providerState.provider = wrapped.provider;
+    const result = await recoverPaymentFromWebhook({
+      orderId: ctx!.orderId,
+      paymentKey: "pay_webhook_stock_out",
+      amount: 85000,
+      currency: "KRW",
+      status: "DONE",
+      provider: "test-provider",
+      providerWebhookSecret: "secret_webhook_stock_out",
+    });
+    const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx!.variantId } });
+    const payments = await db.payment.findMany({ where: { orderId: ctx!.orderId } });
+    const adjustments = await db.paymentAdjustment.findMany({ where: { payment: { orderId: ctx!.orderId } } });
+    expect(result.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(1);
+    expect(variant.stock).toBe(0);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]?.status).toBe("REFUNDED");
+    expect(payments[0]?.providerTransactionId).toBe("pay_webhook_stock_out");
+    expect(payments[0]?.providerWebhookSecret).toBe("secret_webhook_stock_out");
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]?.status).toBe("SUCCEEDED");
+    expect(adjustments[0]?.idempotencyKey).toBe(`auto-refund:${ctx!.orderId}:pay_webhook_stock_out`);
+    expect(adjustments[0]?.providerRefundId).toBe("refund_webhook_stock_out");
+  });
+
+  it("같은 webhook recovery 재진입은 같은 auto-refund 키로 provider refund를 재호출하지 않는다", async () => {
+    await db.wigVariant.update({ where: { id: ctx!.variantId }, data: { stock: 0 } });
+    const wrapped = testProvider("PENDING", "SUCCEEDED", undefined, null, undefined, refundSucceeded("refund_webhook_once"));
+    providerState.provider = wrapped.provider;
+    const input = {
+      orderId: ctx!.orderId,
+      paymentKey: "pay_webhook_retry_refund",
+      amount: 85000,
+      currency: "KRW",
+      status: "DONE",
+    };
+    const first = await recoverPaymentFromWebhook(input);
+    const second = await recoverPaymentFromWebhook(input);
+    const adjustments = await db.paymentAdjustment.findMany({ where: { payment: { orderId: ctx!.orderId } } });
+    expect(first.status).toBe("unconfirmed");
+    expect(second.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(1);
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]?.idempotencyKey).toBe(`auto-refund:${ctx!.orderId}:pay_webhook_retry_refund`);
   });
 
   it("DONE이 아닌 상태는 무시하고 상태를 변경하지 않는다", async () => {
