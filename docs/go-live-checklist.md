@@ -117,6 +117,25 @@
 
 ---
 
+## 5-bis. 코드로 닫아야 하는 것 (라이브 전 필수 — §5와 다른 계열)
+
+§5는 "코드는 옳고 라이브에서 확인만" 하는 자리였다. 아래는 반대 —
+코드에 실재하는 결함이라 라이브 전 수정이 필요하다.
+
+### compensate 자기 재시도 이중환불 창
+### 5-3. compensate 자기 재시도 이중환불 창 (라이브 전 필수 — 코드 보강)
+- 증상: compensateUnconfirmedPayment가 provider.refund 성공 후 auto-refund
+  adjustment 기록 전 크래시하면, 다음 진입 시 auto-refund 키가 없어 provider.
+  refund가 재차 나감 → 실고객 이중환불. confirm·웹훅 복구가 공유하는 창.
+- 현 가드: 기록된 auto-refund adjustment 존재 확인뿐. provider transaction 단위
+  기존 환불 조회나 provider 상태 조회 없음.
+- 필요: provider refund 호출 전, provider transaction 단위로 기존 환불 여부를
+  (조정기록 or provider 상태 조회로) 확인하는 가드 추가. STRICT 결제 코어 변경이라
+  기능과 분리된 독립 과제로. §6-2 일반 규약(패턴 추출)과는 별개 — 이건 실돈
+  이중환불이라 라이브 전 필수.
+- [ ] 별도 STRICT 과제로 착수 → 행동 테스트(refund 성공 후 기록 전 크래시
+  시뮬 → 재진입 시 provider.refund 재호출 안 됨)로 고정.
+
 ## 6. 알려진 후속 (라이브 차단 아님 — 백로그)
 
 - **외부 취소 반영**: 토스 `CANCEL_STATUS_CHANGED` 발송 조건을 §1-4 확인 결과에 따라 확정. 자동 반영이 안 되는 범위는 폴링/대사로 보강.
