@@ -1,19 +1,12 @@
 import "server-only";
-
 import { Prisma, type PaymentAdjustmentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getPaymentProvider } from "@/lib/payment";
 import { calculateRefundableAmount } from "@/lib/payment/refundable";
 import type { RefundInput, RefundResult } from "@/lib/payment/types";
 import type {
-  AdminRefundErrorCode,
-  AdminRefundInput,
-  AdminRefundResult,
-  AmountResult,
-  FailedAdminRefundResult,
-  PreparedRefund,
-  PrepareResult,
-  RefundablePayment,
+  AdminRefundErrorCode, AdminRefundInput, AdminRefundResult, AmountResult,
+  FailedAdminRefundResult, PreparedRefund, PrepareResult, RefundablePayment,
 } from "@/lib/payment/admin-refund-types";
 
 export type { AdminRefundErrorCode, AdminRefundInput, AdminRefundResult };
@@ -40,14 +33,19 @@ async function prepareRefund(input: AdminRefundInput): Promise<PrepareResult> {
       const payment = await loadRefundablePayment(input, tx);
       const providerTransactionId = payment?.providerTransactionId;
       if (!payment || !providerTransactionId) return prepFailed(failed("NOT_FOUND"));
+      const reason = input.reason.trim();
+      if (!reason) return prepFailed(failed("REASON_REQUIRED"));
+      const pending = await otherPendingAdjustment(input, tx);
+      if (pending) return prepFailed(failed("REFUND_IN_PROGRESS", { adjustmentId: pending.id, existingStatus: pending.status }));
 
       const amount = resolveRefundAmount(input.amount, payment);
       if (!amount.success) return prepFailed(amount.result);
 
-      const adjustment = await createPendingAdjustment(input, amount.refundAmount, payment, tx);
+      const refundInput = { ...input, reason };
+      const adjustment = await createPendingAdjustment(refundInput, amount.refundAmount, payment, tx);
       return {
         ready: true,
-        refund: toPreparedRefund(input, amount, payment, providerTransactionId, adjustment.id),
+        refund: toPreparedRefund(refundInput, amount, payment, providerTransactionId, adjustment.id),
       };
     });
   } catch (error) {
@@ -72,6 +70,20 @@ async function loadRefundablePayment(
       order: { select: { marketCode: true, currency: true } },
       adjustments: { where: { status: "SUCCEEDED" }, select: { amount: true } },
     },
+  });
+}
+
+async function otherPendingAdjustment(
+  input: AdminRefundInput,
+  tx: Prisma.TransactionClient,
+): Promise<{ id: string; status: PaymentAdjustmentStatus } | null> {
+  return tx.paymentAdjustment.findFirst({
+    where: {
+      paymentId: input.paymentId,
+      status: "PENDING",
+      idempotencyKey: { not: input.idempotencyKey },
+    },
+    select: { id: true, status: true },
   });
 }
 
@@ -120,16 +132,9 @@ function toPreparedRefund(
   adjustmentId: string,
 ): PreparedRefund {
   return {
-    adjustmentId,
-    orderId: input.orderId,
-    paymentId: input.paymentId,
-    refundAmount: amount.refundAmount,
-    providerAmount: amount.providerAmount,
-    currency: payment.order.currency,
-    reason: input.reason,
-    idempotencyKey: input.idempotencyKey,
-    marketCode: payment.order.marketCode,
-    providerTransactionId,
+    adjustmentId, orderId: input.orderId, paymentId: input.paymentId, refundAmount: amount.refundAmount,
+    providerAmount: amount.providerAmount, currency: payment.order.currency, reason: input.reason,
+    idempotencyKey: input.idempotencyKey, marketCode: payment.order.marketCode, providerTransactionId,
   };
 }
 

@@ -2,8 +2,10 @@ import type { PaymentAdjustmentStatus } from "@prisma/client";
 
 export type AdminRefundErrorCode =
   | "NOT_FOUND"
+  | "REASON_REQUIRED"
   | "INVALID_AMOUNT"
   | "INSUFFICIENT_REFUNDABLE"
+  | "REFUND_IN_PROGRESS"
   | "ALREADY"
   | "PROVIDER_FAILED";
 

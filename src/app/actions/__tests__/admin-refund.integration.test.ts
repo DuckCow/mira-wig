@@ -190,6 +190,89 @@ describe("refundOrderPaymentAction", () => {
     consoleError.mockRestore();
   });
 
+  it("PENDING 가드: 다른 키의 PENDING 환불이 있으면 provider를 호출하지 않고 REFUND_IN_PROGRESS로 거부한다", async () => {
+    const ctx = await createPaidOrder();
+    await createPendingAdjustment(ctx, 20000, `pending_other_${randomUUID()}`);
+
+    const result = await refundOrderPaymentAction(actionInput(ctx, { amount: 20000 }));
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("REFUND_IN_PROGRESS");
+      expect(result.existingStatus).toBe("PENDING");
+    }
+    expect(mocks.refund).not.toHaveBeenCalled();
+    const state = await readState(ctx);
+    expect(state.order.status).toBe("PAID");
+    expect(state.payment.status).toBe("SUCCEEDED");
+    expect(state.adjustments).toMatchObject([{ amount: 20000, status: "PENDING" }]);
+  });
+
+  it("PENDING 가드: 같은 키의 PENDING 재요청은 REFUND_IN_PROGRESS가 아니라 ALREADY로 수렴한다", async () => {
+    const ctx = await createPaidOrder();
+    const idempotencyKey = `pending_same_${randomUUID()}`;
+    await createPendingAdjustment(ctx, 20000, idempotencyKey);
+
+    const result = await refundOrderPaymentAction(actionInput(ctx, { amount: 20000, idempotencyKey }));
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("ALREADY");
+      expect(result.existingStatus).toBe("PENDING");
+    }
+    expect(mocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("PENDING 가드: PENDING이 없으면 정상 환불을 막지 않는다", async () => {
+    const ctx = await createPaidOrder();
+
+    const result = await refundOrderPaymentAction(actionInput(ctx, { amount: 20000 }));
+
+    expect(result.success).toBe(true);
+    expect(mocks.refund).toHaveBeenCalledTimes(1);
+    expect((await readState(ctx)).adjustments).toMatchObject([{ amount: 20000, status: "SUCCEEDED" }]);
+  });
+
+  it("PENDING 가드: 이번 요청이 만든 PENDING은 자기 자신을 REFUND_IN_PROGRESS로 막지 않는다", async () => {
+    const ctx = await createPaidOrder();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.refund.mockResolvedValueOnce({
+      providerTransactionId: ctx.providerTransactionId,
+      status: "PENDING",
+      amount: 20000,
+      currency: "KRW",
+    });
+
+    const result = await refundOrderPaymentAction(actionInput(ctx, { amount: 20000 }));
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.errorCode).toBe("PROVIDER_FAILED");
+    expect(mocks.refund).toHaveBeenCalledTimes(1);
+    expect((await readState(ctx)).adjustments).toMatchObject([{ amount: 20000, status: "PENDING" }]);
+    consoleError.mockRestore();
+  });
+
+  it("reason 필수화: 빈 환불 사유는 provider 호출 없이 REASON_REQUIRED로 거부한다", async () => {
+    const ctx = await createPaidOrder();
+
+    const result = await refundOrderPaymentAction(actionInput(ctx, { amount: 20000, reason: "   " }));
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.errorCode).toBe("REASON_REQUIRED");
+    expect(mocks.refund).not.toHaveBeenCalled();
+    await expectStateUnchanged(ctx);
+  });
+
+  it("reason 필수화: 환불 사유를 trim해 저장하고 provider에 전달한다", async () => {
+    const ctx = await createPaidOrder();
+
+    const result = await refundOrderPaymentAction(actionInput(ctx, { amount: 20000, reason: " 고객 요청 " }));
+
+    expect(result.success).toBe(true);
+    expect(mocks.refund.mock.calls[0]?.[0].reason).toBe("고객 요청");
+    expect((await readState(ctx)).adjustments).toMatchObject([{ amount: 20000, status: "SUCCEEDED", reason: "고객 요청" }]);
+  });
+
   it("비관리자는 환불 코어와 provider를 호출하지 않는다", async () => {
     const ctx = await createPaidOrder();
     mocks.getSession.mockResolvedValue(makeSession("CUSTOMER"));
@@ -302,6 +385,20 @@ async function createSucceededAdjustment(ctx: Ctx, amount: number): Promise<void
   });
 }
 
+async function createPendingAdjustment(ctx: Ctx, amount: number, idempotencyKey: string): Promise<void> {
+  await db.paymentAdjustment.create({
+    data: {
+      paymentId: ctx.paymentId,
+      amount,
+      currency: "KRW",
+      reason: "진행 중 환불",
+      status: "PENDING",
+      idempotencyKey,
+      refundableAmount: ctx.amount - amount,
+    },
+  });
+}
+
 async function readState(ctx: Ctx) {
   const order = await db.order.findUniqueOrThrow({
     where: { id: ctx.orderId },
@@ -314,7 +411,7 @@ async function readState(ctx: Ctx) {
   const adjustments = await db.paymentAdjustment.findMany({
     where: { paymentId: ctx.paymentId },
     orderBy: { createdAt: "asc" },
-    select: { amount: true, status: true },
+    select: { amount: true, status: true, reason: true },
   });
   const variant = await db.wigVariant.findUniqueOrThrow({
     where: { id: ctx.variantId },
