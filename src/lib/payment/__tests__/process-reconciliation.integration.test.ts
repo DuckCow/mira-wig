@@ -168,6 +168,46 @@ async function adjustmentsFor(ctx: Ctx) {
   return db.paymentAdjustment.findMany({ where: { payment: { orderId: ctx.orderId } } });
 }
 
+function markerKey(ctx: Ctx, paymentKey: string): string {
+  return `unconfirmed:${ctx.orderId}:${paymentKey}`;
+}
+
+function autoRefundKey(ctx: Ctx, paymentKey: string): string {
+  return `auto-refund:${ctx.orderId}:${paymentKey}`;
+}
+
+async function createUnconfirmedMarker(ctx: Ctx, paymentKey: string) {
+  return db.payment.create({
+    data: {
+      orderId: ctx.orderId,
+      provider: "test-provider",
+      providerTransactionId: paymentKey,
+      idempotencyKey: markerKey(ctx, paymentKey),
+      status: "PENDING",
+      amount: 85000,
+      currency: "KRW",
+    },
+  });
+}
+
+async function createPendingAutoRefund(ctx: Ctx, paymentKey: string) {
+  const payment = await createUnconfirmedMarker(ctx, paymentKey);
+  return db.paymentAdjustment.create({
+    data: {
+      paymentId: payment.id,
+      amount: 85000,
+      currency: "KRW",
+      reason: "test pending auto refund",
+      status: "PENDING",
+      idempotencyKey: autoRefundKey(ctx, paymentKey),
+    },
+  });
+}
+
+async function autoRefundAdjustment(ctx: Ctx, paymentKey: string) {
+  return db.paymentAdjustment.findUniqueOrThrow({ where: { idempotencyKey: autoRefundKey(ctx, paymentKey) } });
+}
+
 async function expectUnconfirmedMarker(ctx: Ctx, paymentKey: string, providerWebhookSecret: string | null): Promise<void> {
   const order = await db.order.findUniqueOrThrow({ where: { id: ctx.orderId } });
   const variant = await db.wigVariant.findUniqueOrThrow({ where: { id: ctx.variantId } });
@@ -286,6 +326,49 @@ describe("confirmPayment — local finalize auto refund idempotency", () => {
     expect(wrapped.refundCalls).toBe(1);
     expect(adjustments).toHaveLength(1);
     expect(adjustments[0]?.idempotencyKey).toBe(`auto-refund:${ctx!.orderId}:pay_retry`);
+    errorSpy.mockRestore();
+  });
+
+  it("PENDING 선기록만 남은 재진입은 자동 보상을 호출하지 않는다", async () => {
+    await forceStockOut(ctx!);
+    await createPendingAutoRefund(ctx!, "pay_pending_claim");
+    const wrapped = testProvider(confirmSucceeded, refundSucceeded("cancel_not_called"));
+    providerState.provider = wrapped.provider;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await confirm(ctx!, "pay_pending_claim");
+    const adjustment = await autoRefundAdjustment(ctx!, "pay_pending_claim");
+    expect(result.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(0);
+    expect(adjustment.status).toBe("PENDING");
+    expect(adjustment.providerRefundId).toBeNull();
+    errorSpy.mockRestore();
+  });
+
+  it("refund 성공 후 기록 update 실패 재진입은 자동 보상을 재호출하지 않는다", async () => {
+    await forceStockOut(ctx!);
+    const marker = await createUnconfirmedMarker(ctx!, "pay_update_crash");
+    await db.paymentAdjustment.create({
+      data: {
+        paymentId: marker.id,
+        providerRefundId: "cancel_collision",
+        amount: 1,
+        currency: "KRW",
+        reason: "test collision",
+        status: "SUCCEEDED",
+        idempotencyKey: `collision:${ctx!.orderId}:pay_update_crash`,
+      },
+    });
+    const wrapped = testProvider(confirmSucceeded, refundSucceeded("cancel_collision"));
+    providerState.provider = wrapped.provider;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(confirm(ctx!, "pay_update_crash")).rejects.toThrow();
+    expect(wrapped.refundCalls).toBe(1);
+    const result = await confirm(ctx!, "pay_update_crash");
+    const adjustment = await autoRefundAdjustment(ctx!, "pay_update_crash");
+    expect(result.status).toBe("unconfirmed");
+    expect(wrapped.refundCalls).toBe(1);
+    expect(adjustment.status).toBe("PENDING");
+    expect(adjustment.providerRefundId).toBeNull();
     errorSpy.mockRestore();
   });
 });

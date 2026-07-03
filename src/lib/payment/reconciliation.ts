@@ -5,6 +5,7 @@
 
 import { db } from "@/lib/db";
 import { Prisma, type PaymentAttemptStatus } from "@prisma/client";
+import { claimPendingAutoRefundAdjustment, updateAutoRefundAdjustment } from "./reconciliation-adjustment";
 import type { PaymentProvider, RefundResult } from "./types";
 
 type PaymentSuccessResult = { status: "success"; success: true; paymentId: string };
@@ -25,12 +26,6 @@ type ReconciliationInput = {
   currency: string;
   error: unknown;
   providerWebhookSecret?: string;
-};
-
-type RefundAdjustmentInput = ReconciliationInput & {
-  reason: string;
-  idempotencyKey: string;
-  result: RefundResult;
 };
 
 type CompensationInput = {
@@ -213,35 +208,6 @@ export async function resolveUnreconciledMarker(
   });
 }
 
-export async function paymentAdjustmentExists(idempotencyKey: string): Promise<boolean> {
-  const existing = await db.paymentAdjustment.findUnique({
-    where: { idempotencyKey },
-    select: { id: true },
-  });
-  return existing !== null;
-}
-
-export async function recordUnconfirmedPaymentAdjustment(input: RefundAdjustmentInput): Promise<void> {
-  const paymentId = await ensureUnreconciledMarker(input);
-  try {
-    await db.paymentAdjustment.create({
-      data: {
-        paymentId,
-        providerRefundId: input.result.providerRefundId,
-        amount: input.amount,
-        currency: input.currency,
-        reason: input.reason,
-        status: input.result.status,
-        idempotencyKey: input.idempotencyKey,
-        refundableAmount: input.result.refundableAmount,
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return;
-    throw error;
-  }
-}
-
 export async function compensateUnconfirmedPayment(input: CompensationInput): Promise<void> {
   if (input.amount <= 0) {
     console.error("PAYMENT_AUTO_REFUND_SKIPPED", {
@@ -254,23 +220,29 @@ export async function compensateUnconfirmedPayment(input: CompensationInput): Pr
     return;
   }
   const idempotencyKey = autoRefundIdempotencyKey(input.orderId, input.providerTransactionId);
-  if (await paymentAdjustmentExists(idempotencyKey)) {
+  const paymentId = await ensureUnreconciledMarker({ ...input, provider: input.provider.name });
+  const adjustment = await claimPendingAutoRefundAdjustment({
+    paymentId,
+    amount: input.amount,
+    currency: input.currency,
+    reason: AUTO_REFUND_REASON,
+    idempotencyKey,
+  });
+
+  if (!adjustment.claimed) {
     console.error("PAYMENT_AUTO_REFUND_ALREADY_RECORDED", {
       orderId: input.orderId,
       providerTransactionId: input.providerTransactionId,
       provider: input.provider.name,
       idempotencyKey,
+      status: adjustment.status,
     });
     return;
   }
+
   const result = await requestAutoRefund(input, idempotencyKey);
-  await recordUnconfirmedPaymentAdjustment({
-    ...input,
-    provider: input.provider.name,
-    reason: AUTO_REFUND_REASON,
-    idempotencyKey,
-    result,
-  });
+  await updateAutoRefundAdjustment(adjustment.adjustmentId, result);
+
   if (result.status === "SUCCEEDED") {
     await resolveUnreconciledMarker(input.orderId, input.providerTransactionId, "REFUNDED");
   }
