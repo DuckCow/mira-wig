@@ -68,8 +68,9 @@
 ## 3. 배포 & 환경변수 — 라이브 차단 항목 포함
 
 ### 3-1. ⚠️ 배포 (빠지면 결제는 되는데 웹훅/복구가 죽는다)
-웹훅·복구는 `Payment.providerWebhookSecret`, `PaymentWebhookEvent` 스키마에 의존한다. 프로덕션 DB에 migration이 안 올라가면 **결제 화면은 정상인데 웹훅/복구만 조용히 실패**한다(부분 실패라 안 보임).
+웹훅·복구는 `Payment.providerWebhookSecret`, `PaymentWebhookEvent` 스키마에 의존한다. 프로덕션 DB에 migration이 안 올라가면 **결제 화면은 정상인데 웹훅/복구만 조용히 실패**한다(부분 실패라 안 보임). 그 전제로, DB는 **스키마뿐 아니라 엔진 major 버전도 로컬·CI와 정렬**돼야 CI 초록이 프로덕션을 보장한다.
 
+- [ ] **프로덕션 Postgres major = 18** (로컬·CI와 정렬 — migration·verify의 선행 조건). 로컬 개발·CI는 PG18 기준(구 14는 **2026-11 EOL**이라 이관). 관리형 DB(RDS/Cloud SQL/Supabase 등) 프로비저닝 시 **제공 기본 major가 18인지 확인** — 다르면 major 간 거동 드리프트로 CI(18) 초록이 프로덕션을 보장 못 함. 18 미제공이면 그 major로 로컬·CI를 재정렬하거나 제공처 변경 검토.
 - [ ] 프로덕션 배포 전 **`prisma migrate deploy`** 완료 (DB 스키마 최신).
 - [ ] **배포된 커밋 기준 `npm run verify` 초록**.
 
@@ -185,4 +186,4 @@
 | 라이브 키 표식 | `live_` 접두사 | `PAYPAL_ENV=live` |
 | 첫거래 핵심 확인 | secret 저장 + 웹훅 수신 | (새 배포 후 주문) DB PAID + 유효서명 웹훅 복구 |
 
-**라이브 차단 항목 요약**: ① 토스 카드사 심사(§0) ② `prisma migrate deploy`(§3-1) ③ `NEXTAUTH_URL`/`SECRET`(§3-2) ④ 웹훅 URL 외부 접근 가능(§1-2/§2-2) ⑤ PayPal 라이브 Webhook ID(§2-2). (§5-bis 코드 2건은 v7에서 닫혀 이제 차단 아님 — 이 요약은 비-코드 블로커만.)
+**라이브 차단 항목 요약**: ① 토스 카드사 심사(§0) ② `prisma migrate deploy`(§3-1) ③ `NEXTAUTH_URL`/`SECRET`(§3-2) ④ 웹훅 URL 외부 접근 가능(§1-2/§2-2) ⑤ PayPal 라이브 Webhook ID(§2-2) ⑥ 프로덕션 Postgres major=18(§3-1 — 로컬·CI 정렬, migrate 선행). (§5-bis 코드 2건은 v7에서 닫혀 이제 차단 아님 — 이 요약은 비-코드 블로커만.)
