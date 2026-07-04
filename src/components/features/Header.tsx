@@ -37,6 +37,9 @@ function UserMenu({
 }) {
   return (
     <div className="flex items-center gap-4">
+      <Link href="/orders" className="text-sm text-gray-700 hover:text-gray-900">
+        내 주문
+      </Link>
       <CartLink userId={userId} />
       <span
         className="flex items-center gap-2 text-sm text-gray-700"
