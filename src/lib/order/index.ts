@@ -8,6 +8,7 @@
 // ============================================================
 
 export { getCartForCheckout, createOrder, getOrderById } from "./db";
+export { getUserOrders } from "./list";
 
 export {
   computeTotal,
@@ -24,4 +25,5 @@ export {
   type CheckoutItem,
   type OrderView,
   type OrderItemView,
+  type UserOrderListItem,
 } from "./types";

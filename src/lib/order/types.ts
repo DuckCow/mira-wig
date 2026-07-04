@@ -136,3 +136,17 @@ export interface OrderView {
   memo: string | null;
   items: OrderItemView[];
 }
+
+export interface UserOrderListItem {
+  id: string;
+  status: string;
+  currency: string;
+  totalAmount: number;
+  createdAt: Date;
+  itemCount: number;
+  representativeItem: {
+    styleName: string;
+    coverImageKey: string | null;
+    imageUrl: string | null;
+  } | null;
+}

@@ -9,54 +9,15 @@ import { Prisma, ShippingCountry } from "@prisma/client";
 import { db } from "@/lib/db";
 import { MARKET_CONFIGS, isMarketCode } from "@/lib/market/types";
 import { validateAndBuildLines, computeTotal } from "./core";
+import { parseSnapshotData, snapshotToJson } from "./snapshot";
 import {
   OrderException,
   type CheckoutAddressInput,
   type CheckoutItem,
   type OrderView,
   type OrderItemView,
-  type SnapshotData,
   type OrderLine,
 } from "./types";
-
-// ── 내부 유틸 ────────────────────────────────────────────────
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function toStr(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
-
-function toStrOrNull(v: unknown): string | null {
-  return typeof v === "string" ? v : null;
-}
-
-function parseSnapshotData(raw: unknown): SnapshotData {
-  if (!isPlainObject(raw)) throw new Error("Invalid snapshotData");
-  return {
-    styleName: toStr(raw.styleName),
-    color: toStr(raw.color),
-    colorHex: toStrOrNull(raw.colorHex),
-    length: toStr(raw.length),
-    curl: toStr(raw.curl),
-    coverImageKey: toStrOrNull(raw.coverImageKey),
-    currencyCode: toStr(raw.currencyCode),
-  };
-}
-
-function snapshotToJson(data: SnapshotData): Prisma.InputJsonValue {
-  return {
-    styleName: data.styleName,
-    color: data.color,
-    colorHex: data.colorHex,
-    length: data.length,
-    curl: data.curl,
-    coverImageKey: data.coverImageKey,
-    currencyCode: data.currencyCode,
-  };
-}
 
 function isShippingCountry(v: string): v is ShippingCountry {
   return v === "KR" || v === "US" || v === "JP";
