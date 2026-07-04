@@ -67,6 +67,12 @@ function autoRefundIdempotencyKey(orderId: string, providerTransactionId: string
   return `auto-refund:${orderId}:${providerTransactionId}`;
 }
 
+export const UNRECONCILED_PAYMENT_MARKER_WHERE = {
+  status: "PENDING",
+  providerTransactionId: { not: null },
+  idempotencyKey: { startsWith: "unconfirmed:" },
+} satisfies Prisma.PaymentWhereInput;
+
 function failedRefundResult(providerTransactionId: string, error: unknown): RefundResult {
   const fallback = "자동 보상 환불 실패";
   const errorMessage = error instanceof Error ? error.message : fallback;
@@ -127,12 +133,7 @@ export async function paidOrderResultOrEmpty(orderId: string): Promise<PaymentSu
 
 export async function orderHasUnreconciledPayment(orderId: string): Promise<boolean> {
   const payment = await db.payment.findFirst({
-    where: {
-      orderId,
-      status: "PENDING",
-      providerTransactionId: { not: null },
-      idempotencyKey: { startsWith: "unconfirmed:" },
-    },
+    where: { orderId, ...UNRECONCILED_PAYMENT_MARKER_WHERE },
     select: { id: true },
   });
   return payment !== null;

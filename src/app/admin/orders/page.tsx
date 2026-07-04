@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Table, type Column } from "@/components/ui/Table";
+import { isAdminPaymentReviewFilter, type AdminPaymentReviewState } from "@/lib/admin-payment-review";
 import {
   ADMIN_ORDER_STATUSES,
   ADMIN_PAYMENT_STATUSES,
@@ -23,6 +24,7 @@ type FilterValues = {
   status: string;
   paymentStatus: string;
   marketCode: string;
+  paymentReview: string;
   dateFrom: string;
   dateTo: string;
   page: number;
@@ -48,6 +50,13 @@ const PAYMENT_LABELS: Record<string, string> = {
   CANCELLED: "취소",
   REFUNDED: "환불",
   PARTIALLY_REFUNDED: "부분 환불",
+};
+
+const PAYMENT_REVIEW_FILTER = "unreconciled";
+const PAYMENT_REVIEW_LABELS: Record<AdminPaymentReviewState, string> = {
+  UNCONFIRMED: "미확정",
+  AUTO_REFUND_PENDING: "환불 확인 필요",
+  AUTO_REFUND_FAILED: "환불 실패",
 };
 
 function first(value: string | string[] | undefined): string {
@@ -76,6 +85,7 @@ function parseFilterValues(raw: Awaited<SearchParams>): FilterValues {
     status: first(raw.status),
     paymentStatus: first(raw.paymentStatus),
     marketCode: first(raw.marketCode),
+    paymentReview: first(raw.paymentReview),
     dateFrom: first(raw.dateFrom),
     dateTo: first(raw.dateTo),
     page: parsePositiveInt(first(raw.page), 1),
@@ -87,6 +97,7 @@ function toFilters(values: FilterValues): AdminOrderFilters {
     ...(isAdminOrderStatus(values.status) && { status: values.status }),
     ...(isAdminPaymentStatus(values.paymentStatus) && { paymentStatus: values.paymentStatus }),
     ...(isAdminMarketCode(values.marketCode) && { marketCode: values.marketCode }),
+    ...(isAdminPaymentReviewFilter(values.paymentReview) && { paymentReview: values.paymentReview }),
     dateFrom: parseDateStart(values.dateFrom),
     dateTo: parseDateEnd(values.dateTo),
     page: values.page,
@@ -98,6 +109,10 @@ function badgeVariant(status: string): BadgeVariant {
   if (status === "PAYMENT_FAILED" || status === "CANCELLED" || status === "FAILED") return "error";
   if (status === "PENDING_PAYMENT" || status === "PENDING") return "warning";
   return "inactive";
+}
+
+function paymentReviewVariant(state: AdminPaymentReviewState): BadgeVariant {
+  return state === "AUTO_REFUND_FAILED" ? "error" : "warning";
 }
 
 function formatDate(date: Date): string {
@@ -114,11 +129,28 @@ function buildPageHref(values: FilterValues, page: number): string {
   if (values.status) params.set("status", values.status);
   if (values.paymentStatus) params.set("paymentStatus", values.paymentStatus);
   if (values.marketCode) params.set("marketCode", values.marketCode);
+  if (values.paymentReview) params.set("paymentReview", values.paymentReview);
   if (values.dateFrom) params.set("dateFrom", values.dateFrom);
   if (values.dateTo) params.set("dateTo", values.dateTo);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `/admin/orders?${query}` : "/admin/orders";
+}
+
+function buildFilterHref(values: FilterValues, overrides: Partial<FilterValues>): string {
+  return buildPageHref({ ...values, ...overrides, page: 1 }, 1);
+}
+
+function PaymentReviewChip({ values }: { values: FilterValues }) {
+  const active = values.paymentReview === PAYMENT_REVIEW_FILTER;
+  return (
+    <Link
+      href={buildFilterHref(values, { paymentReview: active ? "" : PAYMENT_REVIEW_FILTER })}
+      className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-medium ${active ? "border-yellow-300 bg-yellow-100 text-yellow-800" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+    >
+      미확정·환불실패만
+    </Link>
+  );
 }
 
 function FilterForm({ values }: { values: FilterValues }) {
@@ -134,6 +166,19 @@ function FilterForm({ values }: { values: FilterValues }) {
         <Link href="/admin/orders" className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded hover:bg-gray-50">초기화</Link>
       </div>
     </form>
+  );
+}
+
+function PaymentBadges({ row }: { row: AdminOrderListItem }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Badge variant={badgeVariant(row.paymentStatus)}>{PAYMENT_LABELS[row.paymentStatus] ?? row.paymentStatus}</Badge>
+      {row.paymentReview && (
+        <Badge variant={paymentReviewVariant(row.paymentReview)}>
+          {PAYMENT_REVIEW_LABELS[row.paymentReview]}
+        </Badge>
+      )}
+    </div>
   );
 }
 
@@ -184,7 +229,7 @@ function columns(): Column<AdminOrderListItem>[] {
     {
       key: "payment",
       header: "결제",
-      render: (row) => <Badge variant={badgeVariant(row.paymentStatus)}>{PAYMENT_LABELS[row.paymentStatus] ?? row.paymentStatus}</Badge>,
+      render: (row) => <PaymentBadges row={row} />,
     },
     { key: "amount", header: "금액", render: (row) => money(row.totalAmount, row.currency) },
     { key: "items", header: "상품", render: (row) => `${row.itemCount}개` },
@@ -221,14 +266,21 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
   const result = await listAdminOrders(toFilters(values));
   if (!result.success && result.errorCode === "UNAUTHENTICATED") redirect("/login?callbackUrl=/admin/orders");
   if (!result.success) redirect("/");
-  const { orders, total, page, totalPages } = result.data;
+  const { orders, total, paymentReviewCount, page, totalPages } = result.data;
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">주문 관리</h1>
-        <p className="text-sm text-gray-500 mt-1">총 {total}건</p>
+        <p className="text-sm text-gray-500 mt-1">
+          총 {total}건 · <Link href={buildFilterHref(values, { paymentReview: PAYMENT_REVIEW_FILTER })} className="text-yellow-700 hover:underline">확인 필요 {paymentReviewCount}건</Link>
+        </p>
       </div>
-      <Card><FilterForm values={values} /></Card>
+      <Card>
+        <div className="space-y-3">
+          <FilterForm values={values} />
+          <PaymentReviewChip values={values} />
+        </div>
+      </Card>
       <Card>
         <Table columns={columns()} rows={orders} getRowKey={(row) => row.id} emptyMessage="조건에 맞는 주문이 없습니다." />
       </Card>

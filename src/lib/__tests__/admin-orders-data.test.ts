@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   orderCount: vi.fn(),
   orderFindMany: vi.fn(),
   orderFindUnique: vi.fn(),
+  paymentFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: mocks.getSession }));
@@ -20,6 +21,9 @@ vi.mock("@/lib/db", () => ({
       count: mocks.orderCount,
       findMany: mocks.orderFindMany,
       findUnique: mocks.orderFindUnique,
+    },
+    payment: {
+      findMany: mocks.paymentFindMany,
     },
   },
 }));
@@ -44,6 +48,7 @@ function orderListRow() {
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
     user: { email: "buyer@test.com", name: "Buyer" },
     payments: [{ provider: "toss", status: "SUCCEEDED", providerTransactionId: "pay_1" }],
+    unreconciledPayments: [],
     _count: { items: 2, payments: 1 },
   };
 }
@@ -143,8 +148,9 @@ describe("listAdminOrders — 필터", () => {
       createdAt: { gte: from, lt: to },
     };
     mocks.getSession.mockResolvedValue(ADMIN_SESSION);
-    mocks.orderCount.mockResolvedValue(1);
+    mocks.orderCount.mockResolvedValueOnce(1).mockResolvedValueOnce(3);
     mocks.orderFindMany.mockResolvedValue([orderListRow()]);
+    mocks.paymentFindMany.mockResolvedValue([]);
 
     const result = await listAdminOrders({
       status: "PAID",
@@ -163,8 +169,36 @@ describe("listAdminOrders — 필터", () => {
       skip: 10,
       take: 10,
     }));
+    expect(mocks.paymentFindMany).toHaveBeenCalledTimes(1);
     if (result.success) {
       expect(result.data.orders[0]?.latestPayment?.providerTransactionId).toBe("pay_1");
+      expect(result.data.paymentReviewCount).toBe(3);
+    }
+  });
+
+  it("paymentReview 필터는 unconfirmed marker relation filter를 Prisma 조회로 전달한다", async () => {
+    mocks.getSession.mockResolvedValue(ADMIN_SESSION);
+    mocks.orderCount.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+    mocks.orderFindMany.mockResolvedValue([orderListRow()]);
+    mocks.paymentFindMany.mockResolvedValue([{ orderId: "order-1", id: "marker-1", adjustments: [{ status: "FAILED" }] }]);
+
+    const result = await listAdminOrders({ paymentReview: "unreconciled" });
+
+    expect(result.success).toBe(true);
+    expect(mocks.orderFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        payments: {
+          some: {
+            status: "PENDING",
+            providerTransactionId: { not: null },
+            idempotencyKey: { startsWith: "unconfirmed:" },
+          },
+        },
+      },
+    }));
+    expect(mocks.paymentFindMany).toHaveBeenCalledTimes(1);
+    if (result.success) {
+      expect(result.data.orders[0]?.paymentReview).toBe("AUTO_REFUND_FAILED");
     }
   });
 });

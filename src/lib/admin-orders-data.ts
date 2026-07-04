@@ -3,8 +3,16 @@ import "server-only";
 
 import { Prisma, type OrderStatus, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import {
+  type AdminPaymentReviewFilter,
+  type AdminPaymentReviewState,
+  PAYMENT_REVIEW_MARKER_SELECT,
+  paymentReviewState,
+  paymentReviewWhere,
+} from "@/lib/admin-payment-review";
 import { MARKET_CODES, type MarketCode } from "@/lib/market/types";
 import { calculateRefundableAmountFromAllAdjustments } from "@/lib/payment/refundable";
+import { UNRECONCILED_PAYMENT_MARKER_WHERE } from "@/lib/payment/reconciliation";
 import { requireAdmin } from "./admin";
 
 export const ADMIN_ORDER_STATUSES = [
@@ -26,6 +34,7 @@ export type AdminOrderFilters = {
   status?: OrderStatus;
   paymentStatus?: PaymentStatus;
   marketCode?: MarketCode;
+  paymentReview?: AdminPaymentReviewFilter;
   dateFrom?: Date;
   dateTo?: Date;
   page?: number;
@@ -43,66 +52,29 @@ export type AdminOrderSnapshot = {
 };
 
 export type AdminOrderListItem = {
-  id: string;
-  user: { email: string; name: string | null };
-  status: OrderStatus;
-  paymentStatus: PaymentStatus;
-  marketCode: string;
-  currency: string;
-  totalAmount: number;
-  createdAt: Date;
-  itemCount: number;
-  paymentCount: number;
+  id: string; user: { email: string; name: string | null };
+  status: OrderStatus; paymentStatus: PaymentStatus; marketCode: string; currency: string;
+  totalAmount: number; createdAt: Date; itemCount: number; paymentCount: number;
   latestPayment: { provider: string; status: string; providerTransactionId: string | null } | null;
+  paymentReview: AdminPaymentReviewState | null;
 };
 
 export type AdminOrderDetail = AdminOrderListItem & {
-  paymentMethod: string | null;
-  recipientName: string;
-  phone: string;
-  country: string;
-  postalCode: string;
-  administrativeArea: string | null;
-  city: string;
-  addressLine1: string;
-  addressLine2: string | null;
-  memo: string | null;
+  paymentMethod: string | null; recipientName: string; phone: string; country: string; postalCode: string;
+  administrativeArea: string | null; city: string; addressLine1: string; addressLine2: string | null; memo: string | null;
   items: Array<{
-    id: string;
-    variantId: string;
-    quantity: number;
-    unitPrice: number;
+    id: string; variantId: string; quantity: number; unitPrice: number;
     snapshotData: AdminOrderSnapshot;
     manufacturingRequest: {
-      id: string;
-      status: string;
-      hairCadKey: string | null;
-      notes: string | null;
-      createdAt: Date;
-      updatedAt: Date;
+      id: string; status: string; hairCadKey: string | null; notes: string | null; createdAt: Date; updatedAt: Date;
     } | null;
   }>;
   payments: Array<{
-    id: string;
-    provider: string;
-    providerTransactionId: string | null;
-    status: string;
-    amount: number;
-    currency: string;
-    refundableAmount: number;
-    errorMessage: string | null;
-    idempotencyKey: string;
-    createdAt: Date;
+    id: string; provider: string; providerTransactionId: string | null; status: string;
+    amount: number; currency: string; refundableAmount: number; errorMessage: string | null; idempotencyKey: string; createdAt: Date;
     adjustments: Array<{
-      id: string;
-      providerRefundId: string | null;
-      amount: number;
-      currency: string;
-      reason: string;
-      status: string;
-      idempotencyKey: string;
-      refundableAmount: number | null;
-      createdAt: Date;
+      id: string; providerRefundId: string | null; amount: number; currency: string; reason: string;
+      status: string; idempotencyKey: string; refundableAmount: number | null; createdAt: Date;
     }>;
   }>;
 };
@@ -110,6 +82,7 @@ export type AdminOrderDetail = AdminOrderListItem & {
 export type AdminOrderListData = {
   orders: AdminOrderListItem[];
   total: number;
+  paymentReviewCount: number;
   page: number;
   pageSize: number;
   totalPages: number;
@@ -142,6 +115,7 @@ function buildWhere(filters: AdminOrderFilters): Prisma.OrderWhereInput {
   if (filters.status) where.status = filters.status;
   if (filters.paymentStatus) where.paymentStatus = filters.paymentStatus;
   if (filters.marketCode) where.marketCode = filters.marketCode;
+  if (filters.paymentReview === "unreconciled") Object.assign(where, paymentReviewWhere());
   if (filters.dateFrom || filters.dateTo) {
     where.createdAt = {
       ...(filters.dateFrom && { gte: filters.dateFrom }),
@@ -183,6 +157,27 @@ function parseSnapshotData(raw: Prisma.JsonValue): AdminOrderSnapshot {
 
 type OrderListRow = Awaited<ReturnType<typeof fetchOrderRows>>[number];
 type OrderDetailRow = NonNullable<Awaited<ReturnType<typeof fetchOrderDetailRow>>>;
+type PaymentReviewRow = Awaited<ReturnType<typeof fetchPaymentReviewRows>>[number];
+
+async function fetchPaymentReviewRows(orderIds: string[]) {
+  if (orderIds.length === 0) return [];
+  return db.payment.findMany({
+    where: { orderId: { in: orderIds }, ...UNRECONCILED_PAYMENT_MARKER_WHERE },
+    orderBy: { createdAt: "desc" },
+    select: { orderId: true, ...PAYMENT_REVIEW_MARKER_SELECT },
+  });
+}
+
+function paymentReviewMap(rows: PaymentReviewRow[]): Map<string, AdminPaymentReviewState> {
+  const result = new Map<string, AdminPaymentReviewState>();
+  for (const row of rows) {
+    if (!result.has(row.orderId)) {
+      const state = paymentReviewState(row);
+      if (state) result.set(row.orderId, state);
+    }
+  }
+  return result;
+}
 
 async function fetchOrderRows(where: Prisma.OrderWhereInput, skip: number, take: number) {
   return db.order.findMany({
@@ -204,7 +199,7 @@ async function fetchOrderRows(where: Prisma.OrderWhereInput, skip: number, take:
   });
 }
 
-function toListItem(row: OrderListRow): AdminOrderListItem {
+function toListItem(row: OrderListRow, reviews: Map<string, AdminPaymentReviewState>): AdminOrderListItem {
   return {
     id: row.id,
     user: row.user,
@@ -217,6 +212,7 @@ function toListItem(row: OrderListRow): AdminOrderListItem {
     itemCount: row._count.items,
     paymentCount: row._count.payments,
     latestPayment: row.payments[0] ?? null,
+    paymentReview: reviews.get(row.id) ?? null,
   };
 }
 
@@ -259,7 +255,7 @@ async function fetchOrderDetailRow(orderId: string) {
 
 function toDetail(row: OrderDetailRow): AdminOrderDetail {
   return {
-    ...toListItem({ ...row, payments: row.payments.slice(0, 1) }),
+    ...toListItem({ ...row, payments: row.payments.slice(0, 1) }, new Map()),
     paymentMethod: row.paymentMethod,
     recipientName: row.recipientName,
     phone: row.phone,
@@ -286,13 +282,15 @@ export async function listAdminOrders(
   const page = normalizePage(filters.page);
   const pageSize = clampPageSize(filters.pageSize);
   const where = buildWhere(filters);
-  const [total, rows] = await Promise.all([
+  const [total, rows, paymentReviewCount] = await Promise.all([
     db.order.count({ where }),
     fetchOrderRows(where, (page - 1) * pageSize, pageSize),
+    db.order.count({ where: paymentReviewWhere() }),
   ]);
+  const reviews = paymentReviewMap(await fetchPaymentReviewRows(rows.map((row) => row.id)));
   return {
     success: true,
-    data: { orders: rows.map(toListItem), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    data: { orders: rows.map((row) => toListItem(row, reviews)), total, paymentReviewCount, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
   };
 }
 

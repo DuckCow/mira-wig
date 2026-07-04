@@ -252,6 +252,10 @@ describe("orderHasUnreconciledPayment", () => {
   beforeEach(async () => { ctx = await setupFixtures(1); });
   afterEach(async () => { await cleanupFixtures(ctx); providerState.provider = null; ctx = null; });
 
+  it("marker 없는 PENDING_PAYMENT 주문은 unconfirmed 가드로 보지 않는다", async () => {
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
+  });
+
   it("일반 PENDING 결제행은 unconfirmed 가드로 보지 않는다", async () => {
     await db.payment.create({
       data: {
@@ -262,6 +266,43 @@ describe("orderHasUnreconciledPayment", () => {
         status: "PENDING",
         amount: 85000,
         currency: "KRW",
+      },
+    });
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
+  });
+
+  it("adjustment 없는 PENDING unconfirmed marker는 가드로 본다", async () => {
+    await createUnconfirmedMarker(ctx!, "pay_marker_only");
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(true);
+  });
+
+  it("FAILED auto-refund adjustment가 달린 PENDING marker는 가드로 본다", async () => {
+    const marker = await createUnconfirmedMarker(ctx!, "pay_refund_failed_marker");
+    await db.paymentAdjustment.create({
+      data: {
+        paymentId: marker.id,
+        amount: 85000,
+        currency: "KRW",
+        reason: "test failed auto refund",
+        status: "FAILED",
+        idempotencyKey: autoRefundKey(ctx!, "pay_refund_failed_marker"),
+      },
+    });
+    expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(true);
+  });
+
+  it("REFUNDED marker와 SUCCEEDED adjustment로 종결된 주문은 가드로 보지 않는다", async () => {
+    const marker = await createUnconfirmedMarker(ctx!, "pay_resolved_marker");
+    await db.payment.update({ where: { id: marker.id }, data: { status: "REFUNDED" } });
+    await db.paymentAdjustment.create({
+      data: {
+        paymentId: marker.id,
+        providerRefundId: "refund_resolved",
+        amount: 85000,
+        currency: "KRW",
+        reason: "test resolved auto refund",
+        status: "SUCCEEDED",
+        idempotencyKey: autoRefundKey(ctx!, "pay_resolved_marker"),
       },
     });
     expect(await orderHasUnreconciledPayment(ctx!.orderId)).toBe(false);
