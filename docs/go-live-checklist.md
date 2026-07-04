@@ -117,39 +117,45 @@
 
 ---
 
-## 5-bis. 코드로 닫아야 하는 것 (라이브 전 필수 — §5와 다른 계열)
+## 5-bis. 코드로 닫은 것 (v7 완료 — 구 "라이브 전 필수")
 
-§5는 "코드는 옳고 라이브에서 확인만" 하는 자리였다. 아래는 반대 —
-코드에 실재하는 결함/공백이라 라이브 전 수정이 필요하다. (§6-2 일반 규약
-추출과도 별개: 이건 실돈 운영 안전이라 못 미룬다.)
+§5는 "코드는 옳고 라이브에서 확인만" 하는 자리다. 이 §5-bis는 반대로 **코드에 실재하던
+결함/공백**이라 라이브 전 수정이 필요했다 — **둘 다 v7 세션에서 닫고 커밋했다.**
+(상세·근거·정찰은 handoff v7 §3-2·§3-3·§4·§5가 SSOT.)
 
-### 5-bis-1. compensate 자기 재시도 이중환불 창 (STRICT 결제 코어)
-- 증상: `compensateUnconfirmedPayment`가 `provider.refund` 성공 후 auto-refund
-  adjustment 기록 전 크래시하면, 다음 진입 시 `auto-refund:${orderId}:${providerTransactionId}`
-  키가 없어 `provider.refund`가 재차 나감 → 실고객 이중환불. confirm·웹훅 복구가
-  공유하는 창(웹훅 종국-실패 대칭화가 진입점을 늘렸으나 창 자체는 하나).
-- 현 가드: 기록된 auto-refund adjustment 존재 확인뿐. provider transaction 단위
-  기존 환불 조회나 provider 상태 조회는 없음.
-- 필요: `provider.refund` 호출 **전**, provider transaction 단위로 기존 환불 여부를
-  (조정기록 or provider 상태 조회로) 확인하는 가드 추가. STRICT 결제 코어라 기능과
-  분리된 독립 과제. compensate는 confirm도 쓰는 공유 코어 — 변경 시 confirm 회귀를
-  행동 테스트로 고정.
-- [ ] 별도 STRICT 과제 착수 → 행동 테스트(refund 성공 후 기록 전 크래시 시뮬 →
-  재진입 시 provider.refund 재호출 안 됨)로 고정.
+### 5-bis-1. compensate 자기 재시도 이중환불 창 (STRICT 결제 코어) — ✅ v7 완료(커밋됨)
+- 닫은 방식: `provider.refund` **전에** 같은 키로 PENDING auto-refund adjustment를
+  선기록(`@unique`=락) → refund → 결과로 update. 재진입이 PENDING을 만나면 재발사 안 함.
+  TTL·웹훅 dedup 비의존.
+  - ⚠️ 구 프레이밍("기존 환불 조회 가드 추가")과 다름 — 그건 사실 현재의 *깨진* 가드였고,
+    실제 처방은 **기록 시점을 refund 앞으로 이동**(write-ahead)이다. 정찰이 밝힌 이유:
+    포트에 provider 상태조회 메서드 없음 + "provider TTL/웹훅 dedup 비의존" 목표. (handoff v7 §4-1.)
+  - ⚠️ 트레이드(운영): 크래시-전(선기록 후 refund 전 크래시)은 재발사 안 하고 PENDING
+    잔존 → 자동환불 아니라 **ops 수동 대사**. 이중환불 0의 대가. 목록 노출은 §5-bis-2,
+    대사 절차는 §6.
+- [x] write-ahead + 행동 테스트(크래시-후 refund 1회 유지 / 크래시-전 refund 0회) 고정. 커밋됨.
 
-### 5-bis-2. 미확정 marker 능동 가시화 (어드민 UI — 강도는 5-bis-1 아래)
-- 증상: 웹훅 종국-실패가 200으로 종결될 때 남기는 PENDING reconciliation marker +
-  FAILED auto-refund adjustment(=고객 돈 PG에 묶임)를 어드민 **주문 상세를 열면**
-  볼 수 있으나(Payment/adjustment 전부 렌더됨), **목록/대시보드에 능동적으로 안 뜬다.**
-  목록은 "결제 대기"까지만 → 정상 이탈 주문 더미에 섞여 잠복, 인지가 우연에 의존.
-- 필요: `unconfirmed:` Payment 또는 `auto-refund`/`FAILED` adjustment가 있는 order를
-  목록 배지/조회 신호 하나로 드러냄. 새 대시보드 아니라 기존 주문 목록 플래그 수준.
-  (greppable 로그 `PAYMENT_AUTO_REFUND_FAILED`·`PAYMENT_RECONCILIATION_REQUIRED`는
-  있으나 능동 신호 아님 — 모니터링 붙기 전엔 사실상 안 보임.)
-- [ ] 어드민 주문 목록/상세에 미확정·환불실패 플래그 추가.
+### 5-bis-2. 미확정 marker 능동 가시화 (어드민 UI) — ✅ v7 완료(커밋됨)
+- 닫은 방식: **marker 기준 탐지**(`unconfirmed:` PENDING marker) → 어드민 주문 목록에
+  문제 배지 + "미확정·환불실패만" 필터칩 + "확인 필요 N건" 카운트. 상세는 이전부터
+  adjustment 전부 렌더.
+  - ⚠️ 구 프레이밍("unconfirmed Payment *또는* FAILED adjustment", union)과 다름 —
+    **marker-only**다. 근거: "auto-refund adjustment stuck(PENDING/FAILED) ⟹ marker PENDING"
+    불변식이라 marker만으로 부분집합을 다 덮고 adjustment 없는 marker까지 잡음. adjustment
+    status는 배지 라벨(미확정/환불 확인 필요/환불 실패) 세분화에만. (handoff v7 §5 — 이 불변식이
+    깨지는 흐름 생기면 union 재검토.)
+- [x] 목록 배지/필터칩/카운트 + 술어 행동 테스트(marker true / resolved false / 정상
+  PENDING_PAYMENT false / adjustment 없는 marker true) + read model. 커밋됨.
+- [ ] (선택·NORMAL) 런타임 확인: "verify 초록 ≠ 작동" 원칙상 어드민 주문 목록을 실제로 열어
+  배지·필터칩·카운트 렌더를 1회 확인. 자동화 아닌 사람-수동 자리.
 
 ## 6. 알려진 후속 (라이브 차단 아님 — 백로그)
 
+- **미확정 marker 수동 대사 절차** (§5-bis-1 트레이드의 운영 귀결 — **라이브 런북**): 어드민
+  목록에 뜬 `unconfirmed:` PENDING marker / `auto-refund` PENDING·FAILED adjustment를 ops가
+  **provider 조회 후** 대사 — "환불됨 → marker `REFUNDED` 마킹" 또는 "미환불 → 환불 실행".
+  **자동치유(provider 조회 후 자동 전이)는 라이브 후** per-payment reservation 트랙(handoff v7
+  §6-1 #5). 라이브 차단은 아니나 라이브 시 이 절차는 운영자가 알고 있어야 한다.
 - **외부 취소 반영**: 토스 `CANCEL_STATUS_CHANGED` 발송 조건을 §1-4 확인 결과에 따라 확정. 자동 반영이 안 되는 범위는 폴링/대사로 보강.
 - **OAuth 토큰 캐싱**(PayPal): 현재 호출마다 토큰 발급 가능 — 레이턴시 보이면 만료 전 재사용으로 하드닝.
 - **`payOrderAction` pending 반환의 `error` 필드 잔재** 정리.
@@ -179,4 +185,4 @@
 | 라이브 키 표식 | `live_` 접두사 | `PAYPAL_ENV=live` |
 | 첫거래 핵심 확인 | secret 저장 + 웹훅 수신 | (새 배포 후 주문) DB PAID + 유효서명 웹훅 복구 |
 
-**라이브 차단 항목 요약**: ① 토스 카드사 심사(§0) ② `prisma migrate deploy`(§3-1) ③ `NEXTAUTH_URL`/`SECRET`(§3-2) ④ 웹훅 URL 외부 접근 가능(§1-2/§2-2) ⑤ PayPal 라이브 Webhook ID(§2-2).
+**라이브 차단 항목 요약**: ① 토스 카드사 심사(§0) ② `prisma migrate deploy`(§3-1) ③ `NEXTAUTH_URL`/`SECRET`(§3-2) ④ 웹훅 URL 외부 접근 가능(§1-2/§2-2) ⑤ PayPal 라이브 Webhook ID(§2-2). (§5-bis 코드 2건은 v7에서 닫혀 이제 차단 아님 — 이 요약은 비-코드 블로커만.)
