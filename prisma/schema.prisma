@@ -460,6 +460,7 @@ model PaymentOutbox {
   lastError     String?
   dedupKey      String?      @unique
   createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
   processedAt   DateTime?
 
   @@index([status, nextAttemptAt])
