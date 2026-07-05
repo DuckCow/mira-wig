@@ -53,9 +53,10 @@ function missingShippingFields(shipping: CreateCheckoutSessionInput["shipping"])
 async function loadMarket(tx: SessionTx, marketCode: string) {
   const market = await tx.market.findUnique({
     where: { code: marketCode },
-    select: { currency: true, shippableCountries: true },
+    select: { currency: true, shippableCountries: true, isActive: true },
   });
   if (!market) throw new SessionException("MARKET_UNAVAILABLE", "마켓을 찾을 수 없습니다.");
+  if (!market.isActive) throw new SessionException("MARKET_UNAVAILABLE", "마켓을 찾을 수 없습니다.");
   return market;
 }
 

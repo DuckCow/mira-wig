@@ -137,6 +137,20 @@ describe("checkout session lifecycle", () => {
     await expectNoSessionResidue(ctx.userId);
   });
 
+  it("비활성 시장은 기존 MARKET_UNAVAILABLE로 거부한다", async () => {
+    const marketCode = makeSyntheticMarketCode();
+    await createInactiveMarket(marketCode);
+
+    try {
+      await expectFailure("MARKET_UNAVAILABLE", () => {
+        return createCheckoutSession(db, baseInput(ctx, { marketCode: requireSyntheticMarketCode(marketCode) }));
+      });
+      await expectNoSessionResidue(ctx.userId);
+    } finally {
+      await db.market.deleteMany({ where: { code: marketCode } });
+    }
+  });
+
   it("생성 후 시장 가격이 바뀌어도 unitAmount는 불변이다", async () => {
     const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
     await addCart(ctx, variant, 1);
@@ -286,6 +300,31 @@ async function upsertMarket(
     update: { currency, shippableCountries, defaultLocale, isActive: true },
     create: { code, currency, shippableCountries, defaultLocale, isActive: true },
   });
+}
+
+function makeSyntheticMarketCode(): string {
+  return `ZZ-${randomUUID().slice(0, 8)}`;
+}
+
+async function createInactiveMarket(code: string): Promise<void> {
+  await db.market.create({
+    data: {
+      code,
+      currency: "KRW",
+      shippableCountries: [ShippingCountry.KR],
+      defaultLocale: "ko",
+      isActive: false,
+    },
+  });
+}
+
+function requireSyntheticMarketCode(code: string): MarketCode {
+  if (isSyntheticMarketCodeForTest(code)) return code;
+  throw new Error(`Invalid synthetic market code ${code}`);
+}
+
+function isSyntheticMarketCodeForTest(code: string): code is MarketCode {
+  return code.startsWith("ZZ-");
 }
 
 async function cleanup(context: TestContext): Promise<void> {
