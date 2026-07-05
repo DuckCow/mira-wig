@@ -18,9 +18,4 @@ export {
   type OrderErrorCode,
   type SnapshotData,
   type CheckoutAddressInput,
-  type CreateOrderResult,
-  type CheckoutItem,
-  type OrderView,
-  type OrderItemView,
-  type UserOrderListItem,
 } from "./types";
