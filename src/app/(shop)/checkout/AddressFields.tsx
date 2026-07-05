@@ -1,7 +1,7 @@
 "use client";
 
 import type { CountryFormConfig } from "@/lib/order/address-config";
-import type { CheckoutAddressInput } from "@/lib/order/types";
+import type { CheckoutShippingInput } from "@/lib/payment/session/types";
 import type { AddressKey } from "./types";
 
 // ── 단일 필드 ─────────────────────────────────────────────────
@@ -51,7 +51,7 @@ function Field({ id, label, value, onChange, onBlur, required, placeholder, erro
 // ── 주소 필드 패널 ────────────────────────────────────────────
 
 export interface AddressFieldsProps {
-  values: CheckoutAddressInput;
+  values: CheckoutShippingInput;
   onChange: (field: AddressKey, value: string) => void;
   onBlur: (field: AddressKey, domValue: string) => void;
   errors: Partial<Record<AddressKey, string>>;
@@ -157,7 +157,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
       <Field
         id="addressLine2"
         label="상세주소 (선택)"
-        value={values.addressLine2}
+        value={values.addressLine2 ?? ""}
         onChange={(v) => onChange("addressLine2", v)}
         onBlur={(v) => onBlur("addressLine2", v)}
       />
@@ -165,7 +165,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
       <Field
         id="memo"
         label="배송 메모 (선택)"
-        value={values.memo}
+        value={values.memo ?? ""}
         onChange={(v) => onChange("memo", v)}
         onBlur={(v) => onBlur("memo", v)}
         placeholder="경비실 맡겨주세요 등"

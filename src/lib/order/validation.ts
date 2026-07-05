@@ -4,9 +4,9 @@
 // ============================================================
 
 import type { CountryFormConfig } from "./address-config";
-import type { CheckoutAddressInput } from "./types";
+import type { CheckoutShippingInput } from "@/lib/payment/session/types";
 
-export type AddressFieldKey = keyof CheckoutAddressInput;
+export type AddressFieldKey = keyof CheckoutShippingInput;
 
 // 제출 시 검증할 필수 필드 목록 (국가무관 공통)
 export const REQUIRED_FIELDS: AddressFieldKey[] = [
@@ -62,14 +62,14 @@ export function getFieldError(
 }
 
 // ── FormData 수집 ─────────────────────────────────────────────
-// 제출 시점 DOM 실제 값을 기준으로 CheckoutAddressInput을 구성한다.
+// 제출 시점 DOM 실제 값을 기준으로 CheckoutShippingInput을 구성한다.
 // 브라우저 자동완성이 onChange를 건너뛰어 state가 비어 있어도 정확히 수집된다.
 // country는 마켓 설정에서 결정되므로 state 값을 그대로 사용한다(외부 주입).
 
 export function collectFromFormData(
   formData: FormData,
-  country: string,
-): CheckoutAddressInput {
+  country: CheckoutShippingInput["country"],
+): CheckoutShippingInput {
   function str(key: string): string {
     const v = formData.get(key);
     return typeof v === "string" ? v : "";
@@ -90,10 +90,10 @@ export function collectFromFormData(
 // ── 제출 전 전체 에러 유무 확인 ───────────────────────────────
 
 export function hasSubmitError(
-  address: CheckoutAddressInput,
+  address: CheckoutShippingInput,
   config: CountryFormConfig,
 ): boolean {
   return REQUIRED_FIELDS.some(
-    (f) => getFieldError(f, address[f], config) !== null,
+    (f) => getFieldError(f, address[f] ?? "", config) !== null,
   );
 }

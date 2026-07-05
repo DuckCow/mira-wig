@@ -1,3 +1,3 @@
-import type { CheckoutAddressInput } from "@/lib/order/types";
+import type { CheckoutShippingInput } from "@/lib/payment/session/types";
 
-export type AddressKey = keyof CheckoutAddressInput;
+export type AddressKey = keyof CheckoutShippingInput;

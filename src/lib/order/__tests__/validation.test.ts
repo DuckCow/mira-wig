@@ -134,7 +134,7 @@ function makeFormData(entries: Record<string, string>): FormData {
 // ── collectFromFormData ───────────────────────────────────────
 
 describe("collectFromFormData", () => {
-  it("FormData 값을 CheckoutAddressInput으로 수집한다", () => {
+  it("FormData 값을 CheckoutShippingInput으로 수집한다", () => {
     const fd = makeFormData({
       recipientName: "홍길동", phone: "010-1234-5678", postalCode: "12345",
       administrativeArea: "서울특별시", city: "강남구",
