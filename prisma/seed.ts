@@ -189,6 +189,16 @@ const styles: StyleDef[] = [
 
 async function main() {
   console.log("🗑️  기존 데이터 초기화...");
+  await prisma.manufacturingRequest.deleteMany();
+  await prisma.orderItem.deleteMany();
+  await prisma.orderShipping.deleteMany();
+  await prisma.order.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.checkoutSessionShipping.deleteMany();
+  await prisma.checkoutSessionLine.deleteMany();
+  await prisma.checkoutSession.deleteMany();
+  await prisma.paymentEvent.deleteMany();
+  await prisma.paymentOutbox.deleteMany();
   await prisma.cartItem.deleteMany();
   await prisma.wishlistItem.deleteMany();
   await prisma.review.deleteMany();
