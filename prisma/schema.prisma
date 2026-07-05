@@ -27,7 +27,6 @@ model User {
   accounts      Account[]
   sessions      Session[]
   fittings      Fitting[]
-  orders        Order[]
   reviews       Review[]
   wishlistItems WishlistItem[]
   cartItems     CartItem[]
@@ -79,17 +78,17 @@ model VerificationToken {
 // ============================================================
 
 model Market {
-  code               String   @id       // "KR" | "US" | "JP"
-  currency           String             // "KRW" | "USD" | "JPY"
-  shippableCountries String[]           // 배송 가능 국가 코드 목록
-  defaultLocale      String             // "ko" | "en" | "ja"
+  code               String   @id // "KR" | "US" | "JP"
+  currency           String // "KRW" | "USD" | "JPY"
+  shippableCountries String[] // 배송 가능 국가 코드 목록
+  defaultLocale      String // "ko" | "en" | "ja"
   isActive           Boolean  @default(true)
 
   // ── 향후 확장 슬롯 (이번에 구현하지 않음) ────────────────────
   // taxConfig     : 세율·세금 유형 (미국 sales tax, 일본 소비세 등)
   // paymentConfig : 결제 수단 목록 (토스/Stripe/PayPay 등)
-  taxConfig          Json?
-  paymentConfig      Json?
+  taxConfig     Json?
+  paymentConfig Json?
 
   variantPrices   VariantMarketPrice[]
   availableStyles WigStyleMarket[]
@@ -103,9 +102,9 @@ model Market {
 model VariantMarketPrice {
   variantId  String
   marketCode String
-  amount     Int      // 최소단위 정수 — float 절대 금지
+  amount     Int // 최소단위 정수 — float 절대 금지
 
-  variant WigVariant @relation(fields: [variantId],  references: [id], onDelete: Cascade)
+  variant WigVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
   market  Market     @relation(fields: [marketCode], references: [code], onDelete: Cascade)
 
   @@id([variantId, marketCode])
@@ -170,7 +169,6 @@ model WigVariant {
 
   wigStyle     WigStyle             @relation(fields: [wigStyleId], references: [id], onDelete: Cascade)
   cartItems    CartItem[]
-  orderItems   OrderItem[]
   marketPrices VariantMarketPrice[]
   fittings     Fitting[]
 }
@@ -180,9 +178,9 @@ model WigVariant {
 // ============================================================
 
 enum FittingStatus {
-  PENDING    // provider에 요청 완료, 결과 대기
-  SUCCEEDED  // 성공 — resultImageKey 저장됨
-  FAILED     // 실패 — failureReason 저장됨
+  PENDING // provider에 요청 완료, 결과 대기
+  SUCCEEDED // 성공 — resultImageKey 저장됨
+  FAILED // 실패 — failureReason 저장됨
 }
 
 /// 사용자 1회 피팅 시도. sourceImageKey/resultImageKey는 S3 key (URL 금지).
@@ -235,210 +233,6 @@ model WishlistItem {
   style WigStyle @relation(fields: [wigStyleId], references: [id])
 
   @@unique([userId, wigStyleId])
-}
-
-// ============================================================
-// 주문 (규칙 4-2: 가격 스냅샷 필수)
-// ============================================================
-
-/// 지원 국가. 주소 필드 해석 기준이 된다.
-enum ShippingCountry {
-  KR // 대한민국
-  US // 미국
-  JP // 일본
-}
-
-model Order {
-  id            String          @id @default(cuid())
-  userId        String
-  status        OrderStatus     @default(PENDING_PAYMENT)
-  /// 주문 당시 마켓 코드 — 변경 불가 동결값
-  marketCode    String          @default("KR")
-  /// 주문 당시 통화 코드 — 변경 불가 동결값
-  currency      String          @default("KRW")
-  /// 총 주문금액 = Σ(unitPrice × quantity) + shippingFee, 최소단위 정수, 동결
-  totalAmount   Int
-  /// 배송비, 최소단위 정수 (현재 0; 향후 배송비 정책 시 활성화)
-  shippingFee   Int             @default(0)
-  paymentId     String?
-  paymentMethod String?
-  paymentStatus PaymentStatus   @default(PENDING)
-
-  // ── 배송지 (국제 공통 구조) ─────────────────────────────────
-  // 필드별 한국(KR) / 미국(US) / 일본(JP) 대응 예시:
-  //
-  // recipientName   : 홍길동          / John Doe         / 山田太郎
-  // phone           : 010-1234-5678   / +1-555-123-4567  / 090-1234-5678
-  // country         : KR              / US               / JP
-  // postalCode      : 06234           / 90210            / 150-0001
-  // administrativeArea: 서울특별시    / California       / 東京都
-  // city            : 강남구          / Los Angeles      / 渋谷区
-  // addressLine1    : 테헤란로 152    / 123 Main St      / 道玄坂1-2-3
-  // addressLine2    : 7층 701호       / Apt 4B           / ○○ビル5F  (nullable)
-
-  recipientName      String
-  phone              String
-  country            ShippingCountry
-  postalCode         String
-  administrativeArea String?         // nullable — KR 단일 직할시 등 생략 가능
-  city               String
-  addressLine1       String
-  addressLine2       String?         // 상세주소 / apt·unit / 建物·部屋番号
-
-  memo          String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-
-  user     User        @relation(fields: [userId], references: [id])
-  items    OrderItem[]
-  payments Payment[]
-}
-
-enum OrderStatus {
-  PENDING_PAYMENT  // 주문 생성 완료, 결제 대기 — 초기 상태
-  PAID             // 결제 완료 — processPayment 성공 시 전이
-  PAYMENT_FAILED   // 결제 실패 — processPayment 실패 시 전이
-  PENDING          // 결제 확인 후 처리 대기 (관리자 확인 등)
-  CONFIRMED
-  MANUFACTURING
-  SHIPPED
-  DELIVERED
-  CANCELLED
-  REFUNDED
-}
-
-/// 주문 레벨 결제 상태 (Order.paymentStatus). 결제 시도별 기록은 Payment 모델 참조.
-enum PaymentStatus {
-  PENDING
-  PAID
-  FAILED
-  CANCELLED
-  REFUNDED
-  PARTIALLY_REFUNDED
-}
-
-/// 개별 결제 시도(Payment 레코드)의 상태
-enum PaymentAttemptStatus {
-  PENDING             // 시도 중
-  SUCCEEDED           // 성공
-  FAILED              // 실패
-  CANCELLED           // 결제 취소
-  REFUNDED            // 전액 환불
-  PARTIALLY_REFUNDED  // 부분 환불
-}
-
-/// 개별 취소·환불 조정 기록의 처리 상태
-enum PaymentAdjustmentStatus {
-  PENDING
-  SUCCEEDED
-  FAILED
-}
-
-model OrderItem {
-  id           String @id @default(cuid())
-  orderId      String
-  variantId    String
-  quantity     Int
-  unitPrice    Int
-  snapshotData Json
-
-  order   Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variant WigVariant @relation(fields: [variantId], references: [id])
-
-  manufacturingRequest ManufacturingRequest?
-}
-
-// ============================================================
-// 제조 지시 (MVP: 레코드만, UI는 나중)
-// ============================================================
-
-model ManufacturingRequest {
-  id          String   @id @default(cuid())
-  orderItemId String   @unique
-  status      String   @default("PENDING")
-  hairCadKey  String?
-  notes       String?  @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-}
-
-// ============================================================
-// 결제 시도 기록 (재시도·idempotency 지원)
-// ============================================================
-
-/// 한 주문에 여러 결제 시도를 기록한다(재시도 지원).
-/// idempotencyKey @unique 로 중복 처리를 방지한다.
-model Payment {
-  id                    String               @id @default(cuid())
-  orderId               String
-  /// 결제 공급자 식별자 — "mock" | "toss" 등
-  provider              String
-  /// 공급자가 발급한 거래 ID (mock은 null 가능)
-  providerTransactionId String?
-  /// 웹훅 검증용 공급자 secret (Toss Payment.secret 등). mock/기존 행은 null.
-  providerWebhookSecret String?
-  /// 클라이언트가 생성한 멱등성 키 — 중복 결제 방지
-  idempotencyKey        String               @unique
-  status                PaymentAttemptStatus @default(PENDING)
-  /// 주문 당시 동결된 금액 (최소단위 정수)
-  amount                Int
-  /// 주문 당시 동결된 통화 코드
-  currency              String
-  errorMessage          String?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-
-  order       Order               @relation(fields: [orderId], references: [id])
-  adjustments PaymentAdjustment[]
-}
-
-// ============================================================
-// 결제 취소·환불 기록 (부분 환불 누적 지원)
-// ============================================================
-
-/// PG 취소·환불 결과를 결제 시도별로 누적 기록한다.
-/// amount 합산으로 누적 환불액을 계산하고, refundableAmount는 PG가 보고한 잔액 스냅샷이다.
-model PaymentAdjustment {
-  id               String                  @id @default(cuid())
-  paymentId        String
-  /// PG가 발급한 취소·환불 거래 ID (Toss transactionKey, PayPal refund id)
-  providerRefundId String?
-  /// 취소·환불 금액. 최소단위 정수(KRW/JPY는 zero-decimal 그대로)
-  amount           Int
-  currency         String
-  reason           String
-  status           PaymentAdjustmentStatus @default(PENDING)
-  /// 취소·환불 요청 멱등성 키 — 중복 보상 방지
-  idempotencyKey   String                  @unique
-  /// PG가 응답한 남은 환불 가능 금액 스냅샷. 제공하지 않는 PG는 null.
-  refundableAmount Int?
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
-
-  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-
-  @@unique([paymentId, providerRefundId])
-  @@index([paymentId, status])
-}
-
-// ============================================================
-// 결제 웹훅 이벤트 기록 (재전송 멱등 처리)
-// ============================================================
-
-/// PG 웹훅 수신 이벤트를 기록한다. transmissionId @unique 로 재전송 중복 처리를 방지한다.
-model PaymentWebhookEvent {
-  id                    String    @id @default(cuid())
-  provider              String
-  transmissionId        String    @unique
-  eventType             String
-  orderId               String?
-  providerTransactionId String?
-  status                String?
-  receivedAt            DateTime  @default(now())
-  processedAt           DateTime?
-  raw                   Json?
 }
 
 // ============================================================
