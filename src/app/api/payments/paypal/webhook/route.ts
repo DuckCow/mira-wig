@@ -1,8 +1,13 @@
-const CUTOVER_MESSAGE = "legacy payment cutover — 신 코어 B4가 인수 예정";
+import { PaymentProvider } from "@prisma/client";
+import { db } from "@/lib/db";
+import { handleWebhook } from "@/lib/payment/webhook/handle";
 
 export const runtime = "nodejs";
 
-export function POST() {
-  console.warn(CUTOVER_MESSAGE);
-  return Response.json({ error: CUTOVER_MESSAGE }, { status: 503 });
+export async function POST(request: Request) {
+  const result = await handleWebhook(db, PaymentProvider.PAYPAL, {
+    body: await request.text(),
+    headers: request.headers,
+  });
+  return Response.json({ ok: result.status < 400, kind: result.kind }, { status: result.status });
 }
