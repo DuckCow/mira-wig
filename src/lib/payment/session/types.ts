@@ -1,4 +1,4 @@
-import type { CheckoutSessionStatus, ShippingCountry } from "@prisma/client";
+import type { ShippingCountry } from "@prisma/client";
 import type { MarketCode } from "@/lib/market/types";
 
 // 30 minutes keeps stale payment intents short-lived while leaving room for address/payment entry.
@@ -60,8 +60,14 @@ export interface ExpireStaleInput {
   limit?: number;
 }
 
+export type CheckoutSessionTransition =
+  | { from: "SUBMITTED"; to: "COMPLETED" }
+  | { from: "SUBMITTED"; to: "FAILED" }
+  | { from: "SUBMITTED"; to: "EXPIRED" }
+  | { from: "EXPIRED"; to: "COMPLETED" };
+
 export interface TransitionCheckoutSessionInput {
   sessionId: string;
-  to: CheckoutSessionStatus;
+  transition: CheckoutSessionTransition;
   now: Date;
 }

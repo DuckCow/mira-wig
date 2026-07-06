@@ -3,6 +3,7 @@ export {
   SESSION_TTL_MS,
   SessionException,
   type CheckoutShippingInput,
+  type CheckoutSessionTransition,
   type CreateCheckoutSessionInput,
   type CreateCheckoutSessionResult,
   type ExpireStaleInput,

@@ -14,6 +14,7 @@ import {
   SessionException,
   createCheckoutSession,
   expireStale,
+  isDefinedTransition,
   isUsable,
   transitionCheckoutSession,
   type CheckoutShippingInput,
@@ -213,7 +214,11 @@ describe("checkout session lifecycle", () => {
   it("스위퍼는 COMPLETED 세션을 EXPIRED 대상으로 삼지 않는다", async () => {
     const result = await createReadySession(ctx, new Date("2026-07-06T00:00:00.000Z"));
     const sweepNow = new Date(result.expiresAt.getTime() + 1);
-    await transitionCheckoutSession(db, { sessionId: result.sessionId, to: CheckoutSessionStatus.COMPLETED, now: sweepNow });
+    await transitionCheckoutSession(db, {
+      sessionId: result.sessionId,
+      transition: { from: "SUBMITTED", to: "COMPLETED" },
+      now: sweepNow,
+    });
 
     await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(0);
     await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
@@ -224,7 +229,11 @@ describe("checkout session lifecycle", () => {
     const now = new Date("2026-07-06T00:05:00.000Z");
 
     await expect(
-      transitionCheckoutSession(db, { sessionId: result.sessionId, to: CheckoutSessionStatus.COMPLETED, now }),
+      transitionCheckoutSession(db, {
+        sessionId: result.sessionId,
+        transition: { from: "SUBMITTED", to: "COMPLETED" },
+        now,
+      }),
     ).resolves.toBe(1);
     await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
   });
@@ -235,7 +244,7 @@ describe("checkout session lifecycle", () => {
     await expect(
       transitionCheckoutSession(db, {
         sessionId: result.sessionId,
-        to: CheckoutSessionStatus.FAILED,
+        transition: { from: "SUBMITTED", to: "FAILED" },
         now: new Date("2026-07-06T00:05:00.000Z"),
       }),
     ).resolves.toBe(1);
@@ -248,24 +257,38 @@ describe("checkout session lifecycle", () => {
     await expect(
       transitionCheckoutSession(db, {
         sessionId: result.sessionId,
-        to: CheckoutSessionStatus.EXPIRED,
+        transition: { from: "SUBMITTED", to: "EXPIRED" },
         now: new Date("2026-07-06T00:05:00.000Z"),
       }),
     ).resolves.toBe(1);
     await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.EXPIRED);
   });
 
-  it("미정의 전이는 count=0이고 상태를 바꾸지 않는다", async () => {
+  it("표 밖 전이는 미정의로 판정한다", () => {
+    expect(
+      isDefinedTransition({
+        from: CheckoutSessionStatus.EXPIRED,
+        to: CheckoutSessionStatus.FAILED,
+      }),
+    ).toBe(false);
+  });
+
+  it("EXPIRED에서 COMPLETED 늦은 유효 완료 전이는 count=1이다", async () => {
     const result = await createReadySession(ctx);
+    await transitionCheckoutSession(db, {
+      sessionId: result.sessionId,
+      transition: { from: "SUBMITTED", to: "EXPIRED" },
+      now: new Date("2026-07-06T00:04:00.000Z"),
+    });
 
     await expect(
       transitionCheckoutSession(db, {
         sessionId: result.sessionId,
-        to: CheckoutSessionStatus.OPEN,
+        transition: { from: "EXPIRED", to: "COMPLETED" },
         now: new Date("2026-07-06T00:05:00.000Z"),
       }),
-    ).resolves.toBe(0);
-    await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+    ).resolves.toBe(1);
+    await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
   });
 
   it("같은 유저의 SUBMITTED 세션 2개가 공존한다", async () => {
