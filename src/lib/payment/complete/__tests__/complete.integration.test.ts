@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAttemptStatus,
   PaymentProvider,
   ShippingCountry,
   WigCategory,
@@ -191,6 +192,39 @@ describe("payment completion core", () => {
     expect(result.kind).toBe("completed");
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("providerRef가 있는 pending payment도 providerPaymentKey null 조건으로 캡처 claim 된다", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const providerRef = `pref_${randomUUID()}`;
+    const payment = await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.MOCK,
+        status: PaymentAttemptStatus.INITIATED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        providerRef,
+        idempotencyKey: `pref_idem_${randomUUID()}`,
+      },
+      select: { id: true, providerPaymentKey: true },
+    });
+    const facts = captureFacts(ctx, session);
+
+    const result = await completeFromCapture(db, facts);
+    const captured = await db.payment.findUnique({
+      where: { id: payment.id },
+      select: { providerRef: true, providerPaymentKey: true, status: true },
+    });
+
+    expect(payment.providerPaymentKey).toBeNull();
+    expect(result.kind).toBe("completed");
+    expect(captured).toEqual({
+      providerRef,
+      providerPaymentKey: facts.providerPaymentKey,
+      status: PaymentAttemptStatus.SUCCEEDED,
+    });
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
   });
 
   it("같은 캡처 재실패는 void enqueue를 행 1개로 멱등 처리한다", async () => {

@@ -383,6 +383,7 @@ model Payment {
   status             PaymentAttemptStatus @default(INITIATED)
   amount             Int
   currency           String
+  providerRef        String?
   providerPaymentKey String?
   idempotencyKey     String               @unique
   errorCode          String?
@@ -392,6 +393,7 @@ model Payment {
   order              Order?
 
   @@unique([provider, providerPaymentKey])
+  @@index([provider, providerRef])
   @@index([checkoutSessionId, status])
 }
 
