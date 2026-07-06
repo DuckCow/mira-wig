@@ -2,9 +2,12 @@ import { randomUUID } from "crypto";
 import {
   FulfillmentType,
   PaymentAttemptStatus,
+  PaymentEventFailureStage,
   PaymentEventStatus,
   PaymentProvider,
+  Prisma,
   ShippingCountry,
+  WebhookIngressRejectionStage,
   WigCategory,
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,6 +18,7 @@ import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment
 import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
 import { handleWebhook } from "../handle";
+import { WEBHOOK_RAW_PREFIX_CHARS } from "../rejections";
 
 const B4_NOW = new Date("2026-08-02T00:00:00.000Z");
 const B4_RECEIVED_AT = new Date("2026-08-02T00:02:00.000Z");
@@ -99,7 +103,7 @@ describe("payment webhook core", () => {
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
   });
 
-  it("verification failure is stored as FAILED and returns non-2xx", async () => {
+  it("verification failure writes rejected inbound row without reserving PaymentEvent", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const payload = capturePayload(ctx, session);
 
@@ -110,8 +114,47 @@ describe("payment webhook core", () => {
 
     expect(result.kind).toBe("verifyFailed");
     expect(result.status).toBeGreaterThanOrEqual(400);
-    await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.FAILED);
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.stage).toBe(WebhookIngressRejectionStage.VERIFY);
+    expect(rejection.code).toBe("VERIFY.FAILED");
+    expect(rejection.candidateEventType).toBe(payload.eventType);
+    expect(rejection.rawBodyHash).toMatch(/^[a-f0-9]{64}$/);
     await expect(orderCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("metadata extraction failure writes rejected inbound row without PaymentEvent", async () => {
+    const transmissionId = trackTransmissionId(ctx);
+    const body = JSON.stringify({ transmissionId, kind: "capture" });
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, { body, receivedAt: B4_RECEIVED_AT });
+
+    expect(result.kind).toBe("verifyFailed");
+    expect(result.status).toBe(400);
+    await expect(eventCount(transmissionId)).resolves.toBe(0);
+    const rejection = await onlyRejection(transmissionId);
+    expect(rejection.stage).toBe(WebhookIngressRejectionStage.METADATA_EXTRACT);
+    expect(rejection.code).toBe("METADATA.MISSING_EVENT_TYPE");
+    expect(rejection.candidateEventType).toBeNull();
+  });
+
+  it("forged verify-fail candidate transmissionId does not block later genuine webhook", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    const raw = rawWebhook(payload);
+
+    const forged = await handleWebhook(db, PaymentProvider.TOSS, {
+      ...raw,
+      headers: { "x-mira-verify": "fail" },
+    });
+    const genuine = await handleWebhook(db, PaymentProvider.TOSS, raw);
+
+    expect(forged.kind).toBe("verifyFailed");
+    expect(forged.status).toBeGreaterThanOrEqual(400);
+    expect(genuine.status).toBe(200);
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(1);
+    await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
   });
 
   it("ignored webhook records IGNORED and has no completion side effect", async () => {
@@ -137,16 +180,142 @@ describe("payment webhook core", () => {
     await expect(outboxCount(PaymentProvider.TOSS, requiredProviderKey(payload))).resolves.toBe(1);
   });
 
-  it("retryable parse injection returns non-2xx and does not enqueue void", async () => {
+  it("authenticated parse failure records terminal FAILED(PARSE) and does not enqueue void", async () => {
     const session = await submitSessionWithOneLine(ctx);
-    const payload = capturePayload(ctx, session, { kind: "retryable" });
+    const payload = capturePayload(ctx, session);
+    const invalidPayload = { ...payload };
+    delete invalidPayload.amount;
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const result = await handleWebhook(db, PaymentProvider.TOSS, {
+      body: JSON.stringify(invalidPayload),
+      receivedAt: B4_RECEIVED_AT,
+    });
 
-    expect(result.kind).toBe("retryable");
-    expect(result.status).toBeGreaterThanOrEqual(500);
+    expect(result.kind).toBe("failed");
+    expect(result.status).toBe(200);
     await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.FAILED);
+    const event = await eventSnapshot(payload.transmissionId);
+    expect(event.failureStage).toBe(PaymentEventFailureStage.PARSE);
+    expect(event.failureCode).toBe("PARSE.FIELD_MISSING");
+    expect(event.attemptCount).toBe(0);
+    expect(event.lastAttemptAt).toBeNull();
     await expect(outboxCount(PaymentProvider.TOSS, requiredProviderKey(payload))).resolves.toBe(0);
+  });
+
+  it("retryable COMPLETE failure records RETRYABLE_FAILED and replay converges to PROCESSED", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const conflict = await createConflictingOrder(ctx, session);
+    const payload = capturePayload(ctx, session);
+    const raw = rawWebhook(payload);
+
+    const first = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    const retryable = await eventSnapshot(payload.transmissionId);
+    await deleteConflictingOrder(conflict);
+    const second = await handleWebhook(db, PaymentProvider.TOSS, raw);
+
+    expect(first.kind).toBe("retryable");
+    expect(first.status).toBe(500);
+    expect(retryable.status).toBe(PaymentEventStatus.RETRYABLE_FAILED);
+    expect(retryable.failureStage).toBe(PaymentEventFailureStage.COMPLETE);
+    expect(retryable.failureCode).toBe("COMPLETE.TRANSIENT_DB_ERROR");
+    expect(retryable.attemptCount).toBe(1);
+    expect(retryable.lastAttemptAt?.toISOString()).toBe(B4_RECEIVED_AT.toISOString());
+    expect(second.status).toBe(200);
+    const processed = await eventSnapshot(payload.transmissionId);
+    expect(processed.status).toBe(PaymentEventStatus.PROCESSED);
+    expect(processed.failureStage).toBeNull();
+    expect(processed.failureCode).toBeNull();
+    expect(processed.attemptCount).toBe(0);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("non-terminal duplicate with raw mismatch writes rejection and preserves trusted event", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const conflict = await createConflictingOrder(ctx, session);
+    const payload = capturePayload(ctx, session);
+    const raw = rawWebhook(payload);
+
+    const first = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    await deleteConflictingOrder(conflict);
+    const duplicateProviderKey = providerPaymentKeyFor(ctx);
+    const duplicateBody = JSON.stringify({
+      ...payload,
+      providerPaymentKey: duplicateProviderKey,
+      filler: "x".repeat(WEBHOOK_RAW_PREFIX_CHARS + 128),
+    });
+    const duplicate = await handleWebhook(db, PaymentProvider.TOSS, {
+      body: duplicateBody,
+      receivedAt: B4_RECEIVED_AT,
+    });
+
+    expect(first.kind).toBe("retryable");
+    expect(duplicate.kind).toBe("retryable");
+    expect(duplicate.status).toBe(400);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.stage).toBe(WebhookIngressRejectionStage.VERIFY);
+    expect(rejection.code).toBe("VERIFY.RAW_MISMATCH");
+    expect(rejection.candidateEventType).toBe(payload.eventType);
+    expect(rejection.rawBodyBytes).toBe(Buffer.byteLength(duplicateBody, "utf8"));
+    expect(rejection.rawBodyHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(rejection.rawBodyPrefix).toBe(duplicateBody.slice(0, WEBHOOK_RAW_PREFIX_CHARS));
+    expect(rejection.rawBodyPrefix).not.toBe(duplicateBody);
+    const trusted = await eventSnapshot(payload.transmissionId);
+    expect(trusted.status).toBe(PaymentEventStatus.RETRYABLE_FAILED);
+    expect(trusted.attemptCount).toBe(1);
+    expect(trusted.raw).toBe(raw.body);
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("simultaneous RETRYABLE_FAILED duplicate replay reprocesses without duplicate effects", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const conflict = await createConflictingOrder(ctx, session);
+    const payload = capturePayload(ctx, session);
+    const raw = rawWebhook(payload);
+
+    await handleWebhook(db, PaymentProvider.TOSS, raw);
+    await deleteConflictingOrder(conflict);
+
+    let firstReplay: Promise<Awaited<ReturnType<typeof handleWebhook>>> | undefined;
+    let secondReplay: Promise<Awaited<ReturnType<typeof handleWebhook>>> | undefined;
+    await db.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "CheckoutSession" WHERE "id" = ${session.sessionId} FOR UPDATE
+      `);
+      firstReplay = handleWebhook(db, PaymentProvider.TOSS, raw);
+      secondReplay = handleWebhook(db, PaymentProvider.TOSS, raw);
+      await delay(50);
+    });
+    if (!firstReplay || !secondReplay) throw new Error("Replay promises were not initialized");
+    const [firstResult, secondResult] = await Promise.all([firstReplay, secondReplay]);
+
+    expect(firstResult.status).toBe(200);
+    expect(secondResult.status).toBe(200);
+    await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("rejected inbound raw storage is bounded and excludes full raw body", async () => {
+    const transmissionId = trackTransmissionId(ctx);
+    const body = JSON.stringify({
+      transmissionId,
+      eventType: "PAYMENT.CAPTURED",
+      filler: "x".repeat(WEBHOOK_RAW_PREFIX_CHARS + 128),
+    });
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, {
+      body,
+      headers: { "x-mira-verify": "fail" },
+      receivedAt: B4_RECEIVED_AT,
+    });
+
+    expect(result.kind).toBe("verifyFailed");
+    const rejection = await onlyRejection(transmissionId);
+    expect(rejection.rawBodyBytes).toBe(Buffer.byteLength(body, "utf8"));
+    expect(rejection.rawBodyHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(rejection.rawBodyPrefix).toBe(body.slice(0, WEBHOOK_RAW_PREFIX_CHARS));
+    expect(rejection.rawBodyPrefix).not.toBe(body);
   });
 
   it("webhook-first capture creates a payment and completes the order", async () => {
@@ -283,6 +452,12 @@ function trackTransmission(context: TestContext, payload: MockWebhookPayload): M
   return payload;
 }
 
+function trackTransmissionId(context: TestContext): string {
+  const transmissionId = `b4_tx_${randomUUID()}`;
+  context.transmissionIds.push(transmissionId);
+  return transmissionId;
+}
+
 function providerPaymentKeyFor(context: TestContext): string {
   const key = `b4_capture_${randomUUID()}`;
   context.providerPaymentKeys.push(key);
@@ -302,6 +477,9 @@ function routeRequest(payload: MockWebhookPayload): Request {
 
 async function cleanup(context: TestContext): Promise<void> {
   await db.paymentEvent.deleteMany({ where: { transmissionId: { in: context.transmissionIds } } });
+  await db.webhookIngressRejection.deleteMany({
+    where: { candidateTransmissionId: { in: context.transmissionIds } },
+  });
   await deleteOutbox(context);
   await deleteOrders(context.userId);
   await deletePaymentsAndSessions(context.userId);
@@ -346,6 +524,45 @@ async function deleteVariants(context: TestContext): Promise<void> {
   }
 }
 
+async function createConflictingOrder(
+  context: TestContext,
+  session: Awaited<ReturnType<typeof submitSessionWithOneLine>>,
+): Promise<{ orderId: string; paymentId: string }> {
+  const providerPaymentKey = `b4_conflict_${randomUUID()}`;
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      providerPaymentKey,
+      idempotencyKey: `b4_conflict_${randomUUID()}`,
+    },
+    select: { id: true },
+  });
+  const order = await db.order.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      paymentId: payment.id,
+      userId: context.userId,
+      marketCode: MarketCode.KR,
+      currency: session.currency,
+      subtotalAmount: session.subtotalAmount,
+      shippingAmount: session.shippingAmount,
+      totalAmount: session.totalAmount,
+      paidAt: B4_RECEIVED_AT,
+    },
+    select: { id: true },
+  });
+  return { orderId: order.id, paymentId: payment.id };
+}
+
+async function deleteConflictingOrder(conflict: { orderId: string; paymentId: string }): Promise<void> {
+  await db.order.delete({ where: { id: conflict.orderId } });
+  await db.payment.delete({ where: { id: conflict.paymentId } });
+}
+
 function requiredProviderKey(payload: MockWebhookPayload): string {
   if (payload.providerPaymentKey) return payload.providerPaymentKey;
   throw new Error("Missing providerPaymentKey");
@@ -359,6 +576,41 @@ async function eventStatus(transmissionId: string): Promise<PaymentEventStatus> 
 
 async function eventCount(transmissionId: string): Promise<number> {
   return db.paymentEvent.count({ where: { transmissionId } });
+}
+
+async function eventSnapshot(transmissionId: string) {
+  const event = await db.paymentEvent.findFirst({
+    where: { transmissionId },
+    select: {
+      status: true,
+      raw: true,
+      attemptCount: true,
+      lastAttemptAt: true,
+      failureStage: true,
+      failureCode: true,
+      lastError: true,
+    },
+  });
+  if (!event) throw new Error(`Missing event ${transmissionId}`);
+  return event;
+}
+
+async function onlyRejection(transmissionId: string) {
+  const rejection = await db.webhookIngressRejection.findFirst({
+    where: { candidateTransmissionId: transmissionId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      stage: true,
+      code: true,
+      candidateEventType: true,
+      rawBodyBytes: true,
+      rawBodyHash: true,
+      rawBodyPrefix: true,
+      lastError: true,
+    },
+  });
+  if (!rejection) throw new Error(`Missing webhook rejection ${transmissionId}`);
+  return rejection;
 }
 
 async function paymentCount(checkoutSessionId: string): Promise<number> {
@@ -379,3 +631,6 @@ async function outboxCount(provider: PaymentProvider, providerPaymentKey: string
   return db.paymentOutbox.count({ where: { dedupKey: `void:${provider}:${providerPaymentKey}` } });
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

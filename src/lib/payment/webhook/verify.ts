@@ -9,6 +9,21 @@ export interface WebhookMetadata {
   eventType: string;
 }
 
+export type WebhookMetadataFailureCode =
+  | "METADATA.MISSING_TRANSMISSION_ID"
+  | "METADATA.MISSING_EVENT_TYPE"
+  | "METADATA.INVALID_JSON_FOR_METADATA";
+
+export type WebhookMetadataInspection =
+  | { kind: "ok"; metadata: WebhookMetadata }
+  | {
+      kind: "failed";
+      code: WebhookMetadataFailureCode;
+      message: string;
+      candidateTransmissionId?: string;
+      candidateEventType?: string;
+    };
+
 export type WebhookVerificationResult =
   | ({ ok: true } & WebhookMetadata)
   | ({ ok: false; reason: string } & WebhookMetadata);
@@ -28,10 +43,26 @@ export function createMockWebhookVerifier(options: MockWebhookVerifierOptions = 
 }
 
 export function readWebhookMetadata(raw: RawWebhookRequest): WebhookMetadata {
-  return {
-    transmissionId: requiredMetadata(raw, "transmissionId", "x-mira-transmission-id"),
-    eventType: requiredMetadata(raw, "eventType", "x-mira-event-type"),
-  };
+  const inspected = inspectWebhookMetadata(raw);
+  if (inspected.kind === "ok") return inspected.metadata;
+  throw new Error(inspected.message);
+}
+
+export function inspectWebhookMetadata(raw: RawWebhookRequest): WebhookMetadataInspection {
+  const parsed = parseBody(raw.body);
+  const candidateTransmissionId = readMetadataValue(raw, parsed.record, "transmissionId", "x-mira-transmission-id");
+  const candidateEventType = readMetadataValue(raw, parsed.record, "eventType", "x-mira-event-type");
+  if (!candidateTransmissionId) {
+    return metadataFailure(parsed, "METADATA.MISSING_TRANSMISSION_ID", "Webhook metadata missing: transmissionId", {
+      candidateEventType,
+    });
+  }
+  if (!candidateEventType) {
+    return metadataFailure(parsed, "METADATA.MISSING_EVENT_TYPE", "Webhook metadata missing: eventType", {
+      candidateTransmissionId,
+    });
+  }
+  return { kind: "ok", metadata: { transmissionId: candidateTransmissionId, eventType: candidateEventType } };
 }
 
 function mockVerify(
@@ -41,16 +72,6 @@ function mockVerify(
   const metadata = readWebhookMetadata(raw);
   if (mockMode(raw, options) === "fail") return { ok: false, reason: "Mock webhook verification failed", ...metadata };
   return { ok: true, ...metadata };
-}
-
-function requiredMetadata(
-  raw: RawWebhookRequest,
-  bodyKey: string,
-  headerKey: string,
-): string {
-  const value = readHeader(raw, headerKey) ?? stringField(parseBody(raw.body), bodyKey);
-  if (value) return value;
-  throw new Error(`Webhook metadata missing: ${bodyKey}`);
 }
 
 function mockMode(raw: RawWebhookRequest, options: MockWebhookVerifierOptions): MockWebhookVerifyMode {
@@ -66,13 +87,37 @@ function readHeader(raw: RawWebhookRequest, key: string): string | undefined {
   return raw.headers[key] ?? raw.headers[key.toLowerCase()];
 }
 
-function parseBody(body: string): Record<string, unknown> | null {
+function readMetadataValue(
+  raw: RawWebhookRequest,
+  record: Record<string, unknown> | null,
+  bodyKey: string,
+  headerKey: string,
+): string | undefined {
+  return readHeader(raw, headerKey) ?? stringField(record, bodyKey);
+}
+
+function metadataFailure(
+  parsed: ParseBodyResult,
+  fallbackCode: Exclude<WebhookMetadataFailureCode, "METADATA.INVALID_JSON_FOR_METADATA">,
+  fallbackMessage: string,
+  candidates: { candidateTransmissionId?: string; candidateEventType?: string },
+): WebhookMetadataInspection {
+  if (parsed.kind === "invalid-json") {
+    return { kind: "failed", code: "METADATA.INVALID_JSON_FOR_METADATA", message: parsed.message, ...candidates };
+  }
+  return { kind: "failed", code: fallbackCode, message: fallbackMessage, ...candidates };
+}
+
+type ParseBodyResult =
+  | { kind: "ok"; record: Record<string, unknown> | null }
+  | { kind: "invalid-json"; record: null; message: string };
+
+function parseBody(body: string): ParseBodyResult {
   try {
     const parsed: unknown = JSON.parse(body);
-    if (isRecord(parsed)) return parsed;
-    return null;
+    return { kind: "ok", record: isRecord(parsed) ? parsed : null };
   } catch {
-    return null;
+    return { kind: "invalid-json", record: null, message: "Webhook metadata body is invalid JSON" };
   }
 }
 

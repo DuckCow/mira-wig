@@ -298,9 +298,20 @@ enum PaymentEventSource {
 
 enum PaymentEventStatus {
   RECEIVED
+  RETRYABLE_FAILED
   PROCESSED
   IGNORED
   FAILED
+}
+
+enum PaymentEventFailureStage {
+  PARSE
+  COMPLETE
+}
+
+enum WebhookIngressRejectionStage {
+  METADATA_EXTRACT
+  VERIFY
 }
 
 enum ShippingCountry {
@@ -467,7 +478,7 @@ model PaymentOutbox {
 }
 
 model PaymentEvent {
-  id                 String             @id @default(cuid())
+  id                 String                    @id @default(cuid())
   provider           PaymentProvider
   source             PaymentEventSource
   transmissionId     String?
@@ -475,13 +486,35 @@ model PaymentEvent {
   checkoutSessionId  String?
   providerPaymentKey String?
   raw                Json
-  status             PaymentEventStatus @default(RECEIVED)
-  receivedAt         DateTime           @default(now())
+  status             PaymentEventStatus        @default(RECEIVED)
+  receivedAt         DateTime                  @default(now())
   processedAt        DateTime?
+  attemptCount       Int                       @default(0)
+  lastAttemptAt      DateTime?
+  failureStage       PaymentEventFailureStage?
+  failureCode        String?
   lastError          String?
 
   @@unique([provider, transmissionId])
   @@index([checkoutSessionId])
+}
+
+model WebhookIngressRejection {
+  id                      String                       @id @default(cuid())
+  provider                PaymentProvider
+  stage                   WebhookIngressRejectionStage
+  code                    String
+  candidateTransmissionId String?
+  candidateEventType      String?
+  rawBodyBytes            Int
+  rawBodyHash             String?
+  rawBodyPrefix           String?                      @db.Text
+  lastError               String?
+  receivedAt              DateTime                     @default(now())
+  createdAt               DateTime                     @default(now())
+
+  @@index([provider, receivedAt])
+  @@index([candidateTransmissionId])
 }
 
 // ============================================================

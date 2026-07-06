@@ -1,4 +1,5 @@
 import {
+  PaymentEventFailureStage,
   PaymentEventSource,
   PaymentEventStatus,
   Prisma,
@@ -7,21 +8,22 @@ import type { PaymentEvent, PaymentProvider } from "@prisma/client";
 import type { WebhookMetadata } from "./verify";
 
 type EventClient = Pick<Prisma.TransactionClient, "paymentEvent">;
-type RecordedEvent = Pick<PaymentEvent, "id" | "status" | "transmissionId">;
+
+export type RecordedEvent = Pick<
+  PaymentEvent,
+  | "id"
+  | "status"
+  | "transmissionId"
+  | "eventType"
+  | "raw"
+  | "attemptCount"
+  | "lastAttemptAt"
+>;
 
 export interface RecordWebhookEventInput extends WebhookMetadata {
   provider: PaymentProvider;
   rawBody: string;
   receivedAt: Date;
-}
-
-export interface MarkWebhookEventInput {
-  eventId: string;
-  status: PaymentEventStatus;
-  processedAt: Date;
-  checkoutSessionId?: string;
-  providerPaymentKey?: string;
-  lastError?: string;
 }
 
 export type RecordWebhookEventResult =
@@ -41,14 +43,93 @@ export async function recordEvent(
   }
 }
 
-export async function markEvent(
+export async function markProcessed(
   client: EventClient,
-  input: MarkWebhookEventInput,
+  input: {
+    eventId: string;
+    processedAt: Date;
+    checkoutSessionId: string;
+    providerPaymentKey: string;
+  },
 ): Promise<void> {
   await client.paymentEvent.update({
     where: { id: input.eventId },
-    data: markData(input),
+    data: {
+      status: PaymentEventStatus.PROCESSED,
+      processedAt: input.processedAt,
+      checkoutSessionId: input.checkoutSessionId,
+      providerPaymentKey: input.providerPaymentKey,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      failureStage: null,
+      failureCode: null,
+      lastError: null,
+    },
   });
+}
+
+export async function markIgnored(
+  client: EventClient,
+  input: { eventId: string; processedAt: Date; reason: string },
+): Promise<void> {
+  await client.paymentEvent.update({
+    where: { id: input.eventId },
+    data: {
+      status: PaymentEventStatus.IGNORED,
+      processedAt: input.processedAt,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      failureStage: null,
+      failureCode: null,
+      lastError: input.reason,
+    },
+  });
+}
+
+export async function markParseFailed(
+  client: EventClient,
+  input: { eventId: string; failedAt: Date; code: string; message: string },
+): Promise<void> {
+  await client.paymentEvent.update({
+    where: { id: input.eventId },
+    data: {
+      status: PaymentEventStatus.FAILED,
+      processedAt: input.failedAt,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      failureStage: PaymentEventFailureStage.PARSE,
+      failureCode: input.code,
+      lastError: input.message,
+    },
+  });
+}
+
+export async function markRetryableCompleteFailed(
+  client: EventClient,
+  input: { eventId: string; attemptedAt: Date; code: string; message: string },
+): Promise<void> {
+  await client.paymentEvent.update({
+    where: { id: input.eventId },
+    data: {
+      status: PaymentEventStatus.RETRYABLE_FAILED,
+      processedAt: null,
+      attemptCount: { increment: 1 },
+      lastAttemptAt: input.attemptedAt,
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: input.code,
+      lastError: input.message,
+    },
+  });
+}
+
+export function isTerminalEventStatus(status: PaymentEventStatus): boolean {
+  return status === PaymentEventStatus.PROCESSED
+    || status === PaymentEventStatus.IGNORED
+    || status === PaymentEventStatus.FAILED;
+}
+
+export function rawBodyFromEvent(event: Pick<RecordedEvent, "raw">): string | null {
+  return typeof event.raw === "string" ? event.raw : null;
 }
 
 function eventCreateData(input: RecordWebhookEventInput): Prisma.PaymentEventCreateInput {
@@ -59,16 +140,6 @@ function eventCreateData(input: RecordWebhookEventInput): Prisma.PaymentEventCre
     eventType: input.eventType,
     raw: input.rawBody,
     receivedAt: input.receivedAt,
-  };
-}
-
-function markData(input: MarkWebhookEventInput): Prisma.PaymentEventUpdateInput {
-  return {
-    status: input.status,
-    processedAt: input.processedAt,
-    checkoutSessionId: input.checkoutSessionId,
-    providerPaymentKey: input.providerPaymentKey,
-    lastError: input.lastError,
   };
 }
 
@@ -83,10 +154,17 @@ async function findExisting(
 }
 
 function eventSelect(): Prisma.PaymentEventSelect {
-  return { id: true, status: true, transmissionId: true };
+  return {
+    id: true,
+    status: true,
+    transmissionId: true,
+    eventType: true,
+    raw: true,
+    attemptCount: true,
+    lastAttemptAt: true,
+  };
 }
 
 function isUniqueConflict(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
 }
-
