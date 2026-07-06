@@ -9,9 +9,18 @@ export interface PaymentInitiateInput {
   idempotencyKey: string;
 }
 
-export type PaymentInitiateResult =
-  | { kind: "ready" }
-  | { kind: "redirect"; approveUrl?: string; providerRef?: string };
+export interface PaymentInitiateReady {
+  kind: "ready";
+  providerRef?: string;
+}
+
+export interface PaymentInitiateRedirect {
+  kind: "redirect";
+  approveUrl: string;
+  providerRef?: string;
+}
+
+export type PaymentInitiateResult = PaymentInitiateReady | PaymentInitiateRedirect;
 
 export interface PaymentConfirmInput {
   checkoutSessionId: string;
@@ -33,4 +42,3 @@ export interface PaymentProvider {
   initiate(input: PaymentInitiateInput): Promise<PaymentInitiateResult>;
   confirm(input: PaymentConfirmInput): Promise<PaymentConfirmFacts>;
 }
-

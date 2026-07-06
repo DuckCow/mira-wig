@@ -16,7 +16,10 @@ import {
   resolveProviderForPayment,
   type PaymentMethod,
 } from "@/lib/payment/providers/routing";
-import type { PaymentProvider as PaymentProviderPort } from "@/lib/payment/providers/types";
+import type {
+  PaymentInitiateResult,
+  PaymentProvider as PaymentProviderPort,
+} from "@/lib/payment/providers/types";
 
 type ActionSession = Pick<CheckoutSession, "id" | "userId" | "marketCode" | "totalAmount" | "currency">;
 type PaymentActionFailure = { success: false; errorCode: PaymentActionErrorCode; error: string; retryable: boolean };
@@ -154,7 +157,7 @@ function translateCompletion(result: CompleteFromCaptureResult, provider: Paymen
 function initiateSuccess(
   paymentId: string,
   provider: PaymentProvider,
-  result: { kind: "ready" } | { kind: "redirect"; approveUrl?: string },
+  result: PaymentInitiateResult,
 ): PaymentActionResult {
   if (result.kind === "redirect") return { success: true, paymentId, provider, redirectTo: result.approveUrl };
   return { success: true, paymentId, provider };

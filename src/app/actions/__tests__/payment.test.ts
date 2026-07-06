@@ -12,10 +12,17 @@ import type { Session } from "next-auth";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
+import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
+import { resolveProvider } from "@/lib/payment/providers/resolve";
 import { NoEligibleProviderError, providerForMarket } from "@/lib/payment/providers/routing";
+import type {
+  PaymentInitiateResult,
+  PaymentProvider as PaymentProviderPort,
+} from "@/lib/payment/providers/types";
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 vi.mock("@/lib/market/resolve", () => ({ getCurrentMarketCode: vi.fn() }));
+vi.mock("@/lib/payment/providers/resolve", () => ({ resolveProvider: vi.fn() }));
 
 import { getCurrentMarketCode } from "@/lib/market/resolve";
 import { getSession } from "@/lib/session";
@@ -23,6 +30,7 @@ import { confirmPayment, initiatePayment } from "../payment";
 
 const mockGetSession = vi.mocked(getSession);
 const mockGetCurrentMarketCode = vi.mocked(getCurrentMarketCode);
+const mockResolveProvider = vi.mocked(resolveProvider);
 const ORIGINAL_MOCK_MODE = process.env.PAYMENT_MOCK_MODE;
 
 interface TestContext {
@@ -49,6 +57,7 @@ describe("payment actions", () => {
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
     mockGetSession.mockResolvedValue(makeSession(ctx.userId));
     mockGetCurrentMarketCode.mockResolvedValue(MarketCode.KR);
+    mockResolveProvider.mockImplementation((providerCode) => createMockPaymentProvider(providerCode));
   });
 
   afterEach(async () => {
@@ -69,6 +78,24 @@ describe("payment actions", () => {
     const payment = await onlyPayment(session.sessionId);
     expect(payment.status).toBe(PaymentAttemptStatus.INITIATED);
     expect(payment.idempotencyKey).toMatch(`initiate:${session.sessionId}:`);
+  });
+
+  it("initiate action does not expose providerRef when provider returns one", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const providerRef = `action_pref_${randomUUID()}`;
+    mockResolveProvider.mockReturnValueOnce(fakeActionProvider({ kind: "ready", providerRef }));
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result).not.toHaveProperty("providerRef");
+      expect(result.provider).toBe(PaymentProvider.TOSS);
+      expect(result.paymentId).toBeTruthy();
+    }
+    const payment = await onlyPayment(session.sessionId);
+    expect(payment.providerRef).toBe(providerRef);
+    expect(payment.providerPaymentKey).toBeNull();
   });
 
   it("initiate rejects expired and other-user sessions without payment residue", async () => {
@@ -252,6 +279,11 @@ function providerPaymentKey(context: TestContext): string {
   const key = `b3_capture_${randomUUID()}`;
   context.providerPaymentKeys.push(key);
   return key;
+}
+
+function fakeActionProvider(initiateResult: PaymentInitiateResult): PaymentProviderPort {
+  const provider = createMockPaymentProvider(PaymentProvider.TOSS);
+  return { ...provider, initiate: () => Promise.resolve(initiateResult) };
 }
 
 async function cleanup(context: TestContext): Promise<void> {
