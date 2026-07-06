@@ -9,7 +9,9 @@ import {
   type DispatchPendingResult,
   type OutboxClient,
   type OutboxHandler,
+  type OutboxHandlerResult,
   type OutboxJob,
+  type OutboxTerminalFailed,
 } from "./types";
 
 type ProcessOutcome = "skipped" | "succeeded" | "retried" | "terminalFailed";
@@ -100,12 +102,31 @@ async function processJob(
   if (!claimed) return "skipped";
 
   try {
-    await handler(job.payload, { id: job.id, topic: job.topic, dedupKey: job.dedupKey, attempt: job.attempts + 1, now });
+    const outcome = await handler(job.payload, {
+      id: job.id,
+      topic: job.topic,
+      dedupKey: job.dedupKey,
+      attempt: job.attempts + 1,
+      now,
+    });
+    if (isTerminalFailed(outcome)) {
+      await markTerminalFailed(client, job, outcome.reason);
+      return "terminalFailed";
+    }
     await markDone(client, job.id, now);
     return "succeeded";
   } catch (e) {
     return markFailed(client, job, now, errorToMessage(e));
   }
+}
+
+function isTerminalFailed(outcome: OutboxHandlerResult): outcome is OutboxTerminalFailed {
+  if (!isRecord(outcome)) return false;
+  return outcome.outcome === "terminal_failed" && typeof outcome.reason === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function claimJob(client: OutboxClient, id: string): Promise<boolean> {
@@ -120,6 +141,17 @@ async function markDone(client: OutboxClient, id: string, now: Date): Promise<vo
   await client.paymentOutbox.update({
     where: { id },
     data: { status: OutboxStatus.DONE, processedAt: now, nextAttemptAt: null, lastError: null },
+  });
+}
+
+async function markTerminalFailed(
+  client: OutboxClient,
+  job: OutboxJob,
+  lastError: string,
+): Promise<void> {
+  await client.paymentOutbox.update({
+    where: { id: job.id },
+    data: { status: OutboxStatus.FAILED, attempts: job.attempts + 1, nextAttemptAt: null, lastError },
   });
 }
 

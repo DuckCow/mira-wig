@@ -58,6 +58,40 @@ describe("payment outbox skeleton", () => {
     expect(row.processedAt?.getTime()).toBe(now.getTime());
   });
 
+  it("핸들러 결과는 undefined, terminal_failed, throw를 구분한다", async () => {
+    const topic = makeTopic("outcomes", topics);
+    const now = new Date("2026-07-06T00:00:30.000Z");
+    const doneId = await createOutcomeJob(topic, "done");
+    const terminalId = await createOutcomeJob(topic, "terminal");
+    const throwId = await createOutcomeJob(topic, "throw");
+
+    const registry: OutboxRegistry = {
+      [topic]: (payload) => {
+        const kind = outcomeKind(payload);
+        if (kind === "terminal") return Promise.resolve({ outcome: "terminal_failed", reason: "terminal outcome" });
+        if (kind === "throw") return Promise.reject(new Error("retry outcome"));
+        return Promise.resolve();
+      },
+    };
+
+    const result = await dispatchPending({ client: db, registry, now, limit: 3 });
+    const rows = await db.paymentOutbox.findMany({ where: { id: { in: [doneId, terminalId, throwId] } } });
+    const done = requireRow(rows, doneId);
+    const terminal = requireRow(rows, terminalId);
+    const thrown = requireRow(rows, throwId);
+
+    expect(result).toMatchObject({ claimed: 3, succeeded: 1, retried: 1, terminalFailed: 1 });
+    expect(done.status).toBe(OutboxStatus.DONE);
+    expect(terminal.status).toBe(OutboxStatus.FAILED);
+    expect(terminal.attempts).toBe(1);
+    expect(terminal.nextAttemptAt).toBeNull();
+    expect(terminal.lastError).toBe("terminal outcome");
+    expect(thrown.status).toBe(OutboxStatus.PENDING);
+    expect(thrown.attempts).toBe(1);
+    expect(thrown.nextAttemptAt).not.toBeNull();
+    expect(thrown.lastError).toContain("retry outcome");
+  });
+
   it("실패는 백오프 재시도 후 maxAttempts에서 FAILED로 종료한다", async () => {
     const topic = makeTopic("failure", topics);
     const registry: OutboxRegistry = {
@@ -175,9 +209,33 @@ async function enqueueCommitted(topic: string, dedupKey?: string): Promise<void>
   await db.$transaction((tx) => enqueue(tx, { topic, payload: { topic }, dedupKey }));
 }
 
+async function createOutcomeJob(topic: string, kind: OutcomeKind): Promise<string> {
+  const job = await db.paymentOutbox.create({ data: { topic, payload: { kind } }, select: { id: true } });
+  return job.id;
+}
+
 async function findOutbox(topic: string) {
   const row = await db.paymentOutbox.findFirst({ where: { topic } });
   if (!row) throw new Error(`Missing outbox row for topic ${topic}`);
+  return row;
+}
+
+type OutcomeKind = "done" | "terminal" | "throw";
+
+function outcomeKind(payload: unknown): OutcomeKind {
+  if (!isRecord(payload)) throw new Error("Expected object payload");
+  const kind = payload.kind;
+  if (kind === "done" || kind === "terminal" || kind === "throw") return kind;
+  throw new Error("Unknown outcome payload");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireRow<T extends { id: string }>(rows: T[], id: string): T {
+  const row = rows.find((candidate) => candidate.id === id);
+  if (!row) throw new Error(`Missing outbox row ${id}`);
   return row;
 }
 

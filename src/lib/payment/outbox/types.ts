@@ -21,10 +21,17 @@ export interface OutboxHandlerContext {
   now: Date;
 }
 
+export interface OutboxTerminalFailed {
+  outcome: "terminal_failed";
+  reason: string;
+}
+
+export type OutboxHandlerResult = void | OutboxTerminalFailed;
+
 export type OutboxHandler = (
   payload: Prisma.JsonValue,
   ctx: OutboxHandlerContext,
-) => Promise<void>;
+) => Promise<OutboxHandlerResult>;
 
 export type OutboxRegistry = Readonly<Record<string, OutboxHandler>>;
 
