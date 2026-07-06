@@ -12,7 +12,7 @@ import type { Session } from "next-auth";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
-import { providerForMarket } from "@/lib/payment/providers/routing";
+import { NoEligibleProviderError, providerForMarket } from "@/lib/payment/providers/routing";
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 vi.mock("@/lib/market/resolve", () => ({ getCurrentMarketCode: vi.fn() }));
@@ -146,11 +146,11 @@ describe("payment actions", () => {
     await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
   });
 
-  it("routes markets to their configured payment provider", () => {
+  it("keeps legacy market routing on configured sandbox defaults", () => {
     expect(providerForMarket(MarketCode.KR)).toBe(PaymentProvider.TOSS);
     expect(providerForMarket(MarketCode.US)).toBe(PaymentProvider.PAYPAL);
     expect(providerForMarket(MarketCode.JP)).toBe(PaymentProvider.PAYPAL);
-    expect(providerForMarket("ZZ")).toBe(PaymentProvider.MOCK);
+    expect(() => providerForMarket("ZZ")).toThrow(NoEligibleProviderError);
   });
 });
 
@@ -330,4 +330,3 @@ function restoreMockMode(): void {
   }
   process.env.PAYMENT_MOCK_MODE = ORIGINAL_MOCK_MODE;
 }
-
