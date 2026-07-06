@@ -8,7 +8,7 @@ import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
-import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
+import { resolveProvider } from "@/lib/payment/providers/resolve";
 import { providerForMarket } from "@/lib/payment/providers/routing";
 import type { PaymentProvider as PaymentProviderPort } from "@/lib/payment/providers/types";
 
@@ -41,7 +41,7 @@ export async function initiatePayment(checkoutSessionId: string): Promise<Paymen
   const boundary = await resolveBoundary(checkoutSessionId);
   if (!boundary.success) return boundary;
 
-  const provider = createMockPaymentProvider(boundary.provider);
+  const provider = resolveProvider(boundary.provider);
   try {
     const result = await initiatePaymentAttempt(db, {
       sessionId: checkoutSessionId,
@@ -66,7 +66,7 @@ export async function confirmPayment(
   if (!boundary.success) return boundary;
   if (parsed !== boundary.provider) return actionError("PROVIDER_MISMATCH", "Payment provider does not match market.", false);
 
-  const provider = createMockPaymentProvider(parsed);
+  const provider = resolveProvider(parsed);
   const facts = await confirmWithProvider(provider, boundary.session, input);
   if (!facts.success) return facts;
   return completeConfirmedPayment(facts.captureFacts);
