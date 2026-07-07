@@ -247,6 +247,7 @@ class FakeWebhookParser implements ProviderWebhookParser {
       facts: {
         checkoutSessionId: "checkout_123",
         provider: input.provider,
+        mode: PaymentMode.SANDBOX,
         providerPaymentKey: "provider_payment_final_123",
         amount: 12_000,
         currency: "KRW",

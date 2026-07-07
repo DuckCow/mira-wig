@@ -1,6 +1,7 @@
 import { PaymentAttemptStatus, Prisma } from "@prisma/client";
 import type { PaymentProvider, PrismaClient } from "@prisma/client";
 import type { CaptureFacts } from "@/lib/payment/complete";
+import type { PaymentMode } from "@/lib/payment/providers/routing";
 import type {
   NormalizedProviderConfirmResult,
   ProviderConfirmFailed,
@@ -36,6 +37,7 @@ interface ProviderConfirmBridgeInput {
   checkoutSessionId: string;
   paymentId: string;
   provider: PaymentProvider;
+  mode: PaymentMode;
   result: PaymentConfirmResult;
   receivedAt: Date;
 }
@@ -71,6 +73,7 @@ function legacySuccess(
       ...facts,
       checkoutSessionId: input.checkoutSessionId,
       provider: input.provider,
+      mode: input.mode,
       receivedAt: input.receivedAt,
     },
   };
@@ -85,6 +88,7 @@ function normalizedSuccess(
     captureFacts: {
       checkoutSessionId: input.checkoutSessionId,
       provider: input.provider,
+      mode: input.mode,
       providerPaymentKey: result.providerPaymentKey,
       amount: result.amountMinor,
       currency: result.currency,

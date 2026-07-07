@@ -8,6 +8,7 @@ import {
   PaymentEventFailureStage,
   PaymentEventSource,
   PaymentEventStatus,
+  PaymentMode,
   PaymentProvider,
   ShippingCountry,
   WebhookIngressRejectionStage,
@@ -48,6 +49,7 @@ interface PaymentInput {
   providerRef?: string | null;
   providerConfirmIdempotencyKey?: string | null;
   providerPaymentKey?: string | null;
+  mode?: PaymentMode;
   errorCode?: string | null;
   errorMessage?: string | null;
   updatedAt?: Date;
@@ -77,6 +79,7 @@ describe("payment reconciliation C2-v0", () => {
     const recentFinding = findingFor(findings, "SUCCEEDED_PAYMENT_WITHOUT_ORDER", "payment", recent.id);
     const staleFinding = findingFor(findings, "SUCCEEDED_PAYMENT_WITHOUT_ORDER", "payment", stale.id);
     expect(recentFinding.recommendedAction).toBe("NORMAL_IN_FLIGHT");
+    expect(recentFinding.details.paymentMode).toBe(PaymentMode.SANDBOX);
     expect(recentFinding.details.voidPathStatus).toBe("absent");
     expect(staleFinding.recommendedAction).toBe("AUTO_REENTRY_CANDIDATE");
     expect(staleFinding.details.voidPathStatus).toBe("absent");
@@ -417,6 +420,7 @@ async function createPayment(context: TestContext, sessionId: string, input: Pay
     data: {
       checkoutSessionId: sessionId,
       provider: PaymentProvider.TOSS,
+      mode: input.mode ?? PaymentMode.SANDBOX,
       status: input.status ?? PaymentAttemptStatus.SUCCEEDED,
       amount: input.amount ?? 12_000,
       currency: input.currency ?? "KRW",

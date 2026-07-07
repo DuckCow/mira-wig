@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { PaymentAttemptStatus } from "@prisma/client";
 import type { CheckoutSession, Payment, Prisma, PrismaClient } from "@prisma/client";
 import { isUsable } from "@/lib/payment/session";
+import type { PaymentMode } from "@/lib/payment/providers/routing";
 import type {
   PaymentInitiateRedirect,
   PaymentInitiateResult,
@@ -10,7 +11,7 @@ import type {
 
 type InitiateTx = Prisma.TransactionClient;
 type InitiateSession = Pick<CheckoutSession, "id" | "userId" | "status" | "expiresAt" | "totalAmount" | "currency">;
-type InitiatedPayment = Pick<Payment, "id" | "provider" | "status" | "amount" | "currency" | "idempotencyKey">;
+type InitiatedPayment = Pick<Payment, "id" | "provider" | "mode" | "status" | "amount" | "currency" | "idempotencyKey">;
 
 export type PaymentInitiateErrorCode = "SESSION_UNAVAILABLE" | "SESSION_NOT_USABLE";
 
@@ -28,6 +29,7 @@ export interface InitiatePaymentAttemptInput {
   sessionId: string;
   userId: string;
   provider: PaymentProvider;
+  mode: PaymentMode;
   now?: Date;
 }
 
@@ -64,6 +66,7 @@ async function createInitiatedPayment(
     data: {
       checkoutSessionId: session.id,
       provider: input.provider.code,
+      mode: input.mode,
       status: PaymentAttemptStatus.INITIATED,
       amount: session.totalAmount,
       currency: session.currency,
@@ -155,5 +158,5 @@ function sessionSelect(): Prisma.CheckoutSessionSelect {
 }
 
 function paymentSelect(): Prisma.PaymentSelect {
-  return { id: true, provider: true, status: true, amount: true, currency: true, idempotencyKey: true };
+  return { id: true, provider: true, mode: true, status: true, amount: true, currency: true, idempotencyKey: true };
 }

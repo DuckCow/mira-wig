@@ -1,8 +1,23 @@
 import { PaymentAttemptStatus, Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
-import type { CaptureFacts, CapturedPayment } from "./types";
+import type { CaptureFacts, CapturedPayment, CompletionTerminalFailure } from "./types";
 
 type CaptureTx = Prisma.TransactionClient;
+type ModeGuardPayment = Pick<CapturedPayment, "id" | "mode" | "status">;
+
+export class PaymentCaptureModeMismatchError extends Error {
+  constructor(readonly failure: CompletionTerminalFailure) {
+    super(failure.message);
+    this.name = "PaymentCaptureModeMismatchError";
+  }
+}
+
+export class PaymentCaptureClaimConflictError extends Error {
+  constructor() {
+    super("Pending payment capture claim conflict");
+    this.name = "PaymentCaptureClaimConflictError";
+  }
+}
 
 export async function recordCapture(
   client: PrismaClient,
@@ -11,7 +26,9 @@ export async function recordCapture(
   try {
     return await client.$transaction((tx) => recordCaptureTx(tx, facts));
   } catch (e) {
-    if (isUniqueConflict(e)) return requirePaymentByProviderKey(client, facts);
+    if (isUniqueConflict(e) || e instanceof PaymentCaptureClaimConflictError) {
+      return requireRecoverablePaymentByProviderKey(client, facts);
+    }
     throw e;
   }
 }
@@ -21,15 +38,24 @@ async function recordCaptureTx(
   facts: CaptureFacts,
 ): Promise<CapturedPayment> {
   const existing = await findPaymentByProviderKey(tx, facts);
-  if (existing) return updateExistingIfPending(tx, existing.id, facts);
+  if (existing) {
+    guardPendingCaptureMode(existing, facts);
+    return updateExistingIfPending(tx, existing.id, facts);
+  }
 
-  const claimed = await claimPendingAttempt(tx, facts);
-  if (claimed) return claimed;
+  const pending = await findPendingAttempt(tx, facts);
+  if (pending) {
+    guardPendingCaptureMode(pending, facts);
+    const claimed = await claimPendingAttempt(tx, facts, pending.id);
+    if (claimed) return claimed;
+    throw new PaymentCaptureClaimConflictError();
+  }
 
   return tx.payment.create({
     data: {
       checkoutSessionId: facts.checkoutSessionId,
       provider: facts.provider,
+      mode: facts.mode,
       status: PaymentAttemptStatus.SUCCEEDED,
       amount: facts.amount,
       currency: facts.currency,
@@ -46,7 +72,7 @@ async function updateExistingIfPending(
   facts: CaptureFacts,
 ): Promise<CapturedPayment> {
   await tx.payment.updateMany({
-    where: { id, status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] } },
+    where: { id, mode: facts.mode, status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] } },
     data: captureUpdateData(facts),
   });
   return requirePaymentById(tx, id);
@@ -55,29 +81,38 @@ async function updateExistingIfPending(
 async function claimPendingAttempt(
   tx: CaptureTx,
   facts: CaptureFacts,
+  paymentId: string,
 ): Promise<CapturedPayment | null> {
-  const pending = await tx.payment.findFirst({
-    where: pendingAttemptWhere(facts),
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  if (!pending) return null;
-
   const result = await tx.payment.updateMany({
-    where: { id: pending.id, ...pendingAttemptWhere(facts) },
+    where: { id: paymentId, ...pendingAttemptWhere(facts) },
     data: captureUpdateData(facts),
   });
   if (result.count !== 1) return null;
-  return requirePaymentById(tx, pending.id);
+  return requirePaymentById(tx, paymentId);
 }
 
-function pendingAttemptWhere(facts: CaptureFacts): Prisma.PaymentWhereInput {
+async function findPendingAttempt(
+  tx: CaptureTx,
+  facts: CaptureFacts,
+): Promise<ModeGuardPayment | null> {
+  return tx.payment.findFirst({
+    where: pendingAttemptLookupWhere(facts),
+    orderBy: { createdAt: "desc" },
+    select: { id: true, mode: true, status: true },
+  });
+}
+
+function pendingAttemptLookupWhere(facts: CaptureFacts): Prisma.PaymentWhereInput {
   return {
     checkoutSessionId: facts.checkoutSessionId,
     provider: facts.provider,
     providerPaymentKey: null,
     status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
   };
+}
+
+function pendingAttemptWhere(facts: CaptureFacts): Prisma.PaymentWhereInput {
+  return { ...pendingAttemptLookupWhere(facts), mode: facts.mode };
 }
 
 function captureUpdateData(facts: CaptureFacts): Prisma.PaymentUpdateManyMutationInput {
@@ -108,6 +143,15 @@ async function requirePaymentByProviderKey(
   return payment;
 }
 
+async function requireRecoverablePaymentByProviderKey(
+  client: Pick<CaptureTx, "payment">,
+  facts: CaptureFacts,
+): Promise<CapturedPayment> {
+  const payment = await requirePaymentByProviderKey(client, facts);
+  guardPendingCaptureMode(payment, facts);
+  return payment;
+}
+
 async function requirePaymentById(
   client: Pick<CaptureTx, "payment">,
   id: string,
@@ -122,6 +166,7 @@ function paymentSelect(): Prisma.PaymentSelect {
     id: true,
     checkoutSessionId: true,
     provider: true,
+    mode: true,
     status: true,
     amount: true,
     currency: true,
@@ -133,6 +178,32 @@ function captureIdempotencyKey(facts: CaptureFacts): string {
   return `capture:${facts.provider}:${facts.providerPaymentKey}`;
 }
 
+function guardPendingCaptureMode(payment: ModeGuardPayment, facts: CaptureFacts): void {
+  if (!isPendingStatus(payment.status)) return;
+  if (payment.mode === facts.mode) return;
+  throw new PaymentCaptureModeMismatchError({
+    kind: "terminalFailure",
+    code: "MODE_MISMATCH",
+    message: "Payment mode mismatch",
+    checkoutSessionId: facts.checkoutSessionId,
+    paymentId: payment.id,
+    provider: facts.provider,
+    providerPaymentKey: facts.providerPaymentKey,
+    failedAt: facts.receivedAt,
+  });
+}
+
+function isPendingStatus(status: PaymentAttemptStatus): boolean {
+  return status === PaymentAttemptStatus.INITIATED || status === PaymentAttemptStatus.AWAITING;
+}
+
 function isUniqueConflict(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+  return e instanceof Prisma.PrismaClientKnownRequestError
+    ? e.code === "P2002"
+    : hasErrorCode(e, "P2002");
+}
+
+function hasErrorCode(e: unknown, code: string): boolean {
+  if (typeof e !== "object" || e === null || !("code" in e)) return false;
+  return e.code === code;
 }

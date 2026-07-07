@@ -26,7 +26,7 @@ type BoundaryResult =
   | { success: true; userId: string; session: ActionSession; provider: PaymentProvider; mode: PaymentMode }
   | PaymentActionFailure;
 type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
-type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey">;
+type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey" | "mode">;
 type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
 type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionFailure;
 type AdapterResolutionResult = { success: true; provider: PaymentProviderPort } | PaymentActionFailure;
@@ -67,6 +67,7 @@ export async function initiatePayment(checkoutSessionId: string, input: Initiate
       sessionId: checkoutSessionId,
       userId: boundary.userId,
       provider: provider.provider,
+      mode: boundary.mode,
     });
     return initiateSuccess(result.paymentId, result.provider, result.initiateResult);
   } catch (e) {
@@ -86,9 +87,11 @@ export async function confirmPayment(
   if (!boundary.success) return boundary;
   if (parsed !== boundary.provider) return actionError("PROVIDER_MISMATCH", "Payment provider does not match market.", false);
 
+  const payment = await prepareConfirmPayment(boundary.session.id, parsed, boundary.mode);
+  if (!payment.success) return payment;
   const provider = resolveActionAdapter(parsed, boundary.mode);
   if (!provider.success) return provider;
-  const facts = await confirmWithProvider(provider.provider, boundary.session, input);
+  const facts = await confirmWithProvider(provider.provider, boundary.session, payment.payment, boundary.mode, input);
   if (!facts.success) return facts;
   return completeConfirmedPayment(facts.captureFacts);
 }
@@ -129,27 +132,27 @@ async function loadActionSession(sessionId: string): Promise<ActionSession | nul
 async function confirmWithProvider(
   provider: PaymentProviderPort,
   session: ActionSession,
+  payment: PendingConfirmPaymentWithKey,
+  mode: PaymentMode,
   input: ConfirmPaymentInput,
 ): Promise<ActionProviderConfirmResult> {
-  const payment = await prepareConfirmPayment(session.id, provider.code);
-  if (!payment.success) return payment;
-
   try {
     const result = await provider.confirm({
       checkoutSessionId: session.id,
-      paymentId: payment.payment.id,
+      paymentId: payment.id,
       provider: provider.code,
       providerPaymentKey: input.providerPaymentKey,
-      providerRef: payment.payment.providerRef ?? undefined,
-      providerConfirmIdempotencyKey: payment.payment.providerConfirmIdempotencyKey,
+      providerRef: payment.providerRef ?? undefined,
+      providerConfirmIdempotencyKey: payment.providerConfirmIdempotencyKey,
       amount: session.totalAmount,
       currency: session.currency,
     });
     return bridgeProviderConfirmResult({
       client: db,
       checkoutSessionId: session.id,
-      paymentId: payment.payment.id,
+      paymentId: payment.id,
       provider: provider.code,
+      mode,
       result,
       receivedAt: new Date(),
     });
@@ -158,7 +161,11 @@ async function confirmWithProvider(
   }
 }
 
-async function prepareConfirmPayment(checkoutSessionId: string, provider: PaymentProvider): Promise<ConfirmAttemptResult> {
+async function prepareConfirmPayment(
+  checkoutSessionId: string,
+  provider: PaymentProvider,
+  mode: PaymentMode,
+): Promise<ConfirmAttemptResult> {
   const payments = await db.payment.findMany({
     where: pendingConfirmWhere(checkoutSessionId, provider),
     orderBy: { createdAt: "desc" },
@@ -170,6 +177,9 @@ async function prepareConfirmPayment(checkoutSessionId: string, provider: Paymen
   }
   if (payments.length > 1) {
     return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is ambiguous.", false);
+  }
+  if (payments[0].mode !== mode) {
+    return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is unavailable.", false);
   }
   return ensureConfirmIdempotencyKey(checkoutSessionId, provider, payments[0]);
 }
@@ -225,7 +235,7 @@ function pendingConfirmWhere(checkoutSessionId: string, provider: PaymentProvide
 }
 
 function pendingConfirmSelect() {
-  return { id: true, providerRef: true, providerConfirmIdempotencyKey: true };
+  return { id: true, providerRef: true, providerConfirmIdempotencyKey: true, mode: true };
 }
 
 function confirmIdempotencyKey(provider: PaymentProvider, paymentId: string): string {
@@ -244,7 +254,7 @@ function translateCompletion(result: CompleteFromCaptureResult, provider: Paymen
   if (result.kind === "completed" || result.kind === "alreadyCompleted") {
     return { success: true, orderId: result.orderId, paymentId: result.paymentId, provider };
   }
-  if (result.kind === "compensationEnqueued") {
+  if (result.kind === "compensationEnqueued" || result.kind === "compensationSkipped") {
     return actionError("PAYMENT_FAILED", result.failure.message, false);
   }
   return actionError("COMPLETION_RETRYABLE", result.message, true);

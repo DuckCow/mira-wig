@@ -1,12 +1,14 @@
 import type {
   Order,
   Payment,
+  PaymentMode,
   PaymentProvider,
 } from "@prisma/client";
 
 export interface CaptureFacts {
   checkoutSessionId: string;
   provider: PaymentProvider;
+  mode: PaymentMode;
   providerPaymentKey: string;
   amount: number;
   currency: string;
@@ -16,7 +18,7 @@ export interface CaptureFacts {
 
 export type CapturedPayment = Pick<
   Payment,
-  "id" | "checkoutSessionId" | "provider" | "status" | "amount" | "currency" | "providerPaymentKey"
+  "id" | "checkoutSessionId" | "provider" | "mode" | "status" | "amount" | "currency" | "providerPaymentKey"
 >;
 
 export type CompletionFailureCode =
@@ -25,6 +27,7 @@ export type CompletionFailureCode =
   | "SESSION_ALREADY_COMPLETED_BY_OTHER_PAYMENT"
   | "PAYMENT_NOT_SUCCEEDED"
   | "PAYMENT_SESSION_MISMATCH"
+  | "MODE_MISMATCH"
   | "PAYMENT_KEY_MISMATCH"
   | "AMOUNT_MISMATCH"
   | "CURRENCY_MISMATCH"
@@ -74,6 +77,12 @@ export interface CompensationEnqueued {
   outboxDedupKey: string;
 }
 
+export interface CompensationSkipped {
+  kind: "compensationSkipped";
+  failure: CompletionTerminalFailure;
+  reason: "VOID_NOT_REQUIRED";
+}
+
 export type CompletionClassification =
   | CompletionRetryableFailure
   | CompletionTerminalFailure
@@ -89,6 +98,7 @@ export type CompleteFromCaptureResult =
   | CompletionSucceeded
   | CompletionAlreadyCompleted
   | CompensationEnqueued
+  | CompensationSkipped
   | CompletionRetryableFailure;
 
 export type CreatedOrder = Pick<Order, "id" | "paymentId" | "checkoutSessionId">;

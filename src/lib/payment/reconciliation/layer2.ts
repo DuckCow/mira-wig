@@ -42,7 +42,7 @@ function appendVoidOutboxFinding(
   findings: ReconciliationFinding[],
   row: Awaited<ReturnType<PrismaClient["paymentOutbox"]["findMany"]>>[number],
   payload: VoidPayload | null,
-  paymentById: Map<string, { provider: PaymentProvider; providerPaymentKey: string | null }>,
+  paymentById: Map<string, { mode: string; provider: PaymentProvider; providerPaymentKey: string | null }>,
 ): void {
   if (row.status === OutboxStatus.FAILED && row.attempts >= OUTBOX_MAX_ATTEMPTS) {
     findings.push(voidMaxAttemptsFinding(row));
@@ -198,7 +198,7 @@ function voidMaxAttemptsFinding(row: VoidOutboxRow): ReconciliationFinding {
 function voidMismatchFinding(
   row: VoidOutboxRow,
   payload: VoidPayload,
-  payment: { provider: PaymentProvider; providerPaymentKey: string | null } | null,
+  payment: { mode: string; provider: PaymentProvider; providerPaymentKey: string | null } | null,
 ): ReconciliationFinding {
   return finding({
     kind: "PG_VOID_MISMATCH_TERMINAL",
@@ -211,6 +211,7 @@ function voidMismatchFinding(
       paymentId: payload.paymentId,
       payloadProvider: payload.provider,
       actualProvider: payment?.provider ?? null,
+      actualPaymentMode: payment?.mode ?? null,
       payloadProviderPaymentKey: payload.providerPaymentKey,
       actualProviderPaymentKey: payment?.providerPaymentKey ?? null,
     },

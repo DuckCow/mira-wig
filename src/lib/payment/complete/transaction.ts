@@ -118,6 +118,7 @@ function guardCompletion(
 function guardPayment(payment: CapturedPayment, facts: CaptureFacts): void {
   if (payment.status !== PaymentAttemptStatus.SUCCEEDED) fail("PAYMENT_NOT_SUCCEEDED", "Payment is not succeeded", facts, payment);
   if (payment.checkoutSessionId !== facts.checkoutSessionId) fail("PAYMENT_SESSION_MISMATCH", "Payment session mismatch", facts, payment);
+  if (payment.mode !== facts.mode) fail("MODE_MISMATCH", "Payment mode mismatch", facts, payment);
   if (payment.providerPaymentKey !== facts.providerPaymentKey) fail("PAYMENT_KEY_MISMATCH", "Payment key mismatch", facts, payment);
 }
 

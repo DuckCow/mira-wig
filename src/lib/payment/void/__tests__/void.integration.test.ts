@@ -4,6 +4,7 @@ import {
   FulfillmentType,
   OutboxStatus,
   PaymentAttemptStatus,
+  PaymentMode,
   PaymentProvider,
   ShippingCountry,
   WigCategory,
@@ -199,6 +200,7 @@ async function createPayment(
     data: {
       checkoutSessionId: sessionId,
       provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
       status,
       amount: 12_000,
       currency: "KRW",
@@ -357,6 +359,7 @@ function captureFacts(
   return {
     checkoutSessionId: session.sessionId,
     provider: PaymentProvider.TOSS,
+    mode: PaymentMode.SANDBOX,
     providerPaymentKey,
     amount: session.totalAmount,
     currency: session.currency,

@@ -265,6 +265,11 @@ enum PaymentProvider {
   PAYPAL
 }
 
+enum PaymentMode {
+  SANDBOX
+  LIVE
+}
+
 enum PaymentAttemptStatus {
   INITIATED
   AWAITING
@@ -380,6 +385,7 @@ model Payment {
   checkoutSessionId             String
   session                       CheckoutSession      @relation(fields: [checkoutSessionId], references: [id])
   provider                      PaymentProvider
+  mode                          PaymentMode
   status                        PaymentAttemptStatus @default(INITIATED)
   amount                        Int
   currency                      String

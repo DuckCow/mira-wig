@@ -4,6 +4,7 @@ import {
   PaymentAttemptStatus,
   PaymentEventFailureStage,
   PaymentEventStatus,
+  PaymentMode,
   PaymentProvider,
   Prisma,
   ShippingCountry,
@@ -22,6 +23,7 @@ import { WEBHOOK_RAW_PREFIX_CHARS } from "../rejections";
 
 const B4_NOW = new Date("2026-08-02T00:00:00.000Z");
 const B4_RECEIVED_AT = new Date("2026-08-02T00:02:00.000Z");
+const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
 
 interface TestContext {
   userId: string;
@@ -53,11 +55,13 @@ describe("payment webhook core", () => {
 
   beforeEach(async () => {
     ctx = makeContext();
+    process.env.PAYMENT_MODE = "SANDBOX";
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
   });
 
   afterEach(async () => {
+    restorePaymentMode();
     await cleanup(ctx);
   });
 
@@ -101,6 +105,53 @@ describe("payment webhook core", () => {
     await expect(eventStatus(secondPayload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("conflicting webhook mode fails closed without completing the pending payment", async () => {
+    process.env.PAYMENT_MODE = "LIVE";
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payload = capturePayload(ctx, session);
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const payment = await onlyPayment(session.sessionId);
+    const event = await eventSnapshot(payload.transmissionId);
+
+    expect(result.kind).toBe("failed");
+    expect(result.status).toBe(200);
+    expect(event.status).toBe(PaymentEventStatus.FAILED);
+    expect(event.failureStage).toBe(PaymentEventFailureStage.COMPLETE);
+    expect(event.failureCode).toBe("COMPLETE.MODE_MISMATCH");
+    expect(payment).toMatchObject({
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      providerPaymentKey: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(outboxCount(PaymentProvider.TOSS, requiredProviderKey(payload))).resolves.toBe(0);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("completed same-key webhook duplicate under flipped mode is benign and void-less", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const firstPayload = capturePayload(ctx, session);
+    const secondPayload = capturePayload(ctx, session, { providerPaymentKey: firstPayload.providerPaymentKey });
+
+    await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(firstPayload));
+    process.env.PAYMENT_MODE = "LIVE";
+    const second = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(secondPayload));
+    const payment = await onlyPayment(session.sessionId);
+
+    expect(second.status).toBe(200);
+    await expect(eventStatus(secondPayload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
+    expect(payment).toMatchObject({
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      providerPaymentKey: firstPayload.providerPaymentKey,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(outboxCount(PaymentProvider.TOSS, requiredProviderKey(firstPayload))).resolves.toBe(0);
   });
 
   it("verification failure writes rejected inbound row without reserving PaymentEvent", async () => {
@@ -359,6 +410,7 @@ async function initiateForSession(context: TestContext, sessionId: string): Prom
     sessionId,
     userId: context.userId,
     provider: createMockPaymentProvider(PaymentProvider.TOSS),
+    mode: PaymentMode.SANDBOX,
     now: B4_RECEIVED_AT,
   });
 }
@@ -533,6 +585,7 @@ async function createConflictingOrder(
     data: {
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
       amount: session.totalAmount,
       currency: session.currency,
@@ -633,4 +686,12 @@ async function outboxCount(provider: PaymentProvider, providerPaymentKey: string
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function restorePaymentMode(): void {
+  if (ORIGINAL_PAYMENT_MODE === undefined) {
+    delete process.env.PAYMENT_MODE;
+    return;
+  }
+  process.env.PAYMENT_MODE = ORIGINAL_PAYMENT_MODE;
 }

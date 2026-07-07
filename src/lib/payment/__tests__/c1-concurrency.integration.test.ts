@@ -4,6 +4,7 @@ import {
   FulfillmentType,
   OutboxStatus,
   PaymentAttemptStatus,
+  PaymentMode,
   PaymentProvider,
   Prisma,
   ShippingCountry,
@@ -31,6 +32,7 @@ import { confirmPayment } from "@/app/actions/payment";
 const mockGetSession = vi.mocked(getSession);
 const mockGetCurrentMarketCode = vi.mocked(getCurrentMarketCode);
 const ORIGINAL_MOCK_MODE = process.env.PAYMENT_MOCK_MODE;
+const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
 const C1_NOW = new Date("2026-08-04T00:00:00.000Z");
 const C1_RECEIVED_AT = new Date("2026-08-04T00:02:00.000Z");
 
@@ -90,6 +92,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     process.env.PAYMENT_MOCK_MODE = "success";
+    process.env.PAYMENT_MODE = "SANDBOX";
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
@@ -99,6 +102,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
 
   afterEach(async () => {
     restoreMockMode();
+    restorePaymentMode();
     await cleanup(ctx);
   });
 
@@ -397,6 +401,7 @@ async function createPendingPaymentAttempt(session: SessionResult): Promise<stri
     data: {
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.INITIATED,
       amount: session.totalAmount,
       currency: session.currency,
@@ -428,6 +433,7 @@ function captureFacts(
   const facts = {
     checkoutSessionId: session.sessionId,
     provider: PaymentProvider.TOSS,
+    mode: PaymentMode.SANDBOX,
     providerPaymentKey,
     amount: session.totalAmount,
     currency: session.currency,
@@ -482,6 +488,7 @@ async function createVoidPayment(context: TestContext): Promise<MinimalPayment> 
     data: {
       checkoutSessionId: session.id,
       provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
       amount: 12_000,
       currency: "KRW",
@@ -608,6 +615,14 @@ function restoreMockMode(): void {
     return;
   }
   process.env.PAYMENT_MOCK_MODE = ORIGINAL_MOCK_MODE;
+}
+
+function restorePaymentMode(): void {
+  if (ORIGINAL_PAYMENT_MODE === undefined) {
+    delete process.env.PAYMENT_MODE;
+    return;
+  }
+  process.env.PAYMENT_MODE = ORIGINAL_PAYMENT_MODE;
 }
 
 function kinds(results: CompleteFromCaptureResult[]): CompleteFromCaptureResult["kind"][] {

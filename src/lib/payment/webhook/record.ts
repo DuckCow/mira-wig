@@ -122,6 +122,24 @@ export async function markRetryableCompleteFailed(
   });
 }
 
+export async function markCompleteFailed(
+  client: EventClient,
+  input: { eventId: string; failedAt: Date; code: string; message: string },
+): Promise<void> {
+  await client.paymentEvent.update({
+    where: { id: input.eventId },
+    data: {
+      status: PaymentEventStatus.FAILED,
+      processedAt: input.failedAt,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: input.code,
+      lastError: input.message,
+    },
+  });
+}
+
 export function isTerminalEventStatus(status: PaymentEventStatus): boolean {
   return status === PaymentEventStatus.PROCESSED
     || status === PaymentEventStatus.IGNORED

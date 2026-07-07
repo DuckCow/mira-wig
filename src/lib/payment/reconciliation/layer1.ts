@@ -66,7 +66,7 @@ async function loadVoidPaths(
 }
 
 function paymentWithoutOrderFinding(
-  payment: { id: string; provider: PaymentProvider; providerPaymentKey: string | null; updatedAt: Date },
+  payment: { id: string; mode: string; provider: PaymentProvider; providerPaymentKey: string | null; updatedAt: Date },
   voidPaths: Awaited<ReturnType<typeof loadVoidPaths>>,
   options: NormalizedOptions,
 ): ReconciliationFinding {
@@ -249,7 +249,7 @@ function amountDetails(order: OrderRow): Record<string, ReconciliationDetailValu
 }
 
 function paymentWithoutOrderDetails(
-  payment: { id: string; provider: PaymentProvider; providerPaymentKey: string | null; updatedAt: Date },
+  payment: { id: string; mode: string; provider: PaymentProvider; providerPaymentKey: string | null; updatedAt: Date },
   dedupKey: string | null,
   voidPathStatus: string,
   options: NormalizedOptions,
@@ -257,6 +257,7 @@ function paymentWithoutOrderDetails(
   return {
     paymentId: payment.id,
     provider: payment.provider,
+    paymentMode: payment.mode,
     providerPaymentKey: payment.providerPaymentKey,
     voidDedupKey: dedupKey,
     voidPathStatus,

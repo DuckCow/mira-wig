@@ -2,8 +2,10 @@ import { WebhookIngressRejectionStage } from "@prisma/client";
 import type { PaymentProvider, PrismaClient } from "@prisma/client";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
+import { configuredPaymentMode } from "@/lib/payment/mode";
 import {
   isTerminalEventStatus,
+  markCompleteFailed,
   markIgnored,
   markParseFailed,
   markProcessed,
@@ -103,6 +105,7 @@ async function completeRecorded(
   try {
     const result = await completeFromCapture(client, facts);
     if (result.kind === "retryableFailure") return retryableCompleteFailure(client, eventId, attemptedAt, result.message, `COMPLETE.${result.code}`);
+    if (result.kind === "compensationSkipped") return terminalCompleteFailure(client, eventId, attemptedAt, result.failure.message, `COMPLETE.${result.failure.code}`);
     await markProcessedEvent(client, eventId, attemptedAt, facts, result);
     return { kind: "processed", status: 200, eventId };
   } catch (e) {
@@ -133,6 +136,17 @@ async function ignoreRecorded(
 ): Promise<WebhookHandleResult> {
   await markIgnored(client, { eventId, processedAt, reason });
   return { kind: "ignored", status: 200, eventId };
+}
+
+async function terminalCompleteFailure(
+  client: PrismaClient,
+  eventId: string,
+  failedAt: Date,
+  message: string,
+  code: string,
+): Promise<WebhookHandleResult> {
+  await markCompleteFailed(client, { eventId, failedAt, code, message });
+  return { kind: "failed", status: 200, eventId };
 }
 
 async function retryableCompleteFailure(
@@ -170,6 +184,8 @@ function captureFacts(
   return {
     checkoutSessionId: requiredString(payload, "checkoutSessionId"),
     provider,
+    // Interim source until authenticated provider events carry an explicit persisted mode.
+    mode: configuredPaymentMode(),
     providerPaymentKey: requiredString(payload, "providerPaymentKey"),
     amount: requiredNumber(payload, "amount"),
     currency: requiredString(payload, "currency"),

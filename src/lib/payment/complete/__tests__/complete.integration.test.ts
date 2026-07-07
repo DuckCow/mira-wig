@@ -3,6 +3,7 @@ import {
   CheckoutSessionStatus,
   FulfillmentType,
   PaymentAttemptStatus,
+  PaymentMode,
   PaymentProvider,
   ShippingCountry,
   WigCategory,
@@ -106,6 +107,29 @@ describe("payment completion core", () => {
     expect(second.kind).toBe("alreadyCompleted");
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
     await expect(mrCount(ctx.userId)).resolves.toBe(1);
+    await expect(outboxCount(facts)).resolves.toBe(0);
+  });
+
+  it("completed same-key duplicate under flipped mode remains benign and void-less", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const facts = captureFacts(ctx, session);
+
+    const first = await completeFromCapture(db, facts);
+    const second = await completeFromCapture(db, {
+      ...facts,
+      mode: PaymentMode.LIVE,
+      receivedAt: new Date(facts.receivedAt.getTime() + 1_000),
+    });
+    const payment = await paymentByKey(facts);
+
+    expect(first.kind).toBe("completed");
+    expect(second.kind).toBe("alreadyCompleted");
+    expect(payment).toMatchObject({ mode: PaymentMode.SANDBOX, status: PaymentAttemptStatus.SUCCEEDED });
+    await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(succeededPaymentCount(facts)).resolves.toBe(1);
+    await expect(outboxCount(facts)).resolves.toBe(0);
   });
 
   it("동시 completeFromCapture 경쟁도 주문 1개로 수렴한다", async () => {
@@ -201,6 +225,7 @@ describe("payment completion core", () => {
       data: {
         checkoutSessionId: session.sessionId,
         provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
         status: PaymentAttemptStatus.INITIATED,
         amount: session.totalAmount,
         currency: session.currency,
@@ -248,6 +273,119 @@ describe("payment completion core", () => {
       idempotencyKey: `capture:${facts.provider}:${facts.providerPaymentKey}`,
       providerPaymentKey: facts.providerPaymentKey,
     });
+  });
+
+  it("webhook/API-first capture persists the capture mode", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const facts = captureFacts(ctx, session, { mode: PaymentMode.LIVE });
+
+    const payment = await recordCapture(db, facts);
+    const persisted = await db.payment.findUnique({
+      where: { id: payment.id },
+      select: { mode: true, providerPaymentKey: true },
+    });
+
+    expect(payment.mode).toBe(PaymentMode.LIVE);
+    expect(persisted).toEqual({ mode: PaymentMode.LIVE, providerPaymentKey: facts.providerPaymentKey });
+  });
+
+  it("capture mode mismatch is terminal, void-less, and does not claim or duplicate the pending attempt", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const pending = await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.INITIATED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        idempotencyKey: `mode_mismatch_${randomUUID()}`,
+      },
+      select: { id: true },
+    });
+    const facts = captureFacts(ctx, session, { mode: PaymentMode.LIVE });
+
+    const result = await completeFromCapture(db, facts);
+    const persisted = await db.payment.findUnique({
+      where: { id: pending.id },
+      select: { mode: true, status: true, providerPaymentKey: true },
+    });
+
+    expect(result.kind).toBe("compensationSkipped");
+    if (result.kind === "compensationSkipped") {
+      expect(result.failure.code).toBe("MODE_MISMATCH");
+      expect(result.failure.paymentId).toBe(pending.id);
+      expect(result).not.toHaveProperty("outboxDedupKey");
+    }
+    expect(persisted).toEqual({
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      providerPaymentKey: null,
+    });
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(outboxCount(facts)).resolves.toBe(0);
+  });
+
+  it("orphan succeeded payment with mismatched duplicate capture stays unchanged and void-less", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const providerPaymentKey = `orphan_mode_${randomUUID()}`;
+    const payment = await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.SUCCEEDED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        providerPaymentKey,
+        idempotencyKey: `orphan_mode_${randomUUID()}`,
+      },
+      select: { id: true },
+    });
+    const facts = captureFacts(ctx, session, { mode: PaymentMode.LIVE, providerPaymentKey });
+
+    const result = await completeFromCapture(db, facts);
+    const persisted = await db.payment.findUnique({
+      where: { id: payment.id },
+      select: { mode: true, status: true, providerPaymentKey: true },
+    });
+
+    expect(result.kind).toBe("compensationSkipped");
+    if (result.kind === "compensationSkipped") expect(result.failure.code).toBe("MODE_MISMATCH");
+    expect(persisted).toEqual({
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      providerPaymentKey,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(outboxCount(facts)).resolves.toBe(0);
+  });
+
+  it("mode mismatch does not consume the void dedup slot for a later legitimate compensation", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.INITIATED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        idempotencyKey: `dedup_mode_${randomUUID()}`,
+      },
+    });
+    const providerPaymentKey = `dedup_mode_capture_${randomUUID()}`;
+    const mismatch = captureFacts(ctx, session, { mode: PaymentMode.LIVE, providerPaymentKey });
+    const legitimate = captureFacts(ctx, session, { providerPaymentKey, amount: session.totalAmount + 1 });
+
+    const skipped = await completeFromCapture(db, mismatch);
+    const enqueued = await completeFromCapture(db, legitimate);
+
+    expect(skipped.kind).toBe("compensationSkipped");
+    expect(enqueued.kind).toBe("compensationEnqueued");
+    await expect(outboxCount(legitimate)).resolves.toBe(1);
   });
 
   it("같은 캡처 재실패는 void enqueue를 행 1개로 멱등 처리한다", async () => {
@@ -418,6 +556,7 @@ function captureFacts(
   const facts = {
     checkoutSessionId: session.sessionId,
     provider: PaymentProvider.MOCK,
+    mode: PaymentMode.SANDBOX,
     providerPaymentKey,
     amount: session.totalAmount,
     currency: session.currency,
@@ -455,6 +594,30 @@ async function mrCount(userId: string): Promise<number> {
 
 async function paymentCount(checkoutSessionId: string): Promise<number> {
   return db.payment.count({ where: { checkoutSessionId } });
+}
+
+async function paymentByKey(facts: CaptureFacts) {
+  const payment = await db.payment.findUnique({
+    where: {
+      provider_providerPaymentKey: {
+        provider: facts.provider,
+        providerPaymentKey: facts.providerPaymentKey,
+      },
+    },
+    select: { mode: true, status: true, providerPaymentKey: true },
+  });
+  if (!payment) throw new Error(`Missing payment ${facts.providerPaymentKey}`);
+  return payment;
+}
+
+async function succeededPaymentCount(facts: CaptureFacts): Promise<number> {
+  return db.payment.count({
+    where: {
+      provider: facts.provider,
+      providerPaymentKey: facts.providerPaymentKey,
+      status: PaymentAttemptStatus.SUCCEEDED,
+    },
+  });
 }
 
 async function outboxCount(facts: CaptureFacts): Promise<number> {

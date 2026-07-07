@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { completeFromCapture, type CaptureFacts } from "@/lib/payment/complete";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
+import { PaymentMode } from "@/lib/payment/providers/routing";
 import type {
   PaymentInitiateInput,
   PaymentInitiateResult,
@@ -52,12 +53,14 @@ describe("payment initiate providerRef persistence", () => {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({ kind: "ready", providerRef }),
+      mode: PaymentMode.SANDBOX,
     });
 
     const payment = await onlyPayment(session.sessionId);
     expect(result.status).toBe(PaymentAttemptStatus.INITIATED);
     expect(payment).toMatchObject({
       status: PaymentAttemptStatus.INITIATED,
+      mode: PaymentMode.SANDBOX,
       providerRef,
       providerPaymentKey: null,
     });
@@ -75,6 +78,7 @@ describe("payment initiate providerRef persistence", () => {
         approveUrl: "https://fake-provider.example.test/approve",
         providerRef,
       }),
+      mode: PaymentMode.SANDBOX,
     });
 
     const payment = await onlyPayment(session.sessionId);
@@ -93,6 +97,7 @@ describe("payment initiate providerRef persistence", () => {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({ kind: "ready" }),
+      mode: PaymentMode.SANDBOX,
     });
 
     const payment = await onlyPayment(session.sessionId);
@@ -107,6 +112,7 @@ describe("payment initiate providerRef persistence", () => {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: failingProvider(),
+      mode: PaymentMode.SANDBOX,
     })).rejects.toThrow("Fake provider initiate failure");
 
     const payment = await onlyPayment(session.sessionId);
@@ -122,6 +128,7 @@ describe("payment initiate providerRef persistence", () => {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({ kind: "ready", providerRef }),
+      mode: PaymentMode.SANDBOX,
     });
     const facts = captureFacts(session);
 
@@ -231,6 +238,7 @@ function captureFacts(
   return {
     checkoutSessionId: session.sessionId,
     provider: PaymentProvider.TOSS,
+    mode: PaymentMode.SANDBOX,
     providerPaymentKey: `capture_${randomUUID()}`,
     amount: session.totalAmount,
     currency: session.currency,

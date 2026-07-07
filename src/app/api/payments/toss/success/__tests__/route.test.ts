@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   PaymentAttemptStatus,
+  PaymentMode,
   PaymentProvider,
   ShippingCountry,
 } from "@prisma/client";
@@ -152,6 +153,7 @@ async function createPayment(context: TestContext) {
     data: {
       checkoutSessionId: session.id,
       provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.INITIATED,
       amount: AMOUNT,
       currency: "KRW",

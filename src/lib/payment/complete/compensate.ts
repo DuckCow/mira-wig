@@ -2,20 +2,29 @@ import { CheckoutSessionStatus } from "@prisma/client";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { enqueue } from "@/lib/payment/outbox";
 import { transitionCheckoutSession } from "@/lib/payment/session";
-import type { CompensationEnqueued, CompletionTerminalFailure } from "./types";
+import type { CompensationEnqueued, CompensationSkipped, CompletionTerminalFailure } from "./types";
 
 const VOID_TOPIC = "pg.void";
 
 export async function compensateTerminalFailure(
   client: PrismaClient,
   failure: CompletionTerminalFailure,
-): Promise<CompensationEnqueued> {
+): Promise<CompensationEnqueued | CompensationSkipped> {
+  if (isVoidlessFailure(failure)) {
+    await client.$transaction((tx) => markSessionFailed(tx, failure));
+    return { kind: "compensationSkipped", failure, reason: "VOID_NOT_REQUIRED" };
+  }
+
   const dedupKey = voidDedupKey(failure);
   await client.$transaction(async (tx) => {
     await enqueueVoid(tx, failure, dedupKey);
     await markSessionFailed(tx, failure);
   });
   return { kind: "compensationEnqueued", failure, outboxDedupKey: dedupKey };
+}
+
+function isVoidlessFailure(failure: CompletionTerminalFailure): boolean {
+  return failure.code === "MODE_MISMATCH";
 }
 
 function voidDedupKey(failure: CompletionTerminalFailure): string {

@@ -3,6 +3,7 @@ import {
   CheckoutSessionStatus,
   FulfillmentType,
   PaymentAttemptStatus,
+  PaymentMode as PersistedPaymentMode,
   PaymentProvider,
   ShippingCountry,
   WigCategory,
@@ -67,6 +68,7 @@ interface VariantOptions {
 }
 
 interface PendingPaymentOptions {
+  mode?: PersistedPaymentMode;
   provider?: PaymentProvider;
   providerRef?: string;
   status?: PaymentAttemptStatus;
@@ -86,6 +88,7 @@ describe("payment actions", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockResolveProvider.mockReset();
     process.env.PAYMENT_MOCK_MODE = "success";
     delete process.env.PAYMENT_MODE;
     ctx = makeContext();
@@ -116,6 +119,7 @@ describe("payment actions", () => {
     }
     const payment = await onlyPayment(session.sessionId);
     expect(payment.status).toBe(PaymentAttemptStatus.INITIATED);
+    expect(payment.mode).toBe(PersistedPaymentMode.SANDBOX);
     expect(payment.idempotencyKey).toMatch(`initiate:${session.sessionId}:`);
     expect(mockResolveProvider).toHaveBeenCalledWith({
       provider: PaymentProvider.TOSS,
@@ -244,6 +248,46 @@ describe("payment actions", () => {
     if (!otherResult.success) expect(otherResult.errorCode).toBe("SESSION_UNAVAILABLE");
     await expect(paymentCount(expired.sessionId)).resolves.toBe(0);
     await expect(paymentCount(owned.sessionId)).resolves.toBe(0);
+  });
+
+  it("confirm fails closed before adapter resolution when current LIVE mode meets SANDBOX attempt", async () => {
+    process.env.PAYMENT_MODE = "LIVE";
+    PROVIDER_REGISTRY.TOSS.liveEnabled = [{ market: MarketCode.KR, method: PaymentMethod.CARD, currency: "KRW" }];
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session);
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PAYMENT_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("Pending payment attempt is unavailable.");
+    }
+    expect(mockResolveProvider).not.toHaveBeenCalled();
+    await expect(confirmKeyOf(payment.id)).resolves.toBeNull();
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("confirm fails closed before adapter resolution when current SANDBOX mode meets LIVE attempt", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session, { mode: PersistedPaymentMode.LIVE });
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PAYMENT_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("Pending payment attempt is unavailable.");
+    }
+    expect(mockResolveProvider).not.toHaveBeenCalled();
+    await expect(confirmKeyOf(payment.id)).resolves.toBeNull();
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
   });
 
   it("confirm after initiate claims the existing payment and creates one order", async () => {
@@ -816,6 +860,7 @@ async function createPendingPayment(
     data: {
       checkoutSessionId: session.sessionId,
       provider,
+      mode: options.mode ?? PersistedPaymentMode.SANDBOX,
       status: options.status ?? PaymentAttemptStatus.INITIATED,
       amount: session.totalAmount,
       currency: session.currency,
