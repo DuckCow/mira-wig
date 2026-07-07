@@ -12,6 +12,7 @@ const DEFAULTS = {
   staleReceivedAfterMs: 10 * 60_000,
   staleRetryableFailedAfterMs: 10 * 60_000,
   staleSucceededPaymentAfterMs: 10 * 60_000,
+  staleProviderConfirmAfterMs: 10 * 60_000,
   spikeWindowMs: 10 * 60_000,
   verifySpikeThreshold: 10,
   metadataSpikeThreshold: 10,

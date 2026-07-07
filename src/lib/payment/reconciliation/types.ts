@@ -34,7 +34,11 @@ export type ReconciliationFindingKind =
   | "WEBHOOK_METADATA_REJECTION_SPIKE"
   | "WEBHOOK_RAW_MISMATCH_SPIKE"
   | "TRUSTED_EVENT_PARSE_FAILED_SPIKE"
-  | "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED_SPIKE";
+  | "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED_SPIKE"
+  | "STALE_PROVIDER_CONFIRM_ATTEMPT"
+  | "PROVIDER_CONFIRM_TERMINAL_FAILED"
+  | "PROVIDER_CONFIRM_MANUAL_REVIEW"
+  | "PROVIDER_CONFIRM_STOP";
 
 export type ReconciliationSource =
   | "payment"
@@ -69,6 +73,7 @@ export interface ReconcilePaymentCoreOptions {
   staleReceivedAfterMs?: number;
   staleRetryableFailedAfterMs?: number;
   staleSucceededPaymentAfterMs?: number;
+  staleProviderConfirmAfterMs?: number;
   spikeWindowMs?: number;
   verifySpikeThreshold?: number;
   metadataSpikeThreshold?: number;

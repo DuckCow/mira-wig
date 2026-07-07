@@ -33,6 +33,15 @@ describe("payment reconciliation manual report wrapper", () => {
         confidence: "high",
       },
       {
+        kind: "PROVIDER_CONFIRM_MANUAL_REVIEW",
+        severity: "critical",
+        recommendedAction: "MANUAL_REVIEW",
+        source: ["payment", "checkoutSession"],
+        sourceIds: { payment: ["pay_2"], checkoutSession: ["cs_1"] },
+        details: { paymentId: "pay_2", hasProviderConfirmIdempotencyKey: true },
+        confidence: "high",
+      },
+      {
         kind: "WEBHOOK_VERIFY_REJECTION",
         severity: "warning",
         recommendedAction: "SECURITY_SIGNAL",
@@ -53,15 +62,17 @@ describe("payment reconciliation manual report wrapper", () => {
     expect(parsed).toMatchObject({
       generatedAt: "2026-08-03T10:00:00.000Z",
       now: "2026-08-03T09:55:00.000Z",
-      totalFindings: 2,
+      totalFindings: 3,
       counts: {
         byKind: {
           SUCCEEDED_PAYMENT_WITHOUT_ORDER: 1,
+          PROVIDER_CONFIRM_MANUAL_REVIEW: 1,
           WEBHOOK_VERIFY_REJECTION: 1,
         },
-        bySeverity: { warning: 2 },
+        bySeverity: { warning: 2, critical: 1 },
         byRecommendedAction: {
           AUTO_REENTRY_CANDIDATE: 1,
+          MANUAL_REVIEW: 1,
           SECURITY_SIGNAL: 1,
         },
       },
@@ -77,12 +88,15 @@ describe("payment reconciliation manual report wrapper", () => {
       "2026-08-03T09:55:00.000Z",
       "--stale-received-ms",
       "1000",
+      "--stale-provider-confirm-ms",
+      "2000",
       "--verify-spike-threshold",
       "4",
     ]);
     expect(parsed.pretty).toBe(true);
     expect(parsed.options.now?.toISOString()).toBe("2026-08-03T09:55:00.000Z");
     expect(parsed.options.staleReceivedAfterMs).toBe(1000);
+    expect(parsed.options.staleProviderConfirmAfterMs).toBe(2000);
     expect(parsed.options.verifySpikeThreshold).toBe(4);
 
     const source = readFileSync(join(process.cwd(), "scripts/payment-reconcile.ts"), "utf8");

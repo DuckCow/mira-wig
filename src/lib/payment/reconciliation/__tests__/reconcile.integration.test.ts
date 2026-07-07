@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   CheckoutSessionStatus,
   OutboxStatus,
@@ -43,7 +45,11 @@ interface PaymentInput {
   status?: PaymentAttemptStatus;
   amount?: number;
   currency?: string;
-  providerPaymentKey?: string;
+  providerRef?: string | null;
+  providerConfirmIdempotencyKey?: string | null;
+  providerPaymentKey?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
   updatedAt?: Date;
 }
 
@@ -197,6 +203,116 @@ describe("payment reconciliation C2-v0", () => {
     expect(findings.some((finding) => finding.kind === "WEBHOOK_RAW_MISMATCH_SPIKE")).toBe(true);
   });
 
+  it("detects provider-confirm marker findings with redacted details", async () => {
+    const manualSession = await createSession(ctx);
+    const stopSession = await createSession(ctx);
+    const terminalSession = await createSession(ctx);
+    const manual = await createPayment(ctx, manualSession.id, providerMarkerInput("PROVIDER_CONFIRM_MANUAL_REVIEW"));
+    const stop = await createPayment(ctx, stopSession.id, providerMarkerInput("PROVIDER_CONFIRM_STOP"));
+    const terminal = await createPayment(ctx, terminalSession.id, {
+      ...providerMarkerInput("PROVIDER_CONFIRM_TERMINAL"),
+      status: PaymentAttemptStatus.FAILED,
+    });
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    expect(findingFor(findings, "PROVIDER_CONFIRM_MANUAL_REVIEW", "payment", manual.id))
+      .toMatchObject({ severity: "critical", recommendedAction: "MANUAL_REVIEW", confidence: "high" });
+    expect(findingFor(findings, "PROVIDER_CONFIRM_STOP", "payment", stop.id))
+      .toMatchObject({ severity: "critical", recommendedAction: "MANUAL_REVIEW", confidence: "high" });
+    const terminalFinding = findingFor(findings, "PROVIDER_CONFIRM_TERMINAL_FAILED", "payment", terminal.id);
+    expect(terminalFinding).toMatchObject({ severity: "warning", recommendedAction: "ALERT_ONLY", confidence: "high" });
+    expect(terminalFinding.details).toMatchObject({
+      hasProviderRef: true,
+      hasProviderConfirmIdempotencyKey: true,
+      hasProviderPaymentKey: false,
+      hasOrder: false,
+    });
+    const renderedDetails = JSON.stringify(terminalFinding.details);
+    expect(renderedDetails).not.toContain("provider_ref_secret");
+    expect(renderedDetails).not.toContain("confirm_key_secret");
+  });
+
+  it("detects stale provider confirm attempts but leaves recent and terminal marker rows out", async () => {
+    const staleSession = await createSession(ctx);
+    const recentSession = await createSession(ctx);
+    const terminalSession = await createSession(ctx);
+    const stale = await createPayment(ctx, staleSession.id, pendingConfirmInput(C2_OLD));
+    const recent = await createPayment(ctx, recentSession.id, pendingConfirmInput(C2_NOW));
+    const terminal = await createPayment(ctx, terminalSession.id, {
+      ...providerMarkerInput("PROVIDER_CONFIRM_TERMINAL"),
+      status: PaymentAttemptStatus.FAILED,
+      updatedAt: C2_OLD,
+    });
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    expect(findingFor(findings, "STALE_PROVIDER_CONFIRM_ATTEMPT", "payment", stale.id))
+      .toMatchObject({ severity: "warning", recommendedAction: "WATCH_STALE", confidence: "medium" });
+    expect(hasFinding(findings, "STALE_PROVIDER_CONFIRM_ATTEMPT", recent.id)).toBe(false);
+    expect(hasFinding(findings, "STALE_PROVIDER_CONFIRM_ATTEMPT", terminal.id)).toBe(false);
+    expect(findingFor(findings, "PROVIDER_CONFIRM_TERMINAL_FAILED", "payment", terminal.id))
+      .toMatchObject({ recommendedAction: "ALERT_ONLY" });
+  });
+
+  it("treats retryable pending confirm attempts as stale without adding programmer-error findings", async () => {
+    const retryableSession = await createSession(ctx);
+    const programmerSession = await createSession(ctx);
+    const retryable = await createPayment(ctx, retryableSession.id, pendingConfirmInput(C2_OLD));
+    await createPayment(ctx, programmerSession.id, {
+      ...pendingConfirmInput(C2_OLD),
+      errorCode: "PROVIDER_CONFIRM_PROGRAMMER_ERROR",
+    });
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    expect(findingFor(findings, "STALE_PROVIDER_CONFIRM_ATTEMPT", "payment", retryable.id))
+      .toMatchObject({ recommendedAction: "WATCH_STALE" });
+    expect(findings.map((finding): string => finding.kind)).not.toContain("PROVIDER_CONFIRM_PROGRAMMER_ERROR");
+  });
+
+  it("does not mutate provider-confirm marker fields", async () => {
+    const session = await createSession(ctx);
+    const payment = await createPayment(ctx, session.id, providerMarkerInput("PROVIDER_CONFIRM_MANUAL_REVIEW"));
+    const event = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.TRANSIENT_DB_ERROR",
+      attemptCount: 1,
+      lastAttemptAt: C2_OLD,
+    });
+    const before = await mutationSnapshot(ctx.userId, payment.id, event.id);
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+    const after = await mutationSnapshot(ctx.userId, payment.id, event.id);
+
+    expect(findingFor(findings, "PROVIDER_CONFIRM_MANUAL_REVIEW", "payment", payment.id))
+      .toMatchObject({ recommendedAction: "MANUAL_REVIEW" });
+    expect(after).toEqual(before);
+  });
+
+  it("keeps the provider-confirm detector read-only and exact-marker based", () => {
+    const source = readFileSync(join(process.cwd(), "src/lib/payment/reconciliation/provider-confirm.ts"), "utf8");
+    for (const forbidden of [
+      "completeFromCapture",
+      "dispatchPending",
+      "createVoidHandler",
+      "transitionCheckoutSession",
+      "provider.confirm",
+      "create(",
+      "updateMany",
+      ".update(",
+      "upsert",
+      "deleteMany",
+      ".delete(",
+      "lastError",
+      "Toss",
+      "PayPal",
+    ]) {
+      expect(source).not.toContain(forbidden);
+    }
+    expect(source).toContain("errorCode: \"PROVIDER_CONFIRM_MANUAL_REVIEW\"");
+  });
+
   it("does not mutate payment, order, outbox, or event state", async () => {
     const session = await createSession(ctx);
     const payment = await createPayment(ctx, session.id, { updatedAt: C2_OLD });
@@ -237,12 +353,34 @@ function reconcileOptions() {
     staleReceivedAfterMs: STALE_MS,
     staleRetryableFailedAfterMs: STALE_MS,
     staleSucceededPaymentAfterMs: STALE_MS,
+    staleProviderConfirmAfterMs: STALE_MS,
     spikeWindowMs: 60_000,
     verifySpikeThreshold: 100,
     metadataSpikeThreshold: 100,
     rawMismatchSpikeThreshold: 100,
     parseFailureSpikeThreshold: 100,
     completeRetryableSpikeThreshold: 100,
+  };
+}
+
+function providerMarkerInput(errorCode: string): PaymentInput {
+  return {
+    status: PaymentAttemptStatus.AWAITING,
+    providerRef: `provider_ref_secret_${randomUUID()}`,
+    providerConfirmIdempotencyKey: `confirm_key_secret_${randomUUID()}`,
+    providerPaymentKey: null,
+    errorCode,
+    errorMessage: "safe marker",
+    updatedAt: C2_OLD,
+  };
+}
+
+function pendingConfirmInput(updatedAt: Date): PaymentInput {
+  return {
+    status: PaymentAttemptStatus.AWAITING,
+    providerConfirmIdempotencyKey: `confirm_${randomUUID()}`,
+    providerPaymentKey: null,
+    updatedAt,
   };
 }
 
@@ -282,8 +420,12 @@ async function createPayment(context: TestContext, sessionId: string, input: Pay
       status: input.status ?? PaymentAttemptStatus.SUCCEEDED,
       amount: input.amount ?? 12_000,
       currency: input.currency ?? "KRW",
-      providerPaymentKey: input.providerPaymentKey ?? `c2_pay_${randomUUID()}`,
+      providerRef: input.providerRef,
+      providerConfirmIdempotencyKey: input.providerConfirmIdempotencyKey,
+      providerPaymentKey: input.providerPaymentKey === undefined ? `c2_pay_${randomUUID()}` : input.providerPaymentKey,
       idempotencyKey: `c2_idem_${randomUUID()}`,
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
       createdAt: input.updatedAt ?? C2_NOW,
       updatedAt: input.updatedAt ?? C2_NOW,
     },
@@ -431,7 +573,15 @@ async function createRejection(
 async function mutationSnapshot(userId: string, paymentId: string, eventId: string) {
   const payment = await db.payment.findUniqueOrThrow({
     where: { id: paymentId },
-    select: { status: true, provider: true, providerPaymentKey: true },
+    select: {
+      status: true,
+      provider: true,
+      providerRef: true,
+      providerConfirmIdempotencyKey: true,
+      providerPaymentKey: true,
+      errorCode: true,
+      errorMessage: true,
+    },
   });
   const event = await db.paymentEvent.findUniqueOrThrow({ where: { id: eventId }, select: { status: true, attemptCount: true } });
   const dedupKey = payment.providerPaymentKey ? `void:${payment.provider}:${payment.providerPaymentKey}` : "missing";
@@ -441,6 +591,14 @@ async function mutationSnapshot(userId: string, paymentId: string, eventId: stri
     orderCount: await db.order.count({ where: { userId } }),
     outboxCount: await db.paymentOutbox.count({ where: { dedupKey } }),
   };
+}
+
+function hasFinding(
+  findings: ReconciliationFinding[],
+  kind: ReconciliationFinding["kind"],
+  paymentId: string,
+): boolean {
+  return findings.some((finding) => finding.kind === kind && finding.sourceIds.payment?.includes(paymentId));
 }
 
 function findingFor(

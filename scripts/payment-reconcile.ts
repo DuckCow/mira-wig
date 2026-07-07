@@ -36,6 +36,7 @@ const NUMBER_FLAGS = [
   { flag: "--stale-received-ms", key: "staleReceivedAfterMs" },
   { flag: "--stale-retryable-failed-ms", key: "staleRetryableFailedAfterMs" },
   { flag: "--stale-succeeded-payment-ms", key: "staleSucceededPaymentAfterMs" },
+  { flag: "--stale-provider-confirm-ms", key: "staleProviderConfirmAfterMs" },
   { flag: "--spike-window-ms", key: "spikeWindowMs" },
   { flag: "--verify-spike-threshold", key: "verifySpikeThreshold" },
   { flag: "--metadata-spike-threshold", key: "metadataSpikeThreshold" },
