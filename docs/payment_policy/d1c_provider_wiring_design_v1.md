@@ -86,10 +86,41 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 ### F. SANDBOX Adapter Selection Policy
 
 - DECISION: `TOSS + SANDBOX` stays mock-backed by default.
-- DECISION: a real Toss test-key adapter requires an explicit opt-in mechanism.
-- DECISION: the opt-in must be reviewed and behavior-tested before existing tests that assert mock-backed sandbox behavior change.
-- DESIGN RULE: do not silently replace mock sandbox behavior with external Toss test calls.
-- OPEN: exact opt-in mechanism. Acceptable design shapes include a provider/mode adapter selection flag, provider-specific sandbox adapter enablement setting, or registry/factory config.
+- DECISION: external SANDBOX provider calls require two independent opt-in keys.
+- Code key: a reviewed code-registry entry keyed by provider, `mode = SANDBOX`, and capability. Capability examples include action adapter, webhook verifier, and void executor.
+- Deployment key: a provider-scoped deployment environment opt-in. The concrete environment variable name remains deferred with credential naming, and the key is absent by default everywhere.
+- DESIGN RULE: neither key alone enables external provider calls.
+- DESIGN RULE: credential presence never substitutes for either key.
+- DESIGN RULE: credential checks are evaluated only after both opt-in keys pass.
+- DESIGN RULE: invalid `PAYMENT_MODE` already fails closed rather than silently defaulting; half-configured sandbox external intent must likewise fail closed rather than quietly returning mock success.
+
+Resolution semantics:
+
+| Code key | Deployment key | Credentials / adapter | Result |
+|---|---|---|---|
+| absent | absent | ignored | Use mock. This is the permanent default. |
+| present | absent | ignored | Typed fail-closed error, sanitized to `PROVIDER_UNAVAILABLE` at the action boundary; never silent mock. |
+| absent | present | ignored | Typed fail-closed error, sanitized to `PROVIDER_UNAVAILABLE`; never silent mock. |
+| present | present | SANDBOX credentials missing | Typed fail-closed error; no external call. |
+| present | present | SANDBOX credentials present + registered adapter | External provider test-key adapter may be selected; still no LIVE behavior. |
+
+Representation decision:
+
+- This is adapter selection under existing `PaymentMode.SANDBOX`.
+- Do not add a third `PaymentMode` enum member such as `PROVIDER_SANDBOX`.
+- Mock vs provider-test may be represented as internal adapter selection or diagnostic state only.
+- The `mock:` `providerPaymentKey` prefix remains the current data discriminator for mock-created rows.
+- No schema change is needed for this policy.
+
+Scope and interaction:
+
+- LIVE gating is untouched.
+- The two-key opt-in is evaluated only inside the factory SANDBOX branch.
+- `ProviderFactoryContext` shape remains unchanged.
+- Existing `TOSS + SANDBOX` mock-backed tests remain permanent default-invariant tests.
+- Future real Toss test-key adapter tests should be added beside the default mock tests, not by weakening them.
+- Mechanism code lands with or immediately before the Toss adapter patch; do not implement the mechanism earlier as dead config.
+- Toss confirm adapter wiring must not silently replace mock SANDBOX behavior.
 
 ### G. Toss Status and Error Mapping
 
@@ -125,7 +156,7 @@ Complete Toss error normalization remains OPEN. Unknown or unmapped Toss statuse
 Recommended order, subject to official-doc gap closure:
 
 1. Toss docs snapshot update.
-2. Toss SANDBOX external-adapter opt-in design, if real test-key calls are needed before LIVE.
+2. Toss SANDBOX external-adapter opt-in mechanism, with or immediately before real Toss test-key adapter wiring.
 3. Toss confirm adapter design/implementation.
 4. Toss query-verifier contract and authoritative-state design.
 5. Toss webhook verifier implementation.
@@ -161,6 +192,11 @@ This order is not live readiness. If official docs contradict it, revisit the or
 - Toss lookup failure is classified separately from malformed provider payload.
 - Toss SANDBOX stays mock-backed unless an explicit adapter opt-in test enables external test-key behavior.
 - Unknown Toss statuses/errors fail closed or route to manual review without leaking provider internals.
+- SANDBOX opt-in key matrix uses injected fake env: no keys -> mock, code key only -> fail closed, env key only -> fail closed, both keys + missing credentials -> fail closed, both keys + credentials + adapter -> external adapter selected.
+- Sentinel-port test proves no accidental external calls in every non-fully-enabled SANDBOX row.
+- Existing `TOSS + SANDBOX` mock tests remain green and unchanged as default-invariant tests.
+- Half-configured SANDBOX opt-in errors are sanitized and do not expose environment variable names or values.
+- LIVE path is unaffected by any SANDBOX opt-in combination.
 
 ## 6. Out of Scope
 
@@ -174,6 +210,14 @@ This order is not live readiness. If official docs contradict it, revisit the or
 - Provider API calls.
 - Webhook verifier/parser factory wiring.
 - Void executor factory wiring.
+- Actual SANDBOX opt-in mechanism code.
+- Toss confirm adapter.
+- Concrete credential environment variable names.
+- Credential requirement table content.
+- Toss test-key acquisition/operator setup.
+- Webhook-capability SANDBOX opt-in wiring.
+- `liveEnabled` population.
+- PayPal work.
 
 ## 7. References
 
