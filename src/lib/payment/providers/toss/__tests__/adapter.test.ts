@@ -4,7 +4,7 @@ import { GET as tossSuccessRoute } from "@/app/api/payments/toss/success/route";
 import type { NormalizedProviderConfirmResult, ProviderConfirmFailed, ProviderConfirmSucceeded } from "@/lib/payment/providers/contract";
 import { createMockPaymentProvider } from "../../mock";
 import { resolveProvider } from "../../resolve";
-import { PaymentMode } from "../../routing";
+import { PaymentMethod, PaymentMode } from "../../routing";
 import type { PaymentConfirmInput } from "../../types";
 import {
   createTossConfirmAdapter,
@@ -193,7 +193,7 @@ describe("Toss confirm fake HTTP adapter seam", () => {
   });
 
   it("keeps resolveProvider(TOSS, SANDBOX) mock-backed", async () => {
-    const resolved = resolveProvider({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX });
+    const resolved = resolveProvider(sandboxContext());
     const explicitMock = createMockPaymentProvider(PaymentProvider.TOSS);
 
     await expect(resolved.confirm(confirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });
@@ -212,6 +212,19 @@ describe("Toss confirm fake HTTP adapter seam", () => {
     });
   });
 });
+
+function sandboxContext() {
+  return {
+    provider: PaymentProvider.TOSS,
+    mode: PaymentMode.SANDBOX,
+    market: "KR",
+    method: PaymentMethod.CARD,
+    currency: "KRW",
+    ruleId: "d1a.kr.card.krw",
+    credentials: [],
+    liveGuard: { kind: "blocked" as const, liveEnabled: false as const, reason: "not live mode" },
+  };
+}
 
 interface RecordingClient {
   calls: TossConfirmHttpRequest[];

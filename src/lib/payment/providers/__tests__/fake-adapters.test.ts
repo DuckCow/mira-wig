@@ -104,7 +104,7 @@ describe("fake provider adapter contract", () => {
   });
 
   it("keeps sandbox resolver behavior explicitly mock-backed", async () => {
-    const resolved = resolveProvider({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX });
+    const resolved = resolveProvider(factoryContext({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX }));
     const explicitMock = createMockPaymentProvider(PaymentProvider.PAYPAL);
 
     await expect(resolved.initiate(initiateInput())).resolves.toEqual({ kind: "ready" });

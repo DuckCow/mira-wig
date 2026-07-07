@@ -7,7 +7,7 @@ import type {
 } from "@/lib/payment/providers/contract";
 import { createMockPaymentProvider } from "../../mock";
 import { resolveProvider } from "../../resolve";
-import { PaymentMode } from "../../routing";
+import { PaymentMethod, PaymentMode } from "../../routing";
 import {
   buildTossConfirmRequest,
   normalizeTossConfirmResponse,
@@ -276,13 +276,26 @@ describe("Toss confirm mapper non-wiring", () => {
   });
 
   it("keeps the sandbox resolver on the mock provider", async () => {
-    const resolved = resolveProvider({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX });
+    const resolved = resolveProvider(sandboxContext());
     const explicitMock = createMockPaymentProvider(PaymentProvider.TOSS);
 
     await expect(resolved.confirm(mockConfirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });
     await expect(explicitMock.confirm(mockConfirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });
   });
 });
+
+function sandboxContext() {
+  return {
+    provider: PaymentProvider.TOSS,
+    mode: PaymentMode.SANDBOX,
+    market: "KR",
+    method: PaymentMethod.CARD,
+    currency: "KRW",
+    ruleId: "d1a.kr.card.krw",
+    credentials: [],
+    liveGuard: { kind: "blocked" as const, liveEnabled: false as const, reason: "not live mode" },
+  };
+}
 
 function baseBuildInput(overrides: Partial<TossConfirmRequestBuildInput> = {}): TossConfirmRequestBuildInput {
   return {

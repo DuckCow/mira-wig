@@ -20,6 +20,7 @@ import {
   PROVIDER_REGISTRY,
   PaymentMethod,
   PaymentMode,
+  liveGuardForProviderContext,
   providerForMarket,
 } from "@/lib/payment/providers/routing";
 import type {
@@ -27,6 +28,7 @@ import type {
   ProviderConfirmFailed,
   ProviderErrorCode,
   ProviderFailureClass,
+  ProviderFactoryContext,
 } from "@/lib/payment/providers/contract";
 import type {
   PaymentConfirmFacts,
@@ -121,10 +123,7 @@ describe("payment actions", () => {
     expect(payment.status).toBe(PaymentAttemptStatus.INITIATED);
     expect(payment.mode).toBe(PersistedPaymentMode.SANDBOX);
     expect(payment.idempotencyKey).toMatch(`initiate:${session.sessionId}:`);
-    expect(mockResolveProvider).toHaveBeenCalledWith({
-      provider: PaymentProvider.TOSS,
-      mode: PaymentMode.SANDBOX,
-    });
+    expect(mockResolveProvider).toHaveBeenCalledWith(expectedResolverContext());
   });
 
   it("initiate action does not expose providerRef when provider returns one", async () => {
@@ -228,10 +227,7 @@ describe("payment actions", () => {
       expect(result.error).not.toContain("LIVE_ADAPTER_UNAVAILABLE");
       expect(result.error).not.toContain("internal live adapter detail");
     }
-    expect(mockResolveProvider).toHaveBeenCalledWith({
-      provider: PaymentProvider.TOSS,
-      mode: PaymentMode.LIVE,
-    });
+    expect(mockResolveProvider).toHaveBeenCalledWith(expectedResolverContext({ mode: PaymentMode.LIVE }));
     await expect(paymentCount(session.sessionId)).resolves.toBe(0);
   });
 
@@ -304,10 +300,7 @@ describe("payment actions", () => {
     expect(payment.status).toBe(PaymentAttemptStatus.SUCCEEDED);
     expect(payment.providerPaymentKey).toBe(key);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
-    expect(mockResolveProvider).toHaveBeenLastCalledWith({
-      provider: PaymentProvider.TOSS,
-      mode: PaymentMode.SANDBOX,
-    });
+    expect(mockResolveProvider).toHaveBeenLastCalledWith(expectedResolverContext());
   });
 
   it("confirm persists and sends the canonical provider confirm idempotency key", async () => {
@@ -809,6 +802,26 @@ function confirmFacts(input: PaymentConfirmInput): PaymentConfirmFacts {
     providerPaymentKey: input.providerPaymentKey ?? `mock:${input.checkoutSessionId}`,
     amount: input.amount,
     currency: input.currency,
+  };
+}
+
+function expectedResolverContext(overrides: Partial<ProviderFactoryContext> = {}): ProviderFactoryContext {
+  const provider = overrides.provider ?? PaymentProvider.TOSS;
+  const mode = overrides.mode ?? PaymentMode.SANDBOX;
+  const market = overrides.market ?? MarketCode.KR;
+  const method = overrides.method ?? PaymentMethod.CARD;
+  const currency = overrides.currency ?? "KRW";
+  const ruleId = overrides.ruleId ?? "d1a.kr.card.krw";
+  return {
+    provider,
+    mode,
+    market,
+    method,
+    currency,
+    ruleId,
+    credentials: [],
+    liveGuard: liveGuardForProviderContext({ provider, market, method, currency, ruleId }),
+    ...overrides,
   };
 }
 

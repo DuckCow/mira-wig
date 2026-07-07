@@ -1,7 +1,7 @@
 import type { PaymentProvider as ProviderCode } from "@prisma/client";
 import type { CaptureFacts } from "@/lib/payment/complete/types";
 import type { PaymentConfirmInput, PaymentInitiateInput } from "./types";
-import type { PaymentMethod, PaymentMode } from "./routing";
+import type { PaymentMethod, PaymentMode, ProviderLiveGuardResult } from "./routing";
 
 export interface ProviderDiagnostics {
   providerStatus?: string;
@@ -201,10 +201,6 @@ export interface ProviderCredentialCheck {
   required: boolean;
   present: boolean;
 }
-
-export type ProviderLiveGuardResult =
-  | { kind: "allowed"; liveEnabled: true }
-  | { kind: "blocked"; liveEnabled: false; reason: string };
 
 export interface ProviderFactoryContext {
   provider: ProviderCode;

@@ -8,28 +8,20 @@ import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
-import { PaymentModeConfigException, configuredPaymentMode } from "@/lib/payment/mode";
 import { bridgeProviderConfirmResult, type ProviderConfirmActionErrorCode } from "@/lib/payment/providers/confirm-bridge";
-import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
-import {
-  NoEligibleProviderError,
-  PaymentMode,
-  defaultPaymentMethodForMarket,
-  resolveProviderForPayment,
-  type PaymentMethod,
-} from "@/lib/payment/providers/routing";
+import { PaymentMode, type PaymentMethod } from "@/lib/payment/providers/routing";
 import type { PaymentInitiateResult, PaymentProvider as PaymentProviderPort } from "@/lib/payment/providers/types";
+import { resolveActionAdapter, resolveActionProvider, type ActionProviderSuccess } from "./payment-provider-boundary";
 
 type ActionSession = Pick<CheckoutSession, "id" | "userId" | "marketCode" | "totalAmount" | "currency">;
 type PaymentActionFailure = { success: false; errorCode: PaymentActionErrorCode; error: string; retryable: boolean };
 type BoundaryResult =
-  | { success: true; userId: string; session: ActionSession; provider: PaymentProvider; mode: PaymentMode }
+  | (ActionProviderSuccess & { userId: string; session: ActionSession })
   | PaymentActionFailure;
 type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
 type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey" | "mode">;
 type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
 type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionFailure;
-type AdapterResolutionResult = { success: true; provider: PaymentProviderPort } | PaymentActionFailure;
 
 export interface ConfirmPaymentInput {
   providerPaymentKey?: string;
@@ -60,7 +52,7 @@ export async function initiatePayment(checkoutSessionId: string, input: Initiate
   const boundary = await resolveBoundary(checkoutSessionId, input.method);
   if (!boundary.success) return boundary;
 
-  const provider = resolveActionAdapter(boundary.provider, boundary.mode);
+  const provider = resolveActionAdapter(boundary.adapterContext);
   if (!provider.success) return provider;
   try {
     const result = await initiatePaymentAttempt(db, {
@@ -89,7 +81,7 @@ export async function confirmPayment(
 
   const payment = await prepareConfirmPayment(boundary.session.id, parsed, boundary.mode);
   if (!payment.success) return payment;
-  const provider = resolveActionAdapter(parsed, boundary.mode);
+  const provider = resolveActionAdapter(boundary.adapterContext);
   if (!provider.success) return provider;
   const facts = await confirmWithProvider(provider.provider, boundary.session, payment.payment, boundary.mode, input);
   if (!facts.success) return facts;
@@ -119,6 +111,7 @@ async function resolveBoundary(
     session: checkoutSession,
     provider: provider.provider,
     mode: provider.mode,
+    adapterContext: provider.adapterContext,
   };
 }
 
@@ -271,41 +264,6 @@ function initiateSuccess(
 
 function initiateError(e: PaymentInitiateException): PaymentActionResult {
   return actionError(e.code, e.message, false);
-}
-
-function resolveActionProvider(
-  session: ActionSession,
-  marketCode: string,
-  method: PaymentMethod | undefined,
-): { success: true; provider: PaymentProvider; mode: PaymentMode } | PaymentActionFailure {
-  try {
-    const selectedMethod = method ?? defaultPaymentMethodForMarket(marketCode);
-    const mode = configuredPaymentMode();
-    const resolution = resolveProviderForPayment({
-      market: marketCode,
-      method: selectedMethod,
-      currency: session.currency,
-      amountMinor: session.totalAmount,
-      mode,
-    });
-    return { success: true, provider: resolution.selectedProvider, mode: resolution.mode };
-  } catch (e) {
-    if (e instanceof NoEligibleProviderError || e instanceof PaymentModeConfigException) {
-      return actionError("PROVIDER_UNAVAILABLE", "No payment provider is available.", false);
-    }
-    throw e;
-  }
-}
-
-function resolveActionAdapter(provider: PaymentProvider, mode: PaymentMode): AdapterResolutionResult {
-  try {
-    return { success: true, provider: resolveProvider({ provider, mode }) };
-  } catch (e) {
-    if (e instanceof ProviderResolveException) {
-      return actionError("PROVIDER_UNAVAILABLE", "No payment provider is available.", false);
-    }
-    throw e;
-  }
 }
 
 function parseProvider(value: string): PaymentProvider | null {

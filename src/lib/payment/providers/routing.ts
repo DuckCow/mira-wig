@@ -69,6 +69,18 @@ export interface ProviderSelectionConfig {
   rules?: readonly RoutingRule[];
 }
 
+export type ProviderLiveGuardResult =
+  | { kind: "allowed"; liveEnabled: true }
+  | { kind: "blocked"; liveEnabled: false; reason: string };
+
+export interface ProviderLiveGuardContext {
+  provider: PaymentProvider;
+  market: string;
+  method: PaymentMethod;
+  currency: string;
+  ruleId: string;
+}
+
 export class NoEligibleProviderError extends Error {
   readonly code = "NO_ELIGIBLE_PROVIDER";
 
@@ -200,6 +212,16 @@ export function providerForMarket(marketCode: string): PaymentProvider {
   }).selectedProvider;
 }
 
+export function liveGuardForProviderContext(
+  context: ProviderLiveGuardContext,
+  registry: Partial<Record<PaymentProvider, ProviderRegistryEntry>> = PROVIDER_REGISTRY,
+): ProviderLiveGuardResult {
+  const entry = registry[context.provider];
+  if (!entry) return { kind: "blocked", liveEnabled: false, reason: "provider is not registered" };
+  if (isLiveEnabled(entry, context)) return { kind: "allowed", liveEnabled: true };
+  return { kind: "blocked", liveEnabled: false, reason: "provider is not live-enabled for context" };
+}
+
 function matchingRule(context: PaymentContext, rules: readonly RoutingRule[]): RoutingRule | undefined {
   return rules.find((rule) => (
     rule.market === context.market
@@ -260,7 +282,10 @@ function amountReason(entry: ProviderRegistryEntry, amountMinor: number): string
   return "amount is above provider maximum";
 }
 
-function isLiveEnabled(entry: ProviderRegistryEntry, context: PaymentContext): boolean {
+function isLiveEnabled(
+  entry: ProviderRegistryEntry,
+  context: Pick<PaymentContext, "market" | "method" | "currency">,
+): boolean {
   return entry.liveEnabled?.some((item) => (
     item.market === context.market
     && item.method === context.method
