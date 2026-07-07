@@ -24,8 +24,11 @@ export type PaymentInitiateResult = PaymentInitiateReady | PaymentInitiateRedire
 
 export interface PaymentConfirmInput {
   checkoutSessionId: string;
+  paymentId: string;
   provider: ProviderCode;
   providerPaymentKey?: string;
+  providerRef?: string;
+  providerConfirmIdempotencyKey: string;
   amount: number;
   currency: string;
 }

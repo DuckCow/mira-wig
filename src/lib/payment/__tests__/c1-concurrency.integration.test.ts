@@ -231,6 +231,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
       });
       await addCart(ctx, variant, 1);
       const session = await submitSession(ctx);
+      await createPendingPaymentAttempt(session);
       const providerPaymentKey = `c1_confirm_webhook_${randomUUID()}`;
       const payload = capturePayload(ctx, session, providerPaymentKey);
 
@@ -239,7 +240,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
         handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload)),
       ]);
 
-      expect(confirmResult.success).toBe(true);
+      if (!confirmResult.success) expect(confirmResult.errorCode).toBe("PAYMENT_UNAVAILABLE");
       expect(webhookResult.status).toBe(200);
       await expect(orderCountBySession(session.sessionId)).resolves.toBe(1);
       await expect(paymentCount(session.sessionId)).resolves.toBe(1);
@@ -389,6 +390,21 @@ async function submitSessionWithOneLine(context: TestContext): Promise<SessionRe
   const variant = await createCatalogVariant(context, { amount: 12_000, stock: 10 });
   await addCart(context, variant, 1);
   return submitSession(context);
+}
+
+async function createPendingPaymentAttempt(session: SessionResult): Promise<string> {
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      status: PaymentAttemptStatus.INITIATED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      idempotencyKey: `c1_initiate_${randomUUID()}`,
+    },
+    select: { id: true },
+  });
+  return payment.id;
 }
 
 function validShipping(): CheckoutShippingInput {

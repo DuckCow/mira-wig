@@ -155,7 +155,7 @@ function fakeConfirm(
       safeMessage: "Final provider payment key is required for capture success.",
       ambiguousProviderState: false,
       providerLookupRequired: false,
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey: input.providerConfirmIdempotencyKey,
     });
   }
   return Promise.resolve({
@@ -164,7 +164,7 @@ function fakeConfirm(
     providerPaymentKey: input.providerPaymentKey,
     amountMinor: input.amount,
     currency: input.currency,
-    idempotencyKey: input.idempotencyKey,
+    idempotencyKey: input.providerConfirmIdempotencyKey,
     providerRef: input.providerRef,
     rawProviderStatus: "COMPLETED",
   });
@@ -310,10 +310,11 @@ function initiateInput(): PaymentInitiateInput {
 function confirmInput(overrides: Partial<ProviderConfirmContractInput> = {}): ProviderConfirmContractInput {
   return {
     checkoutSessionId: "checkout_123",
+    paymentId: "payment_123",
     provider: PaymentProvider.TOSS,
     amount: 12_000,
     currency: "KRW",
-    idempotencyKey: "confirm:TOSS:payment_123",
+    providerConfirmIdempotencyKey: "confirm:TOSS:payment_123",
     ...overrides,
   };
 }

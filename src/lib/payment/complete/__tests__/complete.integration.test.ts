@@ -227,6 +227,29 @@ describe("payment completion core", () => {
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
   });
 
+  it("webhook/API-first capture does not require providerConfirmIdempotencyKey", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const facts = captureFacts(ctx, session);
+
+    const result = await completeFromCapture(db, facts);
+    const payment = await db.payment.findUnique({
+      where: {
+        provider_providerPaymentKey: {
+          provider: facts.provider,
+          providerPaymentKey: facts.providerPaymentKey,
+        },
+      },
+      select: { providerConfirmIdempotencyKey: true, idempotencyKey: true, providerPaymentKey: true },
+    });
+
+    expect(result.kind).toBe("completed");
+    expect(payment).toEqual({
+      providerConfirmIdempotencyKey: null,
+      idempotencyKey: `capture:${facts.provider}:${facts.providerPaymentKey}`,
+      providerPaymentKey: facts.providerPaymentKey,
+    });
+  });
+
   it("같은 캡처 재실패는 void enqueue를 행 1개로 멱등 처리한다", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const facts = captureFacts(ctx, session, { amount: session.totalAmount + 1 });

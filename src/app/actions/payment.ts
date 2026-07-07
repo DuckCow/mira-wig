@@ -1,7 +1,7 @@
 "use server";
 
-import { PaymentProvider } from "@prisma/client";
-import type { CheckoutSession } from "@prisma/client";
+import { PaymentAttemptStatus, PaymentProvider } from "@prisma/client";
+import type { CheckoutSession, Payment } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getCurrentMarketCode } from "@/lib/market/resolve";
 import { getSession } from "@/lib/session";
@@ -16,10 +16,7 @@ import {
   resolveProviderForPayment,
   type PaymentMethod,
 } from "@/lib/payment/providers/routing";
-import type {
-  PaymentInitiateResult,
-  PaymentProvider as PaymentProviderPort,
-} from "@/lib/payment/providers/types";
+import type { PaymentInitiateResult, PaymentProvider as PaymentProviderPort } from "@/lib/payment/providers/types";
 
 type ActionSession = Pick<CheckoutSession, "id" | "userId" | "marketCode" | "totalAmount" | "currency">;
 type PaymentActionFailure = { success: false; errorCode: PaymentActionErrorCode; error: string; retryable: boolean };
@@ -27,6 +24,9 @@ type BoundaryResult =
   | { success: true; userId: string; session: ActionSession; provider: PaymentProvider }
   | PaymentActionFailure;
 type ProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
+type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey">;
+type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
+type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionFailure;
 
 export interface ConfirmPaymentInput {
   providerPaymentKey?: string;
@@ -48,6 +48,7 @@ export type PaymentActionErrorCode =
   | "PROVIDER_INVALID"
   | "PROVIDER_MISMATCH"
   | "PROVIDER_UNAVAILABLE"
+  | "PAYMENT_UNAVAILABLE"
   | "PROVIDER_RETRYABLE"
   | "COMPLETION_RETRYABLE"
   | "PAYMENT_FAILED";
@@ -122,11 +123,17 @@ async function confirmWithProvider(
   session: ActionSession,
   input: ConfirmPaymentInput,
 ): Promise<ProviderConfirmResult> {
+  const payment = await prepareConfirmPayment(session.id, provider.code);
+  if (!payment.success) return payment;
+
   try {
     const facts = await provider.confirm({
       checkoutSessionId: session.id,
+      paymentId: payment.payment.id,
       provider: provider.code,
       providerPaymentKey: input.providerPaymentKey,
+      providerRef: payment.payment.providerRef ?? undefined,
+      providerConfirmIdempotencyKey: payment.payment.providerConfirmIdempotencyKey,
       amount: session.totalAmount,
       currency: session.currency,
     });
@@ -134,6 +141,80 @@ async function confirmWithProvider(
   } catch (e) {
     return actionError("PROVIDER_RETRYABLE", errorMessage(e), true);
   }
+}
+
+async function prepareConfirmPayment(checkoutSessionId: string, provider: PaymentProvider): Promise<ConfirmAttemptResult> {
+  const payments = await db.payment.findMany({
+    where: pendingConfirmWhere(checkoutSessionId, provider),
+    orderBy: { createdAt: "desc" },
+    take: 2,
+    select: pendingConfirmSelect(),
+  });
+  if (payments.length === 0) {
+    return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is unavailable.", false);
+  }
+  if (payments.length > 1) {
+    return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is ambiguous.", false);
+  }
+  return ensureConfirmIdempotencyKey(checkoutSessionId, provider, payments[0]);
+}
+
+async function ensureConfirmIdempotencyKey(
+  checkoutSessionId: string,
+  provider: PaymentProvider,
+  payment: PendingConfirmPayment,
+): Promise<ConfirmAttemptResult> {
+  if (payment.providerConfirmIdempotencyKey) {
+    return { success: true, payment: withConfirmKey(payment, payment.providerConfirmIdempotencyKey) };
+  }
+
+  const key = confirmIdempotencyKey(provider, payment.id);
+  const result = await db.payment.updateMany({
+    where: {
+      id: payment.id,
+      ...pendingConfirmWhere(checkoutSessionId, provider),
+      providerConfirmIdempotencyKey: null,
+    },
+    data: { providerConfirmIdempotencyKey: key },
+  });
+  if (result.count === 1) return { success: true, payment: withConfirmKey(payment, key) };
+  return reuseConcurrentConfirmKey(checkoutSessionId, provider, payment.id);
+}
+
+async function reuseConcurrentConfirmKey(
+  checkoutSessionId: string,
+  provider: PaymentProvider,
+  paymentId: string,
+): Promise<ConfirmAttemptResult> {
+  const payment = await db.payment.findFirst({
+    where: { id: paymentId, ...pendingConfirmWhere(checkoutSessionId, provider) },
+    select: pendingConfirmSelect(),
+  });
+  if (payment?.providerConfirmIdempotencyKey) {
+    return { success: true, payment: withConfirmKey(payment, payment.providerConfirmIdempotencyKey) };
+  }
+  return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt changed before confirm.", false);
+}
+
+function withConfirmKey(payment: PendingConfirmPayment, providerConfirmIdempotencyKey: string): PendingConfirmPaymentWithKey {
+  return { ...payment, providerConfirmIdempotencyKey };
+}
+
+function pendingConfirmWhere(checkoutSessionId: string, provider: PaymentProvider) {
+  return {
+    checkoutSessionId,
+    provider,
+    providerPaymentKey: null,
+    status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+  };
+}
+
+function pendingConfirmSelect() {
+  return { id: true, providerRef: true, providerConfirmIdempotencyKey: true };
+}
+
+function confirmIdempotencyKey(provider: PaymentProvider, paymentId: string): string {
+  return `confirm:${provider}:${paymentId}`;
 }
 
 async function completeConfirmedPayment(facts: CaptureFacts): Promise<PaymentActionResult> {

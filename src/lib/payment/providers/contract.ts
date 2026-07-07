@@ -56,11 +56,7 @@ export type NormalizedProviderInitiateResult =
   | (ProviderInitiateBase & { kind: "ready"; approveUrl?: never })
   | (ProviderInitiateBase & { kind: "redirect"; approveUrl: string });
 
-export interface ProviderConfirmContractInput extends PaymentConfirmInput {
-  paymentId?: string;
-  providerRef?: string;
-  idempotencyKey: string;
-}
+export type ProviderConfirmContractInput = PaymentConfirmInput;
 
 export interface ProviderConfirmSucceeded extends ProviderReferenceFields {
   kind: "succeeded";
