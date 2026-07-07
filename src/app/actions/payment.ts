@@ -8,6 +8,7 @@ import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
+import { bridgeProviderConfirmResult, type ProviderConfirmActionErrorCode } from "@/lib/payment/providers/confirm-bridge";
 import { resolveProvider } from "@/lib/payment/providers/resolve";
 import {
   NoEligibleProviderError,
@@ -23,7 +24,7 @@ type PaymentActionFailure = { success: false; errorCode: PaymentActionErrorCode;
 type BoundaryResult =
   | { success: true; userId: string; session: ActionSession; provider: PaymentProvider }
   | PaymentActionFailure;
-type ProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
+type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
 type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey">;
 type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
 type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionFailure;
@@ -49,14 +50,11 @@ export type PaymentActionErrorCode =
   | "PROVIDER_MISMATCH"
   | "PROVIDER_UNAVAILABLE"
   | "PAYMENT_UNAVAILABLE"
-  | "PROVIDER_RETRYABLE"
+  | ProviderConfirmActionErrorCode
   | "COMPLETION_RETRYABLE"
   | "PAYMENT_FAILED";
 
-export async function initiatePayment(
-  checkoutSessionId: string,
-  input: InitiatePaymentInput = {},
-): Promise<PaymentActionResult> {
+export async function initiatePayment(checkoutSessionId: string, input: InitiatePaymentInput = {}): Promise<PaymentActionResult> {
   const boundary = await resolveBoundary(checkoutSessionId, input.method);
   if (!boundary.success) return boundary;
 
@@ -122,12 +120,12 @@ async function confirmWithProvider(
   provider: PaymentProviderPort,
   session: ActionSession,
   input: ConfirmPaymentInput,
-): Promise<ProviderConfirmResult> {
+): Promise<ActionProviderConfirmResult> {
   const payment = await prepareConfirmPayment(session.id, provider.code);
   if (!payment.success) return payment;
 
   try {
-    const facts = await provider.confirm({
+    const result = await provider.confirm({
       checkoutSessionId: session.id,
       paymentId: payment.payment.id,
       provider: provider.code,
@@ -137,7 +135,14 @@ async function confirmWithProvider(
       amount: session.totalAmount,
       currency: session.currency,
     });
-    return { success: true, captureFacts: { ...facts, checkoutSessionId: session.id, provider: provider.code, receivedAt: new Date() } };
+    return bridgeProviderConfirmResult({
+      client: db,
+      checkoutSessionId: session.id,
+      paymentId: payment.payment.id,
+      provider: provider.code,
+      result,
+      receivedAt: new Date(),
+    });
   } catch (e) {
     return actionError("PROVIDER_RETRYABLE", errorMessage(e), true);
   }
@@ -278,11 +283,7 @@ function parseProvider(value: string): PaymentProvider | null {
   return null;
 }
 
-function actionError(
-  errorCode: PaymentActionErrorCode,
-  error: string,
-  retryable: boolean,
-): PaymentActionFailure {
+function actionError(errorCode: PaymentActionErrorCode, error: string, retryable: boolean): PaymentActionFailure {
   return { success: false, errorCode, error, retryable };
 }
 

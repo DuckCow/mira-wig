@@ -1,4 +1,5 @@
 import type { PaymentProvider as ProviderCode } from "@prisma/client";
+import type { NormalizedProviderConfirmResult } from "./contract";
 
 export interface PaymentInitiateInput {
   checkoutSessionId: string;
@@ -40,8 +41,10 @@ export interface PaymentConfirmFacts {
   capturedAt?: Date;
 }
 
+export type PaymentConfirmResult = PaymentConfirmFacts | NormalizedProviderConfirmResult;
+
 export interface PaymentProvider {
   code: ProviderCode;
   initiate(input: PaymentInitiateInput): Promise<PaymentInitiateResult>;
-  confirm(input: PaymentConfirmInput): Promise<PaymentConfirmFacts>;
+  confirm(input: PaymentConfirmInput): Promise<PaymentConfirmResult>;
 }

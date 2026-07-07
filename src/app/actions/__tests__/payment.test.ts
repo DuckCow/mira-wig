@@ -16,8 +16,15 @@ import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
 import { resolveProvider } from "@/lib/payment/providers/resolve";
 import { NoEligibleProviderError, PaymentMethod, providerForMarket } from "@/lib/payment/providers/routing";
 import type {
+  NormalizedProviderConfirmResult,
+  ProviderConfirmFailed,
+  ProviderErrorCode,
+  ProviderFailureClass,
+} from "@/lib/payment/providers/contract";
+import type {
   PaymentConfirmFacts,
   PaymentConfirmInput,
+  PaymentConfirmResult,
   PaymentInitiateResult,
   PaymentProvider as PaymentProviderPort,
 } from "@/lib/payment/providers/types";
@@ -59,6 +66,8 @@ interface FakeConfirmOptions {
   beforeConfirm?: (input: PaymentConfirmInput) => Promise<void>;
   error?: Error;
   facts?: PaymentConfirmFacts;
+  result?: PaymentConfirmResult;
+  resultForInput?: (input: PaymentConfirmInput) => PaymentConfirmResult;
 }
 
 describe("payment actions", () => {
@@ -246,6 +255,180 @@ describe("payment actions", () => {
       providerPaymentKey: null,
     });
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
+  });
+
+  it("normalized success completes through local completion without direct providerPaymentKey write", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session);
+    const key = providerPaymentKey(ctx);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      resultForInput: (input) => normalizedSuccess(input, key),
+    }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: key });
+    const persisted = await loadPayment(payment.id);
+
+    expect(result.success).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(persisted).toMatchObject({
+      status: PaymentAttemptStatus.SUCCEEDED,
+      providerPaymentKey: key,
+      errorCode: null,
+      errorMessage: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
+    fetchSpy.mockRestore();
+  });
+
+  it("normalized retryable failure preserves pending attempt and confirm key without void", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session);
+    const key = providerPaymentKey(ctx);
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      resultForInput: (input) => normalizedFailure(input, "RETRYABLE", "PROVIDER_TIMEOUT"),
+    }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: key });
+    const persisted = await loadPayment(payment.id);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_RETRYABLE");
+      expect(result.retryable).toBe(true);
+    }
+    expect(persisted).toMatchObject({
+      status: PaymentAttemptStatus.INITIATED,
+      providerConfirmIdempotencyKey: `confirm:${PaymentProvider.TOSS}:${payment.id}`,
+      providerPaymentKey: null,
+      errorCode: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
+  });
+
+  it("normalized terminal failure marks only the payment attempt failed and allows a new attempt", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const first = await createPendingPayment(session);
+    const terminalKey = providerPaymentKey(ctx);
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      resultForInput: (input) => normalizedFailure(input, "TERMINAL", "PROVIDER_DECLINED"),
+    }));
+
+    const terminal = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: terminalKey });
+    const failedAttempt = await loadPayment(first.id);
+
+    expect(terminal.success).toBe(false);
+    if (!terminal.success) {
+      expect(terminal.errorCode).toBe("PROVIDER_TERMINAL");
+      expect(terminal.retryable).toBe(false);
+    }
+    expect(failedAttempt).toMatchObject({
+      status: PaymentAttemptStatus.FAILED,
+      errorCode: "PROVIDER_CONFIRM_TERMINAL",
+      providerPaymentKey: null,
+    });
+    await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+    await expect(outboxCount(PaymentProvider.TOSS, terminalKey)).resolves.toBe(0);
+
+    const second = await createPendingPayment(session);
+    const successKey = providerPaymentKey(ctx);
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      resultForInput: (input) => normalizedSuccess(input, successKey),
+    }));
+    const succeeded = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: successKey });
+
+    expect(succeeded.success).toBe(true);
+    await expect(loadPayment(second.id)).resolves.toMatchObject({
+      status: PaymentAttemptStatus.SUCCEEDED,
+      providerPaymentKey: successKey,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("normalized manual review stays pending with safe marker and redacted action result", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session);
+    const key = providerPaymentKey(ctx);
+    const rawSecret = "test_sk_should_not_leak";
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      resultForInput: (input) => normalizedFailure(input, "MANUAL_REVIEW", "PROVIDER_STATE_AMBIGUOUS", rawSecret),
+    }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: key });
+    const persisted = await loadPayment(payment.id);
+    const rendered = JSON.stringify([result, persisted]);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_MANUAL_REVIEW");
+      expect(result.retryable).toBe(false);
+    }
+    expect(persisted).toMatchObject({
+      status: PaymentAttemptStatus.INITIATED,
+      errorCode: "PROVIDER_CONFIRM_MANUAL_REVIEW",
+      providerPaymentKey: null,
+    });
+    expect(rendered).not.toContain(rawSecret);
+    expect(rendered).not.toContain("RAW_PROVIDER_CODE");
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
+  });
+
+  it("normalized stop failure stores operator marker without retry or completion", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session);
+    const key = providerPaymentKey(ctx);
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      resultForInput: (input) => normalizedFailure(input, "STOP", "PROVIDER_AUTH_FAILED"),
+    }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: key });
+    const persisted = await loadPayment(payment.id);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_STOP");
+      expect(result.retryable).toBe(false);
+    }
+    expect(persisted).toMatchObject({
+      status: PaymentAttemptStatus.INITIATED,
+      errorCode: "PROVIDER_CONFIRM_STOP",
+      providerPaymentKey: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
+  });
+
+  it("normalized programmer error fails closed without provider retry or internal detail exposure", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session);
+    const key = providerPaymentKey(ctx);
+    const inputs: PaymentConfirmInput[] = [];
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, {
+      inputs,
+      resultForInput: (input) => normalizedFailure(input, "PROGRAMMER_ERROR", "PROVIDER_PROGRAMMER_ERROR", "stack trace secret"),
+    }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey: key });
+    const persisted = await loadPayment(payment.id);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_PROGRAMMER_ERROR");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("Payment operation failed.");
+      expect(result.error).not.toContain("stack trace secret");
+    }
+    expect(inputs).toHaveLength(1);
+    expect(persisted).toMatchObject({
+      status: PaymentAttemptStatus.INITIATED,
+      errorCode: null,
+      providerPaymentKey: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
     await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
   });
 
@@ -457,6 +640,8 @@ function fakeConfirmProvider(
       options.inputs?.push(input);
       await options.beforeConfirm?.(input);
       if (options.error) throw options.error;
+      if (options.resultForInput) return options.resultForInput(input);
+      if (options.result) return options.result;
       return options.facts ?? confirmFacts(input);
     },
   };
@@ -467,6 +652,45 @@ function confirmFacts(input: PaymentConfirmInput): PaymentConfirmFacts {
     providerPaymentKey: input.providerPaymentKey ?? `mock:${input.checkoutSessionId}`,
     amount: input.amount,
     currency: input.currency,
+  };
+}
+
+function normalizedSuccess(
+  input: PaymentConfirmInput,
+  providerPaymentKey: string,
+): NormalizedProviderConfirmResult {
+  return {
+    kind: "succeeded",
+    provider: input.provider,
+    providerPaymentKey,
+    amountMinor: input.amount,
+    currency: input.currency,
+    idempotencyKey: input.providerConfirmIdempotencyKey,
+    rawProviderStatus: "FAKE_COMPLETED",
+  };
+}
+
+function normalizedFailure(
+  input: PaymentConfirmInput,
+  classification: ProviderFailureClass,
+  normalizedCode: ProviderErrorCode,
+  unsafeDetail = "redacted-provider-detail",
+): ProviderConfirmFailed {
+  return {
+    kind: "failed",
+    provider: input.provider,
+    classification,
+    normalizedCode,
+    providerErrorCode: "RAW_PROVIDER_CODE",
+    safeMessage: `Safe provider message ${unsafeDetail}`,
+    ambiguousProviderState: classification === "MANUAL_REVIEW" || classification === "RETRYABLE",
+    providerLookupRequired: classification === "MANUAL_REVIEW",
+    idempotencyKey: input.providerConfirmIdempotencyKey,
+    diagnostics: {
+      providerCode: "RAW_PROVIDER_CODE",
+      safeMessage: unsafeDetail,
+      requestId: input.providerConfirmIdempotencyKey,
+    },
   };
 }
 
@@ -496,6 +720,21 @@ async function confirmKeyOf(paymentId: string): Promise<string | null> {
   });
   if (!payment) throw new Error(`Missing payment ${paymentId}`);
   return payment.providerConfirmIdempotencyKey;
+}
+
+async function loadPayment(paymentId: string) {
+  const payment = await db.payment.findUnique({
+    where: { id: paymentId },
+    select: {
+      status: true,
+      providerConfirmIdempotencyKey: true,
+      providerPaymentKey: true,
+      errorCode: true,
+      errorMessage: true,
+    },
+  });
+  if (!payment) throw new Error(`Missing payment ${paymentId}`);
+  return payment;
 }
 
 async function cleanup(context: TestContext): Promise<void> {
