@@ -7,6 +7,7 @@ import type {
 } from "@/lib/payment/providers/contract";
 import { createMockPaymentProvider } from "../../mock";
 import { resolveProvider } from "../../resolve";
+import { PaymentMode } from "../../routing";
 import {
   buildTossConfirmRequest,
   normalizeTossConfirmResponse,
@@ -274,8 +275,8 @@ describe("Toss confirm mapper non-wiring", () => {
     fetchSpy.mockRestore();
   });
 
-  it("keeps the production resolver on the mock provider", async () => {
-    const resolved = resolveProvider(PaymentProvider.TOSS);
+  it("keeps the sandbox resolver on the mock provider", async () => {
+    const resolved = resolveProvider({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX });
     const explicitMock = createMockPaymentProvider(PaymentProvider.TOSS);
 
     await expect(resolved.confirm(mockConfirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });

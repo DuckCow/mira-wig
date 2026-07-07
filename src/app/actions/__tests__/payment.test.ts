@@ -13,8 +13,8 @@ import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
-import { resolveProvider } from "@/lib/payment/providers/resolve";
-import { NoEligibleProviderError, PaymentMethod, providerForMarket } from "@/lib/payment/providers/routing";
+import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
+import { NoEligibleProviderError, PaymentMethod, PaymentMode, providerForMarket } from "@/lib/payment/providers/routing";
 import type {
   NormalizedProviderConfirmResult,
   ProviderConfirmFailed,
@@ -31,7 +31,10 @@ import type {
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 vi.mock("@/lib/market/resolve", () => ({ getCurrentMarketCode: vi.fn() }));
-vi.mock("@/lib/payment/providers/resolve", () => ({ resolveProvider: vi.fn() }));
+vi.mock("@/lib/payment/providers/resolve", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/payment/providers/resolve")>()),
+  resolveProvider: vi.fn(),
+}));
 
 import { getCurrentMarketCode } from "@/lib/market/resolve";
 import { getSession } from "@/lib/session";
@@ -81,10 +84,11 @@ describe("payment actions", () => {
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
     mockGetSession.mockResolvedValue(makeSession(ctx.userId));
     mockGetCurrentMarketCode.mockResolvedValue(MarketCode.KR);
-    mockResolveProvider.mockImplementation((providerCode) => createMockPaymentProvider(providerCode));
+    mockResolveProvider.mockImplementation((input) => createMockPaymentProvider(input.provider));
   });
 
   afterEach(async () => {
+    mockResolveProvider.mockImplementation((input) => createMockPaymentProvider(input.provider));
     restoreMockMode();
     await cleanup(ctx);
   });
@@ -102,6 +106,10 @@ describe("payment actions", () => {
     const payment = await onlyPayment(session.sessionId);
     expect(payment.status).toBe(PaymentAttemptStatus.INITIATED);
     expect(payment.idempotencyKey).toMatch(`initiate:${session.sessionId}:`);
+    expect(mockResolveProvider).toHaveBeenCalledWith({
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+    });
   });
 
   it("initiate action does not expose providerRef when provider returns one", async () => {
@@ -120,6 +128,31 @@ describe("payment actions", () => {
     const payment = await onlyPayment(session.sessionId);
     expect(payment.providerRef).toBe(providerRef);
     expect(payment.providerPaymentKey).toBeNull();
+  });
+
+  it("maps provider resolver failures to unavailable without leaking details", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    mockResolveProvider.mockImplementation((input) => {
+      if (input.provider !== PaymentProvider.MOCK) return createMockPaymentProvider(input.provider);
+      throw new ProviderResolveException(
+        "MOCK_PROVIDER_LIVE",
+        input.provider,
+        input.mode,
+        "internal live adapter detail",
+      );
+    });
+
+    const result = await initiatePayment(session.sessionId, { method: PaymentMethod.MOCK });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("No payment provider is available.");
+      expect(result.error).not.toContain("MOCK_PROVIDER_LIVE");
+      expect(result.error).not.toContain("internal live adapter detail");
+    }
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
   });
 
   it("initiate rejects expired and other-user sessions without payment residue", async () => {
@@ -151,6 +184,10 @@ describe("payment actions", () => {
     expect(payment.status).toBe(PaymentAttemptStatus.SUCCEEDED);
     expect(payment.providerPaymentKey).toBe(key);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    expect(mockResolveProvider).toHaveBeenLastCalledWith({
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+    });
   });
 
   it("confirm persists and sends the canonical provider confirm idempotency key", async () => {
@@ -483,7 +520,7 @@ describe("payment actions", () => {
     const toss = await createPendingPayment(session, { provider: PaymentProvider.TOSS });
     const mock = await createPendingPayment(session, { provider: PaymentProvider.MOCK });
     const inputs: PaymentConfirmInput[] = [];
-    mockResolveProvider.mockImplementation((providerCode) => fakeConfirmProvider(providerCode, {
+    mockResolveProvider.mockImplementation((input) => fakeConfirmProvider(input.provider, {
       inputs,
       error: new Error("Provider-scoped retryable"),
     }));

@@ -103,8 +103,8 @@ describe("fake provider adapter contract", () => {
     expect(context.liveGuard).toEqual({ kind: "blocked", liveEnabled: false, reason: "not allowlisted" });
   });
 
-  it("keeps production resolver and mock provider behavior unchanged", async () => {
-    const resolved = resolveProvider(PaymentProvider.TOSS);
+  it("keeps sandbox resolver behavior explicitly mock-backed", async () => {
+    const resolved = resolveProvider({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX });
     const explicitMock = createMockPaymentProvider(PaymentProvider.PAYPAL);
 
     await expect(resolved.initiate(initiateInput())).resolves.toEqual({ kind: "ready" });

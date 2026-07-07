@@ -4,6 +4,7 @@ import { GET as tossSuccessRoute } from "@/app/api/payments/toss/success/route";
 import type { NormalizedProviderConfirmResult, ProviderConfirmFailed, ProviderConfirmSucceeded } from "@/lib/payment/providers/contract";
 import { createMockPaymentProvider } from "../../mock";
 import { resolveProvider } from "../../resolve";
+import { PaymentMode } from "../../routing";
 import type { PaymentConfirmInput } from "../../types";
 import {
   createTossConfirmAdapter,
@@ -191,8 +192,8 @@ describe("Toss confirm fake HTTP adapter seam", () => {
     fetchSpy.mockRestore();
   });
 
-  it("keeps resolveProvider(TOSS) mock-backed", async () => {
-    const resolved = resolveProvider(PaymentProvider.TOSS);
+  it("keeps resolveProvider(TOSS, SANDBOX) mock-backed", async () => {
+    const resolved = resolveProvider({ provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX });
     const explicitMock = createMockPaymentProvider(PaymentProvider.TOSS);
 
     await expect(resolved.confirm(confirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });

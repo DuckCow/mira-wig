@@ -9,7 +9,7 @@ import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
 import { bridgeProviderConfirmResult, type ProviderConfirmActionErrorCode } from "@/lib/payment/providers/confirm-bridge";
-import { resolveProvider } from "@/lib/payment/providers/resolve";
+import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
 import {
   NoEligibleProviderError,
   PaymentMode,
@@ -22,12 +22,13 @@ import type { PaymentInitiateResult, PaymentProvider as PaymentProviderPort } fr
 type ActionSession = Pick<CheckoutSession, "id" | "userId" | "marketCode" | "totalAmount" | "currency">;
 type PaymentActionFailure = { success: false; errorCode: PaymentActionErrorCode; error: string; retryable: boolean };
 type BoundaryResult =
-  | { success: true; userId: string; session: ActionSession; provider: PaymentProvider }
+  | { success: true; userId: string; session: ActionSession; provider: PaymentProvider; mode: PaymentMode }
   | PaymentActionFailure;
 type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
 type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey">;
 type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
 type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionFailure;
+type AdapterResolutionResult = { success: true; provider: PaymentProviderPort } | PaymentActionFailure;
 
 export interface ConfirmPaymentInput {
   providerPaymentKey?: string;
@@ -58,12 +59,13 @@ export async function initiatePayment(checkoutSessionId: string, input: Initiate
   const boundary = await resolveBoundary(checkoutSessionId, input.method);
   if (!boundary.success) return boundary;
 
-  const provider = resolveProvider(boundary.provider);
+  const provider = resolveActionAdapter(boundary.provider, boundary.mode);
+  if (!provider.success) return provider;
   try {
     const result = await initiatePaymentAttempt(db, {
       sessionId: checkoutSessionId,
       userId: boundary.userId,
-      provider,
+      provider: provider.provider,
     });
     return initiateSuccess(result.paymentId, result.provider, result.initiateResult);
   } catch (e) {
@@ -83,8 +85,9 @@ export async function confirmPayment(
   if (!boundary.success) return boundary;
   if (parsed !== boundary.provider) return actionError("PROVIDER_MISMATCH", "Payment provider does not match market.", false);
 
-  const provider = resolveProvider(parsed);
-  const facts = await confirmWithProvider(provider, boundary.session, input);
+  const provider = resolveActionAdapter(parsed, boundary.mode);
+  if (!provider.success) return provider;
+  const facts = await confirmWithProvider(provider.provider, boundary.session, input);
   if (!facts.success) return facts;
   return completeConfirmedPayment(facts.captureFacts);
 }
@@ -106,7 +109,13 @@ async function resolveBoundary(
   }
   const provider = resolveActionProvider(checkoutSession, marketCode, method);
   if (!provider.success) return provider;
-  return { success: true as const, userId: session.user.id, session: checkoutSession, provider: provider.provider };
+  return {
+    success: true as const,
+    userId: session.user.id,
+    session: checkoutSession,
+    provider: provider.provider,
+    mode: provider.mode,
+  };
 }
 
 async function loadActionSession(sessionId: string): Promise<ActionSession | null> {
@@ -257,7 +266,7 @@ function resolveActionProvider(
   session: ActionSession,
   marketCode: string,
   method: PaymentMethod | undefined,
-): { success: true; provider: PaymentProvider } | PaymentActionFailure {
+): { success: true; provider: PaymentProvider; mode: PaymentMode } | PaymentActionFailure {
   try {
     const selectedMethod = method ?? defaultPaymentMethodForMarket(marketCode);
     const resolution = resolveProviderForPayment({
@@ -267,9 +276,20 @@ function resolveActionProvider(
       amountMinor: session.totalAmount,
       mode: PaymentMode.SANDBOX,
     });
-    return { success: true, provider: resolution.selectedProvider };
+    return { success: true, provider: resolution.selectedProvider, mode: resolution.mode };
   } catch (e) {
     if (e instanceof NoEligibleProviderError) {
+      return actionError("PROVIDER_UNAVAILABLE", "No payment provider is available.", false);
+    }
+    throw e;
+  }
+}
+
+function resolveActionAdapter(provider: PaymentProvider, mode: PaymentMode): AdapterResolutionResult {
+  try {
+    return { success: true, provider: resolveProvider({ provider, mode }) };
+  } catch (e) {
+    if (e instanceof ProviderResolveException) {
       return actionError("PROVIDER_UNAVAILABLE", "No payment provider is available.", false);
     }
     throw e;
