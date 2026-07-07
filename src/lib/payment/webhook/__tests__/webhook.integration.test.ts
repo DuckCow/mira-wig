@@ -253,6 +253,43 @@ describe("payment webhook core", () => {
     await expect(outboxCount(PaymentProvider.TOSS, requiredProviderKey(payload))).resolves.toBe(0);
   });
 
+  it("invalid PAYMENT_MODE records retryable failure and reprocesses after config is fixed", async () => {
+    process.env.PAYMENT_MODE = "prod";
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+
+    const response = await tossWebhookPost(routeRequest(payload));
+    const responseBody: unknown = await response.json();
+    const retryable = await eventSnapshot(payload.transmissionId);
+
+    expect(response.status).toBe(500);
+    expect(responseBody).toMatchObject({ ok: false, kind: "retryable" });
+    expect(JSON.stringify(responseBody)).not.toContain("prod");
+    expect(retryable.status).toBe(PaymentEventStatus.RETRYABLE_FAILED);
+    expect(retryable.failureStage).toBe(PaymentEventFailureStage.COMPLETE);
+    expect(retryable.failureCode).toBe("COMPLETE.CONFIG_UNAVAILABLE");
+    expect(retryable.lastError).toBe("Payment processing is temporarily unavailable.");
+    expect(retryable.lastError).not.toContain("prod");
+    expect(retryable.lastError).not.toContain("PAYMENT_MODE");
+    expect(retryable.lastError).not.toContain("PaymentModeConfigException");
+    expect(retryable.attemptCount).toBe(1);
+    expect(retryable.lastAttemptAt).not.toBeNull();
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+
+    process.env.PAYMENT_MODE = "SANDBOX";
+    const replay = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const processed = await eventSnapshot(payload.transmissionId);
+
+    expect(replay.status).toBe(200);
+    expect(processed.status).toBe(PaymentEventStatus.PROCESSED);
+    expect(processed.failureStage).toBeNull();
+    expect(processed.failureCode).toBeNull();
+    expect(processed.lastError).toBeNull();
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
   it("retryable COMPLETE failure records RETRYABLE_FAILED and replay converges to PROCESSED", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const conflict = await createConflictingOrder(ctx, session);

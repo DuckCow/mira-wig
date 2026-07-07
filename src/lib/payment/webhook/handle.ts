@@ -2,7 +2,7 @@ import { WebhookIngressRejectionStage } from "@prisma/client";
 import type { PaymentProvider, PrismaClient } from "@prisma/client";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
-import { configuredPaymentMode } from "@/lib/payment/mode";
+import { configuredPaymentMode, PaymentModeConfigException } from "@/lib/payment/mode";
 import {
   isTerminalEventStatus,
   markCompleteFailed,
@@ -90,6 +90,15 @@ async function processRecorded(
     if (parsed.kind === "ignored") return ignoreRecorded(client, eventId, receivedAt, parsed.reason);
     return completeRecorded(client, eventId, receivedAt, parsed.facts);
   } catch (e) {
+    if (e instanceof PaymentModeConfigException) {
+      return retryableCompleteFailure(
+        client,
+        eventId,
+        receivedAt,
+        "Payment processing is temporarily unavailable.",
+        "COMPLETE.CONFIG_UNAVAILABLE",
+      );
+    }
     const failure = parseFailure(e);
     await markParseFailed(client, { eventId, failedAt: receivedAt, code: failure.code, message: failure.message });
     return { kind: "failed", status: 200, eventId };
