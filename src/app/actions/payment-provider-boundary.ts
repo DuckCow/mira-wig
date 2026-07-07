@@ -1,6 +1,8 @@
 import { PaymentProvider } from "@prisma/client";
 import { PaymentModeConfigException, configuredPaymentMode } from "@/lib/payment/mode";
+import { ProviderCapability } from "@/lib/payment/providers/capabilities";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
+import { credentialChecksForProvider, type ProviderEnv } from "@/lib/payment/providers/credentials";
 import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
 import {
   NoEligibleProviderError,
@@ -39,6 +41,7 @@ export type AdapterResolutionResult =
 
 interface ProviderFactoryContextOptions {
   registry?: Partial<Record<PaymentProvider, ProviderRegistryEntry>>;
+  env?: ProviderEnv;
 }
 
 export function resolveActionProvider(
@@ -93,7 +96,11 @@ export function createProviderFactoryContext(
     method,
     currency: session.currency,
     ruleId: resolution.ruleId,
-    credentials: credentialChecksForProvider(),
+    credentials: credentialChecksForProvider({
+      provider: resolution.selectedProvider,
+      mode: resolution.mode,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    }, options.env),
     liveGuard: liveGuardForProviderContext({
       provider: resolution.selectedProvider,
       market: marketCode,
@@ -108,13 +115,6 @@ interface ActionProviderSuccessLike {
   selectedProvider: PaymentProvider;
   mode: PaymentMode;
   ruleId: string;
-}
-
-function credentialChecksForProvider(): readonly [] {
-  // TODO(real providers): define presence-only credential requirement names only after
-  // official Toss/PayPal docs review. This must later come from a provider/mode
-  // credential requirement table or equivalent, without reading secret values.
-  return [];
 }
 
 function providerUnavailable(): ProviderUnavailableFailure {

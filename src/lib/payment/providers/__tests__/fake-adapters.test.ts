@@ -1,6 +1,7 @@
 import { PaymentProvider } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { createMockPaymentProvider } from "../mock";
+import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
 import { resolveProvider } from "../resolve";
 import { PaymentMethod, PaymentMode } from "../routing";
 import type {
@@ -98,7 +99,7 @@ describe("fake provider adapter contract", () => {
     const adapter = factory.createPaymentAdapter(context);
 
     expect(adapter.code).toBe(PaymentProvider.TOSS);
-    expect(context.credentials).toEqual([{ name: "TOSS_SECRET_KEY", required: true, present: false }]);
+    expect(context.credentials).toEqual([{ name: TOSS_SANDBOX_SECRET_KEY, required: true, present: false }]);
     expect(context.credentials[0]).not.toHaveProperty("value");
     expect(context.liveGuard).toEqual({ kind: "blocked", liveEnabled: false, reason: "not allowlisted" });
   });
@@ -349,7 +350,7 @@ function factoryContext(overrides: Partial<ProviderFactoryContext> = {}): Provid
     method: PaymentMethod.CARD,
     currency: "KRW",
     ruleId: "d1a.kr.card.krw",
-    credentials: [{ name: "TOSS_SECRET_KEY", required: true, present: false }],
+    credentials: [{ name: TOSS_SANDBOX_SECRET_KEY, required: true, present: false }],
     liveGuard: { kind: "allowed", liveEnabled: true },
     ...overrides,
   };

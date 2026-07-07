@@ -15,7 +15,8 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 ## 2. Current Mira Boundary Assumptions
 
 - The provider factory exists.
-- Credential checks are presence-only and concrete credential names are deferred.
+- Credential checks are presence-only. Toss action-adapter secret credential names are now mode-scoped
+  (`TOSS_SANDBOX_SECRET_KEY`, `TOSS_LIVE_SECRET_KEY`); other capability/provider names remain deferred.
 - `Payment.mode` exists.
 - `PaymentEvent.verifiedMode` does not yet exist.
 - Real webhook verifier/parser wiring is not implemented.
@@ -69,18 +70,21 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 
 ### E. Credential Requirements
 
-- DESIGN: introduce provider/mode/capability dimensions later.
-- DESIGN: credential requirement tables must be keyed by provider, mode, and capability.
-- DESIGN: credential names must be mode-scoped.
+- DECISION: provider/mode/capability dimensions exist for action-adapter credential checks.
+- DECISION: credential requirement tables are keyed by provider, mode, and capability.
+- DECISION: credential names must be mode-scoped.
 - DESIGN: required capabilities include at least action adapter, webhook verifier, and void executor.
 - DESIGN: credential checks remain presence-only at the factory boundary.
-- DESIGN RULE: do not invent concrete credential environment variable names now.
+- DECISION, Toss action adapter: use `TOSS_SANDBOX_SECRET_KEY` for SANDBOX/test server API calls and
+  `TOSS_LIVE_SECRET_KEY` for future LIVE server API calls.
+- DESIGN RULE: do not invent concrete credential environment variable names for webhook verifier, void
+  executor, PayPal, or browser client keys in this patch.
 - CONFIRMED, Toss snapshot: client key and secret key are a matched set; mixing non-matching keys or test/live keys causes `INVALID_API_KEY`.
 - CONFIRMED, Toss snapshot: client key initializes the browser SDK and secret key is used for server API calls.
 - DESIGN, Toss credentials: credential requirement design must account for matched browser client key + server secret key pairs, without naming concrete environment variables yet.
 - DESIGN CAVEAT, Toss credentials: factory credential checks are presence-only and cannot prove client/secret key pair consistency. Toss validates pair consistency at provider call time, so the future Toss credential/error normalization patch must handle `INVALID_API_KEY` without introducing concrete environment variable names here.
 - CONFIRMED, Toss snapshot: live API secret keys start with `live_sk` or `live_gsk`.
-- OPEN, Toss snapshot: exact live client key prefix and concrete credential environment variable naming.
+- OPEN, Toss snapshot: exact live client key prefix and concrete browser/client-key environment variable naming.
 - OPEN, PayPal snapshot: webhook ID separation by sandbox/live and OAuth token caching/lifetime behavior.
 
 ### F. SANDBOX Adapter Selection Policy
@@ -88,7 +92,10 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - DECISION: `TOSS + SANDBOX` stays mock-backed by default.
 - DECISION: external SANDBOX provider calls require two independent opt-in keys.
 - Code key: a reviewed code-registry entry keyed by provider, `mode = SANDBOX`, and capability. Capability examples include action adapter, webhook verifier, and void executor.
-- Deployment key: a provider-scoped deployment environment opt-in. The concrete environment variable name remains deferred with credential naming, and the key is absent by default everywhere.
+- Deployment key: a provider-scoped deployment environment opt-in. For Toss action-adapter SANDBOX external calls,
+  use `TOSS_SANDBOX_EXTERNAL_ENABLED`. The key is absent by default everywhere.
+- DECISION: `TOSS_SANDBOX_EXTERNAL_ENABLED` parsing is strict: undefined, empty, or whitespace-only means absent;
+  exact `ENABLED` means opted in; any other non-empty value is a typed fail-closed config error.
 - DESIGN RULE: neither key alone enables external provider calls.
 - DESIGN RULE: credential presence never substitutes for either key.
 - DESIGN RULE: credential checks are evaluated only after both opt-in keys pass.
@@ -212,7 +219,7 @@ This order is not live readiness. If official docs contradict it, revisit the or
 - Void executor factory wiring.
 - Actual SANDBOX opt-in mechanism code.
 - Toss confirm adapter.
-- Concrete credential environment variable names.
+- Concrete credential environment variable names for webhook verifier, void executor, PayPal, and browser client keys.
 - Credential requirement table content.
 - Toss test-key acquisition/operator setup.
 - Webhook-capability SANDBOX opt-in wiring.

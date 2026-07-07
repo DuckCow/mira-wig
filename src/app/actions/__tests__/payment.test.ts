@@ -14,6 +14,9 @@ import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
+import { ProviderCapability } from "@/lib/payment/providers/capabilities";
+import { credentialChecksForProvider } from "@/lib/payment/providers/credentials";
+import { TOSS_SANDBOX_EXTERNAL_ENABLED } from "@/lib/payment/providers/factory";
 import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
 import {
   NoEligibleProviderError,
@@ -54,6 +57,9 @@ const mockGetCurrentMarketCode = vi.mocked(getCurrentMarketCode);
 const mockResolveProvider = vi.mocked(resolveProvider);
 const ORIGINAL_MOCK_MODE = process.env.PAYMENT_MOCK_MODE;
 const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
+const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env.TOSS_SANDBOX_SECRET_KEY;
+const ORIGINAL_TOSS_LIVE_SECRET_KEY = process.env.TOSS_LIVE_SECRET_KEY;
+const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
 const ORIGINAL_TOSS_LIVE_ENABLED = PROVIDER_REGISTRY.TOSS.liveEnabled;
 
 interface TestContext {
@@ -93,6 +99,9 @@ describe("payment actions", () => {
     mockResolveProvider.mockReset();
     process.env.PAYMENT_MOCK_MODE = "success";
     delete process.env.PAYMENT_MODE;
+    delete process.env.TOSS_SANDBOX_SECRET_KEY;
+    delete process.env.TOSS_LIVE_SECRET_KEY;
+    delete process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
@@ -104,6 +113,9 @@ describe("payment actions", () => {
   afterEach(async () => {
     mockResolveProvider.mockImplementation((input) => createMockPaymentProvider(input.provider));
     PROVIDER_REGISTRY.TOSS.liveEnabled = ORIGINAL_TOSS_LIVE_ENABLED;
+    restoreEnv("TOSS_SANDBOX_SECRET_KEY", ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
+    restoreEnv("TOSS_LIVE_SECRET_KEY", ORIGINAL_TOSS_LIVE_SECRET_KEY);
+    restoreEnv("TOSS_SANDBOX_EXTERNAL_ENABLED", ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
     restorePaymentMode();
     restoreMockMode();
     await cleanup(ctx);
@@ -165,6 +177,59 @@ describe("payment actions", () => {
       expect(result.error).toBe("No payment provider is available.");
       expect(result.error).not.toContain("MOCK_PROVIDER_LIVE");
       expect(result.error).not.toContain("internal live adapter detail");
+    }
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("maps half-configured SANDBOX external resolver failures to sanitized unavailable", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const internalDetail = `internal ${TOSS_SANDBOX_EXTERNAL_ENABLED} partial config detail`;
+    mockResolveProvider.mockImplementation((input) => {
+      throw new ProviderResolveException(
+        "SANDBOX_EXTERNAL_MISCONFIGURED",
+        input.provider,
+        input.mode,
+        internalDetail,
+      );
+    });
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("No payment provider is available.");
+      expect(result.error).not.toContain("SANDBOX_EXTERNAL_MISCONFIGURED");
+      expect(result.error).not.toContain(TOSS_SANDBOX_EXTERNAL_ENABLED);
+      expect(result.error).not.toContain(internalDetail);
+    }
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("maps invalid SANDBOX deployment opt-in resolver failures without leaking env details", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const invalidValue = "almost-enabled";
+    process.env.TOSS_SANDBOX_EXTERNAL_ENABLED = invalidValue;
+    mockResolveProvider.mockImplementation((input) => {
+      throw new ProviderResolveException(
+        "SANDBOX_EXTERNAL_CONFIG_INVALID",
+        input.provider,
+        input.mode,
+        `invalid ${TOSS_SANDBOX_EXTERNAL_ENABLED}: ${invalidValue}`,
+      );
+    });
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("No payment provider is available.");
+      expect(result.error).not.toContain("SANDBOX_EXTERNAL_CONFIG_INVALID");
+      expect(result.error).not.toContain(TOSS_SANDBOX_EXTERNAL_ENABLED);
+      expect(result.error).not.toContain(invalidValue);
     }
     await expect(paymentCount(session.sessionId)).resolves.toBe(0);
   });
@@ -819,7 +884,11 @@ function expectedResolverContext(overrides: Partial<ProviderFactoryContext> = {}
     method,
     currency,
     ruleId,
-    credentials: [],
+    credentials: credentialChecksForProvider({
+      provider,
+      mode,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    }),
     liveGuard: liveGuardForProviderContext({ provider, market, method, currency, ruleId }),
     ...overrides,
   };
@@ -991,4 +1060,12 @@ function restorePaymentMode(): void {
     return;
   }
   process.env.PAYMENT_MODE = ORIGINAL_PAYMENT_MODE;
+}
+
+function restoreEnv(key: string, original: string | undefined): void {
+  if (original === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = original;
 }

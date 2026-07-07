@@ -1,9 +1,16 @@
 import { PaymentProvider } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import type { ProviderFactoryContext } from "../contract";
+import { ProviderCapability } from "../capabilities";
+import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
+import {
+  TOSS_SANDBOX_EXTERNAL_ENABLED,
+  type CreateProviderAdapterOptions,
+  type SandboxExternalCodeRegistryEntry,
+} from "../factory";
 import { PaymentMethod, PaymentMode } from "../routing";
 import { ProviderResolveException, resolveProvider } from "../resolve";
-import type { PaymentConfirmInput, PaymentInitiateInput } from "../types";
+import type { PaymentConfirmInput, PaymentInitiateInput, PaymentProvider as PaymentProviderPort } from "../types";
 
 describe("payment provider adapter resolution", () => {
   it.each([
@@ -25,6 +32,98 @@ describe("payment provider adapter resolution", () => {
       amount: 12_000,
       currency: "KRW",
     });
+  });
+
+  it("keeps Toss SANDBOX mock-backed when credentials or adapters exist without both opt-in keys", async () => {
+    const adapter = throwingAdapter();
+    const resolved = resolveProvider(factoryContext({
+      credentials: [presentSandboxCredential()],
+    }), {
+      sandboxExternalAdapters: { [PaymentProvider.TOSS]: adapter.create },
+    });
+
+    await expect(resolved.confirm(confirmInput(PaymentProvider.TOSS))).resolves.toMatchObject({
+      providerPaymentKey: "mock:checkout_123",
+    });
+    expect(adapter.calls).toBe(0);
+  });
+
+  it.each([
+    {
+      name: "code key only",
+      code: "SANDBOX_EXTERNAL_MISCONFIGURED",
+      options: () => ({ sandboxExternalCodeRegistry: tossActionCodeRegistry() }),
+      context: () => factoryContext({ credentials: [presentSandboxCredential()] }),
+    },
+    {
+      name: "deployment key only",
+      code: "SANDBOX_EXTERNAL_MISCONFIGURED",
+      options: () => ({ env: sandboxEnabledEnv() }),
+      context: () => factoryContext({ credentials: [presentSandboxCredential()] }),
+    },
+    {
+      name: "invalid deployment key value",
+      code: "SANDBOX_EXTERNAL_CONFIG_INVALID",
+      options: () => ({ env: { [TOSS_SANDBOX_EXTERNAL_ENABLED]: "enabled" } }),
+      context: () => factoryContext({ credentials: [presentSandboxCredential()] }),
+    },
+    {
+      name: "both keys with missing credentials",
+      code: "SANDBOX_EXTERNAL_CREDENTIALS_MISSING",
+      options: () => ({ env: sandboxEnabledEnv(), sandboxExternalCodeRegistry: tossActionCodeRegistry() }),
+      context: () => factoryContext({ credentials: [missingSandboxCredential()] }),
+    },
+  ])("fails closed for SANDBOX external matrix row: $name", ({ code, context, options }) => {
+    const adapter = throwingAdapter();
+    expectResolutionFailure(
+      context(),
+      code,
+      "fake_secret_do_not_leak",
+      {
+        ...options(),
+        sandboxExternalAdapters: { [PaymentProvider.TOSS]: adapter.create },
+      },
+    );
+    expect(adapter.calls).toBe(0);
+  });
+
+  it("fails closed when both SANDBOX opt-in keys and credentials exist but no adapter is registered", () => {
+    expectResolutionFailure(
+      factoryContext({ credentials: [presentSandboxCredential()] }),
+      "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE",
+      undefined,
+      { env: sandboxEnabledEnv(), sandboxExternalCodeRegistry: tossActionCodeRegistry() },
+    );
+  });
+
+  it("selects a registered SANDBOX external adapter only when both keys and credentials are present", async () => {
+    const resolved = resolveProvider(factoryContext({ credentials: [presentSandboxCredential()] }), {
+      env: sandboxEnabledEnv(),
+      sandboxExternalCodeRegistry: tossActionCodeRegistry(),
+      sandboxExternalAdapters: { [PaymentProvider.TOSS]: fakeSandboxExternalAdapter },
+    });
+
+    await expect(resolved.confirm(confirmInput(PaymentProvider.TOSS))).resolves.toMatchObject({
+      providerPaymentKey: "external:sandbox_payment_123",
+      amount: 12_000,
+      currency: "KRW",
+    });
+  });
+
+  it("redacts SANDBOX external opt-in config and credential values from resolver failures", () => {
+    const sentinel = "secret_value_that_must_not_leak";
+    expectResolutionFailure(
+      factoryContext({ credentials: [{ name: TOSS_SANDBOX_SECRET_KEY, required: true, present: true }] }),
+      "SANDBOX_EXTERNAL_CONFIG_INVALID",
+      sentinel,
+      { env: { [TOSS_SANDBOX_EXTERNAL_ENABLED]: "not-enabled", [TOSS_SANDBOX_SECRET_KEY]: sentinel } },
+    );
+    expectResolutionFailure(
+      factoryContext({ credentials: [{ name: TOSS_SANDBOX_SECRET_KEY, required: true, present: true }] }),
+      "SANDBOX_EXTERNAL_CONFIG_INVALID",
+      TOSS_SANDBOX_EXTERNAL_ENABLED,
+      { env: { [TOSS_SANDBOX_EXTERNAL_ENABLED]: "not-enabled", [TOSS_SANDBOX_SECRET_KEY]: sentinel } },
+    );
   });
 
   it("fails closed for MOCK in LIVE mode", () => {
@@ -73,6 +172,25 @@ describe("payment provider adapter resolution", () => {
     );
   });
 
+  it("keeps LIVE fail-closed behavior unaffected by SANDBOX opt-in options", () => {
+    const adapter = throwingAdapter();
+    expectResolutionFailure(
+      factoryContext({
+        mode: PaymentMode.LIVE,
+        credentials: [{ name: "FAKE_REQUIRED_CREDENTIAL", required: true, present: true }],
+        liveGuard: { kind: "blocked", liveEnabled: false, reason: "fake test live guard blocked" },
+      }),
+      "LIVE_NOT_ENABLED",
+      undefined,
+      {
+        env: sandboxEnabledEnv(),
+        sandboxExternalCodeRegistry: tossActionCodeRegistry(),
+        sandboxExternalAdapters: { [PaymentProvider.TOSS]: adapter.create },
+      },
+    );
+    expect(adapter.calls).toBe(0);
+  });
+
   it("fails closed for unsupported modes", () => {
     expectResolutionFailure(
       factoryContext({
@@ -88,10 +206,11 @@ function expectResolutionFailure(
   context: ProviderFactoryContext,
   code: string,
   absentText?: string,
+  options: CreateProviderAdapterOptions = {},
 ): void {
-  expect(() => resolveProvider(context)).toThrow(ProviderResolveException);
+  expect(() => resolveProvider(context, options)).toThrow(ProviderResolveException);
   try {
-    resolveProvider(context);
+    resolveProvider(context, options);
   } catch (e) {
     expect(e).toBeInstanceOf(ProviderResolveException);
     if (e instanceof ProviderResolveException) {
@@ -123,6 +242,50 @@ function confirmInput(provider: PaymentProvider): PaymentConfirmInput {
     providerConfirmIdempotencyKey: "confirm:TOSS:payment_123",
     amount: 12_000,
     currency: "KRW",
+  };
+}
+
+function tossActionCodeRegistry(): readonly SandboxExternalCodeRegistryEntry[] {
+  return [
+    {
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    },
+  ];
+}
+
+function sandboxEnabledEnv(): Record<string, string> {
+  return { [TOSS_SANDBOX_EXTERNAL_ENABLED]: "ENABLED" };
+}
+
+function presentSandboxCredential() {
+  return { name: TOSS_SANDBOX_SECRET_KEY, required: true, present: true };
+}
+
+function missingSandboxCredential() {
+  return { name: TOSS_SANDBOX_SECRET_KEY, required: true, present: false };
+}
+
+function fakeSandboxExternalAdapter(context: ProviderFactoryContext): PaymentProviderPort {
+  return {
+    code: context.provider,
+    initiate: (input) => Promise.resolve({ kind: "ready", providerRef: `external:${input.paymentId}` }),
+    confirm: (input) => Promise.resolve({
+      providerPaymentKey: "external:sandbox_payment_123",
+      amount: input.amount,
+      currency: input.currency,
+    }),
+  };
+}
+
+function throwingAdapter(): { calls: number; create: (context: ProviderFactoryContext) => PaymentProviderPort } {
+  return {
+    calls: 0,
+    create() {
+      this.calls += 1;
+      throw new Error("external sandbox adapter must not be constructed");
+    },
   };
 }
 
