@@ -276,7 +276,7 @@ describe("Toss confirm mapper non-wiring", () => {
   });
 
   it("keeps the sandbox resolver on the mock provider", async () => {
-    const resolved = resolveProvider(sandboxContext());
+    const resolved = resolveProvider(sandboxContext(), {});
     const explicitMock = createMockPaymentProvider(PaymentProvider.TOSS);
 
     await expect(resolved.confirm(mockConfirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });

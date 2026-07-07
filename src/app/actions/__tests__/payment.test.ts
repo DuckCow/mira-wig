@@ -18,6 +18,8 @@ import { ProviderCapability } from "@/lib/payment/providers/capabilities";
 import { credentialChecksForProvider } from "@/lib/payment/providers/credentials";
 import { TOSS_SANDBOX_EXTERNAL_ENABLED } from "@/lib/payment/providers/factory";
 import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
+import { createTossSandboxPaymentProvider, type TossConfirmHttpRequest } from "@/lib/payment/providers/toss/adapter";
+import { deriveTossOrderId } from "@/lib/payment/providers/toss/order-id";
 import {
   NoEligibleProviderError,
   PROVIDER_REGISTRY,
@@ -498,6 +500,50 @@ describe("payment actions", () => {
     fetchSpy.mockRestore();
   });
 
+  it("Toss sandbox confirm adapter completes through local completion using fake HTTP", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const providerRef = `toss_action_${randomUUID()}`;
+    const payment = await createPendingPayment(session, { providerRef });
+    const calls: TossConfirmHttpRequest[] = [];
+    mockResolveProvider.mockReturnValueOnce(createTossSandboxPaymentProvider({
+      httpClient: (request) => {
+        calls.push(request);
+        return Promise.resolve({
+          kind: "response",
+          httpStatus: 200,
+          receivedAt: new Date("2026-07-07T01:00:00.000Z"),
+          body: tossDone(payment.id, providerRef, session.totalAmount),
+        });
+      },
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS);
+    const persisted = await loadPayment(payment.id);
+
+    expect(result.success).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual([{
+      method: "POST",
+      path: "/v1/payments/confirm",
+      headers: { "Idempotency-Key": `confirm:${PaymentProvider.TOSS}:${payment.id}` },
+      body: {
+        paymentKey: providerRef,
+        orderId: deriveTossOrderId(payment.id),
+        amount: session.totalAmount,
+      },
+    }]);
+    expect(persisted).toMatchObject({
+      status: PaymentAttemptStatus.SUCCEEDED,
+      providerPaymentKey: providerRef,
+      errorCode: null,
+      errorMessage: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(outboxCount(PaymentProvider.TOSS, providerRef)).resolves.toBe(0);
+    fetchSpy.mockRestore();
+  });
+
   it("normalized retryable failure preserves pending attempt and confirm key without void", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const payment = await createPendingPayment(session);
@@ -906,6 +952,17 @@ function normalizedSuccess(
     currency: input.currency,
     idempotencyKey: input.providerConfirmIdempotencyKey,
     rawProviderStatus: "FAKE_COMPLETED",
+  };
+}
+
+function tossDone(paymentId: string, paymentKey: string, amount: number): Record<string, unknown> {
+  return {
+    paymentKey,
+    orderId: deriveTossOrderId(paymentId),
+    status: "DONE",
+    totalAmount: amount,
+    currency: "KRW",
+    approvedAt: "2026-07-07T00:59:59.000Z",
   };
 }
 

@@ -133,7 +133,8 @@ function assertLiveCredentialsPresent(context: ProviderFactoryContext): void {
 }
 
 function assertSandboxCredentialsPresent(context: ProviderFactoryContext): void {
-  if (!context.credentials.some((credential) => credential.required && !credential.present)) return;
+  const requiredCredentials = context.credentials.filter((credential) => credential.required);
+  if (requiredCredentials.length > 0 && requiredCredentials.every((credential) => credential.present)) return;
   throw providerError(context, "SANDBOX_EXTERNAL_CREDENTIALS_MISSING", "Sandbox external provider credentials are missing.");
 }
 

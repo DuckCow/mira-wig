@@ -1,13 +1,22 @@
 import { PaymentProvider } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as tossSuccessRoute } from "@/app/api/payments/toss/success/route";
-import type { NormalizedProviderConfirmResult, ProviderConfirmFailed, ProviderConfirmSucceeded } from "@/lib/payment/providers/contract";
+import type {
+  NormalizedProviderConfirmResult,
+  ProviderConfirmFailed,
+  ProviderConfirmSucceeded,
+  ProviderFactoryContext,
+} from "@/lib/payment/providers/contract";
+import { TOSS_SANDBOX_SECRET_KEY } from "../../credentials";
+import { TOSS_SANDBOX_EXTERNAL_ENABLED } from "../../factory";
 import { createMockPaymentProvider } from "../../mock";
 import { resolveProvider } from "../../resolve";
 import { PaymentMethod, PaymentMode } from "../../routing";
-import type { PaymentConfirmInput } from "../../types";
+import type { PaymentConfirmInput, PaymentInitiateInput, PaymentConfirmResult } from "../../types";
 import {
+  createTossConfirmFetchClient,
   createTossConfirmAdapter,
+  createTossSandboxPaymentProvider,
   type TossConfirmHttpClient,
   type TossConfirmHttpRequest,
   type TossConfirmHttpResult,
@@ -20,8 +29,21 @@ const PAYMENT_KEY = "toss_payment_key_1234567890";
 const IDEMPOTENCY_KEY = "confirm:TOSS:pay_123";
 const AMOUNT = 12_000;
 const APPROVED_AT = "2026-07-07T00:59:59.000Z";
+const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env[TOSS_SANDBOX_EXTERNAL_ENABLED];
+const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env[TOSS_SANDBOX_SECRET_KEY];
 
 describe("Toss confirm fake HTTP adapter seam", () => {
+  beforeEach(() => {
+    delete process.env[TOSS_SANDBOX_EXTERNAL_ENABLED];
+    delete process.env[TOSS_SANDBOX_SECRET_KEY];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    restoreEnv(TOSS_SANDBOX_EXTERNAL_ENABLED, ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
+    restoreEnv(TOSS_SANDBOX_SECRET_KEY, ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
+  });
+
   it("builds the Toss confirm request and passes it to the fake HTTP client", async () => {
     const fake = recordingClient(response(tossDone()));
     const adapter = createTossConfirmAdapter({ httpClient: fake.client });
@@ -39,6 +61,69 @@ describe("Toss confirm fake HTTP adapter seam", () => {
       },
     }]);
     expect(fake.calls[0]?.headers).not.toHaveProperty("Authorization");
+  });
+
+  it("builds Basic auth only inside the fetch HTTP client request", async () => {
+    const rawSecret = "test_sk_fetch_secret_should_not_leak";
+    const fetchCalls: FetchCall[] = [];
+    const fetchFn: typeof fetch = (input, init) => {
+      fetchCalls.push({ input, init });
+      return Promise.resolve(new Response(JSON.stringify(tossDone()), { status: 200 }));
+    };
+    const client = createTossConfirmFetchClient({
+      secretKey: rawSecret,
+      fetchFn,
+      origin: "https://api.toss.example.test",
+    });
+
+    const result = await client(tossConfirmRequest());
+    const call = onlyFetchCall(fetchCalls);
+
+    expect(result).toMatchObject({ kind: "response", httpStatus: 200 });
+    expect(fetchInputUrl(call.input)).toBe("https://api.toss.example.test/v1/payments/confirm");
+    expect(call.init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify(tossConfirmRequest().body),
+    });
+    expect(headerValue(call.init?.headers, "Authorization")).toMatch(/^Basic /);
+    expect(headerValue(call.init?.headers, "Content-Type")).toBe("application/json");
+    expect(headerValue(call.init?.headers, "Idempotency-Key")).toBe(IDEMPOTENCY_KEY);
+    expect(JSON.stringify([result, call.init])).not.toContain(rawSecret);
+  });
+
+  it("keeps Toss SANDBOX mock-backed by default even when sandbox credentials are present", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(tossDone())));
+    const resolved = resolveProvider(sandboxContext({ credentials: [presentSandboxCredential()] }));
+
+    await expect(resolved.confirm(confirmInput())).resolves.toMatchObject({ providerPaymentKey: "mock:checkout_123" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("selects the Toss SANDBOX confirm adapter only when deployment opt-in and credentials are present", async () => {
+    process.env[TOSS_SANDBOX_EXTERNAL_ENABLED] = "ENABLED";
+    process.env[TOSS_SANDBOX_SECRET_KEY] = "test_sk_default_resolver_should_not_leak";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(tossDone()), { status: 200 }));
+    const resolved = resolveProvider(sandboxContext({ credentials: [presentSandboxCredential()] }));
+
+    await expect(resolved.initiate(initiateInput())).resolves.toEqual({ kind: "ready" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const success = expectProviderSuccess(await resolved.confirm(confirmInput()));
+
+    expect(success.providerPaymentKey).toBe(PAYMENT_KEY);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(success)).not.toContain(process.env[TOSS_SANDBOX_SECRET_KEY]);
+  });
+
+  it("keeps the Toss sandbox payment provider on fake HTTP ports in tests", async () => {
+    const fake = recordingClient(response(tossDone()));
+    const provider = createTossSandboxPaymentProvider({ httpClient: fake.client });
+
+    await expect(provider.initiate(initiateInput())).resolves.toEqual({ kind: "ready" });
+    const success = expectProviderSuccess(await provider.confirm(confirmInput()));
+
+    expect(success.providerPaymentKey).toBe(PAYMENT_KEY);
+    expect(fake.calls).toHaveLength(1);
   });
 
   it("returns normalized success for a valid fake DONE response", async () => {
@@ -213,7 +298,7 @@ describe("Toss confirm fake HTTP adapter seam", () => {
   });
 });
 
-function sandboxContext() {
+function sandboxContext(overrides: Partial<ProviderFactoryContext> = {}): ProviderFactoryContext {
   return {
     provider: PaymentProvider.TOSS,
     mode: PaymentMode.SANDBOX,
@@ -223,12 +308,35 @@ function sandboxContext() {
     ruleId: "d1a.kr.card.krw",
     credentials: [],
     liveGuard: { kind: "blocked" as const, liveEnabled: false as const, reason: "not live mode" },
+    ...overrides,
   };
 }
 
 interface RecordingClient {
   calls: TossConfirmHttpRequest[];
   client: TossConfirmHttpClient;
+}
+
+interface FetchCall {
+  input: Parameters<typeof fetch>[0];
+  init: Parameters<typeof fetch>[1];
+}
+
+function onlyFetchCall(calls: readonly FetchCall[]): FetchCall {
+  expect(calls).toHaveLength(1);
+  const call = calls[0];
+  if (!call) throw new Error("Expected one fake fetch call");
+  return call;
+}
+
+function fetchInputUrl(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
+function headerValue(headers: HeadersInit | undefined, key: string): string | null {
+  return new Headers(headers).get(key);
 }
 
 function recordingClient(result: TossConfirmHttpResult): RecordingClient {
@@ -273,6 +381,43 @@ function confirmInput(overrides: Partial<PaymentConfirmInput> = {}): PaymentConf
   };
 }
 
+function initiateInput(overrides: Partial<PaymentInitiateInput> = {}): PaymentInitiateInput {
+  return {
+    checkoutSessionId: CHECKOUT_SESSION_ID,
+    paymentId: PAYMENT_ID,
+    provider: PaymentProvider.TOSS,
+    amount: AMOUNT,
+    currency: "KRW",
+    idempotencyKey: "initiate:checkout_123:payment_123",
+    ...overrides,
+  };
+}
+
+function tossConfirmRequest(): TossConfirmHttpRequest {
+  return {
+    method: "POST",
+    path: "/v1/payments/confirm",
+    headers: { "Idempotency-Key": IDEMPOTENCY_KEY },
+    body: {
+      paymentKey: PAYMENT_KEY,
+      orderId: deriveTossOrderId(PAYMENT_ID),
+      amount: AMOUNT,
+    },
+  };
+}
+
+function presentSandboxCredential() {
+  return { name: TOSS_SANDBOX_SECRET_KEY, required: true, present: true };
+}
+
+function restoreEnv(key: string, original: string | undefined): void {
+  if (original === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = original;
+}
+
 function tossDone(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     paymentKey: PAYMENT_KEY,
@@ -294,6 +439,12 @@ function expectSuccess(result: NormalizedProviderConfirmResult): ProviderConfirm
 function expectFailure(result: NormalizedProviderConfirmResult): ProviderConfirmFailed {
   expect(result.kind).toBe("failed");
   if (result.kind !== "failed") throw new Error("Expected Toss adapter failure");
+  return result;
+}
+
+function expectProviderSuccess(result: PaymentConfirmResult): ProviderConfirmSucceeded {
+  expect("kind" in result && result.kind === "succeeded").toBe(true);
+  if (!("kind" in result) || result.kind !== "succeeded") throw new Error("Expected provider success");
   return result;
 }
 

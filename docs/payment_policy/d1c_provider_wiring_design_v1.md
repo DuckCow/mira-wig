@@ -90,18 +90,21 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 ### F. SANDBOX Adapter Selection Policy
 
 - DECISION: `TOSS + SANDBOX` stays mock-backed by default.
-- DECISION: external SANDBOX provider calls require two independent opt-in keys.
-- Code key: a reviewed code-registry entry keyed by provider, `mode = SANDBOX`, and capability. Capability examples include action adapter, webhook verifier, and void executor.
+- DECISION: the original two-key model remains the provider factory contract and injected test matrix.
+- Factory code key: a reviewed code-registry entry keyed by provider, `mode = SANDBOX`, and capability. Capability examples include action adapter, webhook verifier, and void executor.
+- Production code key: once a reviewed provider SANDBOX adapter wiring patch lands, that reviewed code change represents the code key for the wired provider/mode/capability.
 - Deployment key: a provider-scoped deployment environment opt-in. For Toss action-adapter SANDBOX external calls,
   use `TOSS_SANDBOX_EXTERNAL_ENABLED`. The key is absent by default everywhere.
+- DECISION: after reviewed wiring lands for a provider/capability, the deployment key is the sole runtime opt-in for production behavior because the code key is already represented by the shipped, reviewed wiring.
 - DECISION: `TOSS_SANDBOX_EXTERNAL_ENABLED` parsing is strict: undefined, empty, or whitespace-only means absent;
   exact `ENABLED` means opted in; any other non-empty value is a typed fail-closed config error.
-- DESIGN RULE: neither key alone enables external provider calls.
+- DESIGN RULE: at the factory-contract level, neither key alone enables external provider calls.
 - DESIGN RULE: credential presence never substitutes for either key.
 - DESIGN RULE: credential checks are evaluated only after both opt-in keys pass.
 - DESIGN RULE: invalid `PAYMENT_MODE` already fails closed rather than silently defaulting; half-configured sandbox external intent must likewise fail closed rather than quietly returning mock success.
+- AMENDMENT NOTE: this section explains the Patch 2 Toss SANDBOX confirm adapter wiring and prevents design-lock vs code drift.
 
-Resolution semantics:
+Factory-level resolution semantics:
 
 | Code key | Deployment key | Credentials / adapter | Result |
 |---|---|---|---|
@@ -110,6 +113,15 @@ Resolution semantics:
 | absent | present | ignored | Typed fail-closed error, sanitized to `PROVIDER_UNAVAILABLE`; never silent mock. |
 | present | present | SANDBOX credentials missing | Typed fail-closed error; no external call. |
 | present | present | SANDBOX credentials present + registered adapter | External provider test-key adapter may be selected; still no LIVE behavior. |
+
+Production semantics after reviewed Toss action-adapter wiring:
+
+| Deployment key | Credentials | Result |
+|---|---|---|
+| absent, empty, or whitespace-only | ignored | Use mock. `TOSS + SANDBOX` remains mock-backed by default. |
+| invalid non-empty value | ignored | Typed fail-closed config error, sanitized to `PROVIDER_UNAVAILABLE`; never silent mock. |
+| exact `ENABLED` | SANDBOX credentials missing | Typed fail-closed error; no external call. |
+| exact `ENABLED` | SANDBOX credentials present | Toss SANDBOX/test confirm adapter may be selected; still no LIVE behavior. |
 
 Representation decision:
 
@@ -125,7 +137,7 @@ Scope and interaction:
 - The two-key opt-in is evaluated only inside the factory SANDBOX branch.
 - `ProviderFactoryContext` shape remains unchanged.
 - Existing `TOSS + SANDBOX` mock-backed tests remain permanent default-invariant tests.
-- Future real Toss test-key adapter tests should be added beside the default mock tests, not by weakening them.
+- Toss test-key adapter tests should live beside the default mock tests, not weaken them.
 - Mechanism code lands with or immediately before the Toss adapter patch; do not implement the mechanism earlier as dead config.
 - Toss confirm adapter wiring must not silently replace mock SANDBOX behavior.
 

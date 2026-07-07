@@ -1,6 +1,11 @@
 import { PaymentProvider } from "@prisma/client";
 import type { NormalizedProviderConfirmResult, ProviderConfirmFailed } from "@/lib/payment/providers/contract";
-import type { PaymentConfirmInput } from "@/lib/payment/providers/types";
+import type {
+  PaymentConfirmInput,
+  PaymentInitiateInput,
+  PaymentInitiateResult,
+  PaymentProvider as PaymentProviderPort,
+} from "@/lib/payment/providers/types";
 import {
   buildTossConfirmRequest,
   normalizeTossConfirmResponse,
@@ -9,6 +14,8 @@ import {
 import { buildTossConfirmFailure, classifyTossConfirmError } from "./errors";
 
 export type TossConfirmHttpRequest = TossConfirmRequest;
+
+export const TOSS_API_ORIGIN = "https://api.tosspayments.com";
 
 export type TossConfirmHttpResult =
   | {
@@ -33,11 +40,45 @@ export interface TossConfirmAdapterOptions {
   httpClient: TossConfirmHttpClient;
 }
 
+export interface TossConfirmFetchClientOptions {
+  secretKey: string;
+  fetchFn?: typeof fetch;
+  origin?: string;
+}
+
 export function createTossConfirmAdapter(options: TossConfirmAdapterOptions): TossConfirmAdapter {
   return {
     code: PaymentProvider.TOSS,
     confirm: (input) => confirmWithFakeHttp(input, options.httpClient),
   };
+}
+
+export function createTossSandboxPaymentProvider(options: TossConfirmAdapterOptions): PaymentProviderPort {
+  const confirmAdapter = createTossConfirmAdapter(options);
+  return {
+    code: PaymentProvider.TOSS,
+    initiate: tossBrowserInitiateReady,
+    confirm: (input) => confirmAdapter.confirm(input),
+  };
+}
+
+export function createTossConfirmFetchClient(options: TossConfirmFetchClientOptions): TossConfirmHttpClient {
+  const authorization = tossBasicAuthorization(options.secretKey);
+  const fetchFn = options.fetchFn ?? fetch;
+  const origin = options.origin ?? TOSS_API_ORIGIN;
+  return async (request) => {
+    const response = await fetchFn(new URL(request.path, origin), fetchRequestInit(request, authorization));
+    return {
+      kind: "response",
+      httpStatus: response.status,
+      body: await safeJsonBody(response),
+      receivedAt: new Date(),
+    };
+  };
+}
+
+function tossBrowserInitiateReady(_input: PaymentInitiateInput): Promise<PaymentInitiateResult> {
+  return Promise.resolve({ kind: "ready" });
 }
 
 async function confirmWithFakeHttp(
@@ -129,6 +170,35 @@ function tossCodeFromBody(body: unknown): string | undefined {
 
 function isSuccessStatus(status: number): boolean {
   return status >= 200 && status < 300;
+}
+
+function fetchRequestInit(request: TossConfirmHttpRequest, authorization: string): RequestInit {
+  return {
+    method: request.method,
+    headers: {
+      "Authorization": authorization,
+      "Content-Type": "application/json",
+      "Idempotency-Key": request.headers["Idempotency-Key"],
+    },
+    body: JSON.stringify(request.body),
+  };
+}
+
+function tossBasicAuthorization(secretKey: string): string {
+  const normalized = secretKey.trim();
+  if (!normalized) throw new Error("Toss confirm secret key is required.");
+  return `Basic ${Buffer.from(`${normalized}:`, "utf8").toString("base64")}`;
+}
+
+async function safeJsonBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

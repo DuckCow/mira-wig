@@ -1,5 +1,5 @@
 import { PaymentProvider } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProviderFactoryContext } from "../contract";
 import { ProviderCapability } from "../capabilities";
 import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
@@ -12,7 +12,20 @@ import { PaymentMethod, PaymentMode } from "../routing";
 import { ProviderResolveException, resolveProvider } from "../resolve";
 import type { PaymentConfirmInput, PaymentInitiateInput, PaymentProvider as PaymentProviderPort } from "../types";
 
+const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env.TOSS_SANDBOX_SECRET_KEY;
+
 describe("payment provider adapter resolution", () => {
+  beforeEach(() => {
+    delete process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+    delete process.env.TOSS_SANDBOX_SECRET_KEY;
+  });
+
+  afterEach(() => {
+    restoreEnv("TOSS_SANDBOX_EXTERNAL_ENABLED", ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
+    restoreEnv("TOSS_SANDBOX_SECRET_KEY", ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
+  });
+
   it.each([
     PaymentProvider.MOCK,
     PaymentProvider.TOSS,
@@ -93,6 +106,19 @@ describe("payment provider adapter resolution", () => {
       "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE",
       undefined,
       { env: sandboxEnabledEnv(), sandboxExternalCodeRegistry: tossActionCodeRegistry() },
+    );
+  });
+
+  it("fails closed when both SANDBOX opt-in keys exist but the credential row is absent", () => {
+    expectResolutionFailure(
+      factoryContext({ credentials: [] }),
+      "SANDBOX_EXTERNAL_CREDENTIALS_MISSING",
+      undefined,
+      {
+        env: sandboxEnabledEnv(),
+        sandboxExternalCodeRegistry: tossActionCodeRegistry(),
+        sandboxExternalAdapters: { [PaymentProvider.TOSS]: fakeSandboxExternalAdapter },
+      },
     );
   });
 
@@ -287,6 +313,14 @@ function throwingAdapter(): { calls: number; create: (context: ProviderFactoryCo
       throw new Error("external sandbox adapter must not be constructed");
     },
   };
+}
+
+function restoreEnv(key: string, original: string | undefined): void {
+  if (original === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = original;
 }
 
 function factoryContext(overrides: Partial<ProviderFactoryContext> = {}): ProviderFactoryContext {
