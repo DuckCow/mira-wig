@@ -8,6 +8,7 @@ import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
+import { PaymentModeConfigException, configuredPaymentMode } from "@/lib/payment/mode";
 import { bridgeProviderConfirmResult, type ProviderConfirmActionErrorCode } from "@/lib/payment/providers/confirm-bridge";
 import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
 import {
@@ -269,16 +270,17 @@ function resolveActionProvider(
 ): { success: true; provider: PaymentProvider; mode: PaymentMode } | PaymentActionFailure {
   try {
     const selectedMethod = method ?? defaultPaymentMethodForMarket(marketCode);
+    const mode = configuredPaymentMode();
     const resolution = resolveProviderForPayment({
       market: marketCode,
       method: selectedMethod,
       currency: session.currency,
       amountMinor: session.totalAmount,
-      mode: PaymentMode.SANDBOX,
+      mode,
     });
     return { success: true, provider: resolution.selectedProvider, mode: resolution.mode };
   } catch (e) {
-    if (e instanceof NoEligibleProviderError) {
+    if (e instanceof NoEligibleProviderError || e instanceof PaymentModeConfigException) {
       return actionError("PROVIDER_UNAVAILABLE", "No payment provider is available.", false);
     }
     throw e;

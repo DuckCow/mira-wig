@@ -14,7 +14,13 @@ import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
 import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
-import { NoEligibleProviderError, PaymentMethod, PaymentMode, providerForMarket } from "@/lib/payment/providers/routing";
+import {
+  NoEligibleProviderError,
+  PROVIDER_REGISTRY,
+  PaymentMethod,
+  PaymentMode,
+  providerForMarket,
+} from "@/lib/payment/providers/routing";
 import type {
   NormalizedProviderConfirmResult,
   ProviderConfirmFailed,
@@ -44,6 +50,8 @@ const mockGetSession = vi.mocked(getSession);
 const mockGetCurrentMarketCode = vi.mocked(getCurrentMarketCode);
 const mockResolveProvider = vi.mocked(resolveProvider);
 const ORIGINAL_MOCK_MODE = process.env.PAYMENT_MOCK_MODE;
+const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
+const ORIGINAL_TOSS_LIVE_ENABLED = PROVIDER_REGISTRY.TOSS.liveEnabled;
 
 interface TestContext {
   userId: string;
@@ -79,6 +87,7 @@ describe("payment actions", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     process.env.PAYMENT_MOCK_MODE = "success";
+    delete process.env.PAYMENT_MODE;
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
@@ -89,6 +98,8 @@ describe("payment actions", () => {
 
   afterEach(async () => {
     mockResolveProvider.mockImplementation((input) => createMockPaymentProvider(input.provider));
+    PROVIDER_REGISTRY.TOSS.liveEnabled = ORIGINAL_TOSS_LIVE_ENABLED;
+    restorePaymentMode();
     restoreMockMode();
     await cleanup(ctx);
   });
@@ -152,6 +163,71 @@ describe("payment actions", () => {
       expect(result.error).not.toContain("MOCK_PROVIDER_LIVE");
       expect(result.error).not.toContain("internal live adapter detail");
     }
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("PAYMENT_MODE=LIVE with empty live allowlists fails closed before creating a payment", async () => {
+    process.env.PAYMENT_MODE = "LIVE";
+    const session = await submitSessionWithOneLine(ctx);
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("No payment provider is available.");
+    }
+    expect(mockResolveProvider).not.toHaveBeenCalled();
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("invalid PAYMENT_MODE fails closed without leaking config details", async () => {
+    process.env.PAYMENT_MODE = "prod";
+    const session = await submitSessionWithOneLine(ctx);
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("No payment provider is available.");
+      expect(result.error).not.toContain("prod");
+      expect(result.error).not.toContain("PAYMENT_MODE");
+      expect(result.error).not.toContain("PaymentModeConfigException");
+    }
+    expect(mockResolveProvider).not.toHaveBeenCalled();
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("LIVE routing allowlist still fails closed at adapter resolution without a real adapter", async () => {
+    process.env.PAYMENT_MODE = "LIVE";
+    PROVIDER_REGISTRY.TOSS.liveEnabled = [{ market: MarketCode.KR, method: PaymentMethod.CARD, currency: "KRW" }];
+    const session = await submitSessionWithOneLine(ctx);
+    mockResolveProvider.mockImplementation((input) => {
+      throw new ProviderResolveException(
+        "LIVE_ADAPTER_UNAVAILABLE",
+        input.provider,
+        input.mode,
+        "internal live adapter detail",
+      );
+    });
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(result.retryable).toBe(false);
+      expect(result.error).toBe("No payment provider is available.");
+      expect(result.error).not.toContain("LIVE_ADAPTER_UNAVAILABLE");
+      expect(result.error).not.toContain("internal live adapter detail");
+    }
+    expect(mockResolveProvider).toHaveBeenCalledWith({
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.LIVE,
+    });
     await expect(paymentCount(session.sessionId)).resolves.toBe(0);
   });
 
@@ -849,4 +925,12 @@ function restoreMockMode(): void {
     return;
   }
   process.env.PAYMENT_MOCK_MODE = ORIGINAL_MOCK_MODE;
+}
+
+function restorePaymentMode(): void {
+  if (ORIGINAL_PAYMENT_MODE === undefined) {
+    delete process.env.PAYMENT_MODE;
+    return;
+  }
+  process.env.PAYMENT_MODE = ORIGINAL_PAYMENT_MODE;
 }
