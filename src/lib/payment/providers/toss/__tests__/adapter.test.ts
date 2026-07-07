@@ -39,6 +39,7 @@ describe("Toss confirm fake HTTP adapter seam", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     restoreEnv(TOSS_SANDBOX_EXTERNAL_ENABLED, ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
     restoreEnv(TOSS_SANDBOX_SECRET_KEY, ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
@@ -89,6 +90,65 @@ describe("Toss confirm fake HTTP adapter seam", () => {
     expect(headerValue(call.init?.headers, "Content-Type")).toBe("application/json");
     expect(headerValue(call.init?.headers, "Idempotency-Key")).toBe(IDEMPOTENCY_KEY);
     expect(JSON.stringify([result, call.init])).not.toContain(rawSecret);
+  });
+
+  it("aborts a hung Toss confirm fetch by timeout and normalizes the adapter failure", async () => {
+    vi.useFakeTimers();
+    const rawSecret = "test_sk_timeout_secret_should_not_leak";
+    const fetchCalls: FetchCall[] = [];
+    const fetchFn: typeof fetch = (input, init) => {
+      fetchCalls.push({ input, init });
+      return new Promise<Response>(() => undefined);
+    };
+    const adapter = createTossConfirmAdapter({
+      httpClient: createTossConfirmFetchClient({
+        secretKey: rawSecret,
+        fetchFn,
+        origin: "https://api.toss.example.test",
+        timeoutMs: 5,
+      }),
+    });
+
+    const pending = adapter.confirm(confirmInput());
+    await vi.advanceTimersByTimeAsync(5);
+    const failure = expectFailure(await pending);
+    const call = onlyFetchCall(fetchCalls);
+    const rendered = JSON.stringify(failure);
+
+    expect(signalFromInit(call.init).aborted).toBe(true);
+    expect(failure).toMatchObject({
+      classification: "RETRYABLE",
+      normalizedCode: "PROVIDER_TIMEOUT",
+      ambiguousProviderState: true,
+    });
+    expect(rendered).not.toContain(rawSecret);
+    expect(rendered).not.toContain("Authorization");
+    expect(rendered).not.toContain("Basic");
+    expect(rendered).not.toContain(PAYMENT_KEY);
+    expect(rendered).not.toContain("paymentKey");
+  });
+
+  it("keeps non-timeout fetch rejection on the existing retryable network path", async () => {
+    const rawSecret = "test_sk_rejected_fetch_should_not_leak";
+    const fetchFn: typeof fetch = () => Promise.reject(new TypeError(`fake socket closed ${rawSecret}`));
+    const adapter = createTossConfirmAdapter({
+      httpClient: createTossConfirmFetchClient({
+        secretKey: rawSecret,
+        fetchFn,
+        origin: "https://api.toss.example.test",
+        timeoutMs: 100,
+      }),
+    });
+
+    const failure = expectFailure(await adapter.confirm(confirmInput()));
+    const rendered = JSON.stringify(failure);
+
+    expect(failure).toMatchObject({
+      classification: "RETRYABLE",
+      normalizedCode: "PROVIDER_TIMEOUT",
+    });
+    expect(rendered).not.toContain(rawSecret);
+    expect(rendered).not.toContain("fake socket closed");
   });
 
   it("keeps Toss SANDBOX mock-backed by default even when sandbox credentials are present", async () => {
@@ -337,6 +397,13 @@ function fetchInputUrl(input: Parameters<typeof fetch>[0]): string {
 
 function headerValue(headers: HeadersInit | undefined, key: string): string | null {
   return new Headers(headers).get(key);
+}
+
+function signalFromInit(init: RequestInit | undefined): AbortSignal {
+  const signal = init?.signal;
+  expect(signal).toBeInstanceOf(AbortSignal);
+  if (!(signal instanceof AbortSignal)) throw new Error("Expected fake fetch to receive an AbortSignal");
+  return signal;
 }
 
 function recordingClient(result: TossConfirmHttpResult): RecordingClient {

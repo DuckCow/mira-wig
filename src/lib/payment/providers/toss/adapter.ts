@@ -44,7 +44,10 @@ export interface TossConfirmFetchClientOptions {
   secretKey: string;
   fetchFn?: typeof fetch;
   origin?: string;
+  timeoutMs?: number;
 }
+
+const DEFAULT_TOSS_CONFIRM_TIMEOUT_MS = 10_000;
 
 export function createTossConfirmAdapter(options: TossConfirmAdapterOptions): TossConfirmAdapter {
   return {
@@ -66,14 +69,25 @@ export function createTossConfirmFetchClient(options: TossConfirmFetchClientOpti
   const authorization = tossBasicAuthorization(options.secretKey);
   const fetchFn = options.fetchFn ?? fetch;
   const origin = options.origin ?? TOSS_API_ORIGIN;
+  const timeoutMs = tossConfirmTimeoutMs(options.timeoutMs);
   return async (request) => {
-    const response = await fetchFn(new URL(request.path, origin), fetchRequestInit(request, authorization));
-    return {
-      kind: "response",
-      httpStatus: response.status,
-      body: await safeJsonBody(response),
-      receivedAt: new Date(),
-    };
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<TossConfirmHttpResult>((resolve) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        resolve({ kind: "network_timeout" });
+      }, timeoutMs);
+    });
+    try {
+      const fetched = fetchTossConfirm(fetchFn, request, origin, authorization, controller.signal);
+      return await Promise.race([fetched, timeout]);
+    } catch (error) {
+      if (isAbortError(error)) return { kind: "network_timeout" };
+      throw error;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   };
 }
 
@@ -172,7 +186,27 @@ function isSuccessStatus(status: number): boolean {
   return status >= 200 && status < 300;
 }
 
-function fetchRequestInit(request: TossConfirmHttpRequest, authorization: string): RequestInit {
+async function fetchTossConfirm(
+  fetchFn: typeof fetch,
+  request: TossConfirmHttpRequest,
+  origin: string,
+  authorization: string,
+  signal: AbortSignal,
+): Promise<TossConfirmHttpResult> {
+  const response = await fetchFn(new URL(request.path, origin), fetchRequestInit(request, authorization, signal));
+  return {
+    kind: "response",
+    httpStatus: response.status,
+    body: await safeJsonBody(response),
+    receivedAt: new Date(),
+  };
+}
+
+function fetchRequestInit(
+  request: TossConfirmHttpRequest,
+  authorization: string,
+  signal: AbortSignal,
+): RequestInit {
   return {
     method: request.method,
     headers: {
@@ -181,6 +215,7 @@ function fetchRequestInit(request: TossConfirmHttpRequest, authorization: string
       "Idempotency-Key": request.headers["Idempotency-Key"],
     },
     body: JSON.stringify(request.body),
+    signal,
   };
 }
 
@@ -199,6 +234,16 @@ async function safeJsonBody(response: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+function tossConfirmTimeoutMs(timeoutMs: number | undefined): number {
+  if (timeoutMs === undefined) return DEFAULT_TOSS_CONFIRM_TIMEOUT_MS;
+  if (Number.isSafeInteger(timeoutMs) && timeoutMs > 0) return timeoutMs;
+  throw new Error("Toss confirm timeout must be a positive integer.");
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
