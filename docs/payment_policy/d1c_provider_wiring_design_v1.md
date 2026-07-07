@@ -30,7 +30,8 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - DESIGN: for lookup-verified providers, the webhook body is a trigger, not the authoritative capture source.
 - DESIGN: parser or completion must receive authoritative state from the verifier without a second external call.
 - DESIGN GAP: `ProviderVerifiedWebhookInput` currently carries the raw verified request/input but not an authoritative provider lookup result. Lookup-verified providers therefore require a future contract extension so authoritative provider state can flow from verifier to parser/completion without a second external call.
-- OPEN/DESIGN: lookup-verified provider replay semantics are intentionally undecided. A retry/replay may either re-run the provider lookup or reuse a persisted authoritative lookup result. Re-running lookup gives fresh provider truth but performs an external call on each retry/replay. Reusing a persisted lookup result is deterministic but may become stale. This matters for deferred events such as `COMPLETE.CONFIG_UNAVAILABLE`, which may be retried much later. The Toss verifier patch must decide this explicitly; this document does not resolve it.
+- DECISION, Toss replay semantics: re-run the Toss lookup on each retry/replay for the first query-verified verifier. This gives fresh provider truth across Toss's retry window and across deferred states such as `COMPLETE.CONFIG_UNAVAILABLE`, at the cost of one external provider call per replay. Persisting an authoritative lookup result would be deterministic but can become stale, so it is not the first verifier default.
+- DESIGN RULE: replay/retry lookup must run under the event's verified credential binding, never the currently configured `PAYMENT_MODE`; otherwise an env flip or credential rotation could query the wrong provider environment and manufacture facts under the wrong mode.
 - TEST RULE: tests must inject fake lookup ports and must not perform external calls.
 - CONFIRMED, Toss snapshot: Toss server-side code validates/finalizes payment state with the secret key, server must not trust client-provided amount/status/success, and general payment webhook handling should re-call the Payment Query API with `paymentKey`.
 - DESIGN, Toss ordinary payment webhooks: treat `PAYMENT_STATUS_CHANGED` and `CANCEL_STATUS_CHANGED` as query-verified, not pure HMAC-signature verified.
@@ -38,7 +39,7 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - DESIGN, Toss ordinary payment webhooks: authoritative state for `PAYMENT_STATUS_CHANGED` must come from `GET /v1/payments/{paymentKey}`, not blindly from the webhook body.
 - DESIGN, Toss ordinary payment webhooks: payout/seller `tosspayments-webhook-signature` HMAC verification is a separate primitive and must not be conflated with ordinary payment webhook query-verification.
 - CONFIRMED, Toss snapshot: if initial webhook delivery fails, Toss retries up to 7 times on a 1, 4, 16, 64, 256, 1024, and 4096 minute schedule, with the final retry about 3 days 19 hours after first delivery.
-- DESIGN IMPLICATION: mira's current webhook handling runs verification and completion synchronously in the request. Toss query-verification adds an external provider lookup to that path. The Toss verifier patch must decide whether inline lookup plus completion fits the 10-second response budget, or whether ingress should acknowledge first and process asynchronously. This document does not decide that.
+- OPEN, 10-second ACK budget: mira's current webhook handling runs verification and completion synchronously in the request, while Toss query-verification adds an external provider lookup to that path. The Toss verifier patch must decide whether inline lookup plus completion fits the 10-second response budget, or whether ingress should acknowledge first and process asynchronously. This closes only with measured fake-port timeout tests plus a design choice for provider latency/error behavior; this document does not decide it.
 - DESIGN IMPLICATION: long retryable defers still need reconciliation or internal reentry visibility if they outlast Toss provider retry.
 
 ### B. Verified-by-Signature Support
@@ -63,32 +64,73 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - DESIGN RISK: future mode or credential-environment scoping may be needed.
 - DESIGN RULE: do not silently collapse sandbox/live event IDs.
 - CONFIRMED, Toss snapshot: `tosspayments-webhook-transmission-id` is the native Toss webhook unique identifier.
-- OPEN, Toss snapshot: whether mira event identity must include verified mode or credential environment in addition to provider + `tosspayments-webhook-transmission-id`.
+- OPEN, Toss identity criteria: before real verification or `PaymentEvent.verifiedMode`, decide whether mira event identity must include verified mode or credential environment in addition to provider + `tosspayments-webhook-transmission-id`. Keep current identity only if official docs/recon prove the transmission ID cannot collide across sandbox/live credential environments feeding the same table; otherwise scope identity by verified mode or credential environment. This aligns with `webhook_verified_mode_design_v1.md`.
 - OPEN, PayPal snapshot: webhook ID separation by sandbox/live.
 
 ### E. Credential Requirements
 
 - DESIGN: introduce provider/mode/capability dimensions later.
-- DESIGN: capability examples include action adapter, webhook verifier, and void executor.
+- DESIGN: credential requirement tables must be keyed by provider, mode, and capability.
+- DESIGN: credential names must be mode-scoped.
+- DESIGN: required capabilities include at least action adapter, webhook verifier, and void executor.
 - DESIGN: credential checks remain presence-only at the factory boundary.
 - DESIGN RULE: do not invent concrete credential environment variable names now.
 - CONFIRMED, Toss snapshot: client key and secret key are a matched set; mixing non-matching keys or test/live keys causes `INVALID_API_KEY`.
 - CONFIRMED, Toss snapshot: client key initializes the browser SDK and secret key is used for server API calls.
 - DESIGN, Toss credentials: credential requirement design must account for matched browser client key + server secret key pairs, without naming concrete environment variables yet.
 - DESIGN CAVEAT, Toss credentials: factory credential checks are presence-only and cannot prove client/secret key pair consistency. Toss validates pair consistency at provider call time, so the future Toss credential/error normalization patch must handle `INVALID_API_KEY` without introducing concrete environment variable names here.
-- OPEN, Toss snapshot: exact live key prefix and concrete credential environment variable naming.
+- CONFIRMED, Toss snapshot: live API secret keys start with `live_sk` or `live_gsk`.
+- OPEN, Toss snapshot: exact live client key prefix and concrete credential environment variable naming.
 - OPEN, PayPal snapshot: webhook ID separation by sandbox/live and OAuth token caching/lifetime behavior.
 
-### F. Implementation Order
+### F. SANDBOX Adapter Selection Policy
+
+- DECISION: `TOSS + SANDBOX` stays mock-backed by default.
+- DECISION: a real Toss test-key adapter requires an explicit opt-in mechanism.
+- DECISION: the opt-in must be reviewed and behavior-tested before existing tests that assert mock-backed sandbox behavior change.
+- DESIGN RULE: do not silently replace mock sandbox behavior with external Toss test calls.
+- OPEN: exact opt-in mechanism. Acceptable design shapes include a provider/mode adapter selection flag, provider-specific sandbox adapter enablement setting, or registry/factory config.
+
+### G. Toss Status and Error Mapping
+
+Payment status table:
+
+| Toss status | Mira provisional category | Decision state |
+|---|---|---|
+| `READY` | ignored / pending | OPEN: no capture fact until authoritative status becomes final. |
+| `IN_PROGRESS` | ignored / pending | OPEN: no capture fact until approval completes. |
+| `WAITING_FOR_DEPOSIT` | ignored / pending | OPEN: virtual-account flow and `DEPOSIT_CALLBACK` remain separate. |
+| `DONE` | capture success | DECIDED for query-verified `PAYMENT_STATUS_CHANGED` when amount/currency/provider key match. |
+| `CANCELED` | future_void or ignored, depending on local payment/order state | OPEN: must not create duplicate success. |
+| `PARTIAL_CANCELED` | future_refund | OPEN until refund/partial-cancel handling exists. |
+| `ABORTED` | terminal failure or ignored, depending on local payment/order state | OPEN: safe default is fail-closed/manual review for unknown transitions. |
+| `EXPIRED` | terminal failure or ignored, depending on local payment/order state | OPEN: safe default is fail-closed/manual review for unknown transitions. |
+| unknown/unconfirmed | manual review / fail closed | DECIDED safe posture. |
+
+Error normalization table:
+
+| Toss error group | Official examples | Mira provisional category |
+|---|---|---|
+| Credential/config | `INVALID_API_KEY`, `UNAUTHORIZED_KEY`, `INCORRECT_BASIC_AUTH_FORMAT` | OPEN: likely provider unavailable/auth config failure; exact normalized code must be locked in Toss adapter patch. |
+| Temporary/provider/system | `PROVIDER_ERROR`, `COMMON_ERROR`, `FAILED_INTERNAL_SYSTEM_PROCESSING`, `FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`, `UNKNOWN_PAYMENT_ERROR` | OPEN: likely retryable or manual review depending operation and ambiguity. |
+| Customer/payment decline | `REJECT_CARD_PAYMENT`, `REJECT_ACCOUNT_PAYMENT`, `REJECT_CARD_COMPANY`, `INVALID_REJECT_CARD`, `FDS_ERROR` | OPEN: likely terminal/manual review split. |
+| Request/programmer/input | `INVALID_REQUEST`, `BELOW_MINIMUM_AMOUNT`, `INVALID_CARD_INSTALLMENT_PLAN`, `NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN` | OPEN: distinguish user-correctable, programmer error, and provider-terminal cases. |
+| Not found/state mismatch | `NOT_FOUND_PAYMENT`, `NOT_FOUND_PAYMENT_SESSION`, `ALREADY_PROCESSED_PAYMENT`, `ALREADY_CANCELED_PAYMENT` | OPEN: operation-specific idempotency/state handling needed. |
+| Cancel/refund constraints | `NOT_CANCELABLE_PAYMENT`, `NOT_CANCELABLE_AMOUNT`, `NOT_ALLOWED_PARTIAL_REFUND`, `EXCEED_CANCEL_LIMIT`, `EXCEED_MAX_REFUND_DUE` | OPEN: belongs to future void/refund taxonomy. |
+
+Complete Toss error normalization remains OPEN. Unknown or unmapped Toss statuses/errors must keep the safe manual-review / fail-closed posture.
+
+### H. Implementation Order
 
 Recommended order, subject to official-doc gap closure:
 
 1. Toss docs snapshot update.
-2. Toss confirm adapter design/implementation.
-3. Toss query-verifier contract and authoritative-state design.
-4. Toss webhook verifier implementation.
-5. PayPal order/adapter design.
-6. PayPal webhook verification.
+2. Toss SANDBOX external-adapter opt-in design, if real test-key calls are needed before LIVE.
+3. Toss confirm adapter design/implementation.
+4. Toss query-verifier contract and authoritative-state design.
+5. Toss webhook verifier implementation.
+6. PayPal order/adapter design.
+7. PayPal webhook verification.
 
 This order is not live readiness. If official docs contradict it, revisit the order before implementation.
 
@@ -102,6 +144,7 @@ This order is not live readiness. If official docs contradict it, revisit the or
 - Toss ordinary payment webhook treated as HMAC-signature verified without an official ordinary-payment signature mechanism.
 - Provider-specific error codes normalized from guesses instead of official taxonomy.
 - Credential names or live key prefixes invented before official docs review.
+- External Toss test-key calls introduced into default SANDBOX behavior without explicit opt-in.
 
 ## 5. Required Future Tests
 
@@ -116,6 +159,8 @@ This order is not live readiness. If official docs contradict it, revisit the or
 - Environment variable presence cannot enable LIVE without registry `liveEnabled`.
 - PayPal OAuth/verification transport failure is retryable/non-terminal when appropriate.
 - Toss lookup failure is classified separately from malformed provider payload.
+- Toss SANDBOX stays mock-backed unless an explicit adapter opt-in test enables external test-key behavior.
+- Unknown Toss statuses/errors fail closed or route to manual review without leaking provider internals.
 
 ## 6. Out of Scope
 

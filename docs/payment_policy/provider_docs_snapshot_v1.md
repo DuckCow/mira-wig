@@ -21,6 +21,7 @@ This is a documentation lock only. It does not implement real adapters, webhooks
 ## 2. Toss Source Map
 
 - Toss Payment APIs: https://docs.tosspayments.com/en/api-guide
+- Toss Core API reference: https://docs.tosspayments.com/reference
 - Toss authorization docs: https://docs.tosspayments.com/reference/using-api/authorization
 - Toss API keys: https://docs.tosspayments.com/reference/using-api/api-keys
 - Toss error codes: https://docs.tosspayments.com/reference/error-codes
@@ -38,6 +39,9 @@ This is a documentation lock only. It does not implement real adapters, webhooks
 - CONFIRMED, Toss Payment APIs: cancel request requires `cancelReason`; `cancelAmount` is optional and defaults to full cancellation.
 - CONFIRMED, Toss Payment APIs: POST requests support `Idempotency-Key`.
 - CONFIRMED, Toss Payment APIs: the same idempotency key returns the same response, and the key is valid for 15 days.
+- CONFIRMED, Toss Payment APIs: test API secret keys start with `test_sk` or `test_gsk`.
+- CONFIRMED, Toss Payment APIs: live API secret keys start with `live_sk` or `live_gsk`.
+- CONFIRMED, Toss Core API reference: the Payment object status enum is `READY`, `IN_PROGRESS`, `WAITING_FOR_DEPOSIT`, `DONE`, `CANCELED`, `PARTIAL_CANCELED`, `ABORTED`, and `EXPIRED`.
 - CONFIRMED, Toss authorization docs: Toss API authenticates with the secret key using HTTP Basic auth.
 - CONFIRMED, Toss authorization docs: the secret key is used as the user ID, the password is empty, and `:` is appended after the secret key before encoding.
 - CONFIRMED, Toss API keys: client key and secret key are a set and must be used together.
@@ -48,8 +52,10 @@ This is a documentation lock only. It does not implement real adapters, webhooks
 - CONFIRMED, Toss API keys: Payment Widget keys include `gck` for client key and `gsk` for secret key.
 - CONFIRMED, Toss API keys: API individual integration keys include `ck` for client key and `sk` for secret key.
 - CONFIRMED, Toss API keys: secret keys must not be exposed externally.
-- CONFIRMED, Toss error codes: Toss documents API error codes including `UNAUTHORIZED_KEY`, `FORBIDDEN_REQUEST`, `DATA_NOT_FOUND`, and `COMMON_ERROR`.
-- CONFIRMED, Toss error codes: cancel-related documented codes include `ALREADY_CANCELED_PAYMENT`, `FAILED_CANCEL_PAYMENT`, `NOT_CANCELABLE_PAYMENT`, and `NOT_PARTIAL_CANCELABLE_PAYMENT`.
+- CONFIRMED, Toss API keys: API key errors include `INVALID_CLIENT_KEY`, `INVALID_API_KEY`, `UNAUTHORIZED_KEY`, and `INCORRECT_BASIC_AUTH_FORMAT`.
+- CONFIRMED, Toss error codes: payment confirm errors include `ALREADY_PROCESSED_PAYMENT`, `PROVIDER_ERROR`, `EXCEED_MAX_CARD_INSTALLMENT_PLAN`, `INVALID_REQUEST`, `NOT_ALLOWED_POINT_USE`, `INVALID_API_KEY`, `INVALID_REJECT_CARD`, `BELOW_MINIMUM_AMOUNT`, `INVALID_CARD_EXPIRATION`, `INVALID_STOPPED_CARD`, `EXCEED_MAX_DAILY_PAYMENT_COUNT`, `NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT`, `INVALID_CARD_INSTALLMENT_PLAN`, `NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN`, `EXCEED_MAX_PAYMENT_AMOUNT`, `NOT_FOUND_TERMINAL_ID`, `INVALID_AUTHORIZE_AUTH`, `INVALID_CARD_LOST_OR_STOLEN`, `RESTRICTED_TRANSFER_ACCOUNT`, `INVALID_CARD_NUMBER`, `INVALID_UNREGISTERED_SUBMALL`, `NOT_REGISTERED_BUSINESS`, `EXCEED_MAX_ONE_DAY_WITHDRAW_AMOUNT`, `EXCEED_MAX_ONE_TIME_WITHDRAW_AMOUNT`, `CARD_PROCESSING_ERROR`, `EXCEED_MAX_AMOUNT`, `INVALID_ACCOUNT_INFO_RE_REGISTER`, `NOT_AVAILABLE_PAYMENT`, `UNAPPROVED_ORDER_ID`, `EXCEED_MAX_MONTHLY_PAYMENT_AMOUNT`, `UNAUTHORIZED_KEY`, `REJECT_ACCOUNT_PAYMENT`, `REJECT_CARD_PAYMENT`, `REJECT_CARD_COMPANY`, `FORBIDDEN_REQUEST`, `REJECT_TOSSPAY_INVALID_ACCOUNT`, `EXCEED_MAX_AUTH_COUNT`, `EXCEED_MAX_ONE_DAY_AMOUNT`, `NOT_AVAILABLE_BANK`, `INVALID_PASSWORD`, `INCORRECT_BASIC_AUTH_FORMAT`, `FDS_ERROR`, `NOT_FOUND_PAYMENT`, `NOT_FOUND_PAYMENT_SESSION`, `FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`, `FAILED_INTERNAL_SYSTEM_PROCESSING`, and `UNKNOWN_PAYMENT_ERROR`.
+- CONFIRMED, Toss error codes: payment query errors include `NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN_BELOW_AMOUNT`, `UNAUTHORIZED_KEY`, `FORBIDDEN_CONSECUTIVE_REQUEST`, `INCORRECT_BASIC_AUTH_FORMAT`, `NOT_FOUND_PAYMENT`, `NOT_FOUND`, and `FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`.
+- CONFIRMED, Toss error codes: payment cancel errors include `ALREADY_CANCELED_PAYMENT`, `INVALID_REFUND_ACCOUNT_INFO`, `EXCEED_CANCEL_AMOUNT_DISCOUNT_AMOUNT`, `INVALID_REQUEST`, `INVALID_REFUND_ACCOUNT_NUMBER`, `INVALID_BANK`, `NOT_MATCHES_REFUNDABLE_AMOUNT`, `PROVIDER_ERROR`, `REFUND_REJECTED`, `ALREADY_REFUND_PAYMENT`, `FORBIDDEN_BANK_REFUND_REQUEST`, `UNAUTHORIZED_KEY`, `NOT_CANCELABLE_AMOUNT`, `FORBIDDEN_CONSECUTIVE_REQUEST`, `FORBIDDEN_REQUEST`, `NOT_CANCELABLE_PAYMENT`, `EXCEED_MAX_REFUND_DUE`, `NOT_ALLOWED_PARTIAL_REFUND_WAITING_DEPOSIT`, `NOT_ALLOWED_PARTIAL_REFUND`, `NOT_AVAILABLE_BANK`, `INCORRECT_BASIC_AUTH_FORMAT`, `NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER`, `EXCEED_CANCEL_LIMIT`, `NOT_FOUND_PAYMENT`, `FAILED_INTERNAL_SYSTEM_PROCESSING`, `FAILED_REFUND_PROCESS`, `FAILED_METHOD_HANDLING_CANCEL`, `FAILED_PARTIAL_REFUND`, `COMMON_ERROR`, and `FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`.
 - CONFIRMED, Toss webhook events: Toss webhooks include `tosspayments-webhook-transmission-id`.
 - CONFIRMED, Toss webhook events: `tosspayments-webhook-transmission-id` is the webhook unique identifier.
 - CONFIRMED, Toss webhook events: `tosspayments-webhook-transmission-time` is the sent time.
@@ -79,10 +85,10 @@ This is a documentation lock only. It does not implement real adapters, webhooks
 
 ## 4. Toss OPEN Questions
 
-- OPEN: exact live key prefix and concrete credential environment variable naming.
+- OPEN: exact live client key prefix and concrete credential environment variable naming. Live API secret key prefixes are confirmed as `live_sk` and `live_gsk`, but this snapshot does not infer browser client-key prefixes or env names.
 - OPEN: complete mapping from Toss provider errors to mira's normalized failure taxonomy.
 - OPEN: status mapping from Toss Payment object to mira `CaptureFacts`, ignored events, `future_refund`, and `future_void`.
-- OPEN: query-verified replay semantics: re-run lookup vs persist authoritative lookup result.
+- OPEN: Toss official docs do not prescribe mira's query-verified replay semantics. D1-C currently decides the app-level policy as re-running lookup on each replay/retry.
 - OPEN: whether `PaymentEvent` identity must include verified mode or credential environment in addition to provider + `tosspayments-webhook-transmission-id`.
 - OPEN: exact handling of `DEPOSIT_CALLBACK` virtual-account secret validation vs ordinary payment query-verification in mira's future verifier contracts.
 
