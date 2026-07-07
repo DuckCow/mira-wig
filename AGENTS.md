@@ -33,7 +33,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 인증 | NextAuth + Google OAuth | JWT 전략, `session.user.role` |
 | 스토리지 | AWS S3 (카탈로그) | 선택 메커니즘은 §2. `fittingStorage`는 항상 mock. |
 | AI 피팅 | 외부 VTO 추상화, 현재 mock | `AI_PROVIDER` |
-| 결제 | **재작성 중 — 레거시 제거됨(컷오버 완료 2026-07-06, §4.5)** | **현재 리포에 결제·주문 코드/테이블 없음**(웹훅 라우트는 503 스텁, checkout·orders 화면은 안내 스텁). 신 코어는 §8·Track 1로 재작성. 라우팅 계획: KR=토스, US·JP=PayPal, EU=후속(§2). |
+| 결제 | **재작성 중 — 신 결제 코어 재구축 진행 중(컷오버 완료 2026-07-06, §4.5)** | 현재 `prisma/schema.prisma`와 `src/lib/payment/**`에 신 결제·주문 코어가 존재한다. 단 provider/webhook 실연동은 아직 mock/fake seam 상태이며, real Toss/PayPal wiring·live enablement·real webhook signature verification은 별도 design lock/recon 뒤 진행한다. |
 
 > mutation 진입점은 **server action(`src/app/actions`) 중심**이다. Route Handler(`src/app/api/**`)는 현재 auth 콜백·mock-storage·결제 웹훅 정도뿐 — "API Routes 중심"이 아니다.
 
@@ -60,7 +60,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - mock은 외부 경계에서만(토스/PayPal API는 mock 가능, 우리 주문 로직은 mock 금지).
 - 변경 전 영향 범위를 먼저 요약.
 
-> **글롭 동기화 상태(v4)**: 결제 글롭 두 개는 eslint에 기존재(2026-07-06 정찰 확인)하며, 컷오버로 해당 경로가 비워진 지금도 유지한다 — 신 코어가 같은 경로를 인수하므로 첫 파일부터 STRICT가 적용된다. FROZEN 존은 소멸(§4.5 기록 참조).
+> **글롭 동기화 상태(v4 이후)**: 결제 글롭 두 개는 eslint에 기존재(2026-07-06 정찰 확인)하며, 컷오버 직후 비어 있던 경로를 현재 신 결제 코어가 인수해 STRICT가 적용된다. FROZEN 존은 소멸(§4.5 기록 참조).
 
 **NORMAL** — `src/app/(shop)/**`, `src/components/**`, 단순 표시/조회: 빠르게 구현, 전수 테스트 강요 안 함. 단 공통 규칙은 지킨다.
 
@@ -82,7 +82,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - **근거·경위:** 결정 레코드는 `docs/payment_policy/payment_policy_confirmed_v5.md`의 **ARCH-2**(재작성 + 클린 컷 + 제자리 동결 B′). 게이트 3조건(인양 검수 · A1 감사 판정 · 사람 승인) 충족 후 실행. 경위 상세는 `docs/handoff/mira_handoff_v10.md`.
 - **실행 형태:** `pre-cutover` 태그(`1d34d35`) → 커밋①(레거시 결제·주문 코드 삭제 + 영향권 스텁, 53파일 −8,050줄) → 커밋②(구 6모델 `Order`·`OrderItem`·`ManufacturingRequest`·`Payment`·`PaymentAdjustment`·`PaymentWebhookEvent` + 관련 enum drop 마이그레이션). 테스트 360→204는 삭제분이지 회귀가 아니다.
-- **현재 상태:** 결제·주문 코드/테이블 없음. `src/app/api/payments/**` 웹훅 라우트는 **503 스텁 — PG에 등록될 URL 자산이라 경로를 유지**하며 신 코어 B4가 재배선한다. checkout·orders·어드민 주문 화면은 안내 스텁. `src/lib/order/`의 `snapshot.ts`·`types.ts`·`core.ts`는 생존(비동결이었음 — 단 신 스키마 확정 시 shape 재편 대상).
+- **컷오버 직후 상태(과거 기록):** 결제·주문 코드/테이블이 일시적으로 없었고, `src/app/api/payments/**` 웹훅 라우트는 503 스텁이었다. 이후 신 결제 코어가 같은 경로·스키마를 다시 인수했으므로 현재 사실은 `prisma/schema.prisma`와 `src/lib/payment/**`를 우선한다.
 - **레거시 지식의 출처:** `docs/payment_policy/legacy_salvage_notes.md`(유일한 인양 문서) + git 히스토리(`pre-cutover` 태그). 주문 상태 전이 규칙은 인양되지 않았다(신 코어 §7.1/MFG-2가 상태 공간을 재설계하므로 — 필요 시 태그·구 핸드오프에서 복원).
 - **잔존 규칙 — 부활 금지:** `pre-cutover` 태그의 레거시 코드를 신 코어로 **복사·이식하지 않는다.** 경로는 인양 문서 경유 + 공식 문서 재확인(§7)뿐이다. 태그의 정당한 용도는 두 가지 — 사실 확인용 읽기, PG 심사용 임시 배포(스크래치 DB 필요).
 
