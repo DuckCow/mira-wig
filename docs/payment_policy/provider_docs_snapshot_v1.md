@@ -22,36 +22,69 @@ This is a documentation lock only. It does not implement real adapters, webhooks
 
 - Toss Payment APIs: https://docs.tosspayments.com/en/api-guide
 - Toss authorization docs: https://docs.tosspayments.com/reference/using-api/authorization
+- Toss API keys: https://docs.tosspayments.com/reference/using-api/api-keys
+- Toss error codes: https://docs.tosspayments.com/reference/error-codes
 - Toss webhook events: https://docs.tosspayments.com/reference/using-api/webhook-events
+- Toss webhook guide: https://docs.tosspayments.com/guides/v2/webhook
 - Toss LLM quick reference: https://docs.tosspayments.com/guides/v2/get-started/llms-quick-reference
 
 ## 3. Toss Confirmed Facts
 
 - CONFIRMED, Toss Payment APIs: `POST /v1/payments/confirm` authorizes/finalizes a payment.
 - CONFIRMED, Toss Payment APIs: confirm request requires `paymentKey`, `orderId`, and `amount`.
+- CONFIRMED, Toss Payment APIs: confirm success returns a Payment object.
 - CONFIRMED, Toss Payment APIs: `GET /v1/payments/{paymentKey}` retrieves a payment by `paymentKey`.
 - CONFIRMED, Toss Payment APIs: `POST /v1/payments/{paymentKey}/cancel` cancels full or partial payments.
-- CONFIRMED, Toss Payment APIs: POST idempotency uses `Idempotency-Key`, valid for 15 days.
+- CONFIRMED, Toss Payment APIs: cancel request requires `cancelReason`; `cancelAmount` is optional and defaults to full cancellation.
+- CONFIRMED, Toss Payment APIs: POST requests support `Idempotency-Key`.
+- CONFIRMED, Toss Payment APIs: the same idempotency key returns the same response, and the key is valid for 15 days.
 - CONFIRMED, Toss authorization docs: Toss API authenticates with the secret key using HTTP Basic auth.
 - CONFIRMED, Toss authorization docs: the secret key is used as the user ID, the password is empty, and `:` is appended after the secret key before encoding.
+- CONFIRMED, Toss API keys: client key and secret key are a set and must be used together.
+- CONFIRMED, Toss API keys: mixing non-matching keys or test/live keys causes `INVALID_API_KEY`.
+- CONFIRMED, Toss API keys: test keys start with `test`.
+- CONFIRMED, Toss API keys: client key is used to initialize the SDK in the browser.
+- CONFIRMED, Toss API keys: secret key is used for Toss API calls.
+- CONFIRMED, Toss API keys: Payment Widget keys include `gck` for client key and `gsk` for secret key.
+- CONFIRMED, Toss API keys: API individual integration keys include `ck` for client key and `sk` for secret key.
+- CONFIRMED, Toss API keys: secret keys must not be exposed externally.
+- CONFIRMED, Toss error codes: Toss documents API error codes including `UNAUTHORIZED_KEY`, `FORBIDDEN_REQUEST`, `DATA_NOT_FOUND`, and `COMMON_ERROR`.
+- CONFIRMED, Toss error codes: cancel-related documented codes include `ALREADY_CANCELED_PAYMENT`, `FAILED_CANCEL_PAYMENT`, `NOT_CANCELABLE_PAYMENT`, and `NOT_PARTIAL_CANCELABLE_PAYMENT`.
 - CONFIRMED, Toss webhook events: Toss webhooks include `tosspayments-webhook-transmission-id`.
+- CONFIRMED, Toss webhook events: `tosspayments-webhook-transmission-id` is the webhook unique identifier.
+- CONFIRMED, Toss webhook events: `tosspayments-webhook-transmission-time` is the sent time.
+- CONFIRMED, Toss webhook events: `tosspayments-webhook-transmission-retried-count` is the retry count.
 - CONFIRMED, Toss webhook events: `tosspayments-webhook-signature` is included only for `payout.changed` and `seller.changed`.
-- CONFIRMED, Toss webhook events: `PAYMENT_STATUS_CHANGED` exists for ordinary payment status changes and its body contains a Payment object in `data`.
+- CONFIRMED, Toss webhook events: `PAYMENT_STATUS_CHANGED` is an ordinary payment status webhook.
+- CONFIRMED, Toss webhook events: `PAYMENT_STATUS_CHANGED` body includes `eventType`, `createdAt`, and `data`.
+- CONFIRMED, Toss webhook events: `data` is the changed Payment object for `PAYMENT_STATUS_CHANGED`.
+- CONFIRMED, Toss webhook events: `CANCEL_STATUS_CHANGED` body includes `data` as the changed Cancel object.
+- CONFIRMED, Toss webhook events: `DEPOSIT_CALLBACK` has its own `secret` field for virtual-account request validation, separate from ordinary payment webhook verification.
 - CONFIRMED, Toss webhook events: `PAYMENT_STATUS_CHANGED`, `DEPOSIT_CALLBACK`, and `CANCEL_STATUS_CHANGED` are payment-related webhook types.
+- CONFIRMED, Toss webhook guide: webhook receiver should return HTTP 200 within 10 seconds if received successfully.
+- CONFIRMED, Toss webhook guide: if the initial webhook delivery fails, Toss retries up to 7 times.
+- CONFIRMED, Toss webhook guide: retry schedule is 1, 4, 16, 64, 256, 1024, and 4096 minutes.
+- CONFIRMED, Toss webhook guide: the final retry is about 3 days 19 hours after first delivery.
+- CONFIRMED, Toss webhook guide: Toss sends failure email if webhook delivery fails.
+- CONFIRMED, Toss webhook guide: webhook events are HTTP POST JSON payloads.
+- CONFIRMED, Toss webhook guide: webhooks are configured per MID and sent separately per MID.
 - CONFIRMED, Toss LLM quick reference: client initiates payment authentication via JS SDK.
 - CONFIRMED, Toss LLM quick reference: server validates/finalizes payment state with the secret key.
 - CONFIRMED, Toss LLM quick reference: server must not trust client-provided amount, status, or success.
 - CONFIRMED, Toss LLM quick reference: webhook handling may require server-side re-query/verification.
+- CONFIRMED, Toss LLM quick reference: general payment webhooks such as `PAYMENT_STATUS_CHANGED`, `DEPOSIT_CALLBACK`, and `CANCEL_STATUS_CHANGED` have no signature header.
+- CONFIRMED, Toss LLM quick reference: Toss recommends re-calling the Payment Query API with `paymentKey` to verify status for general payment webhooks.
+- CONFIRMED, Toss LLM quick reference: payout/seller webhooks use `tosspayments-webhook-signature` HMAC verification.
+- IMPLICATION, from confirmed Toss webhook and quick-reference facts: Toss ordinary payment webhook verification is query-verification via `GET /v1/payments/{paymentKey}`, not pure HMAC signature verification. Payout/seller HMAC verification is separate from ordinary payment webhooks.
 
 ## 4. Toss OPEN Questions
 
-- OPEN: exact ordinary-payment webhook retry/redelivery schedule, if not confirmed by the listed official docs.
-- OPEN: whether `PAYMENT_STATUS_CHANGED` has all fields needed for deterministic event identity beyond `tosspayments-webhook-transmission-id`.
-- OPEN: whether ordinary payment webhook verification should be modeled as re-query of `paymentKey`, full `data.paymentKey`, or another official mechanism.
-- OPEN: exact test/live key naming or prefix details.
-- OPEN: exact provider error code taxonomy needed for mira's normalized provider error model.
-- OPEN: exact success, cancel, partial cancel, deposit, and ambiguous-state mapping into mira's confirm/webhook/void taxonomy.
-- OPEN: whether ordinary payment webhook payload authenticity has a provider-supported mechanism other than lookup with secret-authenticated provider API state.
+- OPEN: exact live key prefix and concrete credential environment variable naming.
+- OPEN: complete mapping from Toss provider errors to mira's normalized failure taxonomy.
+- OPEN: status mapping from Toss Payment object to mira `CaptureFacts`, ignored events, `future_refund`, and `future_void`.
+- OPEN: query-verified replay semantics: re-run lookup vs persist authoritative lookup result.
+- OPEN: whether `PaymentEvent` identity must include verified mode or credential environment in addition to provider + `tosspayments-webhook-transmission-id`.
+- OPEN: exact handling of `DEPOSIT_CALLBACK` virtual-account secret validation vs ordinary payment query-verification in mira's future verifier contracts.
 
 ## 5. PayPal Source Map
 

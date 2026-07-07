@@ -32,8 +32,14 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - DESIGN GAP: `ProviderVerifiedWebhookInput` currently carries the raw verified request/input but not an authoritative provider lookup result. Lookup-verified providers therefore require a future contract extension so authoritative provider state can flow from verifier to parser/completion without a second external call.
 - OPEN/DESIGN: lookup-verified provider replay semantics are intentionally undecided. A retry/replay may either re-run the provider lookup or reuse a persisted authoritative lookup result. Re-running lookup gives fresh provider truth but performs an external call on each retry/replay. Reusing a persisted lookup result is deterministic but may become stale. This matters for deferred events such as `COMPLETE.CONFIG_UNAVAILABLE`, which may be retried much later. The Toss verifier patch must decide this explicitly; this document does not resolve it.
 - TEST RULE: tests must inject fake lookup ports and must not perform external calls.
-- CONFIRMED, Toss snapshot: Toss server-side code validates/finalizes payment state with the secret key, server must not trust client-provided amount/status/success, and webhook handling may require server-side re-query/verification.
-- CONFIRMED/IMPLICATION, Toss snapshot: ordinary Toss payment webhooks may require lookup-oriented verification because `tosspayments-webhook-signature` is confirmed only for `payout.changed` and `seller.changed`.
+- CONFIRMED, Toss snapshot: Toss server-side code validates/finalizes payment state with the secret key, server must not trust client-provided amount/status/success, and general payment webhook handling should re-call the Payment Query API with `paymentKey`.
+- DESIGN, Toss ordinary payment webhooks: treat `PAYMENT_STATUS_CHANGED` and `CANCEL_STATUS_CHANGED` as query-verified, not pure HMAC-signature verified.
+- OPEN, Toss snapshot: `DEPOSIT_CALLBACK` is deferred to the virtual-account `secret` validation vs ordinary payment query-verification decision; do not resolve it here.
+- DESIGN, Toss ordinary payment webhooks: authoritative state for `PAYMENT_STATUS_CHANGED` must come from `GET /v1/payments/{paymentKey}`, not blindly from the webhook body.
+- DESIGN, Toss ordinary payment webhooks: payout/seller `tosspayments-webhook-signature` HMAC verification is a separate primitive and must not be conflated with ordinary payment webhook query-verification.
+- CONFIRMED, Toss snapshot: if initial webhook delivery fails, Toss retries up to 7 times on a 1, 4, 16, 64, 256, 1024, and 4096 minute schedule, with the final retry about 3 days 19 hours after first delivery.
+- DESIGN IMPLICATION: mira's current webhook handling runs verification and completion synchronously in the request. Toss query-verification adds an external provider lookup to that path. The Toss verifier patch must decide whether inline lookup plus completion fits the 10-second response budget, or whether ingress should acknowledge first and process asynchronously. This document does not decide that.
+- DESIGN IMPLICATION: long retryable defers still need reconciliation or internal reentry visibility if they outlast Toss provider retry.
 
 ### B. Verified-by-Signature Support
 
@@ -56,7 +62,8 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - CURRENT FACT: `PaymentEvent` is currently unique on provider + transmission ID.
 - DESIGN RISK: future mode or credential-environment scoping may be needed.
 - DESIGN RULE: do not silently collapse sandbox/live event IDs.
-- OPEN, Toss snapshot: whether `PAYMENT_STATUS_CHANGED` has all fields needed for deterministic event identity beyond `tosspayments-webhook-transmission-id`.
+- CONFIRMED, Toss snapshot: `tosspayments-webhook-transmission-id` is the native Toss webhook unique identifier.
+- OPEN, Toss snapshot: whether mira event identity must include verified mode or credential environment in addition to provider + `tosspayments-webhook-transmission-id`.
 - OPEN, PayPal snapshot: webhook ID separation by sandbox/live.
 
 ### E. Credential Requirements
@@ -65,18 +72,23 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
 - DESIGN: capability examples include action adapter, webhook verifier, and void executor.
 - DESIGN: credential checks remain presence-only at the factory boundary.
 - DESIGN RULE: do not invent concrete credential environment variable names now.
-- OPEN, Toss snapshot: exact test/live key naming or prefix details.
+- CONFIRMED, Toss snapshot: client key and secret key are a matched set; mixing non-matching keys or test/live keys causes `INVALID_API_KEY`.
+- CONFIRMED, Toss snapshot: client key initializes the browser SDK and secret key is used for server API calls.
+- DESIGN, Toss credentials: credential requirement design must account for matched browser client key + server secret key pairs, without naming concrete environment variables yet.
+- DESIGN CAVEAT, Toss credentials: factory credential checks are presence-only and cannot prove client/secret key pair consistency. Toss validates pair consistency at provider call time, so the future Toss credential/error normalization patch must handle `INVALID_API_KEY` without introducing concrete environment variable names here.
+- OPEN, Toss snapshot: exact live key prefix and concrete credential environment variable naming.
 - OPEN, PayPal snapshot: webhook ID separation by sandbox/live and OAuth token caching/lifetime behavior.
 
 ### F. Implementation Order
 
 Recommended order, subject to official-doc gap closure:
 
-1. Toss docs gap closure.
-2. Toss confirm adapter wiring.
-3. Toss webhook verifier design/implementation.
-4. PayPal order/adapter design.
-5. PayPal webhook verification.
+1. Toss docs snapshot update.
+2. Toss confirm adapter design/implementation.
+3. Toss query-verifier contract and authoritative-state design.
+4. Toss webhook verifier implementation.
+5. PayPal order/adapter design.
+6. PayPal webhook verification.
 
 This order is not live readiness. If official docs contradict it, revisit the order before implementation.
 
