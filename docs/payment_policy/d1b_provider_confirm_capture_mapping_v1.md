@@ -1,0 +1,606 @@
+# D1-B provider-specific confirm/capture mapping v1
+
+> Status: design lock, not an implementation patch.
+> Date: 2026-07-07.
+> Baseline: `main` pushed/clean, handoff v25, D1-A provider selection complete, D1-B provider adapter contract complete, `Payment.providerRef` and `Payment.providerConfirmIdempotencyKey` schema patches complete, verify baseline 23 files / 311 tests.
+> Scope: future provider-specific confirm/capture adapters for Toss and PayPal.
+
+Official sources checked:
+
+- Toss Payments core API reference: <https://docs.tosspayments.com/reference>
+- Toss Payments payment-widget window integration guide: <https://docs.tosspayments.com/guides/v2/payment-widget/integration-window>
+- Toss Payments authentication and idempotency headers: <https://docs.tosspayments.com/reference/using-api/authorization>
+- Toss Payments API error codes: <https://docs.tosspayments.com/reference/error-codes>
+- PayPal Checkout integration guide: <https://developer.paypal.com/docs/checkout/standard/integrate/>
+- PayPal REST API request headers: <https://developer.paypal.com/api/rest/requests/>
+- PayPal Orders v2 create order reference: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+- PayPal Orders v2 capture order reference: <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+- PayPal Orders v2 error messages: <https://developer.paypal.com/api/orders/v2/error-messages/>
+- PayPal currency codes: <https://developer.paypal.com/api/rest/reference/currency-codes/>
+
+## 1. Purpose
+
+This document locks the provider-specific mapping for future Toss and PayPal confirm/capture adapters.
+
+It maps provider concepts onto the current D1-B local fields:
+
+- `Payment.providerRef`
+- `Payment.providerConfirmIdempotencyKey`
+- `Payment.providerPaymentKey`
+- `Payment.idempotencyKey`
+- `PaymentConfirmInput.providerPaymentKey?`
+- `CaptureFacts`
+- `ProviderConfirmResult`
+
+This is a design lock only. It does not implement real adapters, call provider APIs, change schema, create migrations, or wire credentials.
+
+## 2. Non-goals
+
+- No real Toss adapter.
+- No real PayPal adapter.
+- No provider API calls.
+- No credential wiring.
+- No webhook implementation.
+- No void/cancel implementation.
+- No settlement, fees, or FX.
+- No execution-time cross-PG fallback.
+- No live enablement.
+
+## 3. Current local contract
+
+Current field meanings:
+
+```text
+Payment.providerRef = pre-capture provider/reference field, currently nullable.
+Payment.providerConfirmIdempotencyKey = outbound provider confirm/capture idempotency key.
+Payment.providerPaymentKey = final captured/approved provider payment identity.
+Payment.idempotencyKey = initiate/local attempt key.
+```
+
+Current flow:
+
+- `initiatePaymentAttempt` creates a local `Payment` and passes `paymentId`, amount, currency, provider, and `Payment.idempotencyKey` to `provider.initiate`.
+- If initiate returns `providerRef`, the local flow persists it on `Payment.providerRef`.
+- `confirmPayment` validates user/session/market/provider before provider work.
+- `confirmPayment` loads exactly one pending local `Payment` before `provider.confirm`.
+- Pending confirm selection is scoped by `checkoutSessionId`, `provider`, `providerPaymentKey = null`, and status `INITIATED` or `AWAITING`.
+- The canonical confirm key is `confirm:{provider}:{payment.id}`.
+- `providerConfirmIdempotencyKey` is written before `provider.confirm` and reused on retry.
+- `provider.confirm` receives `paymentId`, `providerRef`, `providerConfirmIdempotencyKey`, amount, currency, and optional `providerPaymentKey`.
+- `provider.confirm` returns provider facts; the action maps them to `CaptureFacts`.
+- `completeFromCapture` persists the final `providerPaymentKey` through `recordCapture`.
+- `recordCapture` first checks unique `(provider, providerPaymentKey)`, then claims a pending attempt with `providerPaymentKey = null`.
+- Webhook/API-first capture uses local `capture:{provider}:{providerPaymentKey}` idempotency and does not require `providerConfirmIdempotencyKey`.
+
+Current schema shape:
+
+- `Payment.providerRef String?`
+- `@@index([provider, providerRef])`
+- `Payment.providerConfirmIdempotencyKey String? @unique`
+- `Payment.providerPaymentKey String?`
+- `@@unique([provider, providerPaymentKey])`
+
+Current non-real-provider surfaces:
+
+- `resolveProvider` still returns mock-backed providers for every provider code.
+- Webhook handling is still mock verifier/parser wired.
+- Void execution is still mock executor wired.
+- Reconciliation is local/report-only.
+
+## 4. Toss official facts
+
+Toss payment identity and response:
+
+- The Toss `Payment` object has `paymentKey`, described as the unique key that identifies a payment. Toss says it is maintained even when payment status changes and is used for payment confirm, lookup, and cancel APIs. Source: <https://docs.tosspayments.com/reference>
+- The Toss `Payment` object has `orderId`, described as the merchant-created order number. It is generated by the merchant during payment request and also persists across status changes. Source: <https://docs.tosspayments.com/reference>
+- The `Payment` object status values include `READY`, `IN_PROGRESS`, `DONE`, `CANCELED`, `PARTIAL_CANCELED`, `ABORTED`, and `EXPIRED`. `DONE` means the authenticated payment method has been approved. Source: <https://docs.tosspayments.com/reference>
+- `approvedAt` is an ISO 8601 timestamp for payment approval and is the candidate provider timestamp for local `capturedAt`. Source: <https://docs.tosspayments.com/reference>
+- `totalAmount` is the payment amount on the `Payment` object. It remains the original approved amount even if the payment is later canceled. Source: <https://docs.tosspayments.com/reference>
+
+Toss redirect and confirm:
+
+- The payment window success redirect returns payment information through the `successUrl` query parameters. The guide says to verify that returned `amount` equals the originally requested amount. Source: <https://docs.tosspayments.com/guides/v2/payment-widget/integration-window>
+- Toss says the server should store `paymentKey`, `orderId`, and `amount` because all are needed for confirm, lookup, and cancel. Source: <https://docs.tosspayments.com/guides/v2/payment-widget/integration-window>
+- The guide says to call the payment confirm API as the final step and put the redirected `paymentKey`, `orderId`, and `amount` in the request body. Source: <https://docs.tosspayments.com/guides/v2/payment-widget/integration-window>
+- The confirm endpoint is `POST /v1/payments/confirm`. Source: <https://docs.tosspayments.com/reference>
+- Required confirm body fields are `paymentKey`, `orderId`, and `amount`. Source: <https://docs.tosspayments.com/reference>
+- A successful confirm returns HTTP `200 OK` with a Toss `Payment` object. Source: <https://docs.tosspayments.com/guides/v2/payment-widget/integration-window>
+
+Toss amount and validation:
+
+- Toss `amount`/`totalAmount` is represented as a number in the API docs.
+- For this project, Toss is only D1-routed for KR/KRW card payments, so the adapter must treat the local KRW integer minor unit as the Toss amount with no `* 100`.
+- The return/callback route must compare Toss `amount` with the local stored amount before confirm.
+- The confirm response `totalAmount` must be compared with local `Payment.amount`/session total before local completion.
+
+Toss idempotency:
+
+- Toss uses the `Idempotency-Key` request header.
+- Max key length is 300 characters.
+- The key is valid for 15 days from first use.
+- Toss says all POST APIs support the idempotency header.
+- Toss scopes idempotency by the combination of idempotency key, API key, API path, and HTTP method.
+- `400 INVALID_IDEMPOTENCY_KEY` means the key is too long.
+- `409 IDEMPOTENT_REQUEST_PROCESSING` means the prior same idempotent request is still processing; retry the same request/key to check the result.
+- Source: <https://docs.tosspayments.com/reference/using-api/authorization>
+
+Relevant Toss confirm errors:
+
+- Retryable candidates: `PROVIDER_ERROR`, `FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`, `FAILED_INTERNAL_SYSTEM_PROCESSING`.
+- Stop/auth candidates: `UNAUTHORIZED_KEY`, `INVALID_API_KEY`, `INCORRECT_BASIC_AUTH_FORMAT`.
+- Terminal/user candidates: `REJECT_CARD_COMPANY`, `REJECT_CARD_PAYMENT`, `REJECT_ACCOUNT_PAYMENT`, stopped/lost/invalid card errors.
+- Ambiguous/manual-review candidates: `ALREADY_PROCESSED_PAYMENT`, `FORBIDDEN_REQUEST`, `UNKNOWN_PAYMENT_ERROR`, amount/order/payment key mismatches.
+- Expired/restart candidate: `NOT_FOUND_PAYMENT_SESSION`.
+- Source: <https://docs.tosspayments.com/reference/error-codes>
+
+## 5. Toss local mapping decision
+
+Decision:
+
+```text
+Toss providerRef = Toss paymentKey, after success callback validation and persistence.
+Toss providerPaymentKey = Toss paymentKey, only after confirm response proves status DONE and amount/currency match.
+Toss providerConfirmIdempotencyKey = Idempotency-Key.
+Toss PaymentConfirmInput.providerPaymentKey? = callback paymentKey candidate, not a final local providerPaymentKey.
+Toss orderId = merchant-created local order reference; must be deterministic from Payment.id or persisted separately before real adapter implementation.
+```
+
+Do not adopt `Toss providerRef = orderId` as the design lock.
+
+### Option A. `providerRef = orderId`
+
+- Consistency with local `providerRef`: weak. `orderId` is merchant-created, not provider-issued.
+- Provider-issued or merchant-issued: merchant-issued.
+- Available at initiate: yes, if the server generates it before payment window request.
+- Available at success callback: yes, returned by Toss.
+- Required for confirm: yes.
+- Must be persisted before confirm: yes, unless deterministically derived from local state.
+- Compatibility with final-only `providerPaymentKey`: good, because `providerPaymentKey` stays null until confirm succeeds.
+- Recovery after browser retry/process restart: insufficient by itself because confirm also requires `paymentKey`.
+- Webhook/callback correlation: useful for binding to the local payment attempt, but not enough to identify the Toss payment.
+- Current schema enough: no, if `providerRef` is used for `orderId`; there is no second durable field for the pre-confirm `paymentKey`.
+
+Verdict: reject as the sole mapping. `orderId` is a local merchant reference, not the best common `providerRef`.
+
+### Option B. `providerRef = paymentKey`
+
+- Consistency with local `providerRef`: strongest. `paymentKey` is provider-issued and identifies the payment.
+- Provider-issued or merchant-issued: provider-issued.
+- Available at initiate: no for Toss payment-window flow.
+- Available at success callback: yes.
+- Required for confirm: yes.
+- Must be persisted before confirm: yes, for retry/process-restart recovery.
+- Compatibility with final-only `providerPaymentKey`: good if `providerPaymentKey` remains null until confirm succeeds. The same external value can exist first as pre-confirm `providerRef` and later as final `providerPaymentKey`; the invariant is about when `Payment.providerPaymentKey` is written.
+- Recovery after browser retry/process restart: good once callback persistence exists.
+- Webhook/callback correlation: good for provider identity; still requires local checkout/session binding and orderId validation.
+- Current schema enough: conditionally yes, but only if Toss `orderId` is deterministically derived from `Payment.id` or otherwise already stored somewhere else. Current code does not yet have the callback route that persists `paymentKey` into `providerRef`.
+
+Verdict: recommended mapping.
+
+### Option C. Add another field for Toss `paymentKey` before confirm
+
+- Consistency with local `providerRef`: useful only if `providerRef` remains `orderId`.
+- Provider-issued or merchant-issued: the new field would hold provider-issued `paymentKey`.
+- Available at initiate: no.
+- Available at success callback: yes.
+- Required for confirm: yes.
+- Must be persisted before confirm: yes.
+- Compatibility with final-only `providerPaymentKey`: good if the new field is pre-confirm only and `providerPaymentKey` is final-only.
+- Recovery after browser retry/process restart: strong.
+- Webhook/callback correlation: strong if paired with stored/derived `orderId`.
+- Current schema enough: no.
+
+Verdict: acceptable fallback if the team wants `providerRef` to mean Toss `orderId`, but not preferred. It adds a Toss-specific shape pressure to the common schema.
+
+### Option D. Two-stage model: local order reference plus persisted callback/auth reference
+
+- Consistency with local `providerRef`: strong if `providerRef` is the provider-issued callback/auth reference (`paymentKey`), and `orderId` is a deterministic local reference.
+- Provider-issued or merchant-issued: separates both: `orderId` is merchant-issued, `paymentKey` is provider-issued.
+- Available at initiate: `orderId` yes; `paymentKey` no.
+- Available at success callback: both yes.
+- Required for confirm: both yes.
+- Must be persisted before confirm: `paymentKey` yes; `orderId` must be persisted or deterministic.
+- Compatibility with final-only `providerPaymentKey`: good.
+- Recovery after browser retry/process restart: strong.
+- Webhook/callback correlation: strongest.
+- Current schema enough: conditionally. It is enough only if the local `orderId` is deterministic from `Payment.id` and the callback route persists `paymentKey` into `Payment.providerRef`. It is not enough if Toss `orderId` is arbitrary or needs durable storage independent of `Payment.id`.
+
+Verdict: recommended operational model with the specific mapping `providerRef = paymentKey`.
+
+### Toss recommendation
+
+Recommended Toss design:
+
+1. Generate Toss `orderId` from the local `Payment.id` using a locked, reversible/stable format that satisfies Toss orderId constraints.
+2. On Toss success callback, validate:
+   - callback `paymentKey` exists;
+   - callback `orderId` maps to the local pending `Payment`;
+   - callback `amount` equals the local stored amount;
+   - checkout/session binding belongs to the authenticated user/session.
+3. Persist callback `paymentKey` into `Payment.providerRef` before calling Toss confirm.
+4. Call `POST /v1/payments/confirm` with:
+   - body `paymentKey = Payment.providerRef`;
+   - body `orderId = derived expected Toss orderId for Payment.id`;
+   - body `amount = Payment.amount`;
+   - header `Idempotency-Key = Payment.providerConfirmIdempotencyKey`.
+5. Treat confirm success as usable only when the Toss `Payment` response has:
+   - status `DONE`;
+   - `paymentKey` equal to the callback/persisted `providerRef`;
+   - `orderId` equal to expected orderId;
+   - `totalAmount` equal to local amount.
+6. Map success to:
+   - `CaptureFacts.providerPaymentKey = response.paymentKey`;
+   - `CaptureFacts.amount = response.totalAmount`;
+   - `CaptureFacts.currency = "KRW"`;
+   - `CaptureFacts.capturedAt = response.approvedAt` when present.
+
+Schema assessment for Toss:
+
+- Current schema is not enough if Toss `orderId` cannot be deterministically derived from `Payment.id`.
+- Current schema can be enough for D1 Toss only if a separate design locks `Toss orderId = deterministic local Payment.id-derived value` and callback code persists `paymentKey` into `Payment.providerRef`.
+- The current code does not yet include Toss callback/return route shape or `paymentKey` persistence. Real Toss adapter implementation remains blocked until that is designed and tested.
+- Do not write Toss `paymentKey` into `Payment.providerPaymentKey` before confirm. That would violate the final-only invariant.
+
+## 6. PayPal official facts
+
+PayPal create order:
+
+- Official checkout integration says the backend creates an order and later captures payment when the payer confirms the order. Source: <https://developer.paypal.com/docs/checkout/standard/integrate/>
+- Create order endpoint is `POST /v2/checkout/orders`. Source: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+- Create order response includes an `id`, which the reference describes as the order ID. Source: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+- Create order response includes HATEOAS links. For payer approval, the caller redirects the payer to the approval/payer-action link. Source: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+- Order statuses include `CREATED`, `SAVED`, `APPROVED`, `VOIDED`, `COMPLETED`, and `PAYER_ACTION_REQUIRED`. Source: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+- Create order request amount uses `purchase_units[].amount.currency_code` and decimal string `value`. Source: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+- `purchase_units` is required and can contain 1-10 elements. Source: <https://docs.paypal.ai/reference/api/rest/orders/create-order>
+
+PayPal capture order:
+
+- Capture order endpoint is `POST /v2/checkout/orders/{id}/capture`. Source: <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+- The path parameter `id` is the ID of the order for which to capture payment. Source: <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+- To capture successfully, the buyer must first approve the order or a valid `payment_source` must be provided. Source: <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+- Capture response returns order details. The sample response contains `purchase_units[].payments.captures[]`.
+- Each capture has an `id`, `status`, `amount.currency_code`, `amount.value`, `final_capture`, `create_time`, and `update_time` in the sample response.
+- The capture sample status is `COMPLETED`.
+- Capture success response is HTTP `200 OK`. Source: <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+- Capture response order status values are the same order status enum: `CREATED`, `SAVED`, `APPROVED`, `VOIDED`, `COMPLETED`, and `PAYER_ACTION_REQUIRED`. Source: <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+
+PayPal idempotency and endpoints:
+
+- PayPal sandbox API base URL is `https://api-m.sandbox.paypal.com`; live API base URL is `https://api-m.paypal.com`. Source: <https://developer.paypal.com/api/rest/requests/>
+- PayPal REST POST idempotency uses `PayPal-Request-Id`, when the API supports it. Source: <https://developer.paypal.com/api/rest/requests/>
+- PayPal says the ID is user-generated and stored for a period of time, and callers can retry network timeouts or HTTP 500 with the same ID while it is stored. Source: <https://developer.paypal.com/api/rest/requests/>
+- The Orders v2 create/capture references list `PayPal-Request-Id`; for Orders it is length 1-108 and the server stores keys for 6 hours by default, with longer windows up to 72 hours by account-manager arrangement. Sources: <https://docs.paypal.ai/reference/api/rest/orders/create-order>, <https://docs.paypal.ai/reference/api/rest/orders/capture-payment-for-order>
+
+PayPal amount/currency:
+
+- PayPal amount fields use ISO-4217 `currency_code` plus string `value`.
+- PayPal currency docs say JPY does not support decimals; passing a decimal amount for a no-decimal currency causes an error.
+- PayPal error docs say currencies that support decimals support only two decimal places.
+- Sources: <https://developer.paypal.com/api/rest/reference/currency-codes/>, <https://developer.paypal.com/api/orders/v2/error-messages/>
+
+Relevant PayPal errors:
+
+- `PREVIOUS_REQUEST_IN_PROGRESS` means a previous request on the resource is still in progress.
+- Auth/permission errors include `AUTHENTICATION_FAILURE`, `NOT_AUTHORIZED`, and `PERMISSION_DENIED`.
+- `ORDER_NOT_APPROVED` means the payer has not approved the order and should be redirected to the approval URL or a valid payment source should be provided.
+- `INSTRUMENT_DECLINED`, `PAYMENT_DENIED`, `PAYER_CANNOT_PAY`, `TRANSACTION_REFUSED`, and `REDIRECT_PAYER_FOR_ALTERNATE_FUNDING` are payer/payment failure candidates.
+- `ORDER_ALREADY_CAPTURED` says that for `intent=CAPTURE` only one capture per order is allowed.
+- `PAYMENT_SOURCE_NOT_SUPPORTED` can occur when multiple purchase units are specified for an order.
+- Source: <https://developer.paypal.com/api/orders/v2/error-messages/>
+
+## 7. PayPal local mapping decision
+
+Decision:
+
+```text
+PayPal providerRef = PayPal order id.
+PayPal providerPaymentKey = PayPal capture id.
+PayPal providerConfirmIdempotencyKey = PayPal-Request-Id.
+PayPal capturedAt = capture.create_time when present, else local receivedAt.
+PayPal raw provider status = capture.status plus order.status diagnostics.
+```
+
+Mapping details:
+
+- `Payment.providerRef`: store the PayPal order id returned by `POST /v2/checkout/orders`.
+- `PaymentConfirmInput.providerPaymentKey?`: not used for PayPal capture. Future callback/client input may include an order id; it must be validated against `Payment.providerRef`, not treated as final provider payment identity.
+- `Payment.providerConfirmIdempotencyKey`: send as `PayPal-Request-Id` on `POST /v2/checkout/orders/{id}/capture`.
+- `Payment.providerPaymentKey`: set after successful capture to the single capture id from `purchase_units[0].payments.captures[0].id`.
+- `ProviderConfirmResult.providerPaymentKey`: the PayPal capture id.
+- `ProviderConfirmResult.providerOrderId`: the PayPal order id.
+- `CaptureFacts.providerPaymentKey`: the PayPal capture id.
+- `CaptureFacts.amount`: parsed minor units from capture amount string.
+- `CaptureFacts.currency`: capture `amount.currency_code`.
+- `CaptureFacts.capturedAt`: capture `create_time` parsed as an absolute timestamp; use `receivedAt` only when no provider timestamp exists.
+
+D1 PayPal restrictions:
+
+- D1 supports only `intent=CAPTURE`.
+- D1 supports exactly one purchase unit.
+- D1 supports exactly one capture in the capture response.
+- D1 requires capture `status = COMPLETED`.
+- D1 requires capture `final_capture = true` when the field is present.
+- D1 rejects or manual-reviews multiple purchase units, multiple captures, missing captures, non-COMPLETED captures, or amount/currency mismatch.
+- D1 does not implement AUTHORIZE/capture-later.
+
+Schema assessment for PayPal:
+
+- Current schema is sufficient for D1 PayPal single-purchase-unit/single-capture.
+- `providerRef` holds PayPal order id before capture.
+- `providerPaymentKey` holds final PayPal capture id after capture.
+- `providerConfirmIdempotencyKey` holds the outbound `PayPal-Request-Id`.
+- Additional fields are not required until multi-purchase-unit, multi-capture, auth/capture-later, settlement/fees, or richer provider-status lookup is introduced.
+
+## 8. Provider field mapping table
+
+| Local field | Toss mapping | PayPal mapping |
+|---|---|---|
+| `Payment.providerRef` | Toss `paymentKey` after success callback validation and persistence. | PayPal order id from create order response. |
+| Source | Success redirect query and later confirm response. | `POST /v2/checkout/orders` response `id`. |
+| Availability before confirm | Not at initiate; available after Toss success redirect. | Available after create order/initiate. |
+| Availability after confirm | Same value appears in Toss `Payment.paymentKey`. | Order id remains response `id`; capture id is separate. |
+| Persistence location | `Payment.providerRef`. | `Payment.providerRef`. |
+| Ambiguity | Requires deterministic or separately persisted Toss `orderId`; current callback persistence not implemented. | No D1 ambiguity if exactly one order/capture is enforced. |
+| `Payment.providerConfirmIdempotencyKey` | Toss `Idempotency-Key`. | PayPal `PayPal-Request-Id`. |
+| Source | Local canonical `confirm:TOSS:{payment.id}` unless provider transform is later required. | Local canonical `confirm:PAYPAL:{payment.id}` unless provider transform is later required. |
+| Availability before confirm | Yes after `prepareConfirmPayment`. | Yes after `prepareConfirmPayment`. |
+| Persistence location | `Payment.providerConfirmIdempotencyKey`. | `Payment.providerConfirmIdempotencyKey`. |
+| Ambiguity | Toss limit 300 chars; current canonical key is well below. | PayPal limit 108 chars for Orders; current canonical key should be checked in tests against real generated ids. |
+| `PaymentConfirmInput.providerPaymentKey?` | Callback `paymentKey` candidate. Must be validated/persisted into `providerRef`; not final local identity. | Not used as final identity. If present as client order id candidate, validate against `providerRef`. |
+| Final `Payment.providerPaymentKey` | Toss `Payment.paymentKey` after status `DONE`. | PayPal capture id from the single completed capture. |
+| `CaptureFacts.providerPaymentKey` | Toss `paymentKey`. | PayPal capture id. |
+| `CaptureFacts.amount` | Toss `totalAmount`, integer KRW amount. | Capture `amount.value` parsed to local minor units. |
+| `CaptureFacts.currency` | `KRW` for D1 Toss, confirmed against local market/session. | Capture `amount.currency_code`, must equal local payment/session currency. |
+| `CaptureFacts.capturedAt` | Toss `approvedAt`; fallback to local `receivedAt` only if absent. | PayPal capture `create_time`; fallback to local `receivedAt` only if absent. |
+| Raw provider status | Toss `Payment.status`, must be `DONE` for success. | Capture `status`, must be `COMPLETED`; order status should be diagnostic and normally `COMPLETED`. |
+| Provider order id | Toss `orderId`, merchant-created local order reference. | PayPal order id. |
+| Provider capture/payment id | Toss `paymentKey`. | PayPal capture id. |
+
+## 9. Amount/currency rules
+
+Shared rules:
+
+- Local storage and internal arithmetic remain minimum-unit integer.
+- Provider adapters are boundary code and may know provider currency formatting rules.
+- No rounding is allowed during confirm normalization.
+- Pre-confirm validation must compare provider callback/input amount with local amount before provider confirm/capture.
+- Post-confirm validation must compare provider response amount/currency with local `Payment` and session before `completeFromCapture`.
+- If parsing requires rounding, fail as `PROGRAMMER_ERROR` or `MANUAL_REVIEW`; do not round.
+
+Toss rules:
+
+- D1 Toss is KR/KRW only.
+- KRW is zero-decimal in this project.
+- Local KRW amount maps directly to Toss `amount` with no `* 100`.
+- Toss confirm response `totalAmount` must equal local `Payment.amount`.
+- Toss response currency, when present, must be consistent with local `KRW`.
+
+PayPal rules:
+
+- PayPal uses decimal string `value` plus `currency_code`.
+- USD maps from minor units to a two-decimal string at request time and back to minor units at response time.
+- JPY maps to an integer string with no decimal point.
+- PayPal docs say JPY does not support decimals and currencies with decimals support only two decimal places.
+- Response parser must reject:
+  - too many decimal places;
+  - decimals for JPY;
+  - missing currency;
+  - currency mismatch;
+  - value mismatch after exact minor-unit conversion.
+
+## 10. Timestamp rules
+
+Toss:
+
+- Use Toss `approvedAt` as `CaptureFacts.capturedAt` when present.
+- Parse it as ISO 8601 with timezone offset.
+- If `approvedAt` is absent but status is otherwise confirmed as `DONE`, use local `receivedAt` only as fallback and include safe diagnostics.
+
+PayPal:
+
+- Use the capture `create_time` as `CaptureFacts.capturedAt` when present.
+- Parse it as Internet date/time / ISO 8601 absolute time.
+- `update_time` is diagnostic unless a future official-doc/sandbox finding proves it is the better capture timestamp.
+- If capture `create_time` is absent, use local `receivedAt` only as fallback and include safe diagnostics.
+
+Shared:
+
+- Invalid provider timestamps must not silently become `Invalid Date`.
+- Timezone offsets must be preserved by parsing to an absolute `Date`.
+- Local `receivedAt` fallback is allowed only when provider timestamp is absent, not when it is malformed.
+
+## 11. Error taxonomy mapping
+
+Local taxonomy for this document:
+
+- `RETRYABLE`: same operation/key may be retried.
+- `TERMINAL`: user/payment state failed; no automatic same-operation retry.
+- `MANUAL_REVIEW`: money movement or local/provider state is ambiguous.
+- `STOP`: rollout/config/credential/security stop.
+- `PROGRAMMER_ERROR`: malformed adapter input or impossible local state.
+- `IDEMPOTENT_SUCCESS`: same operation already succeeded and facts match exactly.
+
+Toss mapping:
+
+| Toss condition | Local taxonomy | Notes |
+|---|---|---|
+| Network timeout before response | `RETRYABLE` | Retry same `Idempotency-Key`. |
+| HTTP 5xx `FAILED_INTERNAL_SYSTEM_PROCESSING`, `FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING` | `RETRYABLE` | Retry same key with bounded policy. |
+| `PROVIDER_ERROR` | `RETRYABLE` | Docs describe temporary provider error. |
+| `409 IDEMPOTENT_REQUEST_PROCESSING` | `RETRYABLE` | Retry same key after delay. |
+| Same idempotency key returns the same successful `Payment` object | `IDEMPOTENT_SUCCESS` | Only if `paymentKey`, `orderId`, amount, currency, and `DONE` match. |
+| `ALREADY_PROCESSED_PAYMENT` | `MANUAL_REVIEW` until lookup/matching exists | Can become `IDEMPOTENT_SUCCESS` only after provider lookup proves same `DONE` payment. |
+| `REJECT_CARD_COMPANY`, `REJECT_CARD_PAYMENT`, `REJECT_ACCOUNT_PAYMENT` | `TERMINAL` | User/payment decline. |
+| `NOT_FOUND_PAYMENT_SESSION` | `TERMINAL` | Restart payment flow; session expired/lost. |
+| `FORBIDDEN_REQUEST` | `MANUAL_REVIEW` or `STOP` | Could indicate order/payment key mismatch or credential mismatch. Classify by diagnostics. |
+| `UNAUTHORIZED_KEY`, `INVALID_API_KEY`, `INCORRECT_BASIC_AUTH_FORMAT` | `STOP` | Credential/auth/config problem. |
+| `INVALID_REQUEST`, missing body fields | `PROGRAMMER_ERROR` | Adapter should not send malformed confirm. |
+| `INVALID_IDEMPOTENCY_KEY` | `PROGRAMMER_ERROR` | Local key transform violated Toss constraint. |
+| Provider response amount/currency/key mismatch | `MANUAL_REVIEW` | Do not complete locally. |
+
+PayPal mapping:
+
+| PayPal condition | Local taxonomy | Notes |
+|---|---|---|
+| Network timeout before response | `RETRYABLE` | Retry same `PayPal-Request-Id`. |
+| HTTP 5xx / `INTERNAL_SERVER_ERROR` | `RETRYABLE` | Retry same key. |
+| `RESOURCE_CONFLICT` / `PREVIOUS_REQUEST_IN_PROGRESS` | `RETRYABLE` | Retry same key after delay. |
+| `ORDER_COMPLETION_IN_PROGRESS` | `RETRYABLE` | Same order may still be completing. |
+| Same `PayPal-Request-Id` returns matching completed capture | `IDEMPOTENT_SUCCESS` | Require same order id, capture id, amount, currency, and `COMPLETED`. |
+| `ORDER_ALREADY_CAPTURED` | `MANUAL_REVIEW` until lookup/matching exists | Can become `IDEMPOTENT_SUCCESS` only after lookup/matching. |
+| `ORDER_NOT_APPROVED` | `TERMINAL` for this capture attempt | User must approve before capture. |
+| `INSTRUMENT_DECLINED` | `TERMINAL` | Future UI can restart approval/funding selection. |
+| `PAYMENT_DENIED`, `PAYER_CANNOT_PAY`, `TRANSACTION_REFUSED`, `REDIRECT_PAYER_FOR_ALTERNATE_FUNDING` | `TERMINAL` | Buyer/payment cannot complete through this attempt. |
+| `AUTHENTICATION_FAILURE`, `NOT_AUTHORIZED`, `PERMISSION_DENIED` | `STOP` | Credential/permission/config stop. |
+| `INVALID_REQUEST`, `MISSING_REQUIRED_PARAMETER`, invalid order id format | `PROGRAMMER_ERROR` | Adapter bug or unsupported flow. |
+| Decimal precision/currency errors caused by adapter formatting | `PROGRAMMER_ERROR` | Boundary conversion bug. |
+| Multiple purchase units/captures in D1 response | `MANUAL_REVIEW` or `PROGRAMMER_ERROR` | Manual review if provider returned unexpected live state; programmer error if our request allowed it. |
+| Amount/currency/capture-id mismatch | `MANUAL_REVIEW` | Do not complete locally. |
+
+Unresolved:
+
+- Official docs do not fully specify every provider duplicate/timeout race in a way that removes the need for sandbox tests.
+- Before real adapters, add fake HTTP contract tests and a sandbox experiment plan for already-confirmed/already-captured and timeout-after-provider-success scenarios.
+
+## 12. Callback / return route implications
+
+Toss future callback route must validate:
+
+- `paymentKey` exists.
+- `orderId` exists.
+- `amount` exists and equals the local expected amount.
+- `orderId` maps to exactly one local pending `Payment` or checkout/session binding.
+- Authenticated user/session owns the checkout session.
+- The local payment provider is `TOSS`.
+- The local payment status is `INITIATED` or `AWAITING`.
+- `Payment.providerPaymentKey` is still null.
+- If `Payment.providerRef` is present, it equals callback `paymentKey`; otherwise persist callback `paymentKey` before confirm.
+
+Toss route shape is not locked yet. This is a blocker before real Toss.
+
+PayPal future return/client route must validate:
+
+- PayPal order id exists.
+- PayPal order id equals persisted `Payment.providerRef`.
+- Authenticated user/session owns the checkout session.
+- The local payment provider is `PAYPAL`.
+- The local payment status is `INITIATED` or `AWAITING`.
+- Payer approval state is available or capture is attempted only after the JS SDK `onApprove`/return path indicates approval.
+- Capture is not attempted without a persisted PayPal order id.
+
+PayPal callback route shape is not fully locked, but the required identity mapping is clear.
+
+## 13. Security / logging
+
+Rules:
+
+- Never log Toss secret key.
+- Never log Toss Basic auth header.
+- Never log PayPal client secret.
+- Never log PayPal OAuth bearer tokens.
+- Avoid raw provider payloads that may contain payer/card/email/address data.
+- Diagnostics should use bounded safe fields only:
+  - provider;
+  - HTTP status;
+  - provider status/code;
+  - request id;
+  - safe message;
+  - local payment id/session id when appropriate.
+- Idempotency keys are not secrets but should be logged cautiously because they correlate operations.
+- Raw webhook bodies remain controlled by webhook ingress policy; real provider payload logging needs a separate redaction decision before enablement.
+
+## 14. Sandbox/live implications
+
+Toss:
+
+- Toss `test_sk` keys are test keys and `live_sk` keys are live keys.
+- Toss secret keys are server-only.
+- Real Toss factory must refuse LIVE unless D1-A live allowlist and live credentials are explicitly configured.
+
+PayPal:
+
+- Sandbox endpoint is `https://api-m.sandbox.paypal.com`.
+- Live endpoint is `https://api-m.paypal.com`.
+- PayPal client secret is server-only.
+- Real PayPal factory must refuse LIVE unless D1-A live allowlist and live credentials are explicitly configured.
+
+Local:
+
+- D1-A `PaymentMode` is conceptually useful for sandbox/live separation.
+- The real adapter factory is not implemented.
+- Current `.env.example` has provider env names, but env presence is not live enablement.
+- Live enablement remains blocked.
+
+## 15. Local contract fit and gaps
+
+Toss fit:
+
+- `providerConfirmIdempotencyKey` fits Toss `Idempotency-Key`.
+- `providerPaymentKey` fits final Toss `paymentKey`.
+- `CaptureFacts` can represent Toss success.
+- `providerRef` should hold Toss `paymentKey`, but current code lacks Toss callback persistence.
+- Current schema is enough only if Toss `orderId` is deterministic from local `Payment.id`.
+- If Toss `orderId` must be arbitrary or separately auditable, add a field such as `providerOrderRef` before real Toss.
+- Do not overload `Payment.idempotencyKey` or `Payment.providerPaymentKey` for Toss callback `paymentKey`.
+
+PayPal fit:
+
+- `providerRef` fits PayPal order id.
+- `providerConfirmIdempotencyKey` fits `PayPal-Request-Id`.
+- `providerPaymentKey` fits PayPal capture id.
+- `CaptureFacts` fits one completed capture.
+- Current schema is sufficient for D1 PayPal if restricted to one purchase unit and one capture.
+- Future multi-purchase-unit/multi-capture support needs more shape than current `CaptureFacts`.
+
+Shared gaps:
+
+- Provider-specific adapter mapping/types tests do not exist yet.
+- Toss callback/paymentKey persistence design is not locked.
+- PayPal return/client route shape is not fully locked.
+- Webhook verifier/parser remains mock-wired.
+- Real void taxonomy/executor remains mock-wired.
+- Real provider status lookup is not implemented.
+- Provider-specific idempotent-success and already-captured handling need sandbox evidence.
+- Provider request-id transformation tests are needed, especially PayPal 108-character limit.
+
+## 16. Recommended next step
+
+Recommended next step:
+
+```text
+D. schema/contract adjustment before adapter tests
+```
+
+Specific next work:
+
+1. Lock Toss callback/paymentKey persistence design.
+2. Decide whether Toss `orderId` is exactly derived from `Payment.id` or requires a new persisted `providerOrderRef`.
+3. Add provider-specific mapping/type tests for Toss and PayPal without real provider calls.
+4. Add fake HTTP contract tests for idempotency header mapping:
+   - Toss `Idempotency-Key`;
+   - PayPal `PayPal-Request-Id`;
+   - provider key length constraints.
+5. Keep real adapter HTTP calls out of normal `npm run verify`.
+
+PayPal could proceed to mapping/types tests sooner because its D1 schema fit is clean. Toss should not proceed to real adapter code until callback `paymentKey` persistence and `orderId` persistence/derivation are locked.
+
+## 17. Stop conditions before real adapters
+
+Stop before real Toss/PayPal adapters if any of these remains true:
+
+- Toss `paymentKey` persistence is unresolved.
+- Toss `orderId` derivation or persistence is unresolved.
+- Callback/return route shape is unresolved.
+- Webhook verifier/parser is still mock-wired.
+- Real void taxonomy is unresolved.
+- Real void executor is still mock-wired.
+- Sandbox/live credential separation is not implemented.
+- Provider-specific error taxonomy is insufficient without sandbox tests.
+- Provider already-confirmed/already-captured behavior is not tested.
+- Provider timeout-after-success behavior is not tested.
+- Provider status lookup policy is not designed for ambiguous state.
+- D1 PayPal is not restricted to one purchase unit and one capture.
+- Provider request-id/header transforms are not covered by fake HTTP tests.
+- Live allowlist is not explicit.
+- Real provider calls are required by normal verify.
+- Secrets, auth headers, bearer tokens, or raw payer payloads would be logged.
