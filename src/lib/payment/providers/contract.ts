@@ -109,6 +109,24 @@ export interface ProviderWebhookCandidateMetadata {
   diagnostics?: ProviderDiagnostics;
 }
 
+export type ProviderVerificationMethod = "QUERY_LOOKUP" | "SIGNATURE" | "MOCK";
+
+export interface VerifiedProviderContext {
+  provider: ProviderCode;
+  mode: PaymentMode;
+  credentialBinding: string;
+  verificationMethod: ProviderVerificationMethod;
+}
+
+export interface ProviderAuthoritativeState {
+  lookedUpAt: Date;
+  providerPaymentKey: string;
+  status: string;
+  amountMinor: number;
+  currency: string;
+  raw?: unknown;
+}
+
 export type ProviderWebhookRejectionReason =
   | "METADATA_INVALID"
   | "SIGNATURE_INVALID"
@@ -132,6 +150,12 @@ export interface ProviderVerifiedWebhookInput extends ProviderWebhookRawRequest 
   transmissionId: string;
   eventId?: string;
   eventType: string;
+  context: VerifiedProviderContext;
+  // Query-verified providers populate this from the verifier lookup. Parser/completion should
+  // derive capture facts from it when present; signature-verified providers may omit it and parse
+  // the authenticated body. Facts mode must come from context.mode, never configuredPaymentMode().
+  // Replay re-runs lookup under context.credentialBinding per D1-C; this is only the typed channel.
+  authoritativeState?: ProviderAuthoritativeState;
 }
 
 export type ProviderWebhookVerificationResult =
