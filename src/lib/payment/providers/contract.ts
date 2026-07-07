@@ -119,7 +119,10 @@ export interface VerifiedProviderContext {
 }
 
 export interface ProviderAuthoritativeState {
+  // lookedUpAt is when Mira fetched provider truth; approvedAt is the provider's
+  // capture/approval time and should drive CaptureFacts.capturedAt when present.
   lookedUpAt: Date;
+  approvedAt?: Date;
   providerPaymentKey: string;
   status: string;
   amountMinor: number;
