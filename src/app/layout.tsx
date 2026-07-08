@@ -16,7 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mira — 가발 가상 피팅 플랫폼",
+  title: {
+    default: "Mira — 가발 가상 피팅 플랫폼",
+    template: "%s — Mira",
+  },
   description: "나에게 맞는 가발 스타일을 가상으로 피팅해보세요.",
 };
 

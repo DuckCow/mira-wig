@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { GoogleSignInButton } from "./GoogleSignInButton";
 
-export const metadata = { title: "로그인 — Mira" };
+export const metadata = { title: "로그인" };
 
 export default async function LoginPage() {
   const session = await getSession();

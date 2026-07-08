@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 
-export const metadata = { title: "내 주문 — Mira" };
+export const metadata = { title: "내 주문" };
 
 export default async function OrdersPage() {
   const session = await getSession();

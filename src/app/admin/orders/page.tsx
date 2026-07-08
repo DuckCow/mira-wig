@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/Card";
 
-export const metadata = { title: "주문 관리 — Mira 어드민" };
+export const metadata = { title: "주문 관리" };
 
 export default function AdminOrdersPage() {
   return (

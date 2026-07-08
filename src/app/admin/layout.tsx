@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { ToastProvider } from "@/components/ui/Toast";
 
-export const metadata = { title: "어드민 — Mira" };
+export const metadata = { title: "어드민" };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
