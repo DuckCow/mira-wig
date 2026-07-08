@@ -1,6 +1,6 @@
 // ============================================================
 // STRICT 존 — lib/catalog-admin/market-price 행동 검증
-// 금액 검증(zero-decimal)·마켓 유효성·갭 진단·가용성 경고를 검증한다.
+// 금액 검증(zero-decimal + bare 0 차단)·마켓 유효성·갭 진단·가용성 경고를 검증한다.
 // ============================================================
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,6 +93,12 @@ describe("setVariantPrices — 금액 검증 (zero-decimal 규칙)", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("최소 경계값 1은 통과한다", async () => {
+    await expect(
+      setVariantPrices("v-1", [{ marketCode: "KR", amount: 1 }]),
+    ).resolves.toBeUndefined();
+  });
+
   it("음수 금액은 INVALID_AMOUNT를 던진다", async () => {
     await expect(
       setVariantPrices("v-1", [{ marketCode: "KR", amount: -1 }]),
@@ -105,10 +111,22 @@ describe("setVariantPrices — 금액 검증 (zero-decimal 규칙)", () => {
     ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
   });
 
-  it("0은 통과한다 (무료 상품 허용)", async () => {
+  it("0은 INVALID_AMOUNT를 던진다 — total-0 주문 방지를 위한 승인된 정책 반전", async () => {
+    // bare 0 가격은 subtotal 0 + shipping 0 = total 0 주문을 만들 수 있다.
+    // 무료 상품은 나중에 할인/배송비 설계를 통해 명시적으로 재도입한다.
     await expect(
       setVariantPrices("v-1", [{ marketCode: "KR", amount: 0 }]),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+  });
+
+  it("일괄 저장에 0 금액이 섞이면 쓰기 전에 INVALID_AMOUNT를 던진다", async () => {
+    await expect(
+      setVariantPrices("v-1", [
+        { marketCode: "KR", amount: 85000 },
+        { marketCode: "US", amount: 0 },
+      ]),
+    ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+    expect(mockPriceUpsert).not.toHaveBeenCalled();
   });
 });
 

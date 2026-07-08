@@ -3,7 +3,7 @@
 // ============================================================
 // 스타일 상세 — variant × 마켓 가격 매트릭스 입력
 // 가격이 없는 셀에 "가격없음" Badge 표시. variant 단위로 저장.
-// 금액은 최소단위 정수 그대로 전달(변환 없음). USD: 센트(7799=$77.99)
+// 금액은 1 이상의 최소단위 정수 그대로 전달(변환 없음). USD: 센트(7799=$77.99)
 // ============================================================
 
 import { useState, useTransition } from "react";
@@ -58,11 +58,11 @@ export function MarketPriceSection({ variantPrices }: Props) {
 
     const entries = filled.map((code) => ({
       marketCode: code,
-      amount: parseInt(variantInputs[code] ?? "", 10),
+      amount: Number(variantInputs[code] ?? ""),
     }));
 
-    if (entries.some((e) => !Number.isInteger(e.amount) || e.amount < 0)) {
-      showToast({ message: "금액은 0 이상의 정수여야 합니다.", variant: "error" });
+    if (entries.some((e) => !Number.isInteger(e.amount) || e.amount < 1)) {
+      showToast({ message: "금액은 1 이상의 정수여야 합니다.", variant: "error" });
       return;
     }
 
@@ -93,7 +93,7 @@ export function MarketPriceSection({ variantPrices }: Props) {
   return (
     <Card title="마켓별 가격">
       <p className="text-xs text-gray-500 mb-4">
-        금액은 최소단위 정수 입력 — KRW(₩) · JPY(¥): 그대로(85000), USD($): 센트 기준(7799 = $77.99)
+        금액은 1 이상의 최소단위 정수 입력 — KRW(₩) · JPY(¥): 그대로(85000), USD($): 센트 기준(7799 = $77.99)
       </p>
       <div className="space-y-4">
         {variantPrices.map((v) => (
@@ -125,7 +125,7 @@ export function MarketPriceSection({ variantPrices }: Props) {
                     <input
                       id={`price-${v.id}-${code}`}
                       type="number"
-                      min={0}
+                      min={1}
                       step={1}
                       value={inputs[v.id]?.[code] ?? ""}
                       onChange={(e) => handleInput(v.id, code, e.target.value)}

@@ -3,6 +3,8 @@
 // ------------------------------------------------------------
 // VariantMarketPrice upsert / WigStyleMarket 토글 / 갭 진단.
 // 금액은 최소단위 정수 (§4): KRW/JPY zero-decimal, USD 센트.
+// 고객 노출 마켓 가격은 최소 1 minor unit 이상이어야 한다.
+// 명시적 무료상품/할인/배송비 설계 전까지 bare 0 가격은 임시 차단한다.
 // ×100 변환 절대 금지 — 받은 정수를 그대로 저장.
 // ============================================================
 import "server-only";
@@ -19,10 +21,10 @@ import {
 // ── 내부 헬퍼 ────────────────────────────────────────────────
 
 function assertValidAmount(amount: number, currencyCode: string): void {
-  if (!Number.isInteger(amount) || amount < 0) {
+  if (!Number.isInteger(amount) || amount < 1) {
     throw new CatalogAdminException(
       "INVALID_AMOUNT",
-      `${currencyCode} 금액은 0 이상의 정수여야 합니다. 받은 값: ${String(amount)}`,
+      `${currencyCode} 금액은 1 이상의 정수여야 합니다. 받은 값: ${String(amount)}`,
     );
   }
 }
@@ -38,7 +40,7 @@ function assertValidMarketCode(code: string): asserts code is keyof typeof MARKE
 /**
  * variant의 마켓별 가격을 일괄 upsert한다.
  * entries 배열 길이 1로 단일 마켓만 변경하는 케이스도 커버.
- * 금액은 최소단위 정수(§4) — KRW 85000, USD 7799, JPY 9800.
+ * 금액은 1 이상의 최소단위 정수(§4) — KRW 85000, USD 7799, JPY 9800.
  */
 export async function setVariantPrices(
   variantId: string,
