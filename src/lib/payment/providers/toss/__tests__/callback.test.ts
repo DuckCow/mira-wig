@@ -26,15 +26,21 @@ interface PaymentOptions {
   providerPaymentKey?: string | null;
   amount?: number;
   currency?: string;
-  marketCode?: string;
+  marketCode?: MarketCode;
 }
+
+const CANONICAL_MARKET_CURRENCY: Record<MarketCode, string> = {
+  [MarketCode.KR]: "KRW",
+  [MarketCode.US]: "USD",
+  [MarketCode.JP]: "JPY",
+};
 
 describe("Toss callback providerRef persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
     ctx = { userId: `toss_cb_${randomUUID()}`, sessionIds: [] };
-    await ensureMarket(MarketCode.KR, "KRW");
+    await ensureMarket(MarketCode.KR);
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
   });
 
@@ -280,7 +286,7 @@ async function createPayment(context: TestContext, options: PaymentOptions = {})
 }
 
 async function createSession(context: TestContext, options: PaymentOptions) {
-  await ensureMarket(options.marketCode ?? MarketCode.KR, options.currency ?? "KRW");
+  await ensureMarket(options.marketCode ?? MarketCode.KR);
   const session = await db.checkoutSession.create({
     data: {
       userId: context.userId,
@@ -298,7 +304,10 @@ async function createSession(context: TestContext, options: PaymentOptions) {
   return session;
 }
 
-async function ensureMarket(code: string, currency: string): Promise<void> {
+async function ensureMarket(code: MarketCode): Promise<void> {
+  // Shared KR/US/JP Market rows are cross-file fixtures and must only hold
+  // canonical currencies; per-test mismatches belong on session/payment rows or synthetic market codes.
+  const currency = CANONICAL_MARKET_CURRENCY[code];
   await db.market.upsert({
     where: { code },
     update: { currency, shippableCountries: [ShippingCountry.KR], defaultLocale: "ko", isActive: true },
