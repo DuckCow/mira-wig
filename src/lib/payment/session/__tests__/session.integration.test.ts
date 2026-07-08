@@ -119,6 +119,43 @@ describe("checkout session lifecycle", () => {
     await expectNoSessionResidue(ctx.userId);
   });
 
+  it("total 0은 TOTAL_AMOUNT_TOO_LOW로 거부하고 세션/라인을 만들지 않는다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 0, stock: 5 });
+    await addCart(ctx, variant, 1);
+
+    await expectFailure("TOTAL_AMOUNT_TOO_LOW", () => createCheckoutSession(db, baseInput(ctx)));
+    await expectNoSessionResidue(ctx.userId);
+  });
+
+  it("total 1은 결제 가능한 최소 경계값으로 세션을 만든다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 1, stock: 5 });
+    await addCart(ctx, variant, 1);
+
+    const result = await createCheckoutSession(db, baseInput(ctx));
+    const session = await findSession(result.sessionId);
+    const line = firstLine(session);
+
+    expect(result.subtotalAmount).toBe(1);
+    expect(result.totalAmount).toBe(1);
+    expect(session.subtotalAmount).toBe(1);
+    expect(session.totalAmount).toBe(1);
+    expect(line.unitAmount).toBe(1);
+  });
+
+  it("unitAmount 0 라인이 있어도 payable total이 1 이상이면 세션을 만든다", async () => {
+    const freeLine = await createCartVariant(ctx, { amount: 0, stock: 5 });
+    const paidLine = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, freeLine, 1);
+    await addCart(ctx, paidLine, 1);
+
+    const result = await createCheckoutSession(db, baseInput(ctx));
+    const session = await findSession(result.sessionId);
+
+    expect(result.totalAmount).toBe(12_000);
+    expect(lineForVariant(session, freeLine.id).unitAmount).toBe(0);
+    expect(lineForVariant(session, paidLine.id).unitAmount).toBe(12_000);
+  });
+
   it("stock 쿼터 부족은 세션을 만들지 않고 거부한다", async () => {
     const variant = await createCartVariant(ctx, { stock: 1 });
     await addCart(ctx, variant, 2);
@@ -469,6 +506,7 @@ async function expectFailure(
 
 async function expectNoSessionResidue(userId: string): Promise<void> {
   await expect(db.checkoutSession.count({ where: { userId } })).resolves.toBe(0);
+  await expect(db.checkoutSessionLine.count({ where: { session: { userId } } })).resolves.toBe(0);
 }
 
 async function findSession(id: string) {
@@ -483,6 +521,12 @@ async function findSession(id: string) {
 function firstLine(session: Awaited<ReturnType<typeof findSession>>) {
   const [line] = session.lines;
   if (!line) throw new Error("Expected checkout session line");
+  return line;
+}
+
+function lineForVariant(session: Awaited<ReturnType<typeof findSession>>, variantId: string) {
+  const line = session.lines.find((item) => item.variantId === variantId);
+  if (!line) throw new Error(`Expected checkout session line for ${variantId}`);
   return line;
 }
 

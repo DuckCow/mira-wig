@@ -23,7 +23,23 @@ export async function createCheckoutSession(
     const lines = await buildLines(tx, cartItems, input.marketCode, market.currency);
     const subtotalAmount = sumLines(lines);
     const shippingAmount = 0;
-    const created = await createSession(tx, input, lines, subtotalAmount, shippingAmount, market.currency, now, expiresAt);
+    const totalAmount = subtotalAmount + shippingAmount;
+    // Total-level payable guard only: zero-unit lines can pass once shipping/discount designs
+    // make total >= 1. A fully free/no-payment order path must be designed explicitly later.
+    if (totalAmount < 1) {
+      throw new SessionException("TOTAL_AMOUNT_TOO_LOW", "결제 가능한 최소 금액에 미달합니다.");
+    }
+    const created = await createSession(
+      tx,
+      input,
+      lines,
+      subtotalAmount,
+      shippingAmount,
+      totalAmount,
+      market.currency,
+      now,
+      expiresAt,
+    );
     return toResult(created);
   });
 }
@@ -166,6 +182,7 @@ async function createSession(
   lines: LineInput[],
   subtotalAmount: number,
   shippingAmount: number,
+  totalAmount: number,
   currency: MarketRow["currency"],
   now: Date,
   expiresAt: Date,
@@ -178,7 +195,7 @@ async function createSession(
       status: CheckoutSessionStatus.SUBMITTED,
       subtotalAmount,
       shippingAmount,
-      totalAmount: subtotalAmount + shippingAmount,
+      totalAmount,
       expiresAt,
       submittedAt: now,
       lines: { create: lines },

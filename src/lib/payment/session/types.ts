@@ -15,6 +15,7 @@ export type SessionErrorCode =
   | "MARKET_UNAVAILABLE"
   | "SHIPPING_COUNTRY_INVALID"
   | "SHIPPING_ADDRESS_INVALID"
+  | "TOTAL_AMOUNT_TOO_LOW"
   | "INVALID_AMOUNT";
 
 export class SessionException extends Error {
