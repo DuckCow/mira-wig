@@ -83,6 +83,7 @@ type StyleDef = {
   category: WigCategory;
   tags: string[];
   sortOrder: number;
+  coverImageKey: string;
   variants: ReturnType<typeof makeVariants>;
   marketPrices: Record<MarketCode, number>;
 };
@@ -95,6 +96,7 @@ const styles: StyleDef[] = [
     category: WigCategory.HAIR_LOSS,
     tags: ["생머리", "탈모", "자연스러움"],
     sortOrder: 10,
+    coverImageKey: "demo-catalog/hl-slkst.png",
     variants: makeVariants("HL-SLKST", [BLACK, NAT_BROWN, ASH_BROWN], [MEDIUM, LONG], [STRAIGHT, WAVY], 85000),
     marketPrices: { KR: 85000, US: 7799, JP: 9800 },
   },
@@ -104,6 +106,7 @@ const styles: StyleDef[] = [
     category: WigCategory.HAIR_LOSS,
     tags: ["미디", "탈모", "데일리", "볼륨"],
     sortOrder: 20,
+    coverImageKey: "demo-catalog/hl-clnvl.png",
     variants: makeVariants("HL-CLNVL", [BLACK, DARK_BROWN, NAT_BROWN], [SHORT, MEDIUM], [STRAIGHT, WAVY], 75000),
     marketPrices: { KR: 75000, US: 6899, JP: 8600 },
   },
@@ -114,6 +117,7 @@ const styles: StyleDef[] = [
     category: WigCategory.FASHION,
     tags: ["웨이브", "패션", "여름", "볼륨"],
     sortOrder: 30,
+    coverImageKey: "demo-catalog/fa-bchwv.png",
     variants: makeVariants("FA-BCHWV", [HONEY_BLOND, NAT_BROWN, BURGUNDY], [MEDIUM, LONG], [WAVY, CURLY], 98000),
     marketPrices: { KR: 98000, US: 8999, JP: 11200 },
   },
@@ -123,6 +127,7 @@ const styles: StyleDef[] = [
     category: WigCategory.FASHION,
     tags: ["레이어드", "글램", "고급", "패션"],
     sortOrder: 40,
+    coverImageKey: "demo-catalog/fa-lyrgl.png",
     variants: makeVariants("FA-LYRGL", [DARK_BROWN, BURGUNDY, BLACK], [MEDIUM, LONG], [WAVY, CURLY], 120000),
     marketPrices: { KR: 120000, US: 10999, JP: 13600 },
   },
@@ -133,6 +138,7 @@ const styles: StyleDef[] = [
     category: WigCategory.COSPLAY,
     tags: ["컬", "코스프레", "볼륨", "개성"],
     sortOrder: 50,
+    coverImageKey: "demo-catalog/cs-ntcl.png",
     variants: makeVariants("CS-NTCL", [BLACK, ROSE_PINK, ASH_GRAY], [MEDIUM, LONG], [CURLY, WAVY], 108000),
     marketPrices: { KR: 108000, US: 9899, JP: 12200 },
   },
@@ -142,6 +148,7 @@ const styles: StyleDef[] = [
     category: WigCategory.COSPLAY,
     tags: ["쇼트", "컬", "코스프레", "개성"],
     sortOrder: 60,
+    coverImageKey: "demo-catalog/cs-lzcl.png",
     variants: makeVariants("CS-LZCL", [WHITE, ROSE_PINK, ASH_GRAY], [SHORT, MEDIUM], [CURLY, WAVY], 78000),
     marketPrices: { KR: 78000, US: 7199, JP: 8900 },
   },
@@ -152,6 +159,7 @@ const styles: StyleDef[] = [
     category: WigCategory.TOPPER,
     tags: ["토퍼", "정수리", "볼륨", "웨이브"],
     sortOrder: 70,
+    coverImageKey: "demo-catalog/tp-wav.png",
     variants: makeVariants("TP-WAV", [BLACK, NAT_BROWN, ASH_BROWN], [SHORT], [WAVY, STRAIGHT], 58000),
     marketPrices: { KR: 58000, US: 5299, JP: 6600 },
   },
@@ -161,6 +169,7 @@ const styles: StyleDef[] = [
     category: WigCategory.TOPPER,
     tags: ["토퍼", "정수리", "생머리", "커버"],
     sortOrder: 80,
+    coverImageKey: "demo-catalog/tp-str.png",
     variants: makeVariants("TP-STR", [BLACK, DARK_BROWN, NAT_BROWN], [SHORT], [STRAIGHT, WAVY], 54000),
     marketPrices: { KR: 54000, US: 4999, JP: 6200 },
   },
@@ -171,6 +180,7 @@ const styles: StyleDef[] = [
     category: WigCategory.MEDICAL,
     tags: ["의료용", "항암", "저자극", "미디"],
     sortOrder: 90,
+    coverImageKey: "demo-catalog/md-sfmd.png",
     variants: makeVariants("MD-SFMD", [BLACK, NAT_BROWN, ASH_BROWN], [SHORT, MEDIUM], [STRAIGHT, WAVY], 142000),
     marketPrices: { KR: 142000, US: 12999, JP: 16200 },
   },
@@ -180,6 +190,7 @@ const styles: StyleDef[] = [
     category: WigCategory.MEDICAL,
     tags: ["의료용", "쇼트", "편안함", "착용감"],
     sortOrder: 100,
+    coverImageKey: "demo-catalog/md-shnt.png",
     variants: makeVariants("MD-SHNT", [BLACK, DARK_BROWN, ASH_BROWN], [SHORT, MEDIUM], [STRAIGHT, WAVY], 128000),
     marketPrices: { KR: 128000, US: 11699, JP: 14500 },
   },

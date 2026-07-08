@@ -10,8 +10,9 @@
 //   → 바디를 인메모리 Map에 보관. 서버 재시작 시 사라짐(데모 전용, 무방).
 // GET /api/mock-storage?key={key}
 //   → 1) 업로드 스토어에 있으면 해당 바이트 반환 (= 사용자가 올린 before 셀카)
-//      2) demo-fitting-result/{sku} 키면 public/demo-fitting/{sku}.jpg 시도
-//      3) 없으면 1×1 회색 PNG 폴백
+//      2) demo-catalog/{file} 키면 public/demo-catalog/{file} 시도
+//      3) demo-fitting-result/{sku} 키면 public/demo-fitting/{sku}.jpg 시도
+//      4) 없으면 1×1 회색 PNG 폴백
 //
 // CORS: 브라우저가 Content-Type 커스텀 헤더로 PUT 시 preflight(OPTIONS)를 보낸다.
 //       origin은 NEXTAUTH_URL(=self)로 제한 — 와일드카드 사용 안 함.
@@ -52,8 +53,12 @@ const uploadStore = new Map<string, { buffer: ArrayBuffer; contentType: string }
 // ── 데모 canned after 이미지 ──────────────────────────────────
 // 실 VTO provider 연동 시 제거(핸드오프 §8)
 
+const DEMO_CATALOG_PREFIX = "demo-catalog";
 const DEMO_RESULT_PREFIX = "demo-fitting-result";
+const DEMO_CATALOG_DIR = join(process.cwd(), "public", "demo-catalog");
 const DEMO_FITTING_DIR = join(process.cwd(), "public", "demo-fitting");
+const DEMO_CATALOG_FILE_RE = /^[a-z0-9-]+\.(png|jpe?g)$/;
+const DEMO_FITTING_KEY_RE = /^[A-Z0-9-]+$/;
 
 // ── 1×1 회색 PNG 폴백 ────────────────────────────────────────
 
@@ -63,6 +68,44 @@ const GRAY_1PX_PNG = new Uint8Array(
     "base64",
   ),
 );
+
+function responseBody(bytes: Uint8Array | ArrayBuffer): ArrayBuffer {
+  if (bytes instanceof ArrayBuffer) return bytes;
+
+  const body = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(body).set(bytes);
+  return body;
+}
+
+function imageResponse(bytes: Uint8Array | ArrayBuffer, contentType: string): NextResponse {
+  return new NextResponse(responseBody(bytes), { headers: { ...corsHeaders(), "Content-Type": contentType } });
+}
+
+function catalogContentType(fileKey: string): string {
+  return fileKey.endsWith(".png") ? "image/png" : "image/jpeg";
+}
+
+function readDemoCatalogImage(fileKey: string): NextResponse | null {
+  if (!DEMO_CATALOG_FILE_RE.test(fileKey)) return null;
+
+  try {
+    const bytes = new Uint8Array(readFileSync(join(DEMO_CATALOG_DIR, fileKey)));
+    return imageResponse(bytes, catalogContentType(fileKey));
+  } catch {
+    return null;
+  }
+}
+
+function readDemoFittingResult(fileKey: string): NextResponse | null {
+  if (!DEMO_FITTING_KEY_RE.test(fileKey)) return null;
+
+  try {
+    const bytes = new Uint8Array(readFileSync(join(DEMO_FITTING_DIR, `${fileKey}.jpg`)));
+    return imageResponse(bytes, "image/jpeg");
+  } catch {
+    return null;
+  }
+}
 
 // ── 핸들러 ───────────────────────────────────────────────────
 
@@ -94,22 +137,23 @@ export function GET(req: NextRequest): NextResponse {
   // 1. 업로드 스토어: 사용자가 올린 before 셀카
   const stored = uploadStore.get(key);
   if (stored) {
-    return new NextResponse(stored.buffer, {
-      headers: { ...corsHeaders(), "Content-Type": stored.contentType },
-    });
+    return imageResponse(stored.buffer, stored.contentType);
   }
 
-  // 2. 데모: canned after 이미지 — 실 VTO provider 연동 시 제거
+  // 2. 데모: 카탈로그 커버 이미지
+  if (key.startsWith(`${DEMO_CATALOG_PREFIX}/`)) {
+    const fileKey = key.slice(DEMO_CATALOG_PREFIX.length + 1);
+    const response = readDemoCatalogImage(fileKey);
+    if (response) return response;
+  }
+
+  // 3. 데모: canned after 이미지 — 실 VTO provider 연동 시 제거
   if (key.startsWith(`${DEMO_RESULT_PREFIX}/`)) {
     const fileKey = key.slice(DEMO_RESULT_PREFIX.length + 1);
-    try {
-      const bytes = new Uint8Array(readFileSync(join(DEMO_FITTING_DIR, `${fileKey}.jpg`)));
-      return new NextResponse(bytes, { headers: { ...corsHeaders(), "Content-Type": "image/jpeg" } });
-    } catch {
-      // 자산 없는 sku → 폴백으로 안 깨지게
-    }
+    const response = readDemoFittingResult(fileKey);
+    if (response) return response;
   }
 
-  // 3. 폴백: 회색 PNG
-  return new NextResponse(GRAY_1PX_PNG, { headers: { ...corsHeaders(), "Content-Type": "image/png" } });
+  // 4. 폴백: 회색 PNG
+  return imageResponse(GRAY_1PX_PNG, "image/png");
 }
