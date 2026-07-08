@@ -103,6 +103,9 @@ function CartSummary({
         <span>상품 합계</span>
         <span>{hasUnavailablePrice ? "가격 확인 필요" : formatPrice(subtotal, currency)}</span>
       </div>
+      <p className="text-xs text-gray-500">
+        배송비·세금 제외 — 배송지에 따라 결제 단계에서 확정됩니다.
+      </p>
       <p className="text-xs text-gray-500">배송비는 체크아웃에서 확인됩니다.</p>
       <p className="text-xs text-gray-500">
         배송지와 선택한 국가/통화에 따라 결제 단계에서 가격과 배송비가 변경될 수 있습니다.
