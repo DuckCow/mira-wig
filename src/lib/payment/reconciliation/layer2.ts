@@ -2,19 +2,31 @@ import {
   OutboxStatus,
   PaymentEventFailureStage,
   PaymentEventStatus,
+  PaymentProvider,
   WebhookIngressRejectionStage,
 } from "@prisma/client";
-import type { PaymentEvent, PaymentProvider, PrismaClient, WebhookIngressRejection } from "@prisma/client";
+import type { PaymentEvent, PrismaClient } from "@prisma/client";
 import { OUTBOX_MAX_ATTEMPTS } from "@/lib/payment/outbox/types";
-import type { ReconciliationFinding, ReconciliationRecommendedAction } from "./types";
+import type { ReconciliationFinding } from "./types";
 import {
   cutoff,
-  finding,
   isOlderThan,
+  LOOKUP_UNAVAILABLE_CODES,
+  metadataRejectionFinding,
   parseVoidPayload,
+  paymentEventFinding,
+  pushSpike,
   RAW_MISMATCH_CODE,
+  rawMismatchFinding,
+  retryableCompleteFinding,
+  tossIgnoredStatusFinding,
+  TOSS_IGNORED_STATUS_PREFIX,
   type NormalizedOptions,
   type VoidPayload,
+  verifyRejectionFinding,
+  VERIFY_SPIKE_EXCLUDED_CODES,
+  voidMaxAttemptsFinding,
+  voidMismatchFinding,
   VOID_TOPIC,
 } from "./utils";
 
@@ -59,10 +71,26 @@ async function appendEventFindings(
   options: NormalizedOptions,
   findings: ReconciliationFinding[],
 ): Promise<void> {
+  await appendIgnoredTossStatusEvents(client, findings);
   await appendParseFailedEvents(client, findings);
+  await appendTerminalCompleteEvents(client, findings);
   await appendRetryableCompleteEvents(client, options, findings);
   await appendStaleReceivedEvents(client, options, findings);
   await appendStaleRetryableEvents(client, options, findings);
+  await appendTossBeyondRedeliveryHorizonEvents(client, options, findings);
+}
+
+async function appendIgnoredTossStatusEvents(client: PrismaClient, findings: ReconciliationFinding[]): Promise<void> {
+  const events = await client.paymentEvent.findMany({
+    where: {
+      provider: PaymentProvider.TOSS,
+      status: PaymentEventStatus.IGNORED,
+      lastError: { startsWith: TOSS_IGNORED_STATUS_PREFIX },
+    },
+  });
+  for (const event of events) {
+    findings.push(tossIgnoredStatusFinding(event));
+  }
 }
 
 async function appendParseFailedEvents(client: PrismaClient, findings: ReconciliationFinding[]): Promise<void> {
@@ -70,6 +98,15 @@ async function appendParseFailedEvents(client: PrismaClient, findings: Reconcili
     where: { status: PaymentEventStatus.FAILED, failureStage: PaymentEventFailureStage.PARSE },
   });
   for (const event of events) findings.push(paymentEventFinding(event, "TRUSTED_EVENT_PARSE_FAILED", "ALERT_ONLY"));
+}
+
+async function appendTerminalCompleteEvents(client: PrismaClient, findings: ReconciliationFinding[]): Promise<void> {
+  const events = await client.paymentEvent.findMany({
+    where: { status: PaymentEventStatus.FAILED, failureStage: PaymentEventFailureStage.COMPLETE },
+  });
+  for (const event of events) {
+    findings.push(paymentEventFinding(event, "TRUSTED_EVENT_TERMINAL_COMPLETE_FAILED", "MANUAL_REVIEW"));
+  }
 }
 
 async function appendRetryableCompleteEvents(
@@ -81,6 +118,11 @@ async function appendRetryableCompleteEvents(
     where: { status: PaymentEventStatus.RETRYABLE_FAILED, failureStage: PaymentEventFailureStage.COMPLETE },
   });
   for (const event of events) {
+    const specific = retryableCompleteFinding(event);
+    if (specific) {
+      findings.push(specific);
+      continue;
+    }
     const stale = isRetryableEventStale(event, options);
     findings.push(paymentEventFinding(event, "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED", stale ? "WATCH_STALE" : "ALERT_ONLY"));
   }
@@ -110,6 +152,23 @@ async function appendStaleRetryableEvents(
   }
 }
 
+async function appendTossBeyondRedeliveryHorizonEvents(
+  client: PrismaClient,
+  options: NormalizedOptions,
+  findings: ReconciliationFinding[],
+): Promise<void> {
+  const events = await client.paymentEvent.findMany({
+    where: {
+      provider: PaymentProvider.TOSS,
+      status: PaymentEventStatus.RETRYABLE_FAILED,
+      receivedAt: { lte: cutoff(options.now, options.tossRedeliveryHorizonMs) },
+    },
+  });
+  for (const event of events) {
+    findings.push(paymentEventFinding(event, "PAYMENT_EVENT_BEYOND_REDELIVERY_HORIZON", "MANUAL_REVIEW"));
+  }
+}
+
 async function appendRejectionFindings(client: PrismaClient, findings: ReconciliationFinding[]): Promise<void> {
   const rejections = await client.webhookIngressRejection.findMany();
   for (const rejection of rejections) {
@@ -135,12 +194,18 @@ async function appendRejectionSpikes(
   since: Date,
   options: NormalizedOptions,
 ): Promise<void> {
-  const verify = await client.webhookIngressRejection.count({ where: { stage: WebhookIngressRejectionStage.VERIFY, receivedAt: { gte: since } } });
+  const verify = await client.webhookIngressRejection.count({
+    where: { stage: WebhookIngressRejectionStage.VERIFY, code: { notIn: VERIFY_SPIKE_EXCLUDED_CODES }, receivedAt: { gte: since } },
+  });
   const metadata = await client.webhookIngressRejection.count({ where: { stage: WebhookIngressRejectionStage.METADATA_EXTRACT, receivedAt: { gte: since } } });
   const rawMismatch = await client.webhookIngressRejection.count({ where: { code: RAW_MISMATCH_CODE, receivedAt: { gte: since } } });
+  const lookupUnavailable = await client.webhookIngressRejection.count({
+    where: { code: { in: LOOKUP_UNAVAILABLE_CODES }, receivedAt: { gte: since } },
+  });
   pushSpike(findings, "WEBHOOK_VERIFY_REJECTION_SPIKE", verify, options.verifySpikeThreshold, "SECURITY_SIGNAL");
   pushSpike(findings, "WEBHOOK_METADATA_REJECTION_SPIKE", metadata, options.metadataSpikeThreshold, "ALERT_ONLY");
   pushSpike(findings, "WEBHOOK_RAW_MISMATCH_SPIKE", rawMismatch, options.rawMismatchSpikeThreshold, "SECURITY_SIGNAL");
+  pushSpike(findings, "WEBHOOK_LOOKUP_UNAVAILABLE_SPIKE", lookupUnavailable, options.lookupUnavailableSpikeThreshold, "ALERT_ONLY");
 }
 
 async function appendTrustedEventSpikes(
@@ -164,120 +229,6 @@ function countTrustedEventSpike(
   return client.paymentEvent.count({ where: { status, failureStage, receivedAt: { gte: since } } });
 }
 
-function pushSpike(
-  findings: ReconciliationFinding[],
-  kind: ReconciliationFinding["kind"],
-  count: number,
-  threshold: number,
-  action: ReconciliationRecommendedAction,
-): void {
-  if (threshold < 1 || count < threshold) return;
-  findings.push(finding({
-    kind,
-    severity: action === "SECURITY_SIGNAL" ? "critical" : "warning",
-    recommendedAction: action,
-    source: kind.includes("WEBHOOK") ? ["webhookIngressRejection"] : ["paymentEvent"],
-    sourceIds: {},
-    details: { count, threshold },
-    confidence: "high",
-  }));
-}
-
-function voidMaxAttemptsFinding(row: VoidOutboxRow): ReconciliationFinding {
-  return finding({
-    kind: "PG_VOID_MAX_ATTEMPTS",
-    severity: "critical",
-    recommendedAction: "VOID_FAILED_MAX_ATTEMPTS",
-    source: ["paymentOutbox"],
-    sourceIds: { paymentOutbox: [row.id] },
-    details: { outboxId: row.id, attempts: row.attempts, status: row.status, dedupKey: row.dedupKey },
-    confidence: "high",
-  });
-}
-
-function voidMismatchFinding(
-  row: VoidOutboxRow,
-  payload: VoidPayload,
-  payment: { mode: string; provider: PaymentProvider; providerPaymentKey: string | null } | null,
-): ReconciliationFinding {
-  return finding({
-    kind: "PG_VOID_MISMATCH_TERMINAL",
-    severity: "critical",
-    recommendedAction: "VOID_MISMATCH_TERMINAL",
-    source: ["paymentOutbox", "payment"],
-    sourceIds: { paymentOutbox: [row.id], payment: [payload.paymentId] },
-    details: {
-      outboxId: row.id,
-      paymentId: payload.paymentId,
-      payloadProvider: payload.provider,
-      actualProvider: payment?.provider ?? null,
-      actualPaymentMode: payment?.mode ?? null,
-      payloadProviderPaymentKey: payload.providerPaymentKey,
-      actualProviderPaymentKey: payment?.providerPaymentKey ?? null,
-    },
-    confidence: "high",
-  });
-}
-
-function paymentEventFinding(
-  event: PaymentEvent,
-  kind: ReconciliationFinding["kind"],
-  action: ReconciliationRecommendedAction,
-): ReconciliationFinding {
-  return finding({
-    kind,
-    severity: action === "WATCH_STALE" || action === "MANUAL_REVIEW" ? "warning" : "info",
-    recommendedAction: action,
-    source: ["paymentEvent"],
-    sourceIds: { paymentEvent: [event.id] },
-    details: {
-      eventId: event.id,
-      status: event.status,
-      failureStage: event.failureStage,
-      failureCode: event.failureCode,
-      attemptCount: event.attemptCount,
-    },
-    confidence: "high",
-  });
-}
-
-function verifyRejectionFinding(rejection: WebhookIngressRejection): ReconciliationFinding {
-  return rejectionFinding(rejection, "WEBHOOK_VERIFY_REJECTION", "SECURITY_SIGNAL", "warning");
-}
-
-function metadataRejectionFinding(rejection: WebhookIngressRejection): ReconciliationFinding {
-  return rejectionFinding(rejection, "WEBHOOK_METADATA_REJECTION", "ALERT_ONLY", "info");
-}
-
-function rawMismatchFinding(rejection: WebhookIngressRejection): ReconciliationFinding {
-  return rejectionFinding(rejection, "WEBHOOK_RAW_MISMATCH", "SECURITY_SIGNAL", "critical");
-}
-
-function rejectionFinding(
-  rejection: WebhookIngressRejection,
-  kind: ReconciliationFinding["kind"],
-  action: ReconciliationRecommendedAction,
-  severity: ReconciliationFinding["severity"],
-): ReconciliationFinding {
-  return finding({
-    kind,
-    severity,
-    recommendedAction: action,
-    source: ["webhookIngressRejection"],
-    sourceIds: { webhookIngressRejection: [rejection.id] },
-    details: {
-      rejectionId: rejection.id,
-      stage: rejection.stage,
-      code: rejection.code,
-      candidateTransmissionId: rejection.candidateTransmissionId,
-      candidateEventType: rejection.candidateEventType,
-    },
-    confidence: "high",
-  });
-}
-
 function isRetryableEventStale(event: PaymentEvent, options: NormalizedOptions): boolean {
   return isOlderThan(event.lastAttemptAt ?? event.receivedAt, options.now, options.staleRetryableFailedAfterMs);
 }
-
-type VoidOutboxRow = Awaited<ReturnType<PrismaClient["paymentOutbox"]["findMany"]>>[number];

@@ -23,16 +23,25 @@ export type ReconciliationFindingKind =
   | "PARTIAL_LOCAL_COMPLETION"
   | "PG_VOID_MAX_ATTEMPTS"
   | "PG_VOID_MISMATCH_TERMINAL"
+  | "TOSS_IGNORED_PROVIDER_STATUS"
   | "TRUSTED_EVENT_PARSE_FAILED"
+  | "TRUSTED_EVENT_TERMINAL_COMPLETE_FAILED"
   | "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED"
+  | "WEBHOOK_EVENT_BINDING_UNAVAILABLE"
+  | "WEBHOOK_EVENT_MODE_DIVERGENCE"
   | "STALE_PAYMENT_EVENT_RECEIVED"
   | "STALE_PAYMENT_EVENT_RETRYABLE_FAILED"
+  | "PAYMENT_EVENT_BEYOND_REDELIVERY_HORIZON"
   | "WEBHOOK_VERIFY_REJECTION"
   | "WEBHOOK_METADATA_REJECTION"
   | "WEBHOOK_RAW_MISMATCH"
+  | "WEBHOOK_ACKED_UNSUPPORTED_EVENT"
+  | "WEBHOOK_LOOKUP_UNAVAILABLE"
+  | "WEBHOOK_MODE_COLLISION"
   | "WEBHOOK_VERIFY_REJECTION_SPIKE"
   | "WEBHOOK_METADATA_REJECTION_SPIKE"
   | "WEBHOOK_RAW_MISMATCH_SPIKE"
+  | "WEBHOOK_LOOKUP_UNAVAILABLE_SPIKE"
   | "TRUSTED_EVENT_PARSE_FAILED_SPIKE"
   | "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED_SPIKE"
   | "STALE_PROVIDER_CONFIRM_ATTEMPT"
@@ -74,10 +83,12 @@ export interface ReconcilePaymentCoreOptions {
   staleRetryableFailedAfterMs?: number;
   staleSucceededPaymentAfterMs?: number;
   staleProviderConfirmAfterMs?: number;
+  tossRedeliveryHorizonMs?: number;
   spikeWindowMs?: number;
   verifySpikeThreshold?: number;
   metadataSpikeThreshold?: number;
   rawMismatchSpikeThreshold?: number;
+  lookupUnavailableSpikeThreshold?: number;
   parseFailureSpikeThreshold?: number;
   completeRetryableSpikeThreshold?: number;
 }

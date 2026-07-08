@@ -183,6 +183,93 @@ describe("payment reconciliation C2-v0", () => {
       .toMatchObject({ recommendedAction: "WATCH_STALE" });
   });
 
+  it("classifies Toss webhook event visibility states with safe provenance details", async () => {
+    const ready = await createPaymentEvent(ctx, PaymentEventStatus.IGNORED, {
+      lastError: "TOSS_STATUS_READY",
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+    });
+    const unknown = await createPaymentEvent(ctx, PaymentEventStatus.IGNORED, { lastError: "TOSS_STATUS_UNKNOWN" });
+    const terminal = await createPaymentEvent(ctx, PaymentEventStatus.FAILED, {
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.LEGACY_UNVERIFIED_EVENT",
+      lastError: "Legacy event requires manual review",
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+    });
+    const binding = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.CREDENTIAL_BINDING_UNAVAILABLE",
+      lastError: "Credential binding is unavailable",
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+    });
+    const divergence = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.MODE_DIVERGENCE",
+      lastError: "Mode divergence deferred",
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+    });
+    const generic = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.TRANSIENT_DB_ERROR",
+    });
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    const readyFinding = findingFor(findings, "TOSS_IGNORED_PROVIDER_STATUS", "paymentEvent", ready.id);
+    expect(readyFinding).toMatchObject({ severity: "info", recommendedAction: "ALERT_ONLY" });
+    expect(readyFinding.details).toMatchObject({
+      provider: PaymentProvider.TOSS,
+      status: PaymentEventStatus.IGNORED,
+      lastError: "TOSS_STATUS_READY",
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+      transmissionId: ready.transmissionId,
+    });
+    expect(findingFor(findings, "TOSS_IGNORED_PROVIDER_STATUS", "paymentEvent", unknown.id))
+      .toMatchObject({ severity: "warning", recommendedAction: "MANUAL_REVIEW" });
+    const terminalFinding = findingFor(findings, "TRUSTED_EVENT_TERMINAL_COMPLETE_FAILED", "paymentEvent", terminal.id);
+    expect(terminalFinding).toMatchObject({ severity: "warning", recommendedAction: "MANUAL_REVIEW" });
+    expect(terminalFinding.details).toMatchObject({
+      failureCode: "COMPLETE.LEGACY_UNVERIFIED_EVENT",
+      provider: PaymentProvider.TOSS,
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+      lastError: "Legacy event requires manual review",
+    });
+    expect(findingFor(findings, "WEBHOOK_EVENT_BINDING_UNAVAILABLE", "paymentEvent", binding.id))
+      .toMatchObject({ severity: "warning", recommendedAction: "ALERT_ONLY" });
+    expect(findingFor(findings, "WEBHOOK_EVENT_MODE_DIVERGENCE", "paymentEvent", divergence.id))
+      .toMatchObject({ severity: "warning", recommendedAction: "ALERT_ONLY" });
+    expect(hasSourceFinding(findings, "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED", "paymentEvent", binding.id)).toBe(false);
+    expect(hasSourceFinding(findings, "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED", "paymentEvent", divergence.id)).toBe(false);
+    expect(findingFor(findings, "TRUSTED_EVENT_RETRYABLE_COMPLETE_FAILED", "paymentEvent", generic.id))
+      .toMatchObject({ recommendedAction: "ALERT_ONLY" });
+  });
+
+  it("classifies Toss retryable events beyond the provider redelivery horizon", async () => {
+    const horizonMs = 60_000;
+    const justUnder = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      receivedAt: new Date(C2_NOW.getTime() - horizonMs + 1),
+    });
+    const justOver = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      receivedAt: new Date(C2_NOW.getTime() - horizonMs - 1),
+    });
+    const paypalOver = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      provider: PaymentProvider.PAYPAL,
+      receivedAt: new Date(C2_NOW.getTime() - horizonMs - 1),
+    });
+
+    const findings = await reconcilePaymentCore(db, { ...reconcileOptions(), tossRedeliveryHorizonMs: horizonMs });
+
+    expect(hasSourceFinding(findings, "PAYMENT_EVENT_BEYOND_REDELIVERY_HORIZON", "paymentEvent", justUnder.id)).toBe(false);
+    expect(findingFor(findings, "PAYMENT_EVENT_BEYOND_REDELIVERY_HORIZON", "paymentEvent", justOver.id))
+      .toMatchObject({ severity: "warning", recommendedAction: "MANUAL_REVIEW" });
+    expect(hasSourceFinding(findings, "PAYMENT_EVENT_BEYOND_REDELIVERY_HORIZON", "paymentEvent", paypalOver.id)).toBe(false);
+  });
+
   it("classifies rejected inbound rows and simple spike thresholds", async () => {
     const verify = await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "VERIFY.FAILED");
     const metadata = await createRejection(ctx, WebhookIngressRejectionStage.METADATA_EXTRACT, "METADATA.MISSING_EVENT_TYPE");
@@ -204,6 +291,58 @@ describe("payment reconciliation C2-v0", () => {
     expect(findings.some((finding) => finding.kind === "WEBHOOK_VERIFY_REJECTION_SPIKE")).toBe(true);
     expect(findings.some((finding) => finding.kind === "WEBHOOK_METADATA_REJECTION_SPIKE")).toBe(true);
     expect(findings.some((finding) => finding.kind === "WEBHOOK_RAW_MISMATCH_SPIKE")).toBe(true);
+  });
+
+  it("separates acked unsupported and lookup unavailable rejections from verify security noise", async () => {
+    const acked = await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "TOSS.EVENT_ACKED_UNSUPPORTED");
+    for (let index = 0; index < 9; index += 1) {
+      await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "TOSS.EVENT_ACKED_UNSUPPORTED");
+    }
+    const lookupCodes = [
+      "TOSS.LOOKUP_TIMEOUT",
+      "TOSS.LOOKUP_NETWORK_ERROR",
+      "TOSS.LOOKUP_HTTP_ERROR",
+      "TOSS.LOOKUP_PORT_UNAVAILABLE",
+      "SANDBOX_EXTERNAL_MISCONFIGURED",
+      "SANDBOX_EXTERNAL_CREDENTIALS_MISSING",
+      "SANDBOX_EXTERNAL_CONFIG_INVALID",
+    ];
+    const lookupRows: Awaited<ReturnType<typeof createRejection>>[] = [];
+    for (const code of lookupCodes) {
+      lookupRows.push(await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, code));
+    }
+
+    const findings = await reconcilePaymentCore(db, {
+      ...reconcileOptions(),
+      verifySpikeThreshold: 1,
+      lookupUnavailableSpikeThreshold: lookupCodes.length,
+    });
+
+    expect(findingFor(findings, "WEBHOOK_ACKED_UNSUPPORTED_EVENT", "webhookIngressRejection", acked.id))
+      .toMatchObject({ severity: "info", recommendedAction: "ALERT_ONLY" });
+    expect(hasSourceFinding(findings, "WEBHOOK_VERIFY_REJECTION", "webhookIngressRejection", acked.id)).toBe(false);
+    for (const row of lookupRows) {
+      expect(findingFor(findings, "WEBHOOK_LOOKUP_UNAVAILABLE", "webhookIngressRejection", row.id))
+        .toMatchObject({ severity: "warning", recommendedAction: "ALERT_ONLY" });
+      expect(hasSourceFinding(findings, "WEBHOOK_VERIFY_REJECTION", "webhookIngressRejection", row.id)).toBe(false);
+    }
+    expect(findings.some((finding) => finding.kind === "WEBHOOK_VERIFY_REJECTION_SPIKE")).toBe(false);
+    expect(findings.some((finding) => finding.kind === "WEBHOOK_LOOKUP_UNAVAILABLE_SPIKE")).toBe(true);
+  });
+
+  it("keeps mode collision, generic verify, and raw-mismatch rejection visibility intact", async () => {
+    const collision = await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "VERIFY.MODE_COLLISION");
+    const verify = await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "VERIFY.FAILED");
+    const raw = await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "VERIFY.RAW_MISMATCH");
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    expect(findingFor(findings, "WEBHOOK_MODE_COLLISION", "webhookIngressRejection", collision.id))
+      .toMatchObject({ severity: "critical", recommendedAction: "SECURITY_SIGNAL" });
+    expect(findingFor(findings, "WEBHOOK_VERIFY_REJECTION", "webhookIngressRejection", verify.id))
+      .toMatchObject({ recommendedAction: "SECURITY_SIGNAL" });
+    expect(findingFor(findings, "WEBHOOK_RAW_MISMATCH", "webhookIngressRejection", raw.id))
+      .toMatchObject({ recommendedAction: "SECURITY_SIGNAL" });
   });
 
   it("detects provider-confirm marker findings with redacted details", async () => {
@@ -314,6 +453,27 @@ describe("payment reconciliation C2-v0", () => {
       expect(source).not.toContain(forbidden);
     }
     expect(source).toContain("errorCode: \"PROVIDER_CONFIRM_MANUAL_REVIEW\"");
+  });
+
+  it("keeps webhook visibility reconciliation read-only", async () => {
+    const event = await createPaymentEvent(ctx, PaymentEventStatus.RETRYABLE_FAILED, {
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.MODE_DIVERGENCE",
+      lastError: "Mode divergence deferred",
+    });
+    const rejection = await createRejection(ctx, WebhookIngressRejectionStage.VERIFY, "TOSS.LOOKUP_TIMEOUT", {
+      lastError: "Provider lookup unavailable",
+    });
+    const before = await reconciliationVisibilitySnapshot(ctx, event.id, rejection.id);
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+    const after = await reconciliationVisibilitySnapshot(ctx, event.id, rejection.id);
+
+    expect(findingFor(findings, "WEBHOOK_EVENT_MODE_DIVERGENCE", "paymentEvent", event.id))
+      .toMatchObject({ recommendedAction: "ALERT_ONLY" });
+    expect(findingFor(findings, "WEBHOOK_LOOKUP_UNAVAILABLE", "webhookIngressRejection", rejection.id))
+      .toMatchObject({ recommendedAction: "ALERT_ONLY" });
+    expect(after).toEqual(before);
   });
 
   it("does not mutate payment, order, outbox, or event state", async () => {
@@ -526,19 +686,25 @@ async function createPaymentEvent(
   context: TestContext,
   status: PaymentEventStatus,
   input: Partial<{
+    provider: PaymentProvider;
     receivedAt: Date;
     failureStage: PaymentEventFailureStage;
     failureCode: string;
     attemptCount: number;
     lastAttemptAt: Date;
+    lastError: string | null;
+    verifiedMode: PaymentMode | null;
+    verifiedCredentialBinding: string | null;
   }> = {},
 ) {
   const event = await db.paymentEvent.create({
     data: {
-      provider: PaymentProvider.TOSS,
+      provider: input.provider ?? PaymentProvider.TOSS,
       source: PaymentEventSource.WEBHOOK,
       transmissionId: `c2_tx_${randomUUID()}`,
       eventType: "PAYMENT.CAPTURED",
+      verifiedMode: input.verifiedMode,
+      verifiedCredentialBinding: input.verifiedCredentialBinding,
       raw: JSON.stringify({ c2: true }),
       status,
       receivedAt: input.receivedAt ?? C2_NOW,
@@ -546,6 +712,7 @@ async function createPaymentEvent(
       failureCode: input.failureCode,
       attemptCount: input.attemptCount ?? 0,
       lastAttemptAt: input.lastAttemptAt,
+      lastError: input.lastError,
     },
   });
   context.eventIds.push(event.id);
@@ -556,10 +723,15 @@ async function createRejection(
   context: TestContext,
   stage: WebhookIngressRejectionStage,
   code: string,
+  input: Partial<{
+    provider: PaymentProvider;
+    receivedAt: Date;
+    lastError: string | null;
+  }> = {},
 ) {
   const rejection = await db.webhookIngressRejection.create({
     data: {
-      provider: PaymentProvider.TOSS,
+      provider: input.provider ?? PaymentProvider.TOSS,
       stage,
       code,
       candidateTransmissionId: `c2_reject_${randomUUID()}`,
@@ -567,11 +739,31 @@ async function createRejection(
       rawBodyBytes: 10,
       rawBodyHash: "a".repeat(64),
       rawBodyPrefix: "c2",
-      receivedAt: C2_NOW,
+      lastError: input.lastError,
+      receivedAt: input.receivedAt ?? C2_NOW,
     },
   });
   context.rejectionIds.push(rejection.id);
   return rejection;
+}
+
+async function reconciliationVisibilitySnapshot(context: TestContext, eventId: string, rejectionId: string) {
+  const event = await db.paymentEvent.findUniqueOrThrow({
+    where: { id: eventId },
+    select: { status: true, failureStage: true, failureCode: true, lastError: true, attemptCount: true },
+  });
+  const rejection = await db.webhookIngressRejection.findUniqueOrThrow({
+    where: { id: rejectionId },
+    select: { stage: true, code: true, lastError: true },
+  });
+  return {
+    event,
+    rejection,
+    paymentEventCount: await db.paymentEvent.count({ where: { id: { in: context.eventIds } } }),
+    rejectionCount: await db.webhookIngressRejection.count({ where: { id: { in: context.rejectionIds } } }),
+    orderCount: await db.order.count({ where: { id: { in: context.orderIds } } }),
+    outboxCount: await db.paymentOutbox.count({ where: { id: { in: context.outboxIds } } }),
+  };
 }
 
 async function mutationSnapshot(userId: string, paymentId: string, eventId: string) {
@@ -603,6 +795,15 @@ function hasFinding(
   paymentId: string,
 ): boolean {
   return findings.some((finding) => finding.kind === kind && finding.sourceIds.payment?.includes(paymentId));
+}
+
+function hasSourceFinding(
+  findings: ReconciliationFinding[],
+  kind: ReconciliationFinding["kind"],
+  source: keyof ReconciliationFinding["sourceIds"],
+  id: string,
+): boolean {
+  return findings.some((finding) => finding.kind === kind && finding.sourceIds[source]?.includes(id));
 }
 
 function findingFor(
