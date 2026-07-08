@@ -3,6 +3,7 @@ import {
   FulfillmentType,
   PaymentAttemptStatus,
   PaymentEventFailureStage,
+  PaymentEventSource,
   PaymentEventStatus,
   PaymentMode,
   PaymentProvider,
@@ -17,8 +18,17 @@ import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
+import { ProviderCapability } from "@/lib/payment/providers/capabilities";
+import { TOSS_SANDBOX_SECRET_KEY } from "@/lib/payment/providers/credentials";
+import {
+  TOSS_SANDBOX_EXTERNAL_ENABLED,
+  type SandboxExternalCodeRegistryEntry,
+} from "@/lib/payment/providers/factory";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
+import { tossBasicAuthorization } from "@/lib/payment/providers/toss/auth";
+import { deriveTossOrderId } from "@/lib/payment/providers/toss/order-id";
 import { handleWebhook } from "../handle";
+import type { WebhookHandleOptions } from "../pipeline-types";
 import { WEBHOOK_RAW_PREFIX_CHARS } from "../rejections";
 
 const B4_NOW = new Date("2026-08-02T00:00:00.000Z");
@@ -48,6 +58,18 @@ interface MockWebhookPayload {
   currency?: string;
   capturedAt?: string;
   kind?: string;
+}
+
+interface TossWebhookPayload {
+  transmissionId: string;
+  eventType: string;
+  eventId: string;
+  paymentKey?: string;
+}
+
+interface TossFetchCall {
+  input: Parameters<typeof fetch>[0];
+  init: Parameters<typeof fetch>[1];
 }
 
 describe("payment webhook core", () => {
@@ -417,6 +439,203 @@ describe("payment webhook core", () => {
     expect(payment.status).toBe(PaymentAttemptStatus.SUCCEEDED);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
   });
+
+  it("Toss SANDBOX webhook code key only fails closed without reserving PaymentEvent", async () => {
+    const payload = tossPayload(ctx, "toss_half_config_code_only");
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), {
+      env: {},
+      fetchFn: fetch.fetchFn,
+      sandboxExternalCodeRegistry: tossWebhookCodeRegistry(),
+    });
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    expect(fetch.calls).toEqual([]);
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.stage).toBe(WebhookIngressRejectionStage.VERIFY);
+    expect(rejection.code).toBe("SANDBOX_EXTERNAL_MISCONFIGURED");
+  });
+
+  it("Toss SANDBOX webhook enabled without secret fails closed without reserving PaymentEvent", async () => {
+    const payload = tossPayload(ctx, "toss_missing_secret");
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), {
+      env: { [TOSS_SANDBOX_EXTERNAL_ENABLED]: "ENABLED" },
+      fetchFn: fetch.fetchFn,
+    });
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    expect(fetch.calls).toEqual([]);
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("SANDBOX_EXTERNAL_CREDENTIALS_MISSING");
+  });
+
+  it("Toss lookup unavailable is rejected before PaymentEvent record and can redeliver later", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payment = await onlyPayment(session.sessionId);
+    const payload = tossPayload(ctx, `toss_lookup_${randomUUID()}`);
+    const unavailable = recordingTossFetch(new Response(JSON.stringify({ code: "FAILED_INTERNAL" }), { status: 503 }));
+
+    const first = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(unavailable.fetchFn));
+    expect(first).toMatchObject({ kind: "verifyFailed", status: 503 });
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.stage).toBe(WebhookIngressRejectionStage.VERIFY);
+    expect(rejection.code).toBe("TOSS.LOOKUP_HTTP_ERROR");
+
+    const available = recordingTossFetch(tossLookupResponse({
+      paymentKey: requiredTossPaymentKey(payload),
+      orderId: deriveTossOrderId(payment.id),
+      amount: session.totalAmount,
+      currency: session.currency,
+    }));
+    const second = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(available.fetchFn));
+
+    expect(second.status).toBe(200);
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(1);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it.each(["CANCEL_STATUS_CHANGED", "DEPOSIT_CALLBACK"])(
+    "Toss %s is acked unsupported with no PaymentEvent and no lookup",
+    async (eventType) => {
+      const payload = tossPayload(ctx, undefined, { eventType, paymentKey: undefined });
+      const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: "unused" }));
+
+      const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+
+      expect(result).toMatchObject({ kind: "verifyFailed", status: 200 });
+      expect(fetch.calls).toEqual([]);
+      await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+      const rejection = await onlyRejection(payload.transmissionId);
+      expect(rejection.code).toBe("TOSS.EVENT_ACKED_UNSUPPORTED");
+      expect(rejection.stage).toBe(WebhookIngressRejectionStage.VERIFY);
+    },
+  );
+
+  it("Toss SANDBOX verified webhook completes capture and persists verified provenance", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payment = await onlyPayment(session.sessionId);
+    const payload = tossPayload(ctx);
+    const fetch = recordingTossFetch(tossLookupResponse({
+      paymentKey: requiredTossPaymentKey(payload),
+      orderId: deriveTossOrderId(payment.id),
+      amount: session.totalAmount,
+      currency: session.currency,
+    }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const call = onlyTossFetchCall(fetch.calls);
+
+    expect(result.status).toBe(200);
+    expect(new Headers(call.init?.headers).get("Authorization")).toBe(tossBasicAuthorization(fakeTossSecret()));
+    await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
+    await expect(eventProvenance(payload.transmissionId)).resolves.toEqual({
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("Toss verified-vs-configured mode divergence is retryable after recording provenance", async () => {
+    process.env.PAYMENT_MODE = "LIVE";
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payment = await onlyPayment(session.sessionId);
+    const payload = tossPayload(ctx);
+    const fetch = recordingTossFetch(tossLookupResponse({
+      paymentKey: requiredTossPaymentKey(payload),
+      orderId: deriveTossOrderId(payment.id),
+      amount: session.totalAmount,
+      currency: session.currency,
+    }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const event = await eventSnapshot(payload.transmissionId);
+
+    expect(result).toMatchObject({ kind: "retryable", status: 500 });
+    expect(event.status).toBe(PaymentEventStatus.RETRYABLE_FAILED);
+    expect(event.failureCode).toBe("COMPLETE.MODE_DIVERGENCE");
+    await expect(eventProvenance(payload.transmissionId)).resolves.toEqual({
+      verifiedMode: PaymentMode.SANDBOX,
+      verifiedCredentialBinding: "toss:sandbox:v1",
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("Toss retryable real duplicate replays lookup and completes after mode config is fixed", async () => {
+    process.env.PAYMENT_MODE = "LIVE";
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payment = await onlyPayment(session.sessionId);
+    const payload = tossPayload(ctx);
+    const fetch = recordingTossFetch(tossLookupResponse({
+      paymentKey: requiredTossPaymentKey(payload),
+      orderId: deriveTossOrderId(payment.id),
+      amount: session.totalAmount,
+      currency: session.currency,
+    }));
+
+    const first = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    process.env.PAYMENT_MODE = "SANDBOX";
+    const second = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const event = await eventSnapshot(payload.transmissionId);
+
+    expect(first).toMatchObject({ kind: "retryable", status: 500 });
+    expect(second.status).toBe(200);
+    expect(fetch.calls).toHaveLength(3);
+    expect(event.status).toBe(PaymentEventStatus.PROCESSED);
+    expect(event.failureCode).toBeNull();
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("Toss real duplicate with persisted mode collision records VERIFY rejection without reprocessing", async () => {
+    const payload = tossPayload(ctx);
+    await createSyntheticTossEvent(payload, { verifiedMode: PaymentMode.LIVE, binding: "toss:sandbox:v1" });
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 409 });
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("VERIFY.MODE_COLLISION");
+    expect(fetch.calls).toHaveLength(2);
+    await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.RETRYABLE_FAILED);
+  });
+
+  it("Toss real duplicate with unavailable persisted credential binding defers retryably without replay lookup", async () => {
+    const payload = tossPayload(ctx);
+    await createSyntheticTossEvent(payload, { verifiedMode: PaymentMode.SANDBOX, binding: "toss:sandbox:v0" });
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const event = await eventSnapshot(payload.transmissionId);
+
+    expect(result).toMatchObject({ kind: "retryable", status: 500 });
+    expect(fetch.calls).toHaveLength(1);
+    expect(event.status).toBe(PaymentEventStatus.RETRYABLE_FAILED);
+    expect(event.failureCode).toBe("COMPLETE.CREDENTIAL_BINDING_UNAVAILABLE");
+  });
+
+  it("Toss real duplicate with legacy null verifiedMode becomes terminal manual-review", async () => {
+    const payload = tossPayload(ctx);
+    await createSyntheticTossEvent(payload, { verifiedMode: null, binding: null });
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
+
+    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const event = await eventSnapshot(payload.transmissionId);
+
+    expect(result).toMatchObject({ kind: "failed", status: 200 });
+    expect(fetch.calls).toHaveLength(1);
+    expect(event.status).toBe(PaymentEventStatus.FAILED);
+    expect(event.failureCode).toBe("COMPLETE.LEGACY_UNVERIFIED_EVENT");
+  });
 });
 
 function makeContext(): TestContext {
@@ -557,6 +776,97 @@ function rawWebhook(payload: MockWebhookPayload) {
   return { body: JSON.stringify(payload), receivedAt: B4_RECEIVED_AT };
 }
 
+function rawTossWebhook(payload: TossWebhookPayload) {
+  return {
+    body: JSON.stringify({
+      eventType: payload.eventType,
+      eventId: payload.eventId,
+      createdAt: "2026-08-02T00:01:00.000Z",
+      data: payload.paymentKey ? { paymentKey: payload.paymentKey } : {},
+    }),
+    headers: { "tosspayments-webhook-transmission-id": payload.transmissionId },
+    receivedAt: B4_RECEIVED_AT,
+  };
+}
+
+function tossPayload(
+  context: TestContext,
+  paymentKey = `toss_payment_${randomUUID()}`,
+  overrides: Partial<TossWebhookPayload> = {},
+): TossWebhookPayload {
+  const payload = {
+    transmissionId: `toss_tx_${randomUUID()}`,
+    eventType: "PAYMENT_STATUS_CHANGED",
+    eventId: `toss_evt_${randomUUID()}`,
+    paymentKey,
+    ...overrides,
+  };
+  context.transmissionIds.push(payload.transmissionId);
+  if (payload.paymentKey) context.providerPaymentKeys.push(payload.paymentKey);
+  return payload;
+}
+
+function realTossOptions(fetchFn: typeof fetch): WebhookHandleOptions {
+  return {
+    env: {
+      [TOSS_SANDBOX_EXTERNAL_ENABLED]: "ENABLED",
+      [TOSS_SANDBOX_SECRET_KEY]: fakeTossSecret(),
+    },
+    fetchFn,
+  };
+}
+
+function tossWebhookCodeRegistry(): readonly SandboxExternalCodeRegistryEntry[] {
+  return [{
+    provider: PaymentProvider.TOSS,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.WEBHOOK_VERIFIER,
+  }];
+}
+
+function fakeTossSecret(): string {
+  return "test_sk_d1d_webhook_sentinel";
+}
+
+function requiredTossPaymentKey(payload: TossWebhookPayload): string {
+  if (!payload.paymentKey) throw new Error("Missing Toss paymentKey");
+  return payload.paymentKey;
+}
+
+function recordingTossFetch(response: Response): { calls: TossFetchCall[]; fetchFn: typeof fetch } {
+  const calls: TossFetchCall[] = [];
+  return {
+    calls,
+    fetchFn: (input, init) => {
+      calls.push({ input, init });
+      return Promise.resolve(response.clone());
+    },
+  };
+}
+
+function tossLookupResponse(options: {
+  paymentKey: string;
+  orderId?: string;
+  amount?: number;
+  currency?: string;
+}): Response {
+  return new Response(JSON.stringify({
+    paymentKey: options.paymentKey,
+    orderId: options.orderId ?? deriveTossOrderId("synthetic_payment_id"),
+    status: "DONE",
+    totalAmount: options.amount ?? 12_000,
+    currency: options.currency ?? "KRW",
+    approvedAt: "2026-08-02T00:01:30.000Z",
+  }), { status: 200 });
+}
+
+function onlyTossFetchCall(calls: readonly TossFetchCall[]): TossFetchCall {
+  expect(calls).toHaveLength(1);
+  const call = calls[0];
+  if (!call) throw new Error("Expected one Toss lookup fetch call.");
+  return call;
+}
+
 function routeRequest(payload: MockWebhookPayload): Request {
   return new Request("http://localhost/api/payments/toss/webhook", {
     method: "POST",
@@ -683,6 +993,38 @@ async function eventSnapshot(transmissionId: string) {
   });
   if (!event) throw new Error(`Missing event ${transmissionId}`);
   return event;
+}
+
+async function eventProvenance(transmissionId: string) {
+  const event = await db.paymentEvent.findFirst({
+    where: { transmissionId },
+    select: { verifiedMode: true, verifiedCredentialBinding: true },
+  });
+  if (!event) throw new Error(`Missing event provenance ${transmissionId}`);
+  return event;
+}
+
+async function createSyntheticTossEvent(
+  payload: TossWebhookPayload,
+  provenance: { verifiedMode: PaymentMode | null; binding: string | null },
+): Promise<void> {
+  await db.paymentEvent.create({
+    data: {
+      provider: PaymentProvider.TOSS,
+      source: PaymentEventSource.WEBHOOK,
+      transmissionId: payload.transmissionId,
+      eventType: payload.eventType,
+      verifiedMode: provenance.verifiedMode,
+      verifiedCredentialBinding: provenance.binding,
+      raw: rawTossWebhook(payload).body,
+      status: PaymentEventStatus.RETRYABLE_FAILED,
+      receivedAt: B4_RECEIVED_AT,
+      failureStage: PaymentEventFailureStage.COMPLETE,
+      failureCode: "COMPLETE.TRANSIENT_DB_ERROR",
+      lastError: "Synthetic nonterminal event",
+    },
+    select: { id: true },
+  });
 }
 
 async function onlyRejection(transmissionId: string) {

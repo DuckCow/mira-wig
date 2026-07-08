@@ -487,22 +487,24 @@ model PaymentOutbox {
 }
 
 model PaymentEvent {
-  id                 String                    @id @default(cuid())
-  provider           PaymentProvider
-  source             PaymentEventSource
-  transmissionId     String?
-  eventType          String
-  checkoutSessionId  String?
-  providerPaymentKey String?
-  raw                Json
-  status             PaymentEventStatus        @default(RECEIVED)
-  receivedAt         DateTime                  @default(now())
-  processedAt        DateTime?
-  attemptCount       Int                       @default(0)
-  lastAttemptAt      DateTime?
-  failureStage       PaymentEventFailureStage?
-  failureCode        String?
-  lastError          String?
+  id                        String                    @id @default(cuid())
+  provider                  PaymentProvider
+  source                    PaymentEventSource
+  transmissionId            String?
+  eventType                 String
+  verifiedMode              PaymentMode?
+  verifiedCredentialBinding String?
+  checkoutSessionId         String?
+  providerPaymentKey        String?
+  raw                       Json
+  status                    PaymentEventStatus        @default(RECEIVED)
+  receivedAt                DateTime                  @default(now())
+  processedAt               DateTime?
+  attemptCount              Int                       @default(0)
+  lastAttemptAt             DateTime?
+  failureStage              PaymentEventFailureStage?
+  failureCode               String?
+  lastError                 String?
 
   @@unique([provider, transmissionId])
   @@index([checkoutSessionId])

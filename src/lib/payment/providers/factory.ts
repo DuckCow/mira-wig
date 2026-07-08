@@ -28,6 +28,12 @@ export interface SandboxExternalCodeRegistryEntry {
   capability: ProviderCapabilityValue;
 }
 
+export interface SandboxExternalCapabilityInput {
+  provider: ProviderCode;
+  mode: PaymentModeValue;
+  capability: ProviderCapabilityValue;
+}
+
 export interface CreateProviderAdapterOptions {
   env?: ProviderEnv;
   sandboxExternalCodeRegistry?: readonly SandboxExternalCodeRegistryEntry[];
@@ -68,8 +74,9 @@ function sandboxAdapterForContext(
   context: ProviderFactoryContext,
   options: CreateProviderAdapterOptions,
 ): PaymentProvider {
-  const codeKeyEnabled = sandboxCodeKeyEnabled(context, options.sandboxExternalCodeRegistry);
-  const deploymentKeyEnabled = sandboxDeploymentKeyEnabled(context, options.env ?? process.env);
+  const capability = sandboxCapabilityInput(context, ProviderCapability.ACTION_ADAPTER);
+  const codeKeyEnabled = sandboxExternalCodeKeyEnabled(capability, options.sandboxExternalCodeRegistry);
+  const deploymentKeyEnabled = sandboxExternalDeploymentKeyEnabled(capability, options.env ?? process.env);
   if (!codeKeyEnabled && !deploymentKeyEnabled) return createMockPaymentProvider(context.provider);
   if (codeKeyEnabled !== deploymentKeyEnabled) {
     throw providerError(context, "SANDBOX_EXTERNAL_MISCONFIGURED", "Sandbox external provider opt-in is incomplete.");
@@ -80,24 +87,30 @@ function sandboxAdapterForContext(
   throw providerError(context, "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE", "Sandbox external provider adapter is not wired.");
 }
 
-function sandboxCodeKeyEnabled(
-  context: ProviderFactoryContext,
+export function sandboxExternalCodeKeyEnabled(
+  input: SandboxExternalCapabilityInput,
   registry: readonly SandboxExternalCodeRegistryEntry[] = [],
 ): boolean {
   return registry.some((entry) => (
-    entry.provider === context.provider
+    entry.provider === input.provider
     && entry.mode === PaymentMode.SANDBOX
-    && entry.capability === ProviderCapability.ACTION_ADAPTER
+    && input.mode === PaymentMode.SANDBOX
+    && entry.capability === input.capability
   ));
 }
 
-function sandboxDeploymentKeyEnabled(context: ProviderFactoryContext, env: ProviderEnv): boolean {
-  const key = sandboxDeploymentKeyName(context.provider);
+export function sandboxExternalDeploymentKeyEnabled(input: SandboxExternalCapabilityInput, env: ProviderEnv): boolean {
+  const key = sandboxDeploymentKeyName(input.provider);
   if (!key) return false;
   const value = env[key]?.trim() ?? "";
   if (value.length === 0) return false;
   if (value === "ENABLED") return true;
-  throw providerError(context, "SANDBOX_EXTERNAL_CONFIG_INVALID", "Sandbox external provider opt-in config is invalid.");
+  throw new ProviderResolveException(
+    "SANDBOX_EXTERNAL_CONFIG_INVALID",
+    input.provider,
+    String(input.mode),
+    "Sandbox external provider opt-in config is invalid.",
+  );
 }
 
 function sandboxDeploymentKeyName(provider: ProviderCode): string | null {
@@ -136,6 +149,13 @@ function assertSandboxCredentialsPresent(context: ProviderFactoryContext): void 
   const requiredCredentials = context.credentials.filter((credential) => credential.required);
   if (requiredCredentials.length > 0 && requiredCredentials.every((credential) => credential.present)) return;
   throw providerError(context, "SANDBOX_EXTERNAL_CREDENTIALS_MISSING", "Sandbox external provider credentials are missing.");
+}
+
+function sandboxCapabilityInput(
+  context: ProviderFactoryContext,
+  capability: ProviderCapabilityValue,
+): SandboxExternalCapabilityInput {
+  return { provider: context.provider, mode: context.mode, capability };
 }
 
 function modeAllowed(allowedModes: readonly PaymentModeValue[], mode: string): boolean {

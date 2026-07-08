@@ -15,11 +15,17 @@ interface ProviderCredentialRequirement {
   name: string;
 }
 
-const ACTION_ADAPTER_CREDENTIALS: readonly ProviderCredentialRequirement[] = [
+const PROVIDER_CREDENTIALS: readonly ProviderCredentialRequirement[] = [
   {
     provider: ProviderCode.TOSS,
     mode: PaymentMode.SANDBOX,
     capability: ProviderCapability.ACTION_ADAPTER,
+    name: TOSS_SANDBOX_SECRET_KEY,
+  },
+  {
+    provider: ProviderCode.TOSS,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.WEBHOOK_VERIFIER,
     name: TOSS_SANDBOX_SECRET_KEY,
   },
   {
@@ -40,7 +46,7 @@ export function credentialChecksForProvider(
   input: ProviderCredentialRequirementInput,
   env: ProviderEnv = process.env,
 ): readonly ProviderCredentialCheck[] {
-  return ACTION_ADAPTER_CREDENTIALS
+  return PROVIDER_CREDENTIALS
     .filter((requirement) => matchesRequirement(requirement, input))
     .map((requirement) => ({
       name: requirement.name,

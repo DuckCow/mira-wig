@@ -5,6 +5,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import type { PaymentEvent, PaymentProvider } from "@prisma/client";
+import type { PaymentMode } from "@/lib/payment/providers/routing";
 import type { WebhookMetadata } from "./verify";
 
 type EventClient = Pick<Prisma.TransactionClient, "paymentEvent">;
@@ -15,6 +16,8 @@ export type RecordedEvent = Pick<
   | "status"
   | "transmissionId"
   | "eventType"
+  | "verifiedMode"
+  | "verifiedCredentialBinding"
   | "raw"
   | "attemptCount"
   | "lastAttemptAt"
@@ -22,6 +25,8 @@ export type RecordedEvent = Pick<
 
 export interface RecordWebhookEventInput extends WebhookMetadata {
   provider: PaymentProvider;
+  verifiedMode?: PaymentMode | null;
+  verifiedCredentialBinding?: string | null;
   rawBody: string;
   receivedAt: Date;
 }
@@ -156,6 +161,8 @@ function eventCreateData(input: RecordWebhookEventInput): Prisma.PaymentEventCre
     source: PaymentEventSource.WEBHOOK,
     transmissionId: input.transmissionId,
     eventType: input.eventType,
+    verifiedMode: input.verifiedMode ?? null,
+    verifiedCredentialBinding: input.verifiedCredentialBinding ?? null,
     raw: input.rawBody,
     receivedAt: input.receivedAt,
   };
@@ -177,6 +184,8 @@ function eventSelect(): Prisma.PaymentEventSelect {
     status: true,
     transmissionId: true,
     eventType: true,
+    verifiedMode: true,
+    verifiedCredentialBinding: true,
     raw: true,
     attemptCount: true,
     lastAttemptAt: true,

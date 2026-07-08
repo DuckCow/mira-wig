@@ -98,6 +98,26 @@ describe("Toss query webhook verifier", () => {
     expect(lookup.calls).toEqual([PAYMENT_KEY]);
   });
 
+  it("rejects lookup network errors with no verified capture input", async () => {
+    const lookup = recordingLookup({ kind: "network_error" });
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify(rawWebhook());
+
+    expect(result).toMatchObject({ kind: "rejected", reason: "LOOKUP_UNAVAILABLE", code: "TOSS.LOOKUP_NETWORK_ERROR" });
+    expect(lookup.calls).toEqual([PAYMENT_KEY]);
+  });
+
+  it("distinguishes locally invalid paymentKey from genuine Toss 400 responses", async () => {
+    const lookup = recordingLookup({ kind: "local_invalid_payment_key", receivedAt: LOOKED_UP_AT });
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify(rawWebhook());
+
+    expect(result).toMatchObject({ kind: "rejected", reason: "METADATA_INVALID", code: "TOSS.PAYMENT_KEY_LOCAL_INVALID" });
+    expect(lookup.calls).toEqual([PAYMENT_KEY]);
+  });
+
   it("rejects non-2xx lookup with no verified capture input", async () => {
     const lookup = recordingLookup(response({ code: "FAILED_INTERNAL_SYSTEM_PROCESSING" }, { httpStatus: 502 }));
     const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
@@ -166,17 +186,19 @@ describe("Toss query webhook verifier", () => {
     expect(lookup.calls).toEqual([]);
   });
 
-  it("verifies CANCEL_STATUS_CHANGED without lookup and parser ignores it", async () => {
+  it("acks CANCEL_STATUS_CHANGED as unsupported without lookup or verified input", async () => {
     const lookup = recordingLookup(response(tossPayment()));
     const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
 
     const result = await verifier.verify(rawWebhook({ eventType: "CANCEL_STATUS_CHANGED", data: { cancelId: "cancel_123" } }));
-    const input = expectVerified(result);
-    const parsed = await parseWithCorrelation(input);
 
-    expect(input.authoritativeState).toBeUndefined();
+    expect(result).toMatchObject({
+      kind: "rejected",
+      reason: "UNSUPPORTED_EVENT",
+      code: "TOSS.EVENT_ACKED_UNSUPPORTED",
+      httpStatus: 200,
+    });
     expect(lookup.calls).toEqual([]);
-    expect(expectIgnored(parsed).reason).toBe("TOSS_CANCEL_STATUS_CHANGED_OUT_OF_SCOPE");
   });
 
   it("rejects DONE lookup response without approvedAt", async () => {
@@ -189,7 +211,7 @@ describe("Toss query webhook verifier", () => {
     expect(lookup.calls).toEqual([PAYMENT_KEY]);
   });
 
-  it("rejects DEPOSIT_CALLBACK before ordinary payment lookup", async () => {
+  it("acks DEPOSIT_CALLBACK as unsupported before ordinary payment lookup", async () => {
     const lookup = recordingLookup(response(tossPayment()));
     const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
 
@@ -198,7 +220,8 @@ describe("Toss query webhook verifier", () => {
     expect(result).toMatchObject({
       kind: "rejected",
       reason: "UNSUPPORTED_EVENT",
-      code: "TOSS.EVENT_UNSUPPORTED",
+      code: "TOSS.EVENT_ACKED_UNSUPPORTED",
+      httpStatus: 200,
     });
     expect(lookup.calls).toEqual([]);
   });

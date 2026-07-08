@@ -11,6 +11,7 @@ import {
   normalizeTossConfirmResponse,
   type TossConfirmRequest,
 } from "./confirm";
+import { tossBasicAuthorization } from "./auth";
 import { buildTossConfirmFailure, classifyTossConfirmError } from "./errors";
 
 export type TossConfirmHttpRequest = TossConfirmRequest;
@@ -217,12 +218,6 @@ function fetchRequestInit(
     body: JSON.stringify(request.body),
     signal,
   };
-}
-
-function tossBasicAuthorization(secretKey: string): string {
-  const normalized = secretKey.trim();
-  if (!normalized) throw new Error("Toss confirm secret key is required.");
-  return `Basic ${Buffer.from(`${normalized}:`, "utf8").toString("base64")}`;
 }
 
 async function safeJsonBody(response: Response): Promise<unknown> {

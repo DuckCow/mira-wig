@@ -107,7 +107,7 @@ describe("Toss lookup HTTP port", () => {
 
       const result = await port(paymentKey);
 
-      expect(result).toEqual({ kind: "response", httpStatus: 400, body: null, receivedAt: NOW });
+      expect(result).toEqual({ kind: "local_invalid_payment_key", receivedAt: NOW });
       expect(fetch.calls).toEqual([]);
     },
   );
@@ -119,7 +119,7 @@ describe("Toss lookup HTTP port", () => {
 
     const result = await port("payment_fetch_throw");
 
-    expect(result).toEqual({ kind: "network_timeout" });
+    expect(result).toEqual({ kind: "network_error" });
     expect(JSON.stringify(result)).not.toContain(sentinel);
     expect(JSON.stringify(result)).not.toContain(AUTHORIZATION);
     expect(JSON.stringify(result)).not.toContain("socket closed");

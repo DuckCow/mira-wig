@@ -10,14 +10,15 @@ const DEPOSIT_CALLBACK = "DEPOSIT_CALLBACK";
 
 export type TossLookupHttpResult =
   | { kind: "response"; httpStatus: number; body: unknown; receivedAt?: Date }
-  | { kind: "network_timeout" };
+  | { kind: "network_timeout" }
+  | { kind: "network_error" }
+  | { kind: "local_invalid_payment_key"; receivedAt?: Date };
 
 // `network_timeout`, non-2xx lookup responses, and caught lookup-port infrastructure
 // failures become LOOKUP_UNAVAILABLE verifier rejections in this dormant module.
 // Future production wiring should classify them as retryable/provider-redelivery-safe,
 // and lookup implementations must not fabricate provider data on transient failures.
 export type TossPaymentLookupPort = (paymentKey: string) => Promise<TossLookupHttpResult>;
-
 // `null` means the paymentId is definitively absent, unknown, or not owned by Mira, so callers may ignore/no-capture; infrastructure, DB, timeout-like, or ambiguous failures must throw, and future Prisma ports must not catch transient DB errors as null.
 export type TossPaymentCorrelationPort = (paymentId: string) => Promise<{ checkoutSessionId: string } | null>;
 
@@ -130,11 +131,12 @@ function prepareVerifiedTrigger(raw: ProviderWebhookRawRequest, context: Verifie
     return { kind: "result", result: verificationRejected("METADATA_INVALID", "TOSS.METADATA_INVALID", "Toss webhook metadata is invalid.", metadata, 400) };
   }
   const requiredMetadata: RequiredMetadata = { ...metadata, transmissionId: metadata.transmissionId, eventType: metadata.eventType };
+  if (isAckedUnsupportedEvent(trigger.value.eventType)) {
+    return { kind: "result", result: verificationRejected("UNSUPPORTED_EVENT", "TOSS.EVENT_ACKED_UNSUPPORTED", "Toss webhook event is acknowledged but unsupported.", requiredMetadata, 200) };
+  }
   if (!isLookupVerifiedEvent(trigger.value.eventType)) {
     return { kind: "result", result: verificationRejected("UNSUPPORTED_EVENT", "TOSS.EVENT_UNSUPPORTED", "Toss webhook event is unsupported.", metadata, 400) };
   }
-  // Dormant-module trigger ack only: this is unauthenticated/uncorroborated, deliberately avoids lookup because cancel semantics are out of ordinary-capture scope here, and must not be production-wired as a normal accepted PaymentEvent without an explicit ingress decision. Future wiring must decide whether to ack without creating a PaymentEvent row or restore corroboration when a safe paymentKey exists.
-  if (trigger.value.eventType === CANCEL_STATUS_CHANGED) return { kind: "result", result: { kind: "verified", input: verifiedTriggerInput(raw, context, requiredMetadata) } };
   if (!trigger.value.paymentKey) {
     return { kind: "result", result: verificationRejected("METADATA_INVALID", "TOSS.PAYMENT_KEY_MISSING", "Toss webhook paymentKey is missing.", metadata, 400) };
   }
@@ -185,6 +187,12 @@ function lookupFailure(result: TossLookupHttpResult, metadata: RequiredMetadata)
   if (result.kind === "network_timeout") {
     return lookupUnavailable("TOSS.LOOKUP_TIMEOUT", "Toss lookup timed out.", metadata, 503);
   }
+  if (result.kind === "network_error") {
+    return lookupUnavailable("TOSS.LOOKUP_NETWORK_ERROR", "Toss lookup network error.", metadata, 503);
+  }
+  if (result.kind === "local_invalid_payment_key") {
+    return verificationRejected("METADATA_INVALID", "TOSS.PAYMENT_KEY_LOCAL_INVALID", "Toss webhook paymentKey is invalid.", metadata, 400);
+  }
   if (result.httpStatus >= 200 && result.httpStatus < 300) return null;
   const diagnostics = tossProviderDiagnostics({ httpStatus: result.httpStatus, safeMessage: "Toss lookup failed." });
   return lookupUnavailable("TOSS.LOOKUP_HTTP_ERROR", "Toss lookup failed.", metadata, result.httpStatus, diagnostics);
@@ -212,10 +220,6 @@ function requiredLookupPaymentFields(body: Record<string, unknown>): Omit<TossLo
   const currency = stringField(body, "currency");
   if (!paymentKey || !orderId || !status || totalAmount === null || !currency) return null;
   return { paymentKey, orderId, status, totalAmount, currency };
-}
-
-function verifiedTriggerInput(raw: ProviderWebhookRawRequest, context: VerifiedProviderContext, metadata: RequiredMetadata): ProviderVerifiedWebhookInput {
-  return { ...raw, provider: context.provider, transmissionId: metadata.transmissionId, eventId: metadata.eventId, eventType: metadata.eventType, context };
 }
 
 function verifiedInput(raw: ProviderWebhookRawRequest, context: VerifiedProviderContext, metadata: RequiredMetadata, payment: TossLookupPayment, lookedUpAt: Date): ProviderVerifiedWebhookInput {
@@ -255,7 +259,11 @@ function verificationRejected(
 }
 
 function isLookupVerifiedEvent(eventType: string): boolean {
-  return eventType === PAYMENT_STATUS_CHANGED || eventType === CANCEL_STATUS_CHANGED;
+  return eventType === PAYMENT_STATUS_CHANGED;
+}
+
+function isAckedUnsupportedEvent(eventType: string): boolean {
+  return eventType === CANCEL_STATUS_CHANGED || eventType === DEPOSIT_CALLBACK;
 }
 
 function readHeader(raw: ProviderWebhookRawRequest, key: string): string | undefined {

@@ -56,8 +56,8 @@ async function lookupPayment(input: LookupPaymentInput): Promise<TossLookupHttpR
   try {
     const fetched = fetchTossLookup(input, controller.signal);
     return await Promise.race([fetched, timeout]);
-  } catch {
-    return { kind: "network_timeout" };
+  } catch (error) {
+    return isAbortError(error) ? { kind: "network_timeout" } : { kind: "network_error" };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
@@ -85,7 +85,7 @@ function lookupUrl(baseUrl: string, paymentKey: string): URL {
 }
 
 function invalidPaymentKey(now: () => Date): TossLookupHttpResult {
-  return { kind: "response", httpStatus: 400, body: null, receivedAt: now() };
+  return { kind: "local_invalid_payment_key", receivedAt: now() };
 }
 
 function isValidPaymentKey(paymentKey: string): boolean {
@@ -123,4 +123,8 @@ function tossLookupTimeoutMs(timeoutMs: number | undefined): number {
   if (timeoutMs === undefined) return DEFAULT_TOSS_LOOKUP_TIMEOUT_MS;
   if (Number.isSafeInteger(timeoutMs) && timeoutMs > 0) return timeoutMs;
   throw new Error("Toss lookup timeout must be a positive integer.");
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
