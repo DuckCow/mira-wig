@@ -12,7 +12,10 @@ export type TossLookupHttpResult =
   | { kind: "response"; httpStatus: number; body: unknown; receivedAt?: Date }
   | { kind: "network_timeout" };
 
-// `network_timeout` means provider lookup timeout/unavailability; thrown port errors are infrastructure failures for future retryable classification, not verified captures, and lookup code must not fabricate missing/invalid provider data on transient failure.
+// `network_timeout`, non-2xx lookup responses, and caught lookup-port infrastructure
+// failures become LOOKUP_UNAVAILABLE verifier rejections in this dormant module.
+// Future production wiring should classify them as retryable/provider-redelivery-safe,
+// and lookup implementations must not fabricate provider data on transient failures.
 export type TossPaymentLookupPort = (paymentKey: string) => Promise<TossLookupHttpResult>;
 
 // `null` means the paymentId is definitively absent, unknown, or not owned by Mira, so callers may ignore/no-capture; infrastructure, DB, timeout-like, or ambiguous failures must throw, and future Prisma ports must not catch transient DB errors as null.
@@ -22,24 +25,14 @@ interface TossWebhookTrigger { eventType: string; eventId?: string; paymentKey?:
 
 interface TossLookupPayment { paymentKey: string; orderId: string; status: string; totalAmount: number; currency: string; approvedAt?: Date }
 
-export function createTossQueryWebhookVerifier({
-  context,
-  lookup,
-}: {
-  context: VerifiedProviderContext;
-  lookup: TossPaymentLookupPort;
-}): ProviderWebhookVerifier {
+export function createTossQueryWebhookVerifier({ context, lookup }: { context: VerifiedProviderContext; lookup: TossPaymentLookupPort }): ProviderWebhookVerifier {
   return {
     extractCandidateMetadata: (raw) => extractTossCandidateMetadata(raw),
     verify: (raw) => verifyTossWebhook(raw, context, lookup),
   };
 }
 
-export function createTossWebhookParser({
-  correlation,
-}: {
-  correlation: TossPaymentCorrelationPort;
-}): ProviderWebhookParser {
+export function createTossWebhookParser({ correlation }: { correlation: TossPaymentCorrelationPort }): ProviderWebhookParser {
   return {
     parse: (input) => parseTossWebhook(input, correlation),
   };
@@ -49,13 +42,7 @@ function extractTossCandidateMetadata(raw: ProviderWebhookRawRequest): ProviderW
   const trigger = parseTrigger(raw.body);
   const metadata = tossMetadata(raw, trigger.ok ? trigger.value : undefined);
   if (metadata.transmissionId && metadata.eventType) return { kind: "metadata", metadata };
-  return {
-    kind: "rejected",
-    reason: "METADATA_INVALID",
-    code: "TOSS.METADATA_MISSING",
-    safeMessage: "Toss webhook metadata is missing.",
-    metadata,
-  };
+  return { kind: "rejected", reason: "METADATA_INVALID", code: "TOSS.METADATA_MISSING", safeMessage: "Toss webhook metadata is missing.", metadata };
 }
 
 async function verifyTossWebhook(
@@ -65,19 +52,16 @@ async function verifyTossWebhook(
 ): Promise<ProviderWebhookVerificationResult> {
   const trigger = parseTrigger(raw.body);
   const metadata = tossMetadata(raw, trigger.ok ? trigger.value : undefined);
-  if (!metadata.transmissionId || !metadata.eventType || !trigger.ok) {
-    return verificationRejected("METADATA_INVALID", "TOSS.METADATA_INVALID", "Toss webhook metadata is invalid.", metadata, 400);
-  }
-  if (!isLookupVerifiedEvent(trigger.value.eventType)) {
-    return verificationRejected("UNSUPPORTED_EVENT", "TOSS.EVENT_UNSUPPORTED", "Toss webhook event is unsupported.", metadata, 400);
-  }
-  if (!trigger.value.paymentKey) {
-    return verificationRejected("METADATA_INVALID", "TOSS.PAYMENT_KEY_MISSING", "Toss webhook paymentKey is missing.", metadata, 400);
-  }
+  const prepared = prepareVerifiedTrigger(raw, context, trigger, metadata);
+  if (prepared.kind === "result") return prepared.result;
 
-  const result = await lookup(trigger.value.paymentKey);
-  const requiredMetadata: RequiredMetadata = { ...metadata, transmissionId: metadata.transmissionId, eventType: metadata.eventType };
-  return verifiedFromLookup(raw, context, trigger.value, requiredMetadata, result);
+  let result: TossLookupHttpResult;
+  try {
+    result = await lookup(prepared.paymentKey);
+  } catch {
+    return lookupUnavailable("TOSS.LOOKUP_PORT_UNAVAILABLE", "Toss lookup was unavailable.", prepared.metadata, 503);
+  }
+  return verifiedFromLookup(raw, context, prepared.trigger, prepared.metadata, result);
 }
 
 function verifiedFromLookup(
@@ -108,10 +92,10 @@ async function parseTossWebhook(
   input: ProviderVerifiedWebhookInput,
   correlation: TossPaymentCorrelationPort,
 ): Promise<NormalizedProviderWebhookEvent> {
-  const state = input.authoritativeState;
-  if (!state) throw new Error("Toss query webhook missing authoritative state.");
-  const ignoredReason = parseIgnoredReason(input.eventType, state.status);
-  if (ignoredReason) return ignored(input, ignoredReason);
+  const ready = captureReadyState(input);
+  if (ready.kind === "ignored") return ready.event;
+  if (ready.kind === "missing") throw new Error("Toss query webhook missing authoritative state.");
+  const state = ready.state;
 
   const orderId = lookupOrderId(state);
   if (!orderId) return ignored(input, "TOSS_LOOKUP_ORDER_ID_MISSING");
@@ -137,12 +121,43 @@ async function parseTossWebhook(
 
 type TriggerParseResult = { ok: true; value: TossWebhookTrigger } | { ok: false };
 type RequiredMetadata = ProviderWebhookCandidateMetadata & { transmissionId: string; eventType: string };
+type PreparedVerification =
+  | { kind: "result"; result: ProviderWebhookVerificationResult }
+  | { kind: "lookup"; trigger: TossWebhookTrigger; paymentKey: string; metadata: RequiredMetadata };
 
-function parseIgnoredReason(eventType: string, status: string): string | null {
+function prepareVerifiedTrigger(raw: ProviderWebhookRawRequest, context: VerifiedProviderContext, trigger: TriggerParseResult, metadata: ProviderWebhookCandidateMetadata): PreparedVerification {
+  if (!metadata.transmissionId || !metadata.eventType || !trigger.ok) {
+    return { kind: "result", result: verificationRejected("METADATA_INVALID", "TOSS.METADATA_INVALID", "Toss webhook metadata is invalid.", metadata, 400) };
+  }
+  const requiredMetadata: RequiredMetadata = { ...metadata, transmissionId: metadata.transmissionId, eventType: metadata.eventType };
+  if (!isLookupVerifiedEvent(trigger.value.eventType)) {
+    return { kind: "result", result: verificationRejected("UNSUPPORTED_EVENT", "TOSS.EVENT_UNSUPPORTED", "Toss webhook event is unsupported.", metadata, 400) };
+  }
+  // Dormant-module trigger ack only: this is unauthenticated/uncorroborated, deliberately avoids lookup because cancel semantics are out of ordinary-capture scope here, and must not be production-wired as a normal accepted PaymentEvent without an explicit ingress decision. Future wiring must decide whether to ack without creating a PaymentEvent row or restore corroboration when a safe paymentKey exists.
+  if (trigger.value.eventType === CANCEL_STATUS_CHANGED) return { kind: "result", result: { kind: "verified", input: verifiedTriggerInput(raw, context, requiredMetadata) } };
+  if (!trigger.value.paymentKey) {
+    return { kind: "result", result: verificationRejected("METADATA_INVALID", "TOSS.PAYMENT_KEY_MISSING", "Toss webhook paymentKey is missing.", metadata, 400) };
+  }
+  return { kind: "lookup", trigger: trigger.value, paymentKey: trigger.value.paymentKey, metadata: requiredMetadata };
+}
+
+type CaptureReadyState = { kind: "ready"; state: ProviderAuthoritativeState } | { kind: "ignored"; event: NormalizedProviderWebhookEvent } | { kind: "missing" };
+
+function captureReadyState(input: ProviderVerifiedWebhookInput): CaptureReadyState {
+  const state = input.authoritativeState;
+  const ignoredReason = parseIgnoredReason(input.eventType, state?.status);
+  if (ignoredReason) return { kind: "ignored", event: ignored(input, ignoredReason) };
+  if (!state) return { kind: "missing" };
+  if (!state.approvedAt) return { kind: "ignored", event: ignored(input, "TOSS_DONE_APPROVED_AT_MISSING") };
+  return { kind: "ready", state };
+}
+
+function parseIgnoredReason(eventType: string, status: string | undefined): string | null {
   if (eventType === CANCEL_STATUS_CHANGED) return "TOSS_CANCEL_STATUS_CHANGED_OUT_OF_SCOPE";
   if (eventType === DEPOSIT_CALLBACK) return "TOSS_DEPOSIT_CALLBACK_OUT_OF_SCOPE";
   if (eventType !== PAYMENT_STATUS_CHANGED) return "TOSS_EVENT_UNSUPPORTED";
-  return status === "DONE" ? null : statusIgnoredReason(status);
+  if (status === undefined || status === "DONE") return null;
+  return statusIgnoredReason(status);
 }
 
 function parseTrigger(body: string): TriggerParseResult {
@@ -152,14 +167,7 @@ function parseTrigger(body: string): TriggerParseResult {
     const eventType = stringField(parsed, "eventType");
     if (!eventType) return { ok: false };
     const data = recordField(parsed, "data");
-    return {
-      ok: true,
-      value: {
-        eventType,
-        eventId: stringField(parsed, "eventId") ?? stringField(parsed, "id"),
-        paymentKey: data ? stringField(data, "paymentKey") : undefined,
-      },
-    };
+    return { ok: true, value: { eventType, eventId: stringField(parsed, "eventId") ?? stringField(parsed, "id"), paymentKey: data ? stringField(data, "paymentKey") : undefined } };
   } catch {
     return { ok: false };
   }
@@ -173,59 +181,46 @@ function tossMetadata(raw: ProviderWebhookRawRequest, trigger: TossWebhookTrigge
   };
 }
 
-function lookupFailure(
-  result: TossLookupHttpResult,
-  metadata: RequiredMetadata,
-): ProviderWebhookVerificationResult | null {
+function lookupFailure(result: TossLookupHttpResult, metadata: RequiredMetadata): ProviderWebhookVerificationResult | null {
   if (result.kind === "network_timeout") {
-    return verificationRejected("AUTHENTICATION_FAILED", "TOSS.LOOKUP_TIMEOUT", "Toss lookup timed out.", metadata, 503);
+    return lookupUnavailable("TOSS.LOOKUP_TIMEOUT", "Toss lookup timed out.", metadata, 503);
   }
   if (result.httpStatus >= 200 && result.httpStatus < 300) return null;
-  const diagnostics = tossProviderDiagnostics({
-    httpStatus: result.httpStatus,
-    safeMessage: "Toss lookup failed.",
-  });
-  return verificationRejected("AUTHENTICATION_FAILED", "TOSS.LOOKUP_HTTP_ERROR", "Toss lookup failed.", metadata, result.httpStatus, diagnostics);
+  const diagnostics = tossProviderDiagnostics({ httpStatus: result.httpStatus, safeMessage: "Toss lookup failed." });
+  return lookupUnavailable("TOSS.LOOKUP_HTTP_ERROR", "Toss lookup failed.", metadata, result.httpStatus, diagnostics);
+}
+
+function lookupUnavailable(code: string, safeMessage: string, metadata: RequiredMetadata, httpStatus: number, diagnostics?: ProviderDiagnostics): ProviderWebhookVerificationResult {
+  return verificationRejected("LOOKUP_UNAVAILABLE", code, safeMessage, metadata, httpStatus, diagnostics);
 }
 
 function parseLookupPayment(body: unknown): TossLookupPayment | null {
   if (!isRecord(body)) return null;
+  const fields = requiredLookupPaymentFields(body);
+  if (!fields) return null;
+  const approvedAt = optionalDate(body, "approvedAt");
+  if (approvedAt === null) return null;
+  if (fields.status === "DONE" && approvedAt === undefined) return null;
+  return { ...fields, approvedAt };
+}
+
+function requiredLookupPaymentFields(body: Record<string, unknown>): Omit<TossLookupPayment, "approvedAt"> | null {
   const paymentKey = stringField(body, "paymentKey");
   const orderId = stringField(body, "orderId");
   const status = stringField(body, "status");
   const totalAmount = integerField(body, "totalAmount");
   const currency = stringField(body, "currency");
   if (!paymentKey || !orderId || !status || totalAmount === null || !currency) return null;
-  const approvedAt = optionalDate(body, "approvedAt");
-  if (approvedAt === null) return null;
-  return { paymentKey, orderId, status, totalAmount, currency, approvedAt };
+  return { paymentKey, orderId, status, totalAmount, currency };
 }
 
-function verifiedInput(
-  raw: ProviderWebhookRawRequest,
-  context: VerifiedProviderContext,
-  metadata: RequiredMetadata,
-  payment: TossLookupPayment,
-  lookedUpAt: Date,
-): ProviderVerifiedWebhookInput {
-  const authoritativeState: ProviderAuthoritativeState = {
-    lookedUpAt,
-    approvedAt: payment.approvedAt,
-    providerPaymentKey: payment.paymentKey,
-    status: payment.status,
-    amountMinor: payment.totalAmount,
-    currency: payment.currency,
-    raw: { orderId: payment.orderId },
-  };
-  return {
-    ...raw,
-    provider: context.provider,
-    transmissionId: metadata.transmissionId,
-    eventId: metadata.eventId,
-    eventType: metadata.eventType,
-    context,
-    authoritativeState,
-  };
+function verifiedTriggerInput(raw: ProviderWebhookRawRequest, context: VerifiedProviderContext, metadata: RequiredMetadata): ProviderVerifiedWebhookInput {
+  return { ...raw, provider: context.provider, transmissionId: metadata.transmissionId, eventId: metadata.eventId, eventType: metadata.eventType, context };
+}
+
+function verifiedInput(raw: ProviderWebhookRawRequest, context: VerifiedProviderContext, metadata: RequiredMetadata, payment: TossLookupPayment, lookedUpAt: Date): ProviderVerifiedWebhookInput {
+  const authoritativeState: ProviderAuthoritativeState = { lookedUpAt, approvedAt: payment.approvedAt, providerPaymentKey: payment.paymentKey, status: payment.status, amountMinor: payment.totalAmount, currency: payment.currency, raw: { orderId: payment.orderId } };
+  return { ...raw, provider: context.provider, transmissionId: metadata.transmissionId, eventId: metadata.eventId, eventType: metadata.eventType, context, authoritativeState };
 }
 
 function lookupOrderId(state: ProviderAuthoritativeState): string | null {

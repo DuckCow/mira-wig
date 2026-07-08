@@ -94,7 +94,7 @@ describe("Toss query webhook verifier", () => {
 
     const result = await verifier.verify(rawWebhook());
 
-    expect(result.kind).toBe("rejected");
+    expect(result).toMatchObject({ kind: "rejected", reason: "LOOKUP_UNAVAILABLE", code: "TOSS.LOOKUP_TIMEOUT" });
     expect(lookup.calls).toEqual([PAYMENT_KEY]);
   });
 
@@ -104,7 +104,19 @@ describe("Toss query webhook verifier", () => {
 
     const result = await verifier.verify(rawWebhook());
 
-    expect(result.kind).toBe("rejected");
+    expect(result).toMatchObject({ kind: "rejected", reason: "LOOKUP_UNAVAILABLE", code: "TOSS.LOOKUP_HTTP_ERROR" });
+    expect(lookup.calls).toEqual([PAYMENT_KEY]);
+  });
+
+  it("rejects thrown lookup-port failures as lookup unavailable without leaking details", async () => {
+    const sentinel = "sentinel_lookup_throw_must_not_leak";
+    const lookup = throwingLookup(new Error(`db pool unavailable ${sentinel}`));
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify(rawWebhook());
+
+    expect(result).toMatchObject({ kind: "rejected", reason: "LOOKUP_UNAVAILABLE", code: "TOSS.LOOKUP_PORT_UNAVAILABLE" });
+    expect(JSON.stringify(result)).not.toContain(sentinel);
     expect(lookup.calls).toEqual([PAYMENT_KEY]);
   });
 
@@ -115,6 +127,65 @@ describe("Toss query webhook verifier", () => {
     const result = await verifier.verify(rawWebhook());
 
     expect(result.kind).toBe("rejected");
+    expect(lookup.calls).toEqual([PAYMENT_KEY]);
+  });
+
+  it("rejects malformed JSON without lookup or capture input", async () => {
+    const lookup = recordingLookup(response(tossPayment()));
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify({
+      body: "{malformed json",
+      headers: { "tosspayments-webhook-transmission-id": TRANSMISSION_ID },
+      receivedAt: RECEIVED_AT,
+    });
+
+    expect(result).toMatchObject({ kind: "rejected", reason: "METADATA_INVALID", code: "TOSS.METADATA_INVALID" });
+    expect(lookup.calls).toEqual([]);
+  });
+
+  it("rejects missing Toss transmission id without lookup", async () => {
+    const lookup = recordingLookup(response(tossPayment()));
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+    const metadata = verifier.extractCandidateMetadata({ ...rawWebhook(), headers: {} });
+
+    const result = await verifier.verify({ ...rawWebhook(), headers: {} });
+
+    expect(metadata).toMatchObject({ kind: "rejected", reason: "METADATA_INVALID" });
+    expect(result).toMatchObject({ kind: "rejected", reason: "METADATA_INVALID" });
+    expect(lookup.calls).toEqual([]);
+  });
+
+  it("rejects missing data.paymentKey without lookup", async () => {
+    const lookup = recordingLookup(response(tossPayment()));
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify(rawWebhook({ data: { status: "DONE" } }));
+
+    expect(result).toMatchObject({ kind: "rejected", reason: "METADATA_INVALID", code: "TOSS.PAYMENT_KEY_MISSING" });
+    expect(lookup.calls).toEqual([]);
+  });
+
+  it("verifies CANCEL_STATUS_CHANGED without lookup and parser ignores it", async () => {
+    const lookup = recordingLookup(response(tossPayment()));
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify(rawWebhook({ eventType: "CANCEL_STATUS_CHANGED", data: { cancelId: "cancel_123" } }));
+    const input = expectVerified(result);
+    const parsed = await parseWithCorrelation(input);
+
+    expect(input.authoritativeState).toBeUndefined();
+    expect(lookup.calls).toEqual([]);
+    expect(expectIgnored(parsed).reason).toBe("TOSS_CANCEL_STATUS_CHANGED_OUT_OF_SCOPE");
+  });
+
+  it("rejects DONE lookup response without approvedAt", async () => {
+    const lookup = recordingLookup(response(tossPayment({ approvedAt: undefined })));
+    const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
+
+    const result = await verifier.verify(rawWebhook());
+
+    expect(result).toMatchObject({ kind: "rejected", reason: "METADATA_INVALID", code: "TOSS.LOOKUP_MALFORMED" });
     expect(lookup.calls).toEqual([PAYMENT_KEY]);
   });
 
@@ -250,6 +321,14 @@ describe("Toss query webhook parser", () => {
     expect(expectIgnored(deposit).reason).toBe("TOSS_DEPOSIT_CALLBACK_OUT_OF_SCOPE");
   });
 
+  it("does not capture DONE authoritative state without approvedAt", async () => {
+    const parsed = await parseWithCorrelation(verifiedInput({
+      authoritativeState: authoritativeState({ approvedAt: undefined }),
+    }));
+
+    expect(expectIgnored(parsed).reason).toBe("TOSS_DONE_APPROVED_AT_MISSING");
+  });
+
   it("throws clearly when authoritative state is absent", async () => {
     const parser = createTossWebhookParser({ correlation: recordingCorrelation(null).correlation });
     const input = verifiedInput({ authoritativeState: undefined });
@@ -266,7 +345,6 @@ describe("Toss query webhook parser", () => {
     const parser = createTossWebhookParser({ correlation: recordingCorrelation({ checkoutSessionId: CHECKOUT_SESSION_ID }).correlation });
     const parsed = await parser.parse(verified);
 
-    expect(Object.prototype.toString.call(verifiedResult)).not.toContain(sentinel);
     expect(JSON.stringify(verifiedResult)).not.toContain(sentinel);
     expect(JSON.stringify(parsed)).not.toContain(sentinel);
     const parsedWithSentinelRaw = await parser.parse(verifiedInput({
@@ -372,6 +450,17 @@ function recordingLookup(result: TossLookupHttpResult): { calls: string[]; looku
     lookup: (paymentKey) => {
       calls.push(paymentKey);
       return Promise.resolve(result);
+    },
+  };
+}
+
+function throwingLookup(error: Error): { calls: string[]; lookup: TossPaymentLookupPort } {
+  const calls: string[] = [];
+  return {
+    calls,
+    lookup: (paymentKey) => {
+      calls.push(paymentKey);
+      return Promise.reject(error);
     },
   };
 }

@@ -134,6 +134,7 @@ export type ProviderWebhookRejectionReason =
   | "METADATA_INVALID"
   | "SIGNATURE_INVALID"
   | "AUTHENTICATION_FAILED"
+  | "LOOKUP_UNAVAILABLE"
   | "UNSUPPORTED_EVENT"
   | "RAW_BODY_MISMATCH";
 
