@@ -54,6 +54,7 @@ function CartRow({
 }) {
   const { currency } = MARKET_CONFIGS[marketCode];
   const optionLabel = `${item.color} / ${getLengthLabel(item.length)} / ${getCurlLabel(item.curl)}`;
+  const lineTotal = item.price === null ? null : item.price * item.quantity;
   return (
     <li className="flex items-start gap-4 py-4 border-b border-gray-100">
       <CartThumbnail imageUrl={imageUrl} styleName={item.styleName} />
@@ -66,13 +67,13 @@ function CartRow({
         </Link>
         <p className="text-xs text-gray-500">{optionLabel}</p>
         <p className="text-sm font-semibold text-gray-900">
-          {formatPrice(item.price, currency)}
+          {item.price === null ? "이 마켓에서 가격 미제공" : formatPrice(item.price, currency)}
         </p>
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
         <QuantityControl cartItemId={item.id} current={item.quantity} max={item.stock} />
         <p className="text-sm font-semibold text-gray-900">
-          {formatPrice(item.price * item.quantity, currency)}
+          {lineTotal === null ? "가격 확인 필요" : formatPrice(lineTotal, currency)}
         </p>
         <RemoveButton cartItemId={item.id} />
       </div>
@@ -96,13 +97,12 @@ export default async function CartPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const [items, marketCode] = await Promise.all([
-    getCart(session.user.id),
-    getCurrentMarketCode(),
-  ]);
+  const marketCode = await getCurrentMarketCode();
+  const items = await getCart(session.user.id, marketCode);
   const { currency } = MARKET_CONFIGS[marketCode];
   const imageUrls = await resolveImageUrls(items);
-  const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const hasUnavailablePrice = items.some((item) => item.price === null);
+  const totalPrice = items.reduce((sum, item) => sum + (item.price ?? 0) * item.quantity, 0);
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
@@ -119,16 +119,33 @@ export default async function CartPage() {
           </ul>
 
           <div className="mt-6 space-y-4">
-            <div className="flex justify-between text-base font-semibold text-gray-900 pt-4 border-t border-gray-200">
-              <span>합계</span>
-              <span>{formatPrice(totalPrice, currency)}</span>
-            </div>
-            <Link
-              href="/checkout"
-              className="block w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 transition-colors text-center"
-            >
-              주문하기
-            </Link>
+            {hasUnavailablePrice ? (
+              <>
+                <div className="text-sm text-red-600 pt-4 border-t border-gray-200">
+                  현재 마켓 가격이 없는 상품이 있어 주문할 수 없습니다.
+                </div>
+                <button
+                  type="button"
+                  disabled
+                  className="block w-full py-3 bg-gray-200 text-gray-500 font-medium rounded-xl text-center cursor-not-allowed"
+                >
+                  주문 불가
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between text-base font-semibold text-gray-900 pt-4 border-t border-gray-200">
+                  <span>합계</span>
+                  <span>{formatPrice(totalPrice, currency)}</span>
+                </div>
+                <Link
+                  href="/checkout"
+                  className="block w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 transition-colors text-center"
+                >
+                  주문하기
+                </Link>
+              </>
+            )}
           </div>
         </>
       )}

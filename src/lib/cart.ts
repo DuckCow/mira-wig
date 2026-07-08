@@ -6,6 +6,7 @@
 import "server-only";
 
 import { db } from "./db";
+import type { MarketCode } from "./market/types";
 
 // ── 에러 타입 ─────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export interface CartItemView {
   colorHex: string | null;
   length: string;
   curl: string;
-  price: number;
+  price: number | null;
   stock: number;
   styleId: string;
   styleName: string;
@@ -48,7 +49,7 @@ export interface CartItemView {
 
 type CartRow = Awaited<ReturnType<typeof fetchCartRows>>[number];
 
-async function fetchCartRows(userId: string) {
+async function fetchCartRows(userId: string, marketCode: MarketCode) {
   return db.cartItem.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
@@ -56,7 +57,15 @@ async function fetchCartRows(userId: string) {
       id: true,
       quantity: true,
       variant: {
-        select: { id: true, color: true, colorHex: true, length: true, curl: true, price: true, stock: true },
+        select: {
+          id: true,
+          color: true,
+          colorHex: true,
+          length: true,
+          curl: true,
+          stock: true,
+          marketPrices: { where: { marketCode }, select: { amount: true }, take: 1 },
+        },
       },
       style: { select: { id: true, name: true, coverImageKey: true } },
     },
@@ -72,7 +81,7 @@ function toView(row: CartRow): CartItemView {
     colorHex: row.variant.colorHex,
     length: row.variant.length,
     curl: row.variant.curl,
-    price: row.variant.price,
+    price: row.variant.marketPrices[0]?.amount ?? null,
     stock: row.variant.stock,
     styleId: row.style.id,
     styleName: row.style.name,
@@ -82,8 +91,8 @@ function toView(row: CartRow): CartItemView {
 
 // ── 공개 API ─────────────────────────────────────────────────
 
-export async function getCart(userId: string): Promise<CartItemView[]> {
-  const rows = await fetchCartRows(userId);
+export async function getCart(userId: string, marketCode: MarketCode): Promise<CartItemView[]> {
+  const rows = await fetchCartRows(userId, marketCode);
   return rows.map(toView);
 }
 
