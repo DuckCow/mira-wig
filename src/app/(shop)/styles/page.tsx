@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   getWigStyles,
   isWigCategory,
@@ -9,6 +10,12 @@ import { getCurrentMarketCode } from "@/lib/market";
 import { catalogStorage } from "@/lib/storage";
 import { StyleCard } from "@/components/features/StyleCard";
 import type { MarketCode } from "@/lib/market/types";
+
+export const metadata: Metadata = {
+  title: "가발 스타일",
+  description:
+    "Mira에서 맞춤 가발과 헤어시스템 스타일을 살펴보고 가상 피팅으로 어울리는 디자인을 비교해보세요.",
+};
 
 // ── URL 파라미터 파싱 ─────────────────────────────────────────
 

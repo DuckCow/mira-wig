@@ -1,6 +1,8 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import type { Metadata } from "next";
 import { getWigStyleById, CATEGORY_LABELS } from "@/lib/catalog";
 import { getCurrentMarketCode } from "@/lib/market";
 import { catalogStorage } from "@/lib/storage";
@@ -79,13 +81,43 @@ function StyleInfo({
 
 type PageParams = Promise<{ id: string }>;
 
+const MAX_META_DESCRIPTION_LENGTH = 160;
+const getStyleForRoute = cache(getWigStyleById);
+
+function buildMetaDescription(style: WigStyleDetail): string {
+  const description =
+    style.description?.trim() ||
+    `${style.name} 스타일의 맞춤 가발 상세 정보를 Mira에서 확인하세요.`;
+  if (description.length <= MAX_META_DESCRIPTION_LENGTH) return description;
+  return `${description.slice(0, MAX_META_DESCRIPTION_LENGTH - 3).trimEnd()}...`;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: PageParams;
+}): Promise<Metadata> {
+  const [{ id }, marketCode] = await Promise.all([params, getCurrentMarketCode()]);
+  const style = await getStyleForRoute(id, marketCode);
+  if (!style) {
+    return {
+      title: "스타일을 찾을 수 없습니다",
+      description: "요청한 가발 스타일 정보를 찾을 수 없습니다.",
+    };
+  }
+  return {
+    title: style.name,
+    description: buildMetaDescription(style),
+  };
+}
+
 export default async function StyleDetailPage({
   params,
 }: {
   params: PageParams;
 }) {
   const [{ id }, marketCode] = await Promise.all([params, getCurrentMarketCode()]);
-  const style = await getWigStyleById(id, marketCode);
+  const style = await getStyleForRoute(id, marketCode);
   if (!style) notFound();
 
   const coverUrl = await resolveCoverUrl(style.coverImageKey);
