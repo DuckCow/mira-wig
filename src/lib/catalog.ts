@@ -86,7 +86,7 @@ function toSummary(row: StyleRow): WigStyleSummary {
     category: row.category,
     tags: row.tags,
     coverImageKey: row.coverImageKey,
-    basePrice: prices.length > 0 ? Math.min(...prices) : 0,
+    basePrice: minPriceOrNull(prices),
   };
 }
 
@@ -136,11 +136,11 @@ function toDetail(row: StyleDetailRow): WigStyleDetail {
     colorHex: v.colorHex,
     length: v.length,
     curl: v.curl,
-    price: v.marketPrices[0]?.amount ?? 0,
+    price: v.marketPrices[0]?.amount ?? null,
     stock: v.stock,
     sku: v.sku,
   }));
-  const prices = variants.map((v) => v.price).filter((p) => p > 0);
+  const prices = variants.flatMap((v) => v.price === null ? [] : [v.price]);
   return {
     id: row.id,
     name: row.name,
@@ -149,7 +149,7 @@ function toDetail(row: StyleDetailRow): WigStyleDetail {
     tags: row.tags,
     coverImageKey: row.coverImageKey,
     imageKeys: row.imageKeys,
-    basePrice: prices.length > 0 ? Math.min(...prices) : 0,
+    basePrice: minPriceOrNull(prices),
     variants,
   };
 }
@@ -160,4 +160,8 @@ export async function getWigStyleById(
 ): Promise<WigStyleDetail | null> {
   const row = await fetchStyleDetailRow(id, marketCode);
   return row ? toDetail(row) : null;
+}
+
+function minPriceOrNull(prices: number[]): number | null {
+  return prices.length > 0 ? Math.min(...prices) : null;
 }

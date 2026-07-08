@@ -182,12 +182,12 @@ function AddToCartPanel({
   onAddToCart: () => void;
 }) {
   const { currency } = MARKET_CONFIGS[marketCode];
-  const canAdd = variant !== null && variant.stock > 0 && !isPending;
+  const canAdd = variant !== null && variant.stock > 0 && variant.price !== null && !isPending;
   return (
     <div className="space-y-4">
       {variant && (
         <p className="text-lg font-semibold text-gray-900">
-          {formatPrice(variant.price, currency)}
+          {variant.price === null ? "이 마켓에서 가격 미제공" : formatPrice(variant.price, currency)}
           {variant.stock === 0 && <span className="ml-2 text-sm font-normal text-red-500">품절</span>}
         </p>
       )}

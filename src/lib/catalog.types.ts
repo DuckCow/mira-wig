@@ -36,7 +36,7 @@ export interface WigStyleSummary {
   category: WigCategory;
   tags: string[];
   coverImageKey: string | null;
-  basePrice: number;
+  basePrice: number | null;
 }
 
 export interface GetWigStylesParams {
@@ -50,7 +50,7 @@ export interface WigVariantDetail {
   colorHex: string | null;
   length: string;
   curl: string;
-  price: number;
+  price: number | null;
   stock: number;
   sku: string;
 }
@@ -63,6 +63,6 @@ export interface WigStyleDetail {
   tags: string[];
   coverImageKey: string | null;
   imageKeys: string[];
-  basePrice: number;
+  basePrice: number | null;
   variants: WigVariantDetail[];
 }

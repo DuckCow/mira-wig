@@ -12,8 +12,8 @@ export interface StyleCardProps {
   category: WigCategory;
   tags: string[];
   imageUrl: string | null;
-  /** 현재 마켓 최소단위 정수 금액 */
-  basePrice: number;
+  /** 현재 마켓 최소단위 정수 금액. null이면 해당 마켓 가격 미제공. */
+  basePrice: number | null;
   marketCode: MarketCode;
 }
 
@@ -64,9 +64,11 @@ export function StyleCard({
             {CATEGORY_LABELS[category]}
           </span>
           <h2 className="text-sm font-semibold text-gray-900 truncate">{name}</h2>
-          <p className="text-sm text-gray-700 mt-1">
-            {formatPrice(basePrice, currency)}~
-          </p>
+          {basePrice === null ? (
+            <p className="text-sm text-gray-400 mt-1">가격 정보 없음</p>
+          ) : (
+            <p className="text-sm text-gray-700 mt-1">{formatPrice(basePrice, currency)}~</p>
+          )}
         </div>
       </Link>
     </article>
