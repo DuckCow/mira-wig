@@ -8,7 +8,7 @@
 // addToCart는 기존 액션 재사용, 직접 storage/SDK import 없음.
 // ============================================================
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useFitting, type FittingStage } from "@/hooks/useFitting";
 import { addToCart } from "@/app/actions/cart";
@@ -80,10 +80,13 @@ function ResultView({
   variantId: string;
 }) {
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   function handleAddToCart() {
+    setError(null);
     startTransition(async () => {
-      await addToCart(variantId, wigStyleId, 1);
+      const result = await addToCart(variantId, wigStyleId, 1);
+      if (!result.success) setError(result.error);
     });
   }
 
@@ -122,6 +125,11 @@ function ResultView({
       >
         {isPending ? "…" : t.addToCart}
       </button>
+      {error && (
+        <p role="status" aria-live="polite" className="text-sm text-center text-red-500">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

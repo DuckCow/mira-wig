@@ -50,7 +50,7 @@ describe("cart pricing", () => {
     const variant = await createCatalogVariant(ctx, {
       marketPrices: { KR: 12_000, US: 2_999, JP: 1_500 },
     });
-    await addToCart(ctx.userId, variant.id, variant.styleId, 1);
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
 
     await expect(firstCartPrice(ctx.userId, MarketCode.KR)).resolves.toBe(12_000);
     await expect(firstCartPrice(ctx.userId, MarketCode.US)).resolves.toBe(2_999);
@@ -62,7 +62,7 @@ describe("cart pricing", () => {
 
   it("returns null when the current market price is missing", async () => {
     const variant = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000 } });
-    await addToCart(ctx.userId, variant.id, variant.styleId, 1);
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
 
     const [item] = await getCart(ctx.userId, MarketCode.US);
 
@@ -74,8 +74,8 @@ describe("cart pricing", () => {
   it("keeps cart display line prices equal to checkout session snapshots", async () => {
     const first = await createCatalogVariant(ctx, { marketPrices: { US: 2_999 } });
     const second = await createCatalogVariant(ctx, { marketPrices: { US: 4_500 } });
-    await addToCart(ctx.userId, first.id, first.styleId, 2);
-    await addToCart(ctx.userId, second.id, second.styleId, 1);
+    await addToCart(ctx.userId, first.id, first.styleId, 2, MarketCode.US);
+    await addToCart(ctx.userId, second.id, second.styleId, 1, MarketCode.US);
 
     const cartItems = await getCart(ctx.userId, MarketCode.US);
     const created = await createCheckoutSession(db, {
@@ -95,13 +95,62 @@ describe("cart pricing", () => {
   it("rejects addToCart when requested quantity exceeds stock", async () => {
     const variant = await createCatalogVariant(ctx, { stock: 1 });
 
-    await expectCartFailure("STOCK_EXCEEDED", () => addToCart(ctx.userId, variant.id, variant.styleId, 2));
+    await expectCartFailure("STOCK_EXCEEDED", () => (
+      addToCart(ctx.userId, variant.id, variant.styleId, 2, MarketCode.KR)
+    ));
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("rejects addToCart when requested market price is missing", async () => {
+    const variant = await createCatalogVariant(ctx, { marketPrices: {} });
+
+    await expectCartFailure("VARIANT_PRICE_UNAVAILABLE", () => (
+      addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)
+    ));
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("adds only in markets with a VariantMarketPrice", async () => {
+    const variant = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000 } });
+
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    await expectCartFailure("VARIANT_PRICE_UNAVAILABLE", () => (
+      addToCart(ctx.otherUserId, variant.id, variant.styleId, 1, MarketCode.US)
+    ));
+
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(1);
+    await expect(getCartItemCount(ctx.otherUserId)).resolves.toBe(0);
+  });
+
+  it("enforces market price guard on existing item increments", async () => {
+    const variant = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000 } });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    const itemId = await firstCartItemId(ctx.userId);
+
+    await deleteMarketPrice(variant.id, MarketCode.KR);
+
+    await expectCartFailure("VARIANT_PRICE_UNAVAILABLE", () => (
+      addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)
+    ));
+    await expect(cartQuantity(itemId)).resolves.toBe(1);
+  });
+
+  it("allows update and remove after a cart line loses its market price", async () => {
+    const variant = await createCatalogVariant(ctx, { stock: 3, marketPrices: { KR: 12_000 } });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    const itemId = await firstCartItemId(ctx.userId);
+
+    await deleteMarketPrice(variant.id, MarketCode.KR);
+
+    await updateQuantity(ctx.userId, itemId, 2);
+    await expect(cartQuantity(itemId)).resolves.toBe(2);
+    await removeFromCart(ctx.userId, itemId);
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
   });
 
   it("rejects updateQuantity for a cart item owned by another user", async () => {
     const variant = await createCatalogVariant(ctx);
-    await addToCart(ctx.otherUserId, variant.id, variant.styleId, 1);
+    await addToCart(ctx.otherUserId, variant.id, variant.styleId, 1, MarketCode.KR);
     const otherItem = await firstCartItemId(ctx.otherUserId);
 
     await expectCartFailure("FORBIDDEN", () => updateQuantity(ctx.userId, otherItem, 2));
@@ -109,7 +158,7 @@ describe("cart pricing", () => {
 
   it("rejects updateQuantity when requested quantity exceeds stock", async () => {
     const variant = await createCatalogVariant(ctx, { stock: 2 });
-    await addToCart(ctx.userId, variant.id, variant.styleId, 1);
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
     const itemId = await firstCartItemId(ctx.userId);
 
     await expectCartFailure("STOCK_EXCEEDED", () => updateQuantity(ctx.userId, itemId, 3));
@@ -118,7 +167,7 @@ describe("cart pricing", () => {
 
   it("rejects removeFromCart for a cart item owned by another user", async () => {
     const variant = await createCatalogVariant(ctx);
-    await addToCart(ctx.otherUserId, variant.id, variant.styleId, 1);
+    await addToCart(ctx.otherUserId, variant.id, variant.styleId, 1, MarketCode.KR);
     const otherItem = await firstCartItemId(ctx.otherUserId);
 
     await expectCartFailure("FORBIDDEN", () => removeFromCart(ctx.userId, otherItem));
@@ -128,8 +177,8 @@ describe("cart pricing", () => {
   it("keeps getCartItemCount as an identity-count query", async () => {
     const first = await createCatalogVariant(ctx);
     const second = await createCatalogVariant(ctx);
-    await addToCart(ctx.userId, first.id, first.styleId, 2);
-    await addToCart(ctx.userId, second.id, second.styleId, 3);
+    await addToCart(ctx.userId, first.id, first.styleId, 2, MarketCode.KR);
+    await addToCart(ctx.userId, second.id, second.styleId, 3, MarketCode.KR);
 
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(2);
   });
@@ -250,6 +299,10 @@ async function cartQuantity(cartItemId: string): Promise<number> {
   const item = await db.cartItem.findUnique({ where: { id: cartItemId }, select: { quantity: true } });
   if (!item) throw new Error("Expected cart item");
   return item.quantity;
+}
+
+async function deleteMarketPrice(variantId: string, marketCode: MarketCode): Promise<void> {
+  await db.variantMarketPrice.delete({ where: { variantId_marketCode: { variantId, marketCode } } });
 }
 
 async function expectCartFailure(code: CartException["code"], act: () => Promise<unknown>): Promise<void> {

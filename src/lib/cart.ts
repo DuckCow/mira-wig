@@ -13,6 +13,7 @@ import type { MarketCode } from "./market/types";
 export type CartErrorCode =
   | "INVALID_QUANTITY"
   | "VARIANT_NOT_FOUND"
+  | "VARIANT_PRICE_UNAVAILABLE"
   | "STOCK_EXCEEDED"
   | "ITEM_NOT_FOUND"
   | "FORBIDDEN";
@@ -105,6 +106,7 @@ export async function addToCart(
   variantId: string,
   wigStyleId: string,
   quantity: number,
+  marketCode: MarketCode,
 ): Promise<void> {
   if (quantity < 1) throw new CartException("INVALID_QUANTITY", "수량은 1 이상이어야 합니다.");
 
@@ -113,6 +115,14 @@ export async function addToCart(
     select: { stock: true },
   });
   if (!variant) throw new CartException("VARIANT_NOT_FOUND", "옵션을 찾을 수 없습니다.");
+
+  const marketPrice = await db.variantMarketPrice.findUnique({
+    where: { variantId_marketCode: { variantId, marketCode } },
+    select: { amount: true },
+  });
+  if (!marketPrice) {
+    throw new CartException("VARIANT_PRICE_UNAVAILABLE", "현재 마켓 가격이 없습니다.");
+  }
 
   const existing = await db.cartItem.findUnique({
     where: { userId_variantId: { userId, variantId } },

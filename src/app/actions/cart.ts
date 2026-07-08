@@ -7,6 +7,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSession } from "@/lib/session";
+import { getCurrentMarketCode } from "@/lib/market/resolve";
 import {
   addToCart as libAddToCart,
   removeFromCart as libRemoveFromCart,
@@ -39,7 +40,8 @@ export async function addToCart(
   if (!userId) return { success: false, error: "로그인이 필요합니다." };
 
   try {
-    await libAddToCart(userId, variantId, wigStyleId, quantity);
+    const marketCode = await getCurrentMarketCode();
+    await libAddToCart(userId, variantId, wigStyleId, quantity, marketCode);
     revalidatePath("/cart");
     return { success: true };
   } catch (e) {

@@ -92,7 +92,7 @@ describe("catalog market pricing", () => {
   it("keeps catalog detail prices aligned with cart prices for the same market", async () => {
     const style = await createStyle(ctx);
     const variant = await createVariant(ctx, { styleId: style.id, marketPrices: { US: 2_999 } });
-    await addToCart(ctx.userId, variant.id, style.id, 1);
+    await addToCart(ctx.userId, variant.id, style.id, 1, MarketCode.US);
 
     const catalogPrice = await detailVariantPrice(style.id, variant.id, MarketCode.US);
     const [cartItem] = await getCart(ctx.userId, MarketCode.US);
