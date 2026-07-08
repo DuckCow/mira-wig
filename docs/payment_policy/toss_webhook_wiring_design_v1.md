@@ -36,6 +36,7 @@ Provider-specific facts come from `docs/payment_policy/provider_docs_snapshot_v1
   1. D1-D docs lock: this document.
   2. Dormant real ports patch.
   3. SANDBOX-only production wiring patch.
+- AMENDMENT NOTE: D1-D Patch 3 is split into Patch 3a (behavior-preserving webhook pipeline seam, no schema, no gates, no real Toss wiring) and Patch 3b (schema + real Toss SANDBOX wiring together). This preserves the rule that `verifiedMode` lands in the same patch as real verification.
 - DECISION: the dormant real ports patch includes a Toss lookup HTTP port:
   - `GET /v1/payments/{paymentKey}`.
   - injected `fetchFn`.
