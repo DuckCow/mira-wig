@@ -55,6 +55,7 @@ function CartRow({
   const { currency } = MARKET_CONFIGS[marketCode];
   const optionLabel = `${item.color} / ${getLengthLabel(item.length)} / ${getCurlLabel(item.curl)}`;
   const lineTotal = item.price === null ? null : item.price * item.quantity;
+  const unitPrice = item.price === null ? null : formatPrice(item.price, currency);
   return (
     <li className="flex items-start gap-4 py-4 border-b border-gray-100">
       <CartThumbnail imageUrl={imageUrl} styleName={item.styleName} />
@@ -67,17 +68,46 @@ function CartRow({
         </Link>
         <p className="text-xs text-gray-500">{optionLabel}</p>
         <p className="text-sm font-semibold text-gray-900">
-          {item.price === null ? "이 마켓에서 가격 미제공" : formatPrice(item.price, currency)}
+          {unitPrice ?? "이 마켓에서 가격 미제공"}
         </p>
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
         <QuantityControl cartItemId={item.id} current={item.quantity} max={item.stock} />
-        <p className="text-sm font-semibold text-gray-900">
-          {lineTotal === null ? "가격 확인 필요" : formatPrice(lineTotal, currency)}
-        </p>
+        {lineTotal === null ? (
+          <p className="text-sm font-semibold text-gray-900">가격 확인 필요</p>
+        ) : (
+          <p className="text-sm text-gray-600">
+            {unitPrice} × {item.quantity} ={" "}
+            <span className="font-semibold text-gray-900">{formatPrice(lineTotal, currency)}</span>
+          </p>
+        )}
         <RemoveButton cartItemId={item.id} />
       </div>
     </li>
+  );
+}
+
+function CartSummary({
+  subtotal,
+  hasUnavailablePrice,
+  marketCode,
+}: {
+  subtotal: number;
+  hasUnavailablePrice: boolean;
+  marketCode: MarketCode;
+}) {
+  const { currency } = MARKET_CONFIGS[marketCode];
+  return (
+    <div className="space-y-2 pt-4 border-t border-gray-200">
+      <div className="flex justify-between text-base font-semibold text-gray-900">
+        <span>상품 합계</span>
+        <span>{hasUnavailablePrice ? "가격 확인 필요" : formatPrice(subtotal, currency)}</span>
+      </div>
+      <p className="text-xs text-gray-500">배송비는 체크아웃에서 확인됩니다.</p>
+      <p className="text-xs text-gray-500">
+        배송지와 선택한 국가/통화에 따라 결제 단계에서 가격과 배송비가 변경될 수 있습니다.
+      </p>
+    </div>
   );
 }
 
@@ -99,10 +129,12 @@ export default async function CartPage() {
 
   const marketCode = await getCurrentMarketCode();
   const items = await getCart(session.user.id, marketCode);
-  const { currency } = MARKET_CONFIGS[marketCode];
   const imageUrls = await resolveImageUrls(items);
   const hasUnavailablePrice = items.some((item) => item.price === null);
-  const totalPrice = items.reduce((sum, item) => sum + (item.price ?? 0) * item.quantity, 0);
+  const productSubtotal = items.reduce((sum, item) => {
+    if (item.price === null) return sum;
+    return sum + item.price * item.quantity;
+  }, 0);
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
@@ -119,9 +151,14 @@ export default async function CartPage() {
           </ul>
 
           <div className="mt-6 space-y-4">
+            <CartSummary
+              subtotal={productSubtotal}
+              hasUnavailablePrice={hasUnavailablePrice}
+              marketCode={marketCode}
+            />
             {hasUnavailablePrice ? (
               <>
-                <div className="text-sm text-red-600 pt-4 border-t border-gray-200">
+                <div className="text-sm text-red-600">
                   현재 마켓 가격이 없는 상품이 있어 주문할 수 없습니다.
                 </div>
                 <button
@@ -133,18 +170,12 @@ export default async function CartPage() {
                 </button>
               </>
             ) : (
-              <>
-                <div className="flex justify-between text-base font-semibold text-gray-900 pt-4 border-t border-gray-200">
-                  <span>합계</span>
-                  <span>{formatPrice(totalPrice, currency)}</span>
-                </div>
-                <Link
-                  href="/checkout"
-                  className="block w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 transition-colors text-center"
-                >
-                  주문하기
-                </Link>
-              </>
+              <Link
+                href="/checkout"
+                className="block w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 transition-colors text-center"
+              >
+                주문하기
+              </Link>
             )}
           </div>
         </>
