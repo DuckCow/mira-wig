@@ -1,6 +1,5 @@
 import {
   FulfillmentType,
-  OrderStatus,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -14,6 +13,7 @@ import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import { getSession } from "@/lib/session";
 import { getCurlLabel, getLengthLabel } from "@/lib/wig-option-labels";
+import { orderStatusLabel } from "../order-status";
 
 type PageParams = Promise<{ id: string }>;
 type OrderDetail = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
@@ -235,11 +235,6 @@ function formatDateTime(date: Date): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function orderStatusLabel(status: OrderStatus): string {
-  if (status === OrderStatus.PAID) return "결제 완료";
-  return "주문 상태 확인 중";
 }
 
 function paymentStatusLabel(status: PaymentAttemptStatus): string {

@@ -280,6 +280,10 @@ enum PaymentAttemptStatus {
 
 enum OrderStatus {
   PAID
+  CANCELLED
+  REFUND_PENDING
+  PARTIALLY_REFUNDED
+  REFUNDED
 }
 
 enum MrStatus {

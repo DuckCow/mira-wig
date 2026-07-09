@@ -1,4 +1,3 @@
-import { OrderStatus } from "@prisma/client";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
@@ -6,6 +5,7 @@ import { CURRENCY_META, formatPrice, type CurrencyMeta } from "@/lib/market/type
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import { getSession } from "@/lib/session";
+import { orderStatusLabel } from "./order-status";
 
 const ORDER_LIST_LIMIT = 20;
 
@@ -141,11 +141,6 @@ function formatDateTime(date: Date): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function orderStatusLabel(status: OrderStatus): string {
-  if (status === OrderStatus.PAID) return "결제 완료";
-  return "상태 확인 중";
 }
 
 function displayText(value: string, fallback: string): string {
