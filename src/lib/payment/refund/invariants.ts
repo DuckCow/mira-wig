@@ -39,7 +39,8 @@ export function isGuardedRefundAttemptStatus(status: RefundAttemptStatus): boole
 }
 
 export function isTerminalRefundAttemptStatus(status: RefundAttemptStatus): boolean {
-  return status === RefundAttemptStatus.FAILED_TERMINAL
+  return status === RefundAttemptStatus.SUCCEEDED
+    || status === RefundAttemptStatus.FAILED_TERMINAL
     || status === RefundAttemptStatus.CANCELLED;
 }
 

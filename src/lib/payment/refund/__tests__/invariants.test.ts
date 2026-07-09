@@ -32,11 +32,19 @@ describe("refund attempt status classification", () => {
   });
 
   it.each([
+    RefundAttemptStatus.SUCCEEDED,
     RefundAttemptStatus.FAILED_TERMINAL,
     RefundAttemptStatus.CANCELLED,
-  ])("does not guard terminal status %s", (status) => {
-    expect(isGuardedRefundAttemptStatus(status)).toBe(false);
+  ])("classifies lifecycle terminal status %s", (status) => {
     expect(isTerminalRefundAttemptStatus(status)).toBe(true);
+  });
+
+  it.each([
+    RefundAttemptStatus.FAILED_TERMINAL,
+    RefundAttemptStatus.CANCELLED,
+  ])("does not guard terminal status %s without succeeded money", (status) => {
+    expect(isGuardedRefundAttemptStatus(status)).toBe(false);
+    expect(isSucceededRefundAttemptStatus(status)).toBe(false);
   });
 
   it("keeps FAILED_RETRYABLE guarded until explicitly closed", () => {
@@ -44,9 +52,11 @@ describe("refund attempt status classification", () => {
     expect(isTerminalRefundAttemptStatus(RefundAttemptStatus.FAILED_RETRYABLE)).toBe(false);
   });
 
-  it("classifies succeeded separately from non-guarding terminal statuses", () => {
-    expect(isTerminalRefundAttemptStatus(RefundAttemptStatus.SUCCEEDED)).toBe(false);
+  it("keeps SUCCEEDED terminal, guarded, and counted as succeeded money", () => {
+    expect(isTerminalRefundAttemptStatus(RefundAttemptStatus.SUCCEEDED)).toBe(true);
     expect(isGuardedRefundAttemptStatus(RefundAttemptStatus.SUCCEEDED)).toBe(true);
+    expect(isSucceededRefundAttemptStatus(RefundAttemptStatus.SUCCEEDED)).toBe(true);
+    expect(sumSucceededRefundAmount([attempt(200, RefundAttemptStatus.SUCCEEDED)])).toBe(200);
   });
 });
 
