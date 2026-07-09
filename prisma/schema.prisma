@@ -278,6 +278,21 @@ enum PaymentAttemptStatus {
   VOIDED
 }
 
+enum RefundAttemptStatus {
+  REQUESTED
+  PROCESSING
+  SUCCEEDED
+  FAILED_RETRYABLE
+  FAILED_TERMINAL
+  MANUAL_REVIEW
+  CANCELLED
+}
+
+enum RefundAttemptActorType {
+  ADMIN
+  SYSTEM
+}
+
 enum OrderStatus {
   PAID
   CANCELLED
@@ -402,6 +417,7 @@ model Payment {
   createdAt                     DateTime             @default(now())
   updatedAt                     DateTime             @updatedAt
   order                         Order?
+  refundAttempts                RefundAttempt[]
 
   @@unique([provider, providerPaymentKey])
   @@index([provider, providerRef])
@@ -428,10 +444,41 @@ model Order {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  items    OrderItem[]
-  shipping OrderShipping?
+  items          OrderItem[]
+  shipping       OrderShipping?
+  refundAttempts RefundAttempt[]
 
   @@index([userId, createdAt])
+}
+
+model RefundAttempt {
+  id                 String                 @id @default(cuid())
+  orderId            String
+  order              Order                  @relation(fields: [orderId], references: [id])
+  paymentId          String
+  payment            Payment                @relation(fields: [paymentId], references: [id])
+  amount             Int
+  currency           String
+  status             RefundAttemptStatus    @default(REQUESTED)
+  reason             String
+  actorType          RefundAttemptActorType
+  actorUserId        String?
+  provider           PaymentProvider
+  mode               PaymentMode
+  providerRefundId   String?
+  idempotencyKey     String                 @unique
+  requestedAt        DateTime               @default(now())
+  processedAt        DateTime?
+  failedAt           DateTime?
+  failureCode        String?
+  safeFailureMessage String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@unique([provider, providerRefundId])
+  @@index([orderId, status])
+  @@index([paymentId, status])
+  @@index([orderId, requestedAt])
 }
 
 model OrderItem {
