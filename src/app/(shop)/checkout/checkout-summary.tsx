@@ -54,13 +54,9 @@ export function SessionSnapshot({
         <SummaryRow label="세금·관세" value="정책 확정 전 - 금액으로 계산하지 않았습니다." />
         <SummaryRow label="총 결제 예정 금액" value={formatPrice(session.totalAmount, sessionCurrency)} strong />
       </div>
-      <button
-        type="button"
-        disabled
-        className="mt-5 w-full rounded-lg bg-gray-200 px-4 py-3 text-sm font-medium text-gray-500"
-      >
-        결제 진행 준비 중
-      </button>
+      <p className="mt-3 text-xs text-gray-500">
+        아래 결제는 방금 생성한 주문서 스냅샷 기준입니다. 배송지를 수정하면 주문서를 다시 생성해 주세요.
+      </p>
     </section>
   );
 }

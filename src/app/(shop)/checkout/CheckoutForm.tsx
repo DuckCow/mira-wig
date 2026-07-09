@@ -12,6 +12,7 @@ import {
 } from "@/lib/order/validation";
 import { AddressFields } from "./AddressFields";
 import { CartSnapshot, SessionSnapshot, type CheckoutCartItem } from "./checkout-summary";
+import { PaymentMethodSection } from "./PaymentMethodSection";
 import type { CheckoutShippingInput, CreateCheckoutSessionResult } from "@/lib/payment/session/types";
 import type { AddressKey } from "./types";
 
@@ -22,6 +23,7 @@ interface CheckoutFormProps {
   shippingCountry: CheckoutShippingInput["country"];
   cartItems: CheckoutCartItem[];
   productSubtotal: number;
+  mockPaymentEnabled: boolean;
 }
 
 type FieldErrors = Partial<Record<AddressKey, string>>;
@@ -60,6 +62,7 @@ export function CheckoutForm({
   shippingCountry,
   cartItems,
   productSubtotal,
+  mockPaymentEnabled,
 }: CheckoutFormProps) {
   const config = COUNTRY_FORM_CONFIGS[shippingCountry];
   const form = useCheckoutSessionForm(shippingCountry, config);
@@ -76,7 +79,16 @@ export function CheckoutForm({
 
       <aside className="space-y-4">
         <CartSnapshot cartItems={cartItems} subtotal={productSubtotal} currency={currency} />
-        {form.created && <SessionSnapshot session={form.created} fallbackCurrency={currency} />}
+        {form.created && (
+          <>
+            <SessionSnapshot session={form.created} fallbackCurrency={currency} />
+            <PaymentMethodSection
+              key={form.created.sessionId}
+              checkoutSessionId={form.created.sessionId}
+              mockPaymentEnabled={mockPaymentEnabled}
+            />
+          </>
+        )}
       </aside>
     </div>
   );
@@ -177,6 +189,7 @@ function useCheckoutSessionForm(
   }
 
   function handleBlur(field: AddressKey, domValue: string) {
+    if (values[field] !== domValue) setCreated(null);
     setValues((current) => ({ ...current, [field]: domValue }));
     setTouched((current) => ({ ...current, [field]: true }));
     setErrors((current) => withFieldError(current, field, getFieldError(field, domValue, config)));

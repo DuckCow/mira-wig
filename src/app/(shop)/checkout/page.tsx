@@ -7,6 +7,8 @@ import { getSession } from "@/lib/session";
 import { getCart } from "@/lib/cart";
 import { getCurrentMarketCode } from "@/lib/market";
 import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types";
+import { configuredPaymentMode } from "@/lib/payment/mode";
+import { PaymentMode } from "@/lib/payment/providers/routing";
 import { getLengthLabel, getCurlLabel } from "@/lib/wig-option-labels";
 import type { CartItemView } from "@/lib/cart";
 import type { MarketCode } from "@/lib/market/types";
@@ -42,6 +44,14 @@ function checkoutCountry(marketCode: MarketCode): ShippingCountry {
   if (country === ShippingCountry.US) return ShippingCountry.US;
   if (country === ShippingCountry.JP) return ShippingCountry.JP;
   throw new Error(`Unsupported checkout shipping country for ${marketCode}.`);
+}
+
+function mockPaymentEnabled(): boolean {
+  try {
+    return configuredPaymentMode() === PaymentMode.SANDBOX && process.env.NODE_ENV !== "production";
+  } catch {
+    return false;
+  }
 }
 
 export default async function CheckoutPage() {
@@ -80,6 +90,7 @@ export default async function CheckoutPage() {
         shippingCountry={checkoutCountry(marketCode)}
         cartItems={cartLines}
         productSubtotal={subtotal}
+        mockPaymentEnabled={mockPaymentEnabled()}
       />
     </main>
   );
