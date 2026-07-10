@@ -8,7 +8,10 @@ import {
   type RefundAttemptActorType,
   type RefundAttemptTransition,
 } from "@prisma/client";
-import { isTerminalRefundAttemptStatus } from "./invariants";
+import {
+  hasConsistentRefundAttemptLedgerIdentity,
+  isTerminalRefundAttemptStatus,
+} from "./invariants";
 import {
   prepareRefundAttempt,
   type PreparedRefundAttempt,
@@ -42,6 +45,7 @@ export type RequestRefundAttemptFailureCode =
   | "REFUND_IN_PROGRESS"
   | "PAYMENT_NOT_REFUNDABLE"
   | "PAYMENT_IDENTITY_MISMATCH"
+  | "REFUND_LEDGER_INCONSISTENT"
   | "DISPUTE_REVIEW_REQUIRED"
   | "IDEMPOTENCY_CONFLICT"
   | "ORDER_STATUS_CONFLICT";
@@ -91,6 +95,9 @@ async function requestInTransaction(
   const replay = resolveReplay(order, candidate.refundAttempt);
   if (replay) return replay;
 
+  if (!hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)) {
+    return failure("REFUND_LEDGER_INCONSISTENT", "Historical refund ledger identity is inconsistent.");
+  }
   const eligibilityFailure = validateEligibility(order);
   if (eligibilityFailure) return eligibilityFailure;
 

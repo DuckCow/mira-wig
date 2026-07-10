@@ -174,15 +174,14 @@ The target policy requires every existing refund attempt for the Order to remain
 the designated Payment identity, currency, provider, and mode. Invalid amounts, mixed identity,
 or contradictory aggregate evidence fail closed.
 
-The current close core protects Order, Payment, and refund-ledger identity and amount consistency
-before restoring a resting state. The current request path verifies Order versus designated
-Payment amount/currency and existing-attempt amount/currency, but it does not yet enforce the full
-historical attempt payment/provider/mode consistency target.
+The request and close cores both enforce historical attempt payment, currency, provider, and mode
+consistency against the designated Payment. Request creation performs this validation after exact
+replay resolution and before ordinary new-request eligibility or any write. Close keeps its
+additional Order, Payment, target, and resting-state checks within the close transaction.
 
 Normal request writers derive those fields from the designated Payment, so this is not a claim
 that normal rows are currently mismatched. It is defense-in-depth hardening against legacy,
-manual, corrupted, or future-writer inconsistencies. Full consistency validation is a
-should-fix-before-UI item and must not be represented as already implemented.
+manual, corrupted, or future-writer inconsistencies.
 
 Legacy attempts without creation-transition evidence retain their stored status and amount
 semantics. Missing transition history does not release a guarded reservation or authorize a new
@@ -326,7 +325,6 @@ using one bare `MANUAL_REVIEW_REQUIRED` label for both concepts without addition
 
 ### 13.1 Should fix before request UI
 
-- Validate historical attempt payment/provider/mode consistency in the request path.
 - Define and enforce a bounded reason input contract.
 - Give request input the same plain-object validation posture as close input.
 - Revalidate the admin order-detail path after successful request creation.
@@ -408,13 +406,12 @@ Require a separate executor design lock covering:
 ## 16. Current implementation boundary
 
 Current code already provides transactional request creation, server-owned admin provenance,
-guarded amount arithmetic, exact core replay for a reused attempt identity, request closure, and
-safe read-only admin/customer projections. The request action remains dormant and no active UI
-creates requests.
+guarded amount arithmetic, exact core replay for a reused attempt identity, historical attempt
+identity consistency in request and close, request closure, and safe read-only admin/customer
+projections. The request action remains dormant and no active UI creates requests.
 
 Current gaps relevant to this contract are:
 
-- full historical attempt payment/provider/mode consistency in the request path;
 - bounded reason and plain-object request validation parity;
 - request-success revalidation and explicit stale-state UI behavior;
 - refund execution and provider-evidence resolution;

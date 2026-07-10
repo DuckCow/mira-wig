@@ -1,4 +1,22 @@
-import { RefundAttemptStatus } from "@prisma/client";
+import {
+  RefundAttemptStatus,
+  type PaymentMode,
+  type PaymentProvider,
+} from "@prisma/client";
+
+export interface RefundPaymentIdentityInput {
+  id: string;
+  currency: string;
+  provider: PaymentProvider;
+  mode: PaymentMode;
+}
+
+export interface RefundAttemptIdentityInput {
+  paymentId: string;
+  currency: string;
+  provider: PaymentProvider;
+  mode: PaymentMode;
+}
 
 export interface RefundAmountStateInput {
   amount: number;
@@ -25,6 +43,18 @@ export type RefundInvariantViolationCode =
 export type RefundInvariantResult =
   | { ok: true; remainingRequestableAmount: number }
   | { ok: false; code: RefundInvariantViolationCode; message: string };
+
+export function hasConsistentRefundAttemptLedgerIdentity(
+  designatedPayment: RefundPaymentIdentityInput,
+  attempts: readonly RefundAttemptIdentityInput[],
+): boolean {
+  return attempts.every((attempt) => (
+    attempt.paymentId === designatedPayment.id
+      && attempt.currency === designatedPayment.currency
+      && attempt.provider === designatedPayment.provider
+      && attempt.mode === designatedPayment.mode
+  ));
+}
 
 export function isSucceededRefundAttemptStatus(status: RefundAttemptStatus): boolean {
   return status === RefundAttemptStatus.SUCCEEDED;

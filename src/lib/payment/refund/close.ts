@@ -16,7 +16,10 @@ import {
   type CloseRefundRequestResult,
   type NormalizedCloseInput,
 } from "./close-contract";
-import { isTerminalRefundAttemptStatus } from "./invariants";
+import {
+  hasConsistentRefundAttemptLedgerIdentity,
+  isTerminalRefundAttemptStatus,
+} from "./invariants";
 import {
   deriveRefundRestingOrderStatus,
   type RefundRestingOrderStatus,
@@ -114,7 +117,7 @@ function validateAggregate(
   if (aggregate.status !== OrderStatus.REFUND_PENDING) {
     return failure("ORDER_STATUS_CONFLICT", "Order is not awaiting a refund decision.");
   }
-  if (!hasConsistentPaymentIdentity(aggregate, target)) {
+  if (!hasConsistentPaymentIdentity(aggregate)) {
     return failure("REFUND_LEDGER_INCONSISTENT", "Order, payment, and refund identities are inconsistent.");
   }
   const openAttempts = aggregate.refundAttempts.filter((attempt) => !isTerminalRefundAttemptStatus(attempt.status));
@@ -126,18 +129,12 @@ function validateAggregate(
 
 function hasConsistentPaymentIdentity(
   aggregate: CloseRefundAggregate,
-  target: RefundAttempt,
 ): boolean {
   const payment = aggregate.payment;
   if (payment.status !== PaymentAttemptStatus.SUCCEEDED) return false;
-  if (aggregate.paymentId !== payment.id || target.paymentId !== payment.id) return false;
+  if (aggregate.paymentId !== payment.id) return false;
   if (aggregate.totalAmount !== payment.amount || aggregate.currency !== payment.currency) return false;
-  return aggregate.refundAttempts.every((attempt) => (
-    attempt.paymentId === payment.id
-      && attempt.currency === payment.currency
-      && attempt.provider === payment.provider
-      && attempt.mode === payment.mode
-  ));
+  return hasConsistentRefundAttemptLedgerIdentity(payment, aggregate.refundAttempts);
 }
 
 function classifyTarget(target: RefundAttempt): CloseRefundRequestFailure | null {

@@ -51,6 +51,8 @@ interface AttemptOptions {
   amount?: number;
   currency?: string;
   status?: RefundAttemptStatus;
+  provider?: PaymentProvider;
+  mode?: PaymentMode;
   providerRefundId?: string | null;
 }
 
@@ -312,6 +314,16 @@ describe("closeRefundRequest", () => {
   });
 
   it.each([
+    ["provider", { provider: PaymentProvider.PAYPAL }],
+    ["mode", { mode: PaymentMode.LIVE }],
+  ] as const)("rejects historical %s mismatch through the shared identity predicate", async (_field, options) => {
+    const fixture = await createOrder(ctx);
+    const targetId = await seedAttempt(fixture, options);
+
+    await expectLedgerFailure(fixture, targetId);
+  });
+
+  it.each([
     { amount: 0 },
     { amount: -1 },
     { amount: 200, currency: "USD" },
@@ -510,25 +522,35 @@ async function createPayment(context: TestContext, sessionId: string, options: O
 
 async function seedAttempt(fixture: OrderFixture, options: AttemptOptions = {}): Promise<string> {
   const id = options.id ?? `refund_${randomUUID()}`;
+  const identity = attemptIdentity(fixture, options);
   await db.refundAttempt.create({
     data: {
       id,
       orderId: fixture.orderId,
-      paymentId: options.paymentId ?? fixture.paymentId,
+      paymentId: identity.paymentId,
       amount: options.amount ?? 400,
-      currency: options.currency ?? fixture.currency,
+      currency: identity.currency,
       status: options.status ?? RefundAttemptStatus.REQUESTED,
       reason: "Seed refund request",
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
+      provider: identity.provider,
+      mode: identity.mode,
       providerRefundId: options.providerRefundId ?? null,
-      idempotencyKey: `refund:${options.paymentId ?? fixture.paymentId}:${id}`,
+      idempotencyKey: `refund:${identity.paymentId}:${id}`,
       requestedAt: NOW,
     },
   });
   return id;
+}
+
+function attemptIdentity(fixture: OrderFixture, options: AttemptOptions) {
+  return {
+    paymentId: options.paymentId ?? fixture.paymentId,
+    currency: options.currency ?? fixture.currency,
+    provider: options.provider ?? PaymentProvider.MOCK,
+    mode: options.mode ?? PaymentMode.SANDBOX,
+  };
 }
 
 async function seedCloseTransition(
@@ -568,10 +590,22 @@ async function simulateExecutorClaim(orderId: string, refundAttemptId: string): 
 }
 
 async function expectLedgerFailure(fixture: OrderFixture, targetId: string): Promise<void> {
+  const beforePayment = await db.payment.findUniqueOrThrow({
+    where: { id: fixture.paymentId },
+    select: { id: true, status: true, amount: true, currency: true, provider: true, mode: true },
+  });
+  const beforeTransitionCount = await transitionCount(targetId);
+
   const result = await closeRefundRequest(db, input(fixture.orderId, targetId));
+
   expect(result).toMatchObject({ ok: false, code: "REFUND_LEDGER_INCONSISTENT" });
   await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.REQUESTED);
   await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+  await expect(transitionCount(targetId)).resolves.toBe(beforeTransitionCount);
+  await expect(db.payment.findUniqueOrThrow({
+    where: { id: fixture.paymentId },
+    select: { id: true, status: true, amount: true, currency: true, provider: true, mode: true },
+  })).resolves.toEqual(beforePayment);
 }
 
 function success(result: CloseRefundRequestResult): Extract<CloseRefundRequestResult, { ok: true }> {
