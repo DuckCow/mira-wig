@@ -183,7 +183,7 @@ Likely indexes/constraints:
   `@@unique([provider, providerRefundId])` (partial/nullable-safe semantics — Prisma treats NULLs
   as distinct, matching the existing `@@unique([provider, providerPaymentKey])` pattern).
 - **Single-in-flight guard (recommended):** at most one attempt per payment in
-  `REQUESTED/PROCESSING/MANUAL_REVIEW`. Enforced transactionally in the action (and optionally by
+  `REQUESTED/PROCESSING/FAILED_RETRYABLE/MANUAL_REVIEW`. Enforced transactionally in the action (and optionally by
   a partial unique index later). The pre-staged admin copy `REFUND_IN_PROGRESS`
   ("처리 중인 환불이 있습니다") already assumes this semantics.
 
@@ -217,7 +217,7 @@ split `PENDING_PROVIDER` out then. Adding it speculatively now would create a de
   counts — not `PROCESSING`, not `MANUAL_REVIEW`, not provider webhooks that haven't been
   resolved into a `SUCCEEDED` row.
 - **Over-refund guard:** a new attempt for amount `A` is admissible iff
-  `Σ(SUCCEEDED) + Σ(in-flight REQUESTED/PROCESSING/MANUAL_REVIEW) + A ≤ Payment.amount`,
+  `Σ(SUCCEEDED) + Σ(in-flight REQUESTED/PROCESSING/FAILED_RETRYABLE/MANUAL_REVIEW) + A ≤ Payment.amount`,
   evaluated inside a transaction with a row lock on the payment (or equivalent serialization via
   the single-in-flight guard, which reduces this to `Σ(SUCCEEDED) + A ≤ Payment.amount`).
   Violation surfaces as `INSUFFICIENT_REFUNDABLE` (copy already staged).
