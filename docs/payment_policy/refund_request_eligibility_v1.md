@@ -17,6 +17,7 @@ owns:
 - future execution suitability;
 - the admin UI projection boundary;
 - current v1 hard blockers, amount rules, and currency authority;
+- the normalized refund-request reason contract;
 - stale-UI transaction authority;
 - activation and rollout gates; and
 - current implementation gaps and unresolved product decisions.
@@ -321,20 +322,128 @@ A future UI should prefer explicit wording such as “merchant review required�
 This docs-only slice does not rename the Prisma enum. Action and UI error taxonomies must avoid
 using one bare `MANUAL_REVIEW_REQUIRED` label for both concepts without additional context.
 
-## 13. Current activation hardening
+## 13. Refund request reason contract
 
-### 13.1 Should fix before request UI
+### 13.1 V1 normalized model
 
-- Define and enforce a bounded reason input contract.
+The v1 request reason is bounded free text. Its one authoritative normalized value is:
+
+- a string;
+- trimmed before evaluation and storage;
+- non-empty after trimming; and
+- no more than 500 Unicode code points.
+
+The maximum is defined in Unicode code points, not UTF-16 code units, UTF-8 bytes, grapheme
+clusters, or database bytes. A future JavaScript implementation must use code-point iteration or
+an equivalent operation rather than assuming that plain string `.length` has the locked meaning.
+The 500-code-point maximum is the initial v1 product-policy bound and remains authoritative until
+this policy is amended. It may be revised only through a policy amendment supported by operational
+evidence; implementations and individual callers must not change or configure it independently.
+
+Bounded free text preserves the operator rationale and audit context needed to understand the
+merchant decision. No stable reason-code taxonomy or queue-filter contract exists yet. Unbounded
+permanent audit text would permit excessive ledger pollution and increase the chance of recording
+personal information, raw errors, secrets, or other inappropriate material. A structured reason
+code plus an optional operator note remains a future evolution after queue and operational
+taxonomy requirements are defined; this v1 contract defines no reason codes.
+
+### 13.2 Safe content and storage consistency
+
+The reason should contain only the concise business rationale needed to understand the merchant's
+refund decision. It must not intentionally contain:
+
+- customer personal information, which must not be copied into the reason; operators must refer to
+  the existing Order record instead of duplicating personal details in permanent audit text;
+- provider payment keys or provider refund identifiers;
+- raw provider payloads, responses, error messages, or stack traces;
+- transition operation keys or payment/refund idempotency keys;
+- credentials, tokens, secrets, or authentication material; or
+- unrelated internal debugging output.
+
+This is an input-policy and operator-guidance boundary. Free text is not automatically sanitized,
+and the stored reason must not be described as sanitized.
+
+Every new request uses the same normalized reason value for both:
+
+```text
+RefundAttempt.reason
+RefundAttemptTransition.reason on the null → REQUESTED creation edge
+```
+
+The two records must not independently normalize the text or store semantically divergent
+reasons. The reason is admin-only audit evidence and is not exposed on customer order surfaces.
+
+### 13.3 Enforcement ownership
+
+The refund core owns the authoritative new-write invariant: trim, require non-empty text, and
+enforce the maximum of 500 Unicode code points. Every caller, including a non-UI caller, must be
+unable to create a new overlength request.
+
+The admin Server Action may provide earlier safe feedback using the same contract, but it must not
+establish a competing definition. In particular, action-layer validation must not make the
+historical exact replay in §13.4 impossible.
+
+The future request form should provide a 500-code-point counter, advisory validation, and the safe
+content guidance above. UI validation is not authoritative. HTML `maxLength` alone is insufficient
+because browser string-length behavior need not equal this contract's code-point definition.
+
+No database constraint or migration is required by the current v1 hardening sequence. The database
+must remain capable of reading historical reason text longer than the new-write limit.
+
+### 13.4 Historical data and exact replay
+
+Existing stored reasons longer than 500 Unicode code points remain valid historical evidence. They
+remain readable and displayable and must not be truncated, rewritten, migrated, or rejected merely
+while loading the ledger.
+
+When an existing request is an exact immutable replay of a historically committed operation, the
+core returns the historical replay result and performs no new attempt or creation-transition write.
+It must not reject that replay solely because the stored reason exceeds the current new-write
+limit.
+
+Any operation that would create a new `RefundAttempt` or `null → REQUESTED` creation transition
+must satisfy the 500-code-point limit after normalization and must reject an overlength reason
+before the first write. A reused operation identity whose immutable evidence differs remains an
+idempotency conflict under the existing replay contract. The length failure must not disguise that
+identity conflict. The implementation must therefore order exact replay resolution and new-write
+validation so both guarantees hold.
+
+### 13.5 Failure and privacy semantics
+
+An overlength reason has a dedicated safe failure meaning appropriate for admin input correction.
+It is distinct from a missing reason, a ledger or manual-review failure, and an idempotency
+conflict. The failure must not echo the submitted reason, customer information, provider
+identifiers, or raw internal details. The implementation slice will choose the narrow internal and
+action-safe code names; this document does not lock a TypeScript enum member.
+
+### 13.6 Deferred reason evolution
+
+The following remain explicitly deferred:
+
+- a structured reason-code taxonomy;
+- an optional operator-note field;
+- queue filters based on reason;
+- localization of reason-code labels;
+- migration of historical free-text rows; and
+- whether customer-visible refund reasons will ever exist.
+
+None is implemented or required for dormant request-action hardening.
+
+## 14. Current activation hardening
+
+### 14.1 Should fix before request UI
+
+- Enforce §13's authoritative new-write reason contract in the refund core; any action-layer early
+  feedback must preserve historical exact replay.
 - Give request input the same plain-object validation posture as close input.
 - Revalidate the admin order-detail path after successful request creation.
 - Define explicit stale-state rejection copy and refresh-and-inspect behavior.
 
-### 13.2 Safe to decide during form design
+### 14.2 Safe to decide during form design
 
 - Stable browser form token or operation identity.
 
-### 13.3 Production rollout prerequisites
+### 14.3 Production rollout prerequisites
 
 - A working execution rail or genuine manual-resolution path.
 - Named operational ownership of pending and parked requests.
@@ -345,32 +454,32 @@ using one bare `MANUAL_REVIEW_REQUIRED` label for both concepts without addition
 Queue/worklist availability is an operational activation requirement, not part of payment
 refundability.
 
-## 14. Rollout gates
+## 15. Rollout gates
 
-### 14.1 Before this eligibility document is complete
+### 15.1 Before this eligibility document is complete
 
 The architectural ownership and v1 fail-closed contract may be locked while the explicit
-human/product questions in §15 remain open. Those questions must not be silently answered by
+human/product questions in §16.1 remain open. Those questions must not be silently answered by
 implementation.
 
-### 14.2 Before request-core hardening
+### 15.2 Before request-core hardening
 
 This eligibility SSOT must be accepted. The hardening slice must remain in the refund core with
 behavioral and integration tests and must not activate UI or provider execution.
 
-### 14.3 Before SANDBOX request UI
+### 15.3 Before SANDBOX request UI
 
 Follow the sequence in `order_refund_request_closure_v1.md` §16. Dormant MOCK execution and
 provider-evidence resolution prerequisites remain mandatory unless a human explicitly amends
-that sequence. Complete all §13.1 action/core hardening first.
+that sequence. Complete all §14.1 action/core hardening first.
 
-### 14.4 Before restricted internal production UI
+### 15.4 Before restricted internal production UI
 
 Require a working execution or legitimate manual-resolution path plus a runbook and named owner
 for parked requests. A dedicated queue may be deferred only when the restricted operators can
 reliably discover and resolve every request.
 
-### 14.5 Before general production UI
+### 15.5 Before general production UI
 
 Require:
 
@@ -379,7 +488,7 @@ Require:
 - a customer notification decision; and
 - a production execution or manual-resolution path.
 
-### 14.6 Before an automatic provider executor
+### 15.6 Before an automatic provider executor
 
 Require a separate executor design lock covering:
 
@@ -390,7 +499,9 @@ Require a separate executor design lock covering:
 - retry, ambiguous, and terminal result taxonomy; and
 - reconciliation.
 
-## 15. Human and product decisions left open
+## 16. Human and product decisions
+
+### 16.1 Still open
 
 1. Manufacturing/MTO cancellation cutoff and exclusions.
 2. Jurisdictional return and refund windows.
@@ -401,9 +512,14 @@ Require a separate executor design lock covering:
 7. Customer refund-lifecycle notification behavior.
 8. Order-level partial-refund guidance before line, shipping, tax, discount, and customs
    allocation exists.
-9. Bounded reason format: structured reason code plus operator note, or bounded free text.
 
-## 16. Current implementation boundary
+### 16.2 Resolved for v1
+
+The request reason uses bounded free text, normalized by trimming, with a maximum of 500 Unicode
+code points and the safe-content guidance in §13. Structured reason codes remain future work and
+are not an unresolved v1 blocker.
+
+## 17. Current implementation boundary
 
 Current code already provides transactional request creation, server-owned admin provenance,
 guarded amount arithmetic, exact core replay for a reused attempt identity, historical attempt
@@ -412,7 +528,7 @@ projections. The request action remains dormant and no active UI creates request
 
 Current gaps relevant to this contract are:
 
-- bounded reason and plain-object request validation parity;
+- implementation of the locked reason contract and plain-object request validation parity;
 - request-success revalidation and explicit stale-state UI behavior;
 - refund execution and provider-evidence resolution;
 - operational queue/worklist ownership;
@@ -421,7 +537,7 @@ Current gaps relevant to this contract are:
 
 No current implementation should be described as having solved these future boundaries.
 
-## 17. Explicit non-goals
+## 18. Explicit non-goals
 
 This document does not implement or authorize:
 
