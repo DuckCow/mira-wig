@@ -413,8 +413,8 @@ validation so both guarantees hold.
 An overlength reason has a dedicated safe failure meaning appropriate for admin input correction.
 It is distinct from a missing reason, a ledger or manual-review failure, and an idempotency
 conflict. The failure must not echo the submitted reason, customer information, provider
-identifiers, or raw internal details. The implementation slice will choose the narrow internal and
-action-safe code names; this document does not lock a TypeScript enum member.
+identifiers, or raw internal details. The request core and admin action now expose this meaning as
+the dedicated safe `REASON_TOO_LONG` code.
 
 ### 13.6 Deferred reason evolution
 
@@ -431,13 +431,19 @@ None is implemented or required for dormant request-action hardening.
 
 ## 14. Current activation hardening
 
-### 14.1 Should fix before request UI
+### 14.1 Dormant server-contract hardening
 
-- Enforce §13's authoritative new-write reason contract in the refund core; any action-layer early
-  feedback must preserve historical exact replay.
-- Give request input the same plain-object validation posture as close input.
-- Revalidate the admin order-detail path after successful request creation.
-- Define explicit stale-state rejection copy and refresh-and-inspect behavior.
+The dormant request boundary now:
+
+- enforces the 500-code-point new-write limit in the request core after exact replay or conflict
+  resolution and before ordinary eligibility or writes;
+- preserves exact historical replay for overlength stored reasons;
+- maps overlength input to the dedicated safe action failure in §13.5;
+- gives request input the same plain-object validation posture as close input; and
+- revalidates only the affected admin order-detail path after request success, including replay.
+
+Explicit stale-state rejection copy and refresh-and-inspect behavior remain request-form work
+before UI activation.
 
 ### 14.2 Safe to decide during form design
 
@@ -471,7 +477,7 @@ behavioral and integration tests and must not activate UI or provider execution.
 
 Follow the sequence in `order_refund_request_closure_v1.md` §16. Dormant MOCK execution and
 provider-evidence resolution prerequisites remain mandatory unless a human explicitly amends
-that sequence. Complete all §14.1 action/core hardening first.
+that sequence. Complete the remaining §14.1 request-form hardening before activation.
 
 ### 15.4 Before restricted internal production UI
 
@@ -524,12 +530,14 @@ are not an unresolved v1 blocker.
 Current code already provides transactional request creation, server-owned admin provenance,
 guarded amount arithmetic, exact core replay for a reused attempt identity, historical attempt
 identity consistency in request and close, request closure, and safe read-only admin/customer
-projections. The request action remains dormant and no active UI creates requests.
+projections. It also enforces the 500-code-point new-write reason limit after replay resolution,
+preserves historical overlength replay, maps a dedicated safe overlength failure, validates request
+action input as a plain object, and revalidates the admin detail path on success. The request action
+remains dormant and no active UI creates requests.
 
 Current gaps relevant to this contract are:
 
-- implementation of the locked reason contract and plain-object request validation parity;
-- request-success revalidation and explicit stale-state UI behavior;
+- explicit stale-state rejection copy and refresh-and-inspect UI behavior;
 - refund execution and provider-evidence resolution;
 - operational queue/worklist ownership;
 - complete manufacturing and delivery evidence; and

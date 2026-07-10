@@ -1,8 +1,10 @@
 import { RefundAttemptStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
+  REFUND_REQUEST_REASON_MAX_CODE_POINTS,
   buildRefundAttemptIdempotencyKey,
   isGuardedRefundAttemptStatus,
+  isRefundRequestReasonWithinCodePointLimit,
   isSucceededRefundAttemptStatus,
   isTerminalRefundAttemptStatus,
   remainingRefundableAmount,
@@ -15,6 +17,27 @@ import {
 } from "../invariants";
 
 const ALL_STATUSES = Object.values(RefundAttemptStatus);
+
+describe("refund request reason length", () => {
+  it("accepts exactly 500 ASCII code points", () => {
+    const reason = "a".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS);
+
+    expect(isRefundRequestReasonWithinCodePointLimit(reason)).toBe(true);
+  });
+
+  it("counts supplementary-plane characters as one code point each", () => {
+    const reason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS);
+
+    expect(reason.length).toBe(REFUND_REQUEST_REASON_MAX_CODE_POINTS * 2);
+    expect(isRefundRequestReasonWithinCodePointLimit(reason)).toBe(true);
+  });
+
+  it("rejects 501 Unicode code points", () => {
+    const reason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1);
+
+    expect(isRefundRequestReasonWithinCodePointLimit(reason)).toBe(false);
+  });
+});
 
 describe("refund attempt status classification", () => {
   it.each(ALL_STATUSES)("classifies succeeded money movement for %s", (status) => {

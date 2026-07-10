@@ -31,6 +31,7 @@ export type AdminRefundActionErrorCode =
   | "FORBIDDEN"
   | "INVALID_INPUT"
   | "REASON_REQUIRED"
+  | "REASON_TOO_LONG"
   | "INVALID_AMOUNT"
   | "INSUFFICIENT_REFUNDABLE"
   | "NOT_FOUND"
@@ -67,6 +68,7 @@ type CloseInputValidationResult =
 
 const REQUEST_FAILURE_CODE_MAP: Record<RequestRefundAttemptFailureCode, AdminRefundActionErrorCode> = {
   INVALID_REASON: "REASON_REQUIRED",
+  REASON_TOO_LONG: "REASON_TOO_LONG",
   INVALID_REQUEST_AMOUNT: "INVALID_AMOUNT",
   OVER_REFUND: "INSUFFICIENT_REFUNDABLE",
   ORDER_NOT_FOUND: "NOT_FOUND",
@@ -122,6 +124,7 @@ export async function requestRefundAttemptAction(
     now: new Date(),
   });
   if (!result.ok) return failure(mapFailureCode(result.code));
+  revalidatePath(`/admin/orders/${validated.input.orderId}`);
   return {
     success: true,
     refundAttemptId: result.refundAttempt.id,
@@ -160,7 +163,7 @@ export async function closeRefundRequestAction(
 }
 
 function validateInput(input: unknown): InputValidationResult {
-  if (!isRecord(input)) return failure("INVALID_INPUT");
+  if (!isPlainRecord(input)) return failure("INVALID_INPUT");
   const orderId = input.orderId;
   const amount = input.amount;
   const reason = input.reason;

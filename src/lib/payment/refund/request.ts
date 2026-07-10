@@ -10,6 +10,7 @@ import {
 } from "@prisma/client";
 import {
   hasConsistentRefundAttemptLedgerIdentity,
+  isRefundRequestReasonWithinCodePointLimit,
   isTerminalRefundAttemptStatus,
 } from "./invariants";
 import {
@@ -47,6 +48,7 @@ export type RequestRefundAttemptFailureCode =
   | "PAYMENT_IDENTITY_MISMATCH"
   | "REFUND_LEDGER_INCONSISTENT"
   | "DISPUTE_REVIEW_REQUIRED"
+  | "REASON_TOO_LONG"
   | "IDEMPOTENCY_CONFLICT"
   | "ORDER_STATUS_CONFLICT";
 
@@ -92,8 +94,12 @@ async function requestInTransaction(
 
   const candidate = prepareAgainst(order, input, []);
   if (!candidate.ok) return candidate;
-  const replay = resolveReplay(order, candidate.refundAttempt);
-  if (replay) return replay;
+  const replayOrReasonFailure = await resolveReplayBeforeNewWriteReasonValidation(
+    tx,
+    order,
+    candidate.refundAttempt,
+  );
+  if (replayOrReasonFailure) return replayOrReasonFailure;
 
   if (!hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)) {
     return failure("REFUND_LEDGER_INCONSISTENT", "Historical refund ledger identity is inconsistent.");
@@ -158,6 +164,35 @@ function resolveReplay(
   ));
   if (!existing) return null;
   return resolveExistingReplay(existing, candidate);
+}
+
+async function resolveReplayBeforeNewWriteReasonValidation(
+  tx: RefundRequestTx,
+  order: RefundRequestOrder,
+  candidate: PreparedRefundAttempt,
+): Promise<RequestRefundAttemptResult | null> {
+  const replay = resolveReplay(order, candidate);
+  if (replay) return replay;
+  if (isRefundRequestReasonWithinCodePointLimit(candidate.reason)) return null;
+  if (await hasExistingRequestIdentity(tx, candidate)) {
+    return failure("IDEMPOTENCY_CONFLICT", "Refund request identity is already in use.");
+  }
+  return failure("REASON_TOO_LONG", "Refund reason exceeds the 500-code-point limit.");
+}
+
+async function hasExistingRequestIdentity(
+  tx: RefundRequestTx,
+  candidate: PreparedRefundAttempt,
+): Promise<boolean> {
+  const operationKey = buildRefundRequestOperationKey(candidate.id);
+  const [attempt, transition] = await Promise.all([
+    tx.refundAttempt.findFirst({
+      where: { OR: [{ id: candidate.id }, { idempotencyKey: candidate.idempotencyKey }] },
+      select: { id: true },
+    }),
+    tx.refundAttemptTransition.findUnique({ where: { operationKey }, select: { id: true } }),
+  ]);
+  return attempt !== null || transition !== null;
 }
 
 function resolveExistingReplay(

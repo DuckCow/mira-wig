@@ -14,6 +14,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_TRANSITION: "현재 상태에서는 이 전이를 할 수 없습니다.",
   MARKET_NOT_FOUND: "유효하지 않은 마켓 코드입니다.",
   REASON_REQUIRED: "환불 사유를 입력해주세요.",
+  REASON_TOO_LONG: "환불 사유는 500자 이내로 입력해 주세요.",
   INVALID_AMOUNT: "금액은 1 이상의 정수여야 합니다.",
   INSUFFICIENT_REFUNDABLE: "환불 가능 금액을 초과했습니다.",
   REFUND_IN_PROGRESS: "처리 중인 환불이 있습니다. 운영 확인 후 다시 시도해주세요.",

@@ -12,6 +12,7 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
+import { REFUND_REQUEST_REASON_MAX_CODE_POINTS } from "../invariants";
 import {
   requestRefundAttempt,
   type RequestRefundAttemptInput,
@@ -57,6 +58,7 @@ interface AttemptSeedOptions {
   currency?: string;
   provider?: PaymentProvider;
   mode?: PaymentMode;
+  reason?: string;
 }
 
 describe("requestRefundAttempt", () => {
@@ -92,6 +94,7 @@ describe("requestRefundAttempt", () => {
       amount: 400,
       currency: "KRW",
       status: RefundAttemptStatus.REQUESTED,
+      reason: "Admin-approved refund request",
       actorType: RefundAttemptActorType.ADMIN,
       actorUserId: "admin_123",
       providerRefundId: null,
@@ -113,6 +116,45 @@ describe("requestRefundAttempt", () => {
       }),
     ]);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+  });
+
+  it("trims before accepting exactly 500 ASCII code points and writes one reason value", async () => {
+    const fixture = await createOrder(ctx);
+    const normalizedReason = "a".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS);
+
+    const result = success(await requestRefundAttempt(db, input(fixture.orderId, {
+      reason: `  ${normalizedReason}\n`,
+    })));
+    const transitions = await creationTransitions(result.refundAttempt.id);
+
+    expect(result.refundAttempt.reason).toBe(normalizedReason);
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0].reason).toBe(result.refundAttempt.reason);
+  });
+
+  it("accepts exactly 500 supplementary-plane code points", async () => {
+    const fixture = await createOrder(ctx);
+    const reason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS);
+
+    const result = success(await requestRefundAttempt(db, input(fixture.orderId, { reason })));
+
+    expect(reason.length).toBe(REFUND_REQUEST_REASON_MAX_CODE_POINTS * 2);
+    expect(result.refundAttempt.reason).toBe(reason);
+  });
+
+  it("rejects a 501-code-point new request without changing the aggregate", async () => {
+    const fixture = await createOrder(ctx);
+    const before = await requestPersistenceState(fixture);
+    const reason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1);
+
+    const result = await requestRefundAttempt(db, input(fixture.orderId, { reason }));
+
+    expect(result).toEqual({
+      ok: false,
+      code: "REASON_TOO_LONG",
+      message: "Refund reason exceeds the 500-code-point limit.",
+    });
+    await expect(requestPersistenceState(fixture)).resolves.toEqual(before);
   });
 
   it("opens another sequential request from PARTIALLY_REFUNDED", async () => {
@@ -250,6 +292,57 @@ describe("requestRefundAttempt", () => {
     await expect(refundCount(fixture.orderId)).resolves.toBe(1);
     await expect(transitionCount(first.refundAttempt.id)).resolves.toBe(1);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUNDED);
+  });
+
+  it("replays historical overlength reason evidence without rewriting it", async () => {
+    const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
+    const reason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1);
+    const refundAttemptId = await seedAttemptWithIdentity(
+      fixture,
+      RefundAttemptStatus.REQUESTED,
+      400,
+      { reason },
+    );
+    await seedCreationTransition(refundAttemptId, { reason });
+    const before = await requestPersistenceState(fixture);
+
+    const replay = success(await requestRefundAttempt(db, input(fixture.orderId, {
+      refundAttemptId,
+      reason: ` ${reason} `,
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+    })));
+    const persisted = await db.refundAttempt.findUniqueOrThrow({
+      where: { id: refundAttemptId },
+      select: { reason: true },
+    });
+
+    expect(replay).toMatchObject({ replayed: true, orderStatus: OrderStatus.REFUND_PENDING });
+    expect(persisted.reason).toBe(reason);
+    await expect(requestPersistenceState(fixture)).resolves.toEqual(before);
+  });
+
+  it("returns idempotency conflict before overlength failure for reused identity", async () => {
+    const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
+    const historicalReason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1);
+    const refundAttemptId = await seedAttemptWithIdentity(
+      fixture,
+      RefundAttemptStatus.REQUESTED,
+      400,
+      { reason: historicalReason },
+    );
+    await seedCreationTransition(refundAttemptId, { reason: historicalReason });
+    const before = await requestPersistenceState(fixture);
+
+    const result = await requestRefundAttempt(db, input(fixture.orderId, {
+      refundAttemptId,
+      reason: "🧠".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1),
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+    }));
+
+    expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+    await expect(requestPersistenceState(fixture)).resolves.toEqual(before);
   });
 
   it("returns exact replay despite an unrelated inconsistent sibling", async () => {
@@ -418,6 +511,23 @@ describe("requestRefundAttempt", () => {
     expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
     await expect(orderStatus(targetOrder.orderId)).resolves.toBe(OrderStatus.PAID);
     await expect(refundCount(targetOrder.orderId)).resolves.toBe(0);
+    await expect(refundCount(existingOrder.orderId)).resolves.toBe(1);
+  });
+
+  it("returns cross-order identity conflict before overlength failure without writes", async () => {
+    const existingOrder = await createOrder(ctx);
+    const targetOrder = await createOrder(ctx);
+    const collisionId = `refund_collision_${randomUUID()}`;
+    await seedAttempt(existingOrder, RefundAttemptStatus.FAILED_TERMINAL, 100, collisionId);
+    const before = await requestPersistenceState(targetOrder);
+
+    const result = await requestRefundAttempt(db, input(targetOrder.orderId, {
+      refundAttemptId: collisionId,
+      reason: "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1),
+    }));
+
+    expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+    await expect(requestPersistenceState(targetOrder)).resolves.toEqual(before);
     await expect(refundCount(existingOrder.orderId)).resolves.toBe(1);
   });
 
@@ -630,7 +740,7 @@ async function seedAttemptWithIdentity(
       amount,
       currency: options.currency ?? fixture.paymentCurrency,
       status,
-      reason: "Seed refund attempt",
+      reason: options.reason ?? "Seed refund attempt",
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
       provider: options.provider ?? fixture.provider,

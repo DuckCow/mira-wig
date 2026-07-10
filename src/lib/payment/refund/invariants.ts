@@ -4,6 +4,12 @@ import {
   type PaymentProvider,
 } from "@prisma/client";
 
+export const REFUND_REQUEST_REASON_MAX_CODE_POINTS = 500;
+
+export function isRefundRequestReasonWithinCodePointLimit(reason: string): boolean {
+  return Array.from(reason).length <= REFUND_REQUEST_REASON_MAX_CODE_POINTS;
+}
+
 export interface RefundPaymentIdentityInput {
   id: string;
   currency: string;

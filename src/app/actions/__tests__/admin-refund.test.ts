@@ -73,23 +73,49 @@ describe("requestRefundAttemptAction authorization", () => {
     const result = await requestRefundAttemptAction(VALID_INPUT);
 
     expect(result).toEqual({ success: false, errorCode });
+    expect(mockRandomUUID).not.toHaveBeenCalled();
     expect(mockRequestRefundAttempt).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
 describe("requestRefundAttemptAction input boundary", () => {
-  it.each([
-    null,
-    [],
-    {},
-    { ...VALID_INPUT, orderId: "   " },
-    { ...VALID_INPUT, reason: 123 },
-  ])("rejects malformed input", async (input) => {
+  class HostileInput {}
+
+  const malformedInputs: ReadonlyArray<readonly [string, unknown]> = [
+    ["null", null],
+    ["array", Object.assign([], VALID_INPUT)],
+    ["Date", Object.assign(new Date(), VALID_INPUT)],
+    ["class instance", Object.assign(new HostileInput(), VALID_INPUT)],
+    ["custom prototype", Object.setPrototypeOf({ ...VALID_INPUT }, { inherited: true })],
+    ["function", Object.assign(() => undefined, VALID_INPUT)],
+    ["empty object", {}],
+    ["blank order id", { ...VALID_INPUT, orderId: "   " }],
+    ["non-string reason", { ...VALID_INPUT, reason: 123 }],
+  ];
+
+  it.each(malformedInputs)("rejects malformed %s input", async (_label, input) => {
     // @ts-expect-error Runtime validation intentionally covers untrusted action payloads.
     const result = await requestRefundAttemptAction(input);
 
     expect(result).toEqual({ success: false, errorCode: "INVALID_INPUT" });
+    expect(mockRandomUUID).not.toHaveBeenCalled();
     expect(mockRequestRefundAttempt).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("accepts a null-prototype object", async () => {
+    const input = { ...VALID_INPUT };
+    Object.setPrototypeOf(input, null);
+
+    const result = await requestRefundAttemptAction(input);
+
+    expect(result).toEqual({
+      success: true,
+      refundAttemptId: GENERATED_ID,
+      orderStatus: OrderStatus.REFUND_PENDING,
+    });
+    expect(mockRequestRefundAttempt).toHaveBeenCalledOnce();
   });
 
   it("returns REASON_REQUIRED for a blank reason", async () => {
@@ -97,6 +123,7 @@ describe("requestRefundAttemptAction input boundary", () => {
 
     expect(result).toEqual({ success: false, errorCode: "REASON_REQUIRED" });
     expect(mockRequestRefundAttempt).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
   it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
@@ -106,6 +133,7 @@ describe("requestRefundAttemptAction input boundary", () => {
 
       expect(result).toEqual({ success: false, errorCode: "INVALID_AMOUNT" });
       expect(mockRequestRefundAttempt).not.toHaveBeenCalled();
+      expect(mockRevalidatePath).not.toHaveBeenCalled();
     },
   );
 });
@@ -132,6 +160,17 @@ describe("requestRefundAttemptAction delegation", () => {
       refundAttemptId: GENERATED_ID,
       orderStatus: OrderStatus.REFUND_PENDING,
     });
+    expect(mockRevalidatePath).toHaveBeenCalledOnce();
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
+  });
+
+  it("revalidates the validated detail path for an exact core replay", async () => {
+    mockRequestRefundAttempt.mockResolvedValue(successResult({ replayed: true }));
+
+    await requestRefundAttemptAction({ ...VALID_INPUT, orderId: "  order_123  " });
+
+    expect(mockRevalidatePath).toHaveBeenCalledOnce();
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
   });
 
   it("returns only the minimal safe success fields", async () => {
@@ -168,12 +207,14 @@ describe("requestRefundAttemptAction delegation", () => {
     mockRequestRefundAttempt.mockRejectedValue(new Error("database unavailable"));
 
     await expect(requestRefundAttemptAction(VALID_INPUT)).rejects.toThrow("database unavailable");
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
 describe("requestRefundAttemptAction failure mapping", () => {
   it.each([
     ["INVALID_REASON", "REASON_REQUIRED"],
+    ["REASON_TOO_LONG", "REASON_TOO_LONG"],
     ["INVALID_REQUEST_AMOUNT", "INVALID_AMOUNT"],
     ["INVALID_TOTAL_AMOUNT", "INVALID_TRANSITION"],
     ["OVER_REFUND", "INSUFFICIENT_REFUNDABLE"],
@@ -200,6 +241,7 @@ describe("requestRefundAttemptAction failure mapping", () => {
     const result = await requestRefundAttemptAction(VALID_INPUT);
 
     expect(result).toEqual({ success: false, errorCode });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -382,12 +424,15 @@ function adminGuard() {
   };
 }
 
-function successResult(): RequestRefundAttemptResult {
+function successResult(
+  overrides: Partial<Extract<RequestRefundAttemptResult, { ok: true }>> = {},
+): RequestRefundAttemptResult {
   return {
     ok: true,
     refundAttempt: refundAttempt(),
     orderStatus: OrderStatus.REFUND_PENDING,
     replayed: false,
+    ...overrides,
   };
 }
 
