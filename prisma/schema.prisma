@@ -293,6 +293,38 @@ enum RefundAttemptActorType {
   SYSTEM
 }
 
+enum RefundExecutionCommandStatus {
+  READY
+  LEASED
+  WAITING_EVIDENCE
+  WAITING_RETRY
+  PARKED
+  DONE
+}
+
+enum RefundExecutionEvidenceSource {
+  ADAPTER_RESPONSE
+  PROVIDER_LOOKUP
+  WEBHOOK
+  RECONCILIATION
+  OPERATOR
+}
+
+enum RefundExecutionEvidenceOutcome {
+  SUCCEEDED
+  ACCEPTED_PENDING
+  NOT_EXECUTED_RETRYABLE
+  NOT_EXECUTED_TERMINAL
+  UNKNOWN
+}
+
+enum RefundExecutionEvidenceApplication {
+  APPLIED
+  PARKED
+  DUPLICATE
+  CONFLICT
+}
+
 enum OrderStatus {
   PAID
   CANCELLED
@@ -475,6 +507,7 @@ model RefundAttempt {
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
   transitions        RefundAttemptTransition[]
+  executionCommand   RefundExecutionCommand?
 
   @@unique([provider, providerRefundId])
   @@index([orderId, status])
@@ -502,6 +535,53 @@ model RefundAttemptTransition {
   createdAt    DateTime @default(now())
 
   @@index([refundAttemptId, createdAt])
+}
+
+model RefundExecutionCommand {
+  id              String        @id @default(cuid())
+  refundAttemptId String        @unique
+  refundAttempt   RefundAttempt @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict)
+
+  status          RefundExecutionCommandStatus @default(READY)
+  availableAt     DateTime                     @default(now())
+  leaseOwner      String?                      @db.VarChar(255)
+  leaseUntil      DateTime?
+  dispatchAttempt Int                          @default(0)
+
+  lastSafeErrorCode    String? @db.VarChar(128)
+  lastSafeErrorMessage String? @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  evidence RefundExecutionEvidence[]
+
+  @@index([status, availableAt, createdAt])
+  @@index([status, leaseUntil])
+}
+
+model RefundExecutionEvidence {
+  id        String                 @id @default(cuid())
+  commandId String
+  command   RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+
+  source         RefundExecutionEvidenceSource
+  sourceDedupKey String                             @unique @db.VarChar(512)
+  outcome        RefundExecutionEvidenceOutcome
+  application    RefundExecutionEvidenceApplication
+
+  observedProviderRefundId String? @db.VarChar(512)
+  reportedAmount           Int?
+  reportedCurrency         String? @db.VarChar(3)
+
+  safeCode    String? @db.VarChar(128)
+  safeMessage String? @db.VarChar(500)
+
+  observedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([commandId, createdAt])
+  @@index([source, observedAt])
 }
 
 model OrderItem {
