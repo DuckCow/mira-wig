@@ -452,33 +452,56 @@ model Order {
 }
 
 model RefundAttempt {
-  id                 String                 @id @default(cuid())
+  id                 String                    @id @default(cuid())
   orderId            String
-  order              Order                  @relation(fields: [orderId], references: [id])
+  order              Order                     @relation(fields: [orderId], references: [id])
   paymentId          String
-  payment            Payment                @relation(fields: [paymentId], references: [id])
+  payment            Payment                   @relation(fields: [paymentId], references: [id])
   amount             Int
   currency           String
-  status             RefundAttemptStatus    @default(REQUESTED)
+  status             RefundAttemptStatus       @default(REQUESTED)
   reason             String
   actorType          RefundAttemptActorType
   actorUserId        String?
   provider           PaymentProvider
   mode               PaymentMode
   providerRefundId   String?
-  idempotencyKey     String                 @unique
-  requestedAt        DateTime               @default(now())
+  idempotencyKey     String                    @unique
+  requestedAt        DateTime                  @default(now())
   processedAt        DateTime?
   failedAt           DateTime?
   failureCode        String?
   safeFailureMessage String?
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  transitions        RefundAttemptTransition[]
 
   @@unique([provider, providerRefundId])
   @@index([orderId, status])
   @@index([paymentId, status])
   @@index([orderId, requestedAt])
+}
+
+model RefundAttemptTransition {
+  id String @id @default(cuid())
+
+  refundAttemptId String
+  refundAttempt   RefundAttempt @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict)
+
+  fromStatus RefundAttemptStatus?
+  toStatus   RefundAttemptStatus
+
+  orderStatusBefore OrderStatus
+  orderStatusAfter  OrderStatus
+
+  actorType   RefundAttemptActorType
+  actorUserId String?
+
+  reason       String
+  operationKey String   @unique
+  createdAt    DateTime @default(now())
+
+  @@index([refundAttemptId, createdAt])
 }
 
 model OrderItem {
