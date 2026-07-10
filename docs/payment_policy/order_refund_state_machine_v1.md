@@ -3,7 +3,10 @@
 - **Date**: 2026-07-10
 - **Status**: DESIGN LOCK — docs only. Nothing in this document is implemented by this document.
 - **Base commit context**: `2f5838f feat(orders): add cancellation and refund order statuses`
-- **Related**: `payment_policy_open_v6.md` (환불/취소 트랙 — "나가는 절반"), `payment_policy_confirmed_v6.md`, `b5_void_design_v3.md` (pg.void / completion compensation), `multi_pg_priority_fallback_v1.md` (post-contact immutability), `a3_outbox_design_v2.md`.
+- **Related**: `refund_request_eligibility_v1.md` (request-creation eligibility SSOT),
+  `payment_policy_open_v6.md` (환불/취소 트랙 — "나가는 절반"),
+  `payment_policy_confirmed_v6.md`, `b5_void_design_v3.md` (pg.void / completion compensation),
+  `multi_pg_priority_fallback_v1.md` (post-contact immutability), `a3_outbox_design_v2.md`.
 
 ---
 
@@ -92,7 +95,7 @@ Adding refund-ish values (e.g., `REFUNDED`) to `PaymentAttemptStatus` is **rejec
 | Term | Definition (locked) |
 |---|---|
 | Customer cancellation request | A shopper's **request** to cancel/refund. In v1 this is an inquiry (CS channel); it creates no state transition by itself. Future: may create a `RefundAttempt` in `REQUESTED` after policy lock (§11). |
-| Admin/merchant cancellation | An admin-initiated cancel/refund workflow. The **first implemented workflow** (§12). Admin approves eligibility, creates ledger rows, triggers execution. |
+| Admin/merchant cancellation | An admin-initiated cancel/refund workflow. The **first implemented workflow** (§12). Request-creation eligibility and merchant approval follow `refund_request_eligibility_v1.md`; execution remains a separate later boundary. |
 | Provider void/cancel | Provider-side reversal of a capture (`pg.void`, `ProviderVoidExecutor`). Today: completion-compensation only, pre-order. Distinct from refund execution and from this state machine. |
 | Full refund | Cumulative succeeded refunded amount equals the captured `Payment.amount`. Enables `CANCELLED` or `REFUNDED`. |
 | Partial refund | A succeeded refund attempt with amount < remaining refundable. Leads to `PARTIALLY_REFUNDED` as the resting state. |
@@ -193,7 +196,7 @@ Adopt the proposed set unchanged:
 
 | Status | Meaning | Maps to provider result classes |
 |---|---|---|
-| `REQUESTED` | Row created, eligibility approved, provider **not yet contacted**. Freely cancellable. | — |
+| `REQUESTED` | Merchant-approved intent to attempt returning a specific amount; payment refundability was verified at creation, provider **not yet contacted**, and success not guaranteed. Withdrawable only while the close contract permits. Creation eligibility is owned by `refund_request_eligibility_v1.md`. | — |
 | `PROCESSING` | Provider contacted (or contact in flight). Post-contact immutability applies from here. | `pending` results park here |
 | `SUCCEEDED` | Durable provider success (direct result or verified lookup). Counts toward cumulative refunded. | `succeeded`, `idempotent_succeeded` |
 | `FAILED_RETRYABLE` | Transient failure; retry reuses the **same row and same idempotency key**. | `retryable` |
@@ -284,6 +287,10 @@ policy/adapter concern, not a contract field.
   non-pending resting state, which removes the pending badge and explanation.
 
 ## 12. Admin workflow recommendation (first real workflow)
+
+The payment-refundability, merchant-approval, execution-suitability, and UI-projection boundaries
+for creating `REQUESTED` are owned by `refund_request_eligibility_v1.md`. This section preserves
+workflow sequencing and does not duplicate that eligibility contract.
 
 - The **first implemented workflow is admin-only** (slice D), after the ledger exists (B) and the
   MOCK executor is test-proven (C).

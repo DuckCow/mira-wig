@@ -3,7 +3,9 @@
 - **Date:** 2026-07-10
 - **Status:** DESIGN LOCK — documentation only; this document does not implement code or schema.
 - **Base commit context:** `d6e1845 feat(admin): read-only order detail with refund ledger and review summary`
-- **Related:** `order_refund_state_machine_v1.md`, `payment_policy_confirmed_v6.md`, `payment_policy_open_v6.md`
+- **Related:** `refund_request_eligibility_v1.md` (request-creation eligibility SSOT),
+  `order_refund_state_machine_v1.md`, `payment_policy_confirmed_v6.md`,
+  `payment_policy_open_v6.md`
 
 ## 1. Purpose and activation gate
 
@@ -436,9 +438,10 @@ Closure has no money-movement side effect. The following are locked:
 - Payment initiation, confirmation, and completion are unchanged.
 - No `ManufacturingRequest` is read, written, or locked.
 
-Manufacturing and commercial refund eligibility belong to request creation and future execution
-policy, not withdrawal of an unexecuted internal request. A future manufacturing hold/release
-mechanism, if adopted, is a separate design and must not be inferred from this close operation.
+Request-creation eligibility, merchant advisory context, and future execution suitability are
+owned by `refund_request_eligibility_v1.md`, not by withdrawal of an unexecuted internal request.
+A future manufacturing hold/release mechanism, if adopted, is a separate design and must not be
+inferred from this close operation.
 
 ## 14. Structured failures
 
@@ -510,7 +513,8 @@ Implementation order is locked as follows:
 5. Dormant admin close action.
 6. Read-only transition rendering and `REQUESTED` close control.
 7. Customer `REFUND_PENDING` copy decision and correction.
-8. Authoritative manufacturing/commercial refund eligibility.
+8. Refund-request eligibility design lock (`refund_request_eligibility_v1.md`), including
+   merchant advisory context and the contract for required activation hardening.
 9. MOCK executor and provider-evidence resolution paths.
 10. Only after all preceding gates, activate a MOCK/SANDBOX admin request form.
 
