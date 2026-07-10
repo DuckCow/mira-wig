@@ -519,17 +519,22 @@ controls, or later workflow states forward “while here.”
 
 ## 17. Customer copy
 
-Customer copy is intentionally unresolved and does not block docs, schema, or close-core work.
-Candidates are:
+The customer `REFUND_PENDING` copy decision is resolved as follows:
 
-- `환불 요청 접수`;
-- `환불 진행 중`; or
-- phase-derived copy from the active `RefundAttempt.status`.
+- List and detail badge: `환불 요청 처리 중`.
+- Detail explanation, rendered only while the Order is `REFUND_PENDING`:
+  `환불 요청이 접수되어 처리 중입니다. 환불 여부와 완료 시점은 아직 확정되지 않았습니다.`
 
-This is a product/human decision and must be resolved before form activation. The decision should
-test at least two scenarios: a `REQUESTED` attempt later withdrawn with no money moved, and a
-`PROCESSING` attempt that proceeds to provider resolution. No new `OrderStatus` is authorized by
-this document.
+The wording describes an active refund request rather than provider submission or money movement.
+It remains outcome-neutral across `REQUESTED`, `PROCESSING`, `FAILED_RETRYABLE`, and
+`MANUAL_REVIEW`, without exposing those internal phases. It promises neither approval, provider
+contact, money movement, successful completion, nor timing. When withdrawal, terminal failure, or
+successful resolution returns the Order to a resting state, the pending presentation disappears
+through the existing Order-status rendering. No new `OrderStatus` is authorized by this decision.
+
+No proactive customer refund-lifecycle notification currently exists. Notification design is a
+prerequisite for customer-initiated refund requests or terminal-failure communication; this copy
+decision does not imply that email, SMS, push, or another notification channel is implemented.
 
 ## 18. Architecture protection
 

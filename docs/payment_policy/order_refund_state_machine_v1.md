@@ -18,7 +18,7 @@ not implementation**.
 - `OrderStatus` enum expanded to `PAID / CANCELLED / REFUND_PENDING / PARTIALLY_REFUNDED / REFUNDED`
   (`prisma/schema.prisma:281`).
 - Shopper-facing labels for all five values in `src/app/(shop)/orders/order-status.ts`
-  (결제 완료 / 주문 취소 / 환불 처리 중 / 부분 환불 / 환불 완료), used by the customer order
+  (결제 완료 / 주문 취소 / 환불 요청 처리 중 / 부분 환불 / 환불 완료), used by the customer order
   list and detail pages for **display only**.
 - Verified at HEAD: no production code writes any `OrderStatus` other than the `PAID` default at
   order creation (completion transaction). There are no `order.update` call sites. The state
@@ -54,7 +54,7 @@ state machine. It is mentioned here only to state that nothing in this document 
 | Value | Meaning (locked) | Shopper label (already shipped) |
 |---|---|---|
 | `PAID` | Capture succeeded and order exists. In this codebase an `Order` row is only created by the completion transaction after a successful capture, so `PAID` is the birth state of every order. | 결제 완료 |
-| `REFUND_PENDING` | A cancellation/refund workflow is **open** for this order: at least one refund attempt has been requested and the workflow has not reached a resting state. Non-terminal. | 환불 처리 중 |
+| `REFUND_PENDING` | A cancellation/refund workflow is **open** for this order: at least one refund attempt has been requested and the workflow has not reached a resting state. Non-terminal. | 환불 요청 처리 중 |
 | `PARTIALLY_REFUNDED` | Resting state: some money has verifiably been returned (cumulative succeeded refunds > 0 and < payment amount) and no workflow is currently open. Non-terminal. | 부분 환불 |
 | `CANCELLED` | Terminal: the full captured amount has verifiably been returned **and** the order will not be (or was not) fulfilled — the cancellation flavor of a full refund (e.g., before production start; MR aborted/`CANCELLED`). | 주문 취소 |
 | `REFUNDED` | Terminal: the full captured amount has verifiably been returned, where fulfillment had progressed (return-style full refund), or the cancellation flavor does not apply. | 환불 완료 |
@@ -96,7 +96,7 @@ Adding refund-ish values (e.g., `REFUNDED`) to `PaymentAttemptStatus` is **rejec
 | Provider void/cancel | Provider-side reversal of a capture (`pg.void`, `ProviderVoidExecutor`). Today: completion-compensation only, pre-order. Distinct from refund execution and from this state machine. |
 | Full refund | Cumulative succeeded refunded amount equals the captured `Payment.amount`. Enables `CANCELLED` or `REFUNDED`. |
 | Partial refund | A succeeded refund attempt with amount < remaining refundable. Leads to `PARTIALLY_REFUNDED` as the resting state. |
-| Refund pending | An open workflow: ≥1 `RefundAttempt` in a non-terminal status (`REQUESTED/PROCESSING/MANUAL_REVIEW`). Order shows `REFUND_PENDING`. |
+| Refund pending | An open workflow: ≥1 `RefundAttempt` in a non-terminal status (`REQUESTED/PROCESSING/FAILED_RETRYABLE/MANUAL_REVIEW`). Order shows `REFUND_PENDING`. |
 | Provider retryable failure | Provider refund call failed with a transient class (timeout, 5xx, rate limit). The same attempt may be retried **with the same idempotency key**. |
 | Provider terminal failure | Provider definitively refused (invalid state, already refunded elsewhere, policy refusal). The attempt is closed `FAILED_TERMINAL`; a new attempt (new key) is required to try again. |
 | Ambiguous/manual-review state | Provider response does not durably establish success or failure (ambiguous HTTP outcome, mismatched echo, lookup unavailable). Attempt parks in `MANUAL_REVIEW`; **no order terminal transition may consume it** until resolved by verified lookup or operator decision. |
@@ -111,12 +111,12 @@ durably recorded on the `RefundAttempt` row first.
 
 | From | To | Trigger | Actor | Required evidence | Provider call in this step? | Idempotency required? | Shopper-facing copy |
 |---|---|---|---|---|---|---|---|
-| `PAID` | `REFUND_PENDING` | Refund/cancel workflow opened | Admin (v1); system on future customer request | ≥1 `RefundAttempt` row created in `REQUESTED` with amount, currency, reason, actor | No (ledger only) | Yes — attempt row carries its unique `idempotencyKey` from creation | 환불 처리 중 |
+| `PAID` | `REFUND_PENDING` | Refund/cancel workflow opened | Admin (v1); system on future customer request | ≥1 `RefundAttempt` row created in `REQUESTED` with amount, currency, reason, actor | No (ledger only) | Yes — attempt row carries its unique `idempotencyKey` from creation | 환불 요청 처리 중 |
 | `REFUND_PENDING` | `CANCELLED` | Full refund succeeded; order not fulfilled | Admin decision + system | Cumulative `SUCCEEDED` refunds == `Payment.amount`; each with durable provider result (`providerRefundId` and/or verified lookup); no in-flight attempts; fulfillment not started (MR aborted/absent) | Executed in prior step(s); transition consumes recorded results | Yes (execution steps); transition itself is guarded-conditional | 주문 취소 |
 | `REFUND_PENDING` | `REFUNDED` | Full refund succeeded; cancellation flavor not applicable | Admin decision + system | Same money evidence as above (cumulative == `Payment.amount`, durable provider results, no in-flight attempts) | Executed in prior step(s) | Yes | 환불 완료 |
 | `REFUND_PENDING` | `PARTIALLY_REFUNDED` | Workflow closes with partial success | Admin decision + system | Cumulative `SUCCEEDED` > 0 and < `Payment.amount`; no in-flight attempts remain | Executed in prior step(s) | Yes | 부분 환불 |
 | `REFUND_PENDING` | `PAID` | Request withdrawn/declined with **zero** money moved | Admin | Zero `SUCCEEDED` refunds; all attempts closed (`FAILED_TERMINAL`/`CANCELLED`); decline reason recorded | No | Guarded-conditional transition only | 결제 완료 |
-| `PARTIALLY_REFUNDED` | `REFUND_PENDING` | Another refund round opened | Admin (v1) | New `RefundAttempt` in `REQUESTED`; over-refund guard passes (§9) | No (ledger only) | Yes | 환불 처리 중 |
+| `PARTIALLY_REFUNDED` | `REFUND_PENDING` | Another refund round opened | Admin (v1) | New `RefundAttempt` in `REQUESTED`; over-refund guard passes (§9) | No (ledger only) | Yes | 환불 요청 처리 중 |
 | `PARTIALLY_REFUNDED` | `REFUNDED` | Final round brings cumulative to total | Admin decision + system | Cumulative `SUCCEEDED` == `Payment.amount`; durable provider results; no in-flight attempts | Executed in prior step(s) | Yes | 환불 완료 |
 
 Notes:
@@ -272,6 +272,16 @@ policy/adapter concern, not a contract field.
 - `/orders` pages may **display** the five statuses (labels already shipped in
   `order-status.ts`) but must not trigger transitions. Display-only is the locked ceiling for
   customer UI until slice G.
+- Customer list and detail badges render `REFUND_PENDING` as `환불 요청 처리 중`. The grammatical
+  object is the active refund request, not refund execution or money movement. The order detail
+  additionally renders `환불 요청이 접수되어 처리 중입니다. 환불 여부와 완료 시점은 아직 확정되지
+  않았습니다.` while the order remains `REFUND_PENDING`.
+- `REFUND_PENDING` alone does not prove provider contact and promises neither approval, money
+  movement, successful completion, nor timing. Internal attempt phases remain hidden from customer
+  pages in v1.
+- A succeeded refund must move the Order to the appropriate resting `PARTIALLY_REFUNDED`,
+  `CANCELLED`, or `REFUNDED` state. Withdrawal or terminal failure must restore the appropriate
+  non-pending resting state, which removes the pending badge and explanation.
 
 ## 12. Admin workflow recommendation (first real workflow)
 

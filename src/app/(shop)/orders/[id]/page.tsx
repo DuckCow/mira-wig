@@ -1,5 +1,6 @@
 import {
   FulfillmentType,
+  OrderStatus,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -107,6 +108,12 @@ function OrderHeader({ order }: { order: OrderDetail }) {
         </span>
       </div>
       <p className="text-sm text-gray-500">결제일 {formatDateTime(order.paidAt)}</p>
+      {order.status === OrderStatus.REFUND_PENDING ? (
+        <div className="space-y-1 text-sm text-gray-600">
+          <p>환불 요청이 접수되어 처리 중입니다.</p>
+          <p>환불 여부와 완료 시점은 아직 확정되지 않았습니다.</p>
+        </div>
+      ) : null}
     </header>
   );
 }
