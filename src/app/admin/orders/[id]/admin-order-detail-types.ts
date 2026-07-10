@@ -79,6 +79,7 @@ interface RefundAttemptSource extends RefundAmountStateInput {
   safeFailureMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
+  hasProviderRefundId: boolean;
   transitions: RefundAttemptTransitionSource[];
 }
 
@@ -155,6 +156,7 @@ interface RefundReviewViewModel {
 }
 
 interface RefundAttemptViewModel {
+  refundAttemptId: string;
   shortId: string;
   status: string;
   amount: string;
@@ -165,6 +167,8 @@ interface RefundAttemptViewModel {
   failedAt: string | null;
   providerContext: string;
   safeFailureMessage: string | null;
+  canCloseRequest: boolean;
+  closeWarning: string | null;
   transitionHistory: RefundTransitionHistoryViewModel;
 }
 

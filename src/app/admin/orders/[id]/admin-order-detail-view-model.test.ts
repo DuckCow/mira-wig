@@ -74,6 +74,78 @@ describe("admin order detail view model", () => {
     expect(view.refundReview.remainingRequestableAmount).toBe("금액 확인 필요");
   });
 
+  it("offers close advice for a legacy REQUESTED attempt with no provider id", () => {
+    const order = source({
+      status: OrderStatus.REFUND_PENDING,
+      refundAttempts: [attempt("refund_legacy", 1_000, RefundAttemptStatus.REQUESTED)],
+    });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(true);
+    expect(view.closeWarning).toBeNull();
+    expect(view.transitionHistory.entries).toEqual([]);
+  });
+
+  it("withholds close advice and explains REQUESTED provider evidence", () => {
+    const requested = attempt("refund_provider", 1_000, RefundAttemptStatus.REQUESTED);
+    requested.hasProviderRefundId = true;
+    const order = source({ status: OrderStatus.REFUND_PENDING, refundAttempts: [requested] });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(false);
+    expect(view.closeWarning).toBe(
+      "제공자 처리 정보가 있어 현재 요청의 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    );
+  });
+
+  it("withholds close advice and explains a REQUESTED order-status mismatch", () => {
+    const order = source({
+      status: OrderStatus.PAID,
+      refundAttempts: [attempt("refund_mismatch", 1_000, RefundAttemptStatus.REQUESTED)],
+    });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(false);
+    expect(view.closeWarning).toBe(
+      "주문 상태와 환불 요청 상태가 일치하지 않아 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    );
+  });
+
+  it("combines both REQUESTED anomaly facts into one warning", () => {
+    const requested = attempt("refund_both", 1_000, RefundAttemptStatus.REQUESTED);
+    requested.hasProviderRefundId = true;
+    const order = source({ status: OrderStatus.PAID, refundAttempts: [requested] });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(false);
+    expect(view.closeWarning).toBe(
+      "제공자 처리 정보가 있고 주문 상태와 환불 요청 상태도 일치하지 않아 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    );
+  });
+
+  it.each([
+    RefundAttemptStatus.PROCESSING,
+    RefundAttemptStatus.SUCCEEDED,
+    RefundAttemptStatus.FAILED_RETRYABLE,
+    RefundAttemptStatus.FAILED_TERMINAL,
+    RefundAttemptStatus.MANUAL_REVIEW,
+    RefundAttemptStatus.CANCELLED,
+  ])("silently withholds close advice for ordinary %s attempts", (status) => {
+    const order = source({
+      status: OrderStatus.REFUND_PENDING,
+      refundAttempts: [attempt(`refund_${status}`, 1_000, status)],
+    });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(false);
+    expect(view.closeWarning).toBeNull();
+  });
+
   it("projects transition history in loader order with safe Korean audit labels", () => {
     const transitions = [
       transition({
@@ -114,7 +186,7 @@ describe("admin order detail view model", () => {
       },
       {
         key: "transition_a",
-        attemptStatusChange: "환불 요청됨 → 요청 취소",
+        attemptStatusChange: "환불 요청됨 → 요청 철회",
         orderStatusChange: "환불 처리 중 → 결제 완료",
         actor: "시스템 작업",
         auditReason: "기록 사유 확인 필요",
@@ -127,9 +199,10 @@ describe("admin order detail view model", () => {
       refundAttempts: [attempt("refund_legacy", 1_000, RefundAttemptStatus.CANCELLED)],
     });
 
-    const history = buildAdminOrderDetailViewModel(order).refundAttempts[0].transitionHistory;
+    const attemptView = buildAdminOrderDetailViewModel(order).refundAttempts[0];
 
-    expect(history).toEqual({
+    expect(attemptView.status).toBe("요청 철회");
+    expect(attemptView.transitionHistory).toEqual({
       entries: [],
       emptyState: "상태 변경 기록이 없습니다. 이전 데이터이거나 기록 확인이 필요합니다.",
     });
@@ -144,6 +217,8 @@ describe("admin order detail view model", () => {
     const keys = collectObjectKeys(buildAdminOrderDetailViewModel(order));
 
     expect(keys.has("providerContext")).toBe(true);
+    expect(keys.has("canCloseRequest")).toBe(true);
+    expect(keys.has("hasProviderRefundId")).toBe(false);
     for (const forbidden of [
       "operationKey",
       "actorUserId",
@@ -166,7 +241,7 @@ describe("refund attempt labels", () => {
     [RefundAttemptStatus.FAILED_RETRYABLE, "재시도 필요"],
     [RefundAttemptStatus.FAILED_TERMINAL, "환불 실패"],
     [RefundAttemptStatus.MANUAL_REVIEW, "수동 확인 필요"],
-    [RefundAttemptStatus.CANCELLED, "요청 취소"],
+    [RefundAttemptStatus.CANCELLED, "요청 철회"],
   ])("maps %s to safe Korean copy", (status, label) => {
     expect(refundAttemptStatusLabel(status)).toBe(label);
   });
@@ -257,6 +332,7 @@ function attempt(
     safeFailureMessage: null,
     createdAt: now,
     updatedAt: now,
+    hasProviderRefundId: false,
     transitions,
   };
 }

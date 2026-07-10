@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { loadAdminOrderDetail } from "./admin-order-detail-data";
 import type { AdminOrderDetailViewModel } from "./admin-order-detail-types";
+import { RefundRequestCloseControl } from "./RefundRequestCloseControl";
 
 type Params = Promise<{ id: string }>;
 type Detail = AdminOrderDetailViewModel;
@@ -25,7 +26,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Params 
       <ShippingSummary shipping={order.shipping} />
       <PaymentSummary order={order} />
       <RefundReview review={order.refundReview} />
-      <RefundLedger attempts={order.refundAttempts} />
+      <RefundLedger orderId={order.id} attempts={order.refundAttempts} />
       <FulfillmentPolicyNote />
     </div>
   );
@@ -132,7 +133,7 @@ function RefundReview({ review }: { review: Detail["refundReview"] }) {
   return (
     <Card title="환불 검토 요약">
       <p className="mb-4 text-sm text-amber-700">
-        환불 요청·실행 버튼은 아직 연결되지 않았습니다. 아래 정보는 운영 검토용입니다.
+        새 환불 요청과 환불 실행 버튼은 아직 연결되지 않았습니다. 아래 정보는 운영 검토용입니다.
       </p>
       <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
         <Info label="주문 합계" value={review.orderTotal} />
@@ -153,7 +154,7 @@ function RefundReview({ review }: { review: Detail["refundReview"] }) {
   );
 }
 
-function RefundLedger({ attempts }: { attempts: Detail["refundAttempts"] }) {
+function RefundLedger({ orderId, attempts }: { orderId: string; attempts: Detail["refundAttempts"] }) {
   return (
     <Card title="환불 요청 내역">
       {attempts.length === 0 ? <p className="text-sm text-gray-500">환불 요청 내역이 없습니다.</p> : (
@@ -179,6 +180,14 @@ function RefundLedger({ attempts }: { attempts: Detail["refundAttempts"] }) {
                 <p className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                   {attempt.safeFailureMessage}
                 </p>
+              ) : null}
+              {attempt.closeWarning ? (
+                <p className="border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {attempt.closeWarning}
+                </p>
+              ) : null}
+              {attempt.canCloseRequest ? (
+                <RefundRequestCloseControl orderId={orderId} refundAttemptId={attempt.refundAttemptId} />
               ) : null}
               <RefundTransitionHistory history={attempt.transitionHistory} />
             </li>

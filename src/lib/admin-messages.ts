@@ -24,6 +24,19 @@ const ERROR_MESSAGES: Record<string, string> = {
   UNSUPPORTED_TYPE: "지원하지 않는 파일 형식입니다. (JPEG/PNG/WEBP만 허용)",
 };
 
+const REFUND_CLOSE_ERROR_MESSAGES: Record<string, string> = {
+  PROVIDER_CONTACT_ALREADY_STARTED:
+    "결제 제공자 처리가 이미 시작되었을 수 있어 철회할 수 없습니다. 최신 상태를 확인해 주세요.",
+  INVALID_TRANSITION:
+    "현재 상태에서는 철회할 수 없습니다. 이미 철회되었거나 상태가 변경되었을 수 있습니다. 최신 상태를 확인해 주세요.",
+  CONFLICT: "다른 작업과 겹쳐 처리하지 못했습니다. 최신 상태를 확인해 주세요.",
+  MANUAL_REVIEW_REQUIRED: "환불 장부 상태에 확인이 필요합니다. 운영 검토 후 진행해 주세요.",
+};
+
 export function getAdminErrorMessage(errorCode: string): string {
   return ERROR_MESSAGES[errorCode] ?? `오류가 발생했습니다. (${errorCode})`;
+}
+
+export function getAdminRefundCloseErrorMessage(errorCode: string): string {
+  return REFUND_CLOSE_ERROR_MESSAGES[errorCode] ?? getAdminErrorMessage(errorCode);
 }

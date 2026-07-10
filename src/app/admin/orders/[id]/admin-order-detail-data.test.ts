@@ -5,6 +5,7 @@ interface MockFindUniqueArgs {
   select: {
     refundAttempts: {
       select: {
+        providerRefundId: true;
         transitions: {
           orderBy: [{ createdAt: "asc" }, { id: "asc" }];
           select: Record<string, true>;
@@ -34,6 +35,7 @@ describe("admin order detail transition query", () => {
     expect(mockFindUnique).toHaveBeenCalledTimes(1);
     const [query] = mockFindUnique.mock.calls[0];
     expect(query.where).toEqual({ id: "order_123" });
+    expect(query.select.refundAttempts.select.providerRefundId).toBe(true);
     expect(query.select.refundAttempts.select.transitions).toEqual({
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {

@@ -78,6 +78,7 @@ const ORDER_DETAIL_SELECT = {
       safeFailureMessage: true,
       createdAt: true,
       updatedAt: true,
+      providerRefundId: true,
       transitions: {
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
@@ -106,7 +107,7 @@ export async function loadAdminOrderDetail(
 }
 
 function toSafeSource(order: OrderDetailRecord): AdminOrderDetailSource {
-  const { payment, ...orderFields } = order;
+  const { payment, refundAttempts, ...orderFields } = order;
   return {
     ...orderFields,
     payment: {
@@ -120,5 +121,9 @@ function toSafeSource(order: OrderDetailRecord): AdminOrderDetailSource {
       updatedAt: payment.updatedAt,
       providerPaymentKeyPresent: Boolean(payment.providerPaymentKey?.trim()),
     },
+    refundAttempts: refundAttempts.map(({ providerRefundId, ...attempt }) => ({
+      ...attempt,
+      hasProviderRefundId: Boolean(providerRefundId?.trim()),
+    })),
   };
 }

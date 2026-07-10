@@ -19,14 +19,10 @@ import {
   sumSucceededRefundAmount,
 } from "@/lib/payment/refund/invariants";
 import { getCurlLabel, getLengthLabel } from "@/lib/wig-option-labels";
-import type {
-  AdminOrderDetailSource,
-  AdminOrderDetailViewModel,
-} from "./admin-order-detail-types";
+import type { AdminOrderDetailSource, AdminOrderDetailViewModel } from "./admin-order-detail-types";
+import { buildRefundCloseAdvisory } from "./refund-close-presentation";
 
-export function buildAdminOrderDetailViewModel(
-  order: AdminOrderDetailSource,
-): AdminOrderDetailViewModel {
+export function buildAdminOrderDetailViewModel(order: AdminOrderDetailSource): AdminOrderDetailViewModel {
   const refundAmounts = buildRefundAmounts(order);
   return {
     id: order.id,
@@ -50,13 +46,11 @@ export function buildAdminOrderDetailViewModel(
     items: order.items.map((item) => buildItem(item, order.currency)),
     payment: buildPayment(order.payment),
     refundReview: buildRefundReview(order, refundAmounts),
-    refundAttempts: order.refundAttempts.map(buildRefundAttempt),
+    refundAttempts: order.refundAttempts.map((attempt) => buildRefundAttempt(attempt, order.status)),
   };
 }
 
-function buildShipping(
-  shipping: AdminOrderDetailSource["shipping"],
-): AdminOrderDetailViewModel["shipping"] {
+function buildShipping(shipping: AdminOrderDetailSource["shipping"]): AdminOrderDetailViewModel["shipping"] {
   if (!shipping) return null;
   return {
     ...shipping,
@@ -85,9 +79,7 @@ function buildItem(
   };
 }
 
-function buildPayment(
-  payment: AdminOrderDetailSource["payment"],
-): AdminOrderDetailViewModel["payment"] {
+function buildPayment(payment: AdminOrderDetailSource["payment"]): AdminOrderDetailViewModel["payment"] {
   return {
     id: payment.id,
     status: paymentStatusLabel(payment.status),
@@ -164,8 +156,15 @@ function unavailableAmounts(): RefundAmountLabels {
 
 function buildRefundAttempt(
   attempt: AdminOrderDetailSource["refundAttempts"][number],
+  orderStatus: OrderStatus,
 ): AdminOrderDetailViewModel["refundAttempts"][number] {
+  const closeAdvisory = buildRefundCloseAdvisory({
+    orderStatus,
+    attemptStatus: attempt.status,
+    hasProviderRefundId: attempt.hasProviderRefundId,
+  });
   return {
+    refundAttemptId: attempt.id,
     shortId: attempt.id.slice(0, 8),
     status: refundAttemptStatusLabel(attempt.status),
     amount: formatMoney(attempt.amount, attempt.currency),
@@ -176,6 +175,7 @@ function buildRefundAttempt(
     failedAt: attempt.failedAt ? formatDateTime(attempt.failedAt) : null,
     providerContext: `${attempt.provider} / ${attempt.mode}`,
     safeFailureMessage: attempt.safeFailureMessage,
+    ...closeAdvisory,
     transitionHistory: buildRefundTransitionHistory(attempt.transitions),
   };
 }
@@ -217,7 +217,7 @@ export function refundAttemptStatusLabel(status: RefundAttemptStatus): string {
   if (status === RefundAttemptStatus.FAILED_RETRYABLE) return "재시도 필요";
   if (status === RefundAttemptStatus.FAILED_TERMINAL) return "환불 실패";
   if (status === RefundAttemptStatus.MANUAL_REVIEW) return "수동 확인 필요";
-  if (status === RefundAttemptStatus.CANCELLED) return "요청 취소";
+  if (status === RefundAttemptStatus.CANCELLED) return "요청 철회";
   return "상태 확인 중";
 }
 

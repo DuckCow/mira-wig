@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { OrderStatus, RefundAttemptActorType, RefundAttemptStatus } from "@prisma/client";
+import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
 import { db } from "@/lib/db";
 import {
@@ -146,6 +147,7 @@ export async function closeRefundRequestAction(
     now: new Date(),
   });
   if (!result.ok) return failure(mapCloseFailureCode(result.code));
+  revalidatePath(`/admin/orders/${validated.input.orderId}`);
   return {
     success: true,
     transitionId: result.transitionId,

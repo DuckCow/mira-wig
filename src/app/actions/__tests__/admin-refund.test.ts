@@ -12,12 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockDb = vi.hoisted(() => ({ kind: "mock-db" }));
 
 vi.mock("crypto", () => ({ randomUUID: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: mockDb }));
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn() }));
 vi.mock("@/lib/payment/refund/close", () => ({ closeRefundRequest: vi.fn() }));
 vi.mock("@/lib/payment/refund/request", () => ({ requestRefundAttempt: vi.fn() }));
 
 import { requireAdmin } from "@/lib/admin";
+import { revalidatePath } from "next/cache";
 import {
   closeRefundRequest,
   type CloseRefundRequestFailureCode,
@@ -45,6 +47,7 @@ const mockRequireAdmin = vi.mocked(requireAdmin);
 const mockCloseRefundRequest = vi.mocked(closeRefundRequest);
 const mockRequestRefundAttempt = vi.mocked(requestRefundAttempt);
 const mockRandomUUID = vi.mocked(randomUUID);
+const mockRevalidatePath = vi.mocked(revalidatePath);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -212,6 +215,7 @@ describe("closeRefundRequestAction authorization", () => {
     expect(result).toEqual({ success: false, errorCode });
     expect(mockRandomUUID).not.toHaveBeenCalled();
     expect(mockCloseRefundRequest).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -233,6 +237,7 @@ describe("closeRefundRequestAction input boundary", () => {
     expect(result).toEqual({ success: false, errorCode: "INVALID_INPUT" });
     expect(mockRandomUUID).not.toHaveBeenCalled();
     expect(mockCloseRefundRequest).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
   it("returns REASON_REQUIRED for a blank reason", async () => {
@@ -241,6 +246,7 @@ describe("closeRefundRequestAction input boundary", () => {
     expect(result).toEqual({ success: false, errorCode: "REASON_REQUIRED" });
     expect(mockRandomUUID).not.toHaveBeenCalled();
     expect(mockCloseRefundRequest).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -264,6 +270,8 @@ describe("closeRefundRequestAction delegation", () => {
       now: NOW,
     });
     expect(result).toEqual(closeActionSuccess());
+    expect(mockRevalidatePath).toHaveBeenCalledOnce();
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
   });
 
   it("discards hostile caller context and forwards exactly seven trusted fields", async () => {
@@ -311,6 +319,7 @@ describe("closeRefundRequestAction delegation", () => {
     mockCloseRefundRequest.mockRejectedValue(new Error("database unavailable"));
 
     await expect(closeRefundRequestAction(VALID_CLOSE_INPUT)).rejects.toThrow("database unavailable");
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -332,6 +341,8 @@ describe("closeRefundRequestAction success result", () => {
       "success",
       "transitionId",
     ]);
+    expect(mockRevalidatePath).toHaveBeenCalledOnce();
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
   });
 });
 
@@ -356,6 +367,7 @@ describe("closeRefundRequestAction failure mapping", () => {
     const result = await closeRefundRequestAction(VALID_CLOSE_INPUT);
 
     expect(result).toEqual({ success: false, errorCode });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
 
