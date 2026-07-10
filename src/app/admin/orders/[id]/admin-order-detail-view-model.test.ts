@@ -73,6 +73,89 @@ describe("admin order detail view model", () => {
     expect(view.refundReview.succeededAmount).toBe("금액 확인 필요");
     expect(view.refundReview.remainingRequestableAmount).toBe("금액 확인 필요");
   });
+
+  it("projects transition history in loader order with safe Korean audit labels", () => {
+    const transitions = [
+      transition({
+        id: "transition_z",
+        fromStatus: null,
+        toStatus: RefundAttemptStatus.REQUESTED,
+        orderStatusBefore: OrderStatus.PAID,
+        orderStatusAfter: OrderStatus.REFUND_PENDING,
+        actorType: RefundAttemptActorType.ADMIN,
+        reason: "  고객 요청: 상담 기록 확인  ",
+      }),
+      transition({
+        id: "transition_a",
+        fromStatus: RefundAttemptStatus.REQUESTED,
+        toStatus: RefundAttemptStatus.CANCELLED,
+        orderStatusBefore: OrderStatus.REFUND_PENDING,
+        orderStatusAfter: OrderStatus.PAID,
+        actorType: RefundAttemptActorType.SYSTEM,
+        reason: "   ",
+        createdAt: new Date("2026-07-10T09:00:00.000Z"),
+      }),
+    ];
+    const order = source({
+      refundAttempts: [attempt("refund_requested", 1_000, RefundAttemptStatus.REQUESTED, "KRW", transitions)],
+    });
+
+    const history = buildAdminOrderDetailViewModel(order).refundAttempts[0].transitionHistory;
+
+    expect(history.emptyState).toBeNull();
+    expect(history.entries.every((entry) => entry.timestamp.length > 0)).toBe(true);
+    expect(history.entries).toMatchObject([
+      {
+        key: "transition_z",
+        attemptStatusChange: "생성 → 환불 요청됨",
+        orderStatusChange: "결제 완료 → 환불 처리 중",
+        actor: "관리자 작업",
+        auditReason: "고객 요청: 상담 기록 확인",
+      },
+      {
+        key: "transition_a",
+        attemptStatusChange: "환불 요청됨 → 요청 취소",
+        orderStatusChange: "환불 처리 중 → 결제 완료",
+        actor: "시스템 작업",
+        auditReason: "기록 사유 확인 필요",
+      },
+    ]);
+  });
+
+  it("uses a neutral transition-history empty state for attempts without evidence", () => {
+    const order = source({
+      refundAttempts: [attempt("refund_legacy", 1_000, RefundAttemptStatus.CANCELLED)],
+    });
+
+    const history = buildAdminOrderDetailViewModel(order).refundAttempts[0].transitionHistory;
+
+    expect(history).toEqual({
+      entries: [],
+      emptyState: "상태 변경 기록이 없습니다. 이전 데이터이거나 기록 확인이 필요합니다.",
+    });
+  });
+
+  it("omits private exact property keys from the final admin view model", () => {
+    const transitions = [transition({ id: "transition_private_boundary" })];
+    const order = source({
+      refundAttempts: [attempt("refund_private_boundary", 1_000, RefundAttemptStatus.REQUESTED, "KRW", transitions)],
+    });
+
+    const keys = collectObjectKeys(buildAdminOrderDetailViewModel(order));
+
+    expect(keys.has("providerContext")).toBe(true);
+    for (const forbidden of [
+      "operationKey",
+      "actorUserId",
+      "providerRefundId",
+      "idempotencyKey",
+      "providerPaymentKey",
+      "rawPayload",
+      "rawError",
+    ]) {
+      expect(keys.has(forbidden), forbidden).toBe(false);
+    }
+  });
 });
 
 describe("refund attempt labels", () => {
@@ -155,6 +238,7 @@ function attempt(
   amount: number,
   status: RefundAttemptStatus,
   currency = "KRW",
+  transitions: AdminOrderDetailSource["refundAttempts"][number]["transitions"] = [],
 ): AdminOrderDetailSource["refundAttempts"][number] {
   const now = new Date("2026-07-10T08:00:00.000Z");
   return {
@@ -173,5 +257,36 @@ function attempt(
     safeFailureMessage: null,
     createdAt: now,
     updatedAt: now,
+    transitions,
   };
+}
+
+function transition(
+  overrides: Partial<AdminOrderDetailSource["refundAttempts"][number]["transitions"][number]> = {},
+): AdminOrderDetailSource["refundAttempts"][number]["transitions"][number] {
+  const now = new Date("2026-07-10T08:00:00.000Z");
+  return {
+    id: "transition_123",
+    fromStatus: null,
+    toStatus: RefundAttemptStatus.REQUESTED,
+    orderStatusBefore: OrderStatus.PAID,
+    orderStatusAfter: OrderStatus.REFUND_PENDING,
+    actorType: RefundAttemptActorType.ADMIN,
+    reason: "고객 요청",
+    createdAt: now,
+    ...overrides,
+  };
+}
+
+function collectObjectKeys(value: unknown, keys = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) collectObjectKeys(item, keys);
+    return keys;
+  }
+  if (typeof value !== "object" || value === null) return keys;
+  for (const [key, nested] of Object.entries(value)) {
+    keys.add(key);
+    collectObjectKeys(nested, keys);
+  }
+  return keys;
 }

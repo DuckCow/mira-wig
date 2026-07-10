@@ -180,11 +180,39 @@ function RefundLedger({ attempts }: { attempts: Detail["refundAttempts"] }) {
                   {attempt.safeFailureMessage}
                 </p>
               ) : null}
+              <RefundTransitionHistory history={attempt.transitionHistory} />
             </li>
           ))}
         </ol>
       )}
     </Card>
+  );
+}
+
+function RefundTransitionHistory({
+  history,
+}: {
+  history: Detail["refundAttempts"][number]["transitionHistory"];
+}) {
+  return (
+    <div className="border-t border-gray-100 pt-3">
+      <h4 className="text-xs font-medium text-gray-700">상태 변경 기록</h4>
+      {history.emptyState ? <p className="mt-2 text-xs text-gray-500">{history.emptyState}</p> : (
+        <ol className="mt-3 space-y-4">
+          {history.entries.map((entry) => (
+            <li key={entry.key} className="border-l-2 border-gray-200 pl-3">
+              <p className="text-xs text-gray-400">{entry.timestamp}</p>
+              <p className="mt-1 text-sm font-medium text-gray-900">{entry.attemptStatusChange}</p>
+              <p className="mt-1 text-xs text-gray-600">주문 상태: {entry.orderStatusChange}</p>
+              <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+                <Info label="작업 주체" value={entry.actor} />
+                <Info label="기록 사유" value={entry.auditReason} />
+              </dl>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 

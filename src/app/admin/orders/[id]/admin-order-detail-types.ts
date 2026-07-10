@@ -6,6 +6,7 @@ import type {
   PaymentMode,
   PaymentProvider,
   RefundAttemptActorType,
+  RefundAttemptStatus,
   ShippingCountry,
 } from "@prisma/client";
 import type { RefundAmountStateInput } from "@/lib/payment/refund/invariants";
@@ -78,6 +79,18 @@ interface RefundAttemptSource extends RefundAmountStateInput {
   safeFailureMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
+  transitions: RefundAttemptTransitionSource[];
+}
+
+interface RefundAttemptTransitionSource {
+  id: string;
+  fromStatus: RefundAttemptStatus | null;
+  toStatus: RefundAttemptStatus;
+  orderStatusBefore: OrderStatus;
+  orderStatusAfter: OrderStatus;
+  actorType: RefundAttemptActorType;
+  reason: string;
+  createdAt: Date;
 }
 
 export interface AdminOrderDetailViewModel {
@@ -152,4 +165,20 @@ interface RefundAttemptViewModel {
   failedAt: string | null;
   providerContext: string;
   safeFailureMessage: string | null;
+  transitionHistory: RefundTransitionHistoryViewModel;
+}
+
+interface RefundTransitionHistoryViewModel {
+  entries: RefundAttemptTransitionViewModel[];
+  emptyState: string | null;
+}
+
+interface RefundAttemptTransitionViewModel {
+  key: string;
+  timestamp: string;
+  attemptStatusChange: string;
+  orderStatusChange: string;
+  actor: string;
+  /** Admin-only audit text; no sanitization claim is made. */
+  auditReason: string;
 }

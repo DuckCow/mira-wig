@@ -176,7 +176,38 @@ function buildRefundAttempt(
     failedAt: attempt.failedAt ? formatDateTime(attempt.failedAt) : null,
     providerContext: `${attempt.provider} / ${attempt.mode}`,
     safeFailureMessage: attempt.safeFailureMessage,
+    transitionHistory: buildRefundTransitionHistory(attempt.transitions),
   };
+}
+
+function buildRefundTransitionHistory(
+  transitions: AdminOrderDetailSource["refundAttempts"][number]["transitions"],
+): AdminOrderDetailViewModel["refundAttempts"][number]["transitionHistory"] {
+  if (transitions.length === 0) {
+    return {
+      entries: [],
+      emptyState: "상태 변경 기록이 없습니다. 이전 데이터이거나 기록 확인이 필요합니다.",
+    };
+  }
+  return {
+    entries: transitions.map((transition) => ({
+      key: transition.id,
+      timestamp: formatDateTime(transition.createdAt),
+      attemptStatusChange: attemptStatusChangeLabel(transition.fromStatus, transition.toStatus),
+      orderStatusChange: `${orderStatusLabel(transition.orderStatusBefore)} → ${orderStatusLabel(transition.orderStatusAfter)}`,
+      actor: transition.actorType === RefundAttemptActorType.ADMIN ? "관리자 작업" : "시스템 작업",
+      auditReason: displayText(transition.reason, "기록 사유 확인 필요"),
+    })),
+    emptyState: null,
+  };
+}
+
+function attemptStatusChangeLabel(
+  fromStatus: RefundAttemptStatus | null,
+  toStatus: RefundAttemptStatus,
+): string {
+  const fromLabel = fromStatus === null ? "생성" : refundAttemptStatusLabel(fromStatus);
+  return `${fromLabel} → ${refundAttemptStatusLabel(toStatus)}`;
 }
 
 export function refundAttemptStatusLabel(status: RefundAttemptStatus): string {

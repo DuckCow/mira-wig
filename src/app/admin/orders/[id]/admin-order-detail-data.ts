@@ -78,6 +78,19 @@ const ORDER_DETAIL_SELECT = {
       safeFailureMessage: true,
       createdAt: true,
       updatedAt: true,
+      transitions: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          fromStatus: true,
+          toStatus: true,
+          orderStatusBefore: true,
+          orderStatusAfter: true,
+          actorType: true,
+          reason: true,
+          createdAt: true,
+        },
+      },
     },
   },
 } satisfies Prisma.OrderSelect;
