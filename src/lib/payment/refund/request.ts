@@ -2,9 +2,11 @@ import {
   OrderStatus,
   PaymentAttemptStatus,
   Prisma,
+  RefundAttemptStatus,
   type PrismaClient,
   type RefundAttempt,
   type RefundAttemptActorType,
+  type RefundAttemptTransition,
 } from "@prisma/client";
 import { isTerminalRefundAttemptStatus } from "./invariants";
 import {
@@ -12,9 +14,16 @@ import {
   type PreparedRefundAttempt,
   type PrepareRefundAttemptFailureCode,
 } from "./prepare";
+import {
+  buildRefundRequestOperationKey,
+  resolveRefundRequestCreationEvidence,
+  sameImmutableRefundRequest,
+} from "./request-evidence";
 
 type RefundRequestTx = Prisma.TransactionClient;
+type RefundRequestReader = Pick<PrismaClient, "order">;
 type RefundRequestOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
+type AuditedRefundAttempt = RefundAttempt & { transitions: RefundAttemptTransition[] };
 
 export interface RequestRefundAttemptInput {
   refundAttemptId: string;
@@ -62,9 +71,7 @@ export async function requestRefundAttempt(
   try {
     return await client.$transaction((tx) => requestInTransaction(tx, { ...input, orderId }));
   } catch (error) {
-    if (isUniqueConflict(error)) {
-      return failure("IDEMPOTENCY_CONFLICT", "Refund attempt identity is already in use.");
-    }
+    if (isUniqueConflict(error)) return classifyUniqueConflict(client, { ...input, orderId }, error);
     throw error;
   }
 }
@@ -99,12 +106,15 @@ async function lockOrder(tx: RefundRequestTx, orderId: string): Promise<boolean>
   return rows.length === 1;
 }
 
-function loadOrder(tx: RefundRequestTx, orderId: string) {
-  return tx.order.findUnique({
+function loadOrder(client: RefundRequestReader, orderId: string) {
+  return client.order.findUnique({
     where: { id: orderId },
     include: {
       payment: true,
-      refundAttempts: { orderBy: { createdAt: "asc" } },
+      refundAttempts: {
+        orderBy: { createdAt: "asc" },
+        include: { transitions: { orderBy: { createdAt: "asc" } } },
+      },
     },
   });
 }
@@ -140,42 +150,25 @@ function resolveReplay(
     attempt.id === candidate.id || attempt.idempotencyKey === candidate.idempotencyKey
   ));
   if (!existing) return null;
-  if (!sameImmutableRequest(existing, candidate)) {
+  return resolveExistingReplay(existing, candidate);
+}
+
+function resolveExistingReplay(
+  existing: AuditedRefundAttempt,
+  candidate: PreparedRefundAttempt,
+): RequestRefundAttemptResult {
+  if (!sameImmutableRefundRequest(existing, candidate)) {
     return failure("IDEMPOTENCY_CONFLICT", "Refund attempt identity conflicts with an existing request.");
   }
-  return { ok: true, refundAttempt: existing, orderStatus: order.status, replayed: true };
-}
-
-function sameImmutableRequest(
-  existing: RefundAttempt,
-  candidate: PreparedRefundAttempt,
-): boolean {
-  return sameRecordIdentity(existing, candidate)
-    && sameMoneyAndReason(existing, candidate)
-    && sameActor(existing, candidate)
-    && sameProviderContext(existing, candidate);
-}
-
-function sameRecordIdentity(existing: RefundAttempt, candidate: PreparedRefundAttempt): boolean {
-  return existing.id === candidate.id
-    && existing.orderId === candidate.orderId
-    && existing.paymentId === candidate.paymentId
-    && existing.idempotencyKey === candidate.idempotencyKey;
-}
-
-function sameMoneyAndReason(existing: RefundAttempt, candidate: PreparedRefundAttempt): boolean {
-  return existing.amount === candidate.amount
-    && existing.currency === candidate.currency
-    && existing.reason === candidate.reason;
-}
-
-function sameActor(existing: RefundAttempt, candidate: PreparedRefundAttempt): boolean {
-  return existing.actorType === candidate.actorType
-    && existing.actorUserId === candidate.actorUserId;
-}
-
-function sameProviderContext(existing: RefundAttempt, candidate: PreparedRefundAttempt): boolean {
-  return existing.provider === candidate.provider && existing.mode === candidate.mode;
+  const evidence = resolveRefundRequestCreationEvidence(existing.transitions, candidate);
+  if (evidence.kind === "conflict") {
+    return failure("IDEMPOTENCY_CONFLICT", "Refund request creation evidence conflicts with the existing request.");
+  }
+  const orderStatus = evidence.kind === "matched"
+    ? evidence.orderStatus
+    : OrderStatus.REFUND_PENDING;
+  const { transitions: _transitions, ...refundAttempt } = existing;
+  return { ok: true, refundAttempt, orderStatus, replayed: true };
 }
 
 function validateEligibility(order: RefundRequestOrder): RequestRefundAttemptFailure | null {
@@ -227,7 +220,51 @@ async function persistRequest(
     return failure("ORDER_STATUS_CONFLICT", "Order status changed before the refund request was saved.");
   }
   const refundAttempt = await tx.refundAttempt.create({ data: prepared });
+  await tx.refundAttemptTransition.create({
+    data: {
+      refundAttemptId: prepared.id,
+      fromStatus: null,
+      toStatus: RefundAttemptStatus.REQUESTED,
+      orderStatusBefore: order.status,
+      orderStatusAfter: OrderStatus.REFUND_PENDING,
+      actorType: prepared.actorType,
+      actorUserId: prepared.actorUserId,
+      reason: prepared.reason,
+      operationKey: buildRefundRequestOperationKey(prepared.id),
+      createdAt: prepared.requestedAt,
+    },
+  });
   return { ok: true, refundAttempt, orderStatus: OrderStatus.REFUND_PENDING, replayed: false };
+}
+
+async function classifyUniqueConflict(
+  client: PrismaClient,
+  input: RequestRefundAttemptInput,
+  originalError: unknown,
+): Promise<RequestRefundAttemptResult> {
+  const order = await loadOrder(client, input.orderId);
+  if (!order) throw originalError;
+  const prepared = prepareAgainst(order, input, []);
+  if (!prepared.ok) return prepared;
+
+  const candidate = prepared.refundAttempt;
+  const operationKey = buildRefundRequestOperationKey(candidate.id);
+  const [attempts, transition] = await Promise.all([
+    client.refundAttempt.findMany({
+      where: { OR: [{ id: candidate.id }, { idempotencyKey: candidate.idempotencyKey }] },
+      include: { transitions: { orderBy: { createdAt: "asc" } } },
+      take: 2,
+    }),
+    client.refundAttemptTransition.findUnique({ where: { operationKey } }),
+  ]);
+  if (attempts.length === 0 && !transition) throw originalError;
+  if (attempts.length !== 1) {
+    return failure("IDEMPOTENCY_CONFLICT", "Refund request identity or creation evidence is already in use.");
+  }
+  if (transition && transition.refundAttemptId !== attempts[0].id) {
+    return failure("IDEMPOTENCY_CONFLICT", "Refund request identity or creation evidence is already in use.");
+  }
+  return resolveExistingReplay(attempts[0], candidate);
 }
 
 function isUniqueConflict(error: unknown): boolean {

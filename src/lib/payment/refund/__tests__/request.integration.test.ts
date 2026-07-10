@@ -44,6 +44,7 @@ interface OrderFixtureOptions {
 interface OrderFixture {
   orderId: string;
   paymentId: string;
+  sessionId: string;
   paymentAmount: number;
   paymentCurrency: string;
   provider: PaymentProvider;
@@ -65,9 +66,16 @@ describe("requestRefundAttempt", () => {
 
   it("creates REQUESTED and atomically moves a PAID order to REFUND_PENDING", async () => {
     const fixture = await createOrder(ctx);
+    const refundAttemptId = `refund_${randomUUID()}`;
+    const request = input(fixture.orderId, {
+      refundAttemptId: `  ${refundAttemptId}  `,
+      reason: "  Admin-approved refund request  ",
+      actorUserId: "  admin_123  ",
+    });
 
-    const result = success(await requestRefundAttempt(db, input(fixture.orderId)));
+    const result = success(await requestRefundAttempt(db, request));
     const persisted = await db.refundAttempt.findUniqueOrThrow({ where: { id: result.refundAttempt.id } });
+    const transitions = await creationTransitions(result.refundAttempt.id);
 
     expect(result).toMatchObject({ orderStatus: OrderStatus.REFUND_PENDING, replayed: false });
     expect(persisted).toMatchObject({
@@ -82,6 +90,20 @@ describe("requestRefundAttempt", () => {
       processedAt: null,
       failedAt: null,
     });
+    expect(transitions).toEqual([
+      expect.objectContaining({
+        refundAttemptId: result.refundAttempt.id,
+        fromStatus: null,
+        toStatus: RefundAttemptStatus.REQUESTED,
+        orderStatusBefore: OrderStatus.PAID,
+        orderStatusAfter: OrderStatus.REFUND_PENDING,
+        actorType: RefundAttemptActorType.ADMIN,
+        actorUserId: "admin_123",
+        reason: result.refundAttempt.reason,
+        operationKey: `refund-request:${refundAttemptId}`,
+        createdAt: NOW,
+      }),
+    ]);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
   });
 
@@ -90,8 +112,17 @@ describe("requestRefundAttempt", () => {
     await seedAttempt(fixture, RefundAttemptStatus.SUCCEEDED, 200);
 
     const result = success(await requestRefundAttempt(db, input(fixture.orderId, { amount: 300 })));
+    const transitions = await creationTransitions(result.refundAttempt.id);
 
     expect(result.orderStatus).toBe(OrderStatus.REFUND_PENDING);
+    expect(transitions).toEqual([
+      expect.objectContaining({
+        fromStatus: null,
+        toStatus: RefundAttemptStatus.REQUESTED,
+        orderStatusBefore: OrderStatus.PARTIALLY_REFUNDED,
+        orderStatusAfter: OrderStatus.REFUND_PENDING,
+      }),
+    ]);
     await expect(refundCount(fixture.orderId)).resolves.toBe(2);
   });
 
@@ -160,6 +191,10 @@ describe("requestRefundAttempt", () => {
     const fixture = await createOrder(ctx);
     const request = input(fixture.orderId, { refundAttemptId: `refund_${randomUUID()}` });
     const first = success(await requestRefundAttempt(db, request));
+    await db.order.update({
+      where: { id: fixture.orderId },
+      data: { status: OrderStatus.REFUNDED },
+    });
 
     const replay = success(await requestRefundAttempt(db, {
       ...request,
@@ -170,6 +205,63 @@ describe("requestRefundAttempt", () => {
     expect(replay).toMatchObject({ replayed: true, orderStatus: OrderStatus.REFUND_PENDING });
     expect(replay.refundAttempt.id).toBe(first.refundAttempt.id);
     await expect(refundCount(fixture.orderId)).resolves.toBe(1);
+    await expect(transitionCount(first.refundAttempt.id)).resolves.toBe(1);
+    await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUNDED);
+  });
+
+  it("replays an exact legacy attempt without fabricating creation evidence", async () => {
+    const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
+    const refundAttemptId = await seedAttempt(fixture, RefundAttemptStatus.REQUESTED, 400);
+
+    const replay = success(await requestRefundAttempt(db, input(fixture.orderId, {
+      refundAttemptId,
+      reason: "Seed refund attempt",
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+    })));
+
+    expect(replay).toMatchObject({ replayed: true, orderStatus: OrderStatus.REFUND_PENDING });
+    await expect(transitionCount(refundAttemptId)).resolves.toBe(0);
+    await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+  });
+
+  it("rejects contradictory creation evidence for an otherwise exact replay", async () => {
+    const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
+    const refundAttemptId = await seedAttempt(fixture, RefundAttemptStatus.REQUESTED, 400);
+    await seedCreationTransition(refundAttemptId, {
+      reason: "Contradictory audit reason",
+      operationKey: `refund-request:${refundAttemptId}`,
+    });
+
+    const result = await requestRefundAttempt(db, input(fixture.orderId, {
+      refundAttemptId,
+      reason: "Seed refund attempt",
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+    }));
+
+    expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+    await expect(transitionCount(refundAttemptId)).resolves.toBe(1);
+    await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+  });
+
+  it("rejects multiple creation transitions for an otherwise exact replay", async () => {
+    const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
+    const refundAttemptId = await seedAttempt(fixture, RefundAttemptStatus.REQUESTED, 400);
+    await seedCreationTransition(refundAttemptId);
+    await seedCreationTransition(refundAttemptId, {
+      operationKey: `refund-request-duplicate:${refundAttemptId}`,
+    });
+
+    const result = await requestRefundAttempt(db, input(fixture.orderId, {
+      refundAttemptId,
+      reason: "Seed refund attempt",
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+    }));
+
+    expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+    await expect(transitionCount(refundAttemptId)).resolves.toBe(2);
   });
 
   it("rejects conflicting immutable data for the same attempt identity", async () => {
@@ -228,7 +320,7 @@ describe("requestRefundAttempt", () => {
     await expect(refundCount(fixture.orderId)).resolves.toBe(0);
   });
 
-  it("does not enqueue outbox work or change Payment.status", async () => {
+  it("does not enqueue outbox/events work or change Payment.status", async () => {
     const fixture = await createOrder(ctx);
     const request = input(fixture.orderId);
 
@@ -236,8 +328,10 @@ describe("requestRefundAttempt", () => {
 
     const payment = await db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId }, select: { status: true } });
     const outboxCount = await db.paymentOutbox.count({ where: { dedupKey: { contains: request.refundAttemptId } } });
+    const eventCount = await db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } });
     expect(payment.status).toBe(PaymentAttemptStatus.SUCCEEDED);
     expect(outboxCount).toBe(0);
+    expect(eventCount).toBe(0);
   });
 
   it("rolls back REFUND_PENDING when RefundAttempt insert hits an identity conflict", async () => {
@@ -252,6 +346,50 @@ describe("requestRefundAttempt", () => {
     await expect(orderStatus(targetOrder.orderId)).resolves.toBe(OrderStatus.PAID);
     await expect(refundCount(targetOrder.orderId)).resolves.toBe(0);
     await expect(refundCount(existingOrder.orderId)).resolves.toBe(1);
+  });
+
+  it("rolls back Order and RefundAttempt when creation operationKey conflicts", async () => {
+    const evidenceOrder = await createOrder(ctx);
+    const targetOrder = await createOrder(ctx);
+    const refundAttemptId = `refund_transition_collision_${randomUUID()}`;
+    const evidenceAttemptId = await seedAttempt(
+      evidenceOrder,
+      RefundAttemptStatus.FAILED_TERMINAL,
+      100,
+    );
+    await seedCreationTransition(evidenceAttemptId, {
+      operationKey: `refund-request:${refundAttemptId}`,
+    });
+
+    const result = await requestRefundAttempt(db, input(targetOrder.orderId, { refundAttemptId }));
+
+    expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+    await expect(orderStatus(targetOrder.orderId)).resolves.toBe(OrderStatus.PAID);
+    await expect(refundCount(targetOrder.orderId)).resolves.toBe(0);
+    await expect(db.refundAttemptTransition.count({
+      where: { operationKey: `refund-request:${refundAttemptId}` },
+    })).resolves.toBe(1);
+  });
+
+  it("serializes concurrent exact requests into one attempt and one replay", async () => {
+    const fixture = await createOrder(ctx);
+    const request = input(fixture.orderId, { refundAttemptId: `refund_${randomUUID()}` });
+    const contenders: Promise<RequestRefundAttemptResult>[] = [];
+
+    await db.$transaction(async (tx) => {
+      await lockOrder(tx, fixture.orderId);
+      contenders.push(requestRefundAttempt(db, request), requestRefundAttempt(db, request));
+      expect(await settlesWithin(contenders[0], 40)).toBe(false);
+      expect(await settlesWithin(contenders[1], 40)).toBe(false);
+    });
+
+    const results = await Promise.all(contenders);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(results.filter((result) => result.ok && result.replayed)).toHaveLength(1);
+    await expect(refundCount(fixture.orderId)).resolves.toBe(1);
+    await expect(db.refundAttemptTransition.count({
+      where: { refundAttempt: { orderId: fixture.orderId } },
+    })).resolves.toBe(1);
   });
 
   it("serializes concurrent contenders and creates exactly one open attempt", async () => {
@@ -275,6 +413,9 @@ describe("requestRefundAttempt", () => {
       expect.objectContaining({ code: "REFUND_IN_PROGRESS" }),
     ]);
     await expect(refundCount(fixture.orderId)).resolves.toBe(1);
+    await expect(db.refundAttemptTransition.count({
+      where: { refundAttempt: { orderId: fixture.orderId } },
+    })).resolves.toBe(1);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
   });
 });
@@ -309,7 +450,7 @@ async function createOrder(
   const sessionId = await createCheckoutSession(context, orderAmount, orderCurrency);
   const payment = await createPayment(context, sessionId, options);
   const orderId = await createOrderRow(context, sessionId, payment.id, orderAmount, orderCurrency, options);
-  return { orderId, paymentId: payment.id, ...payment.context };
+  return { orderId, paymentId: payment.id, sessionId, ...payment.context };
 }
 
 async function createCheckoutSession(
@@ -396,7 +537,7 @@ async function seedAttempt(
   status: RefundAttemptStatus,
   amount: number,
   id = `refund_seed_${randomUUID()}`,
-): Promise<void> {
+): Promise<string> {
   await db.refundAttempt.create({
     data: {
       id,
@@ -414,6 +555,27 @@ async function seedAttempt(
       requestedAt: NOW,
       processedAt: status === RefundAttemptStatus.SUCCEEDED ? NOW : null,
       failedAt: status === RefundAttemptStatus.FAILED_TERMINAL ? NOW : null,
+    },
+  });
+  return id;
+}
+
+async function seedCreationTransition(
+  refundAttemptId: string,
+  overrides: { operationKey?: string; reason?: string } = {},
+): Promise<void> {
+  await db.refundAttemptTransition.create({
+    data: {
+      refundAttemptId,
+      fromStatus: null,
+      toStatus: RefundAttemptStatus.REQUESTED,
+      orderStatusBefore: OrderStatus.PAID,
+      orderStatusAfter: OrderStatus.REFUND_PENDING,
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+      reason: overrides.reason ?? "Seed refund attempt",
+      operationKey: overrides.operationKey ?? `refund-request:${refundAttemptId}`,
+      createdAt: NOW,
     },
   });
 }
@@ -442,6 +604,17 @@ function refundCount(orderId: string): Promise<number> {
   return db.refundAttempt.count({ where: { orderId } });
 }
 
+function creationTransitions(refundAttemptId: string) {
+  return db.refundAttemptTransition.findMany({
+    where: { refundAttemptId },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+function transitionCount(refundAttemptId: string): Promise<number> {
+  return db.refundAttemptTransition.count({ where: { refundAttemptId } });
+}
+
 async function lockOrder(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
   await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
     SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE
@@ -464,6 +637,13 @@ async function ensureMarket(): Promise<void> {
 }
 
 async function cleanup(context: TestContext): Promise<void> {
+  const attempts = await db.refundAttempt.findMany({
+    where: { orderId: { in: context.orderIds } },
+    select: { id: true },
+  });
+  await db.refundAttemptTransition.deleteMany({
+    where: { refundAttemptId: { in: attempts.map((attempt) => attempt.id) } },
+  });
   await db.refundAttempt.deleteMany({ where: { orderId: { in: context.orderIds } } });
   await db.order.deleteMany({ where: { id: { in: context.orderIds } } });
   await db.payment.deleteMany({ where: { id: { in: context.paymentIds } } });
