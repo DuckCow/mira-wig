@@ -4,6 +4,7 @@
 - **Status**: DESIGN LOCK — docs only. Nothing in this document is implemented by this document.
 - **Base commit context**: `2f5838f feat(orders): add cancellation and refund order statuses`
 - **Related**: `refund_request_eligibility_v1.md` (request-creation eligibility SSOT),
+  `refund_execution_v1.md` (execution-command and evidence-resolution SSOT),
   `payment_policy_open_v6.md` (환불/취소 트랙 — "나가는 절반"),
   `payment_policy_confirmed_v6.md`, `b5_void_design_v3.md` (pg.void / completion compensation),
   `multi_pg_priority_fallback_v1.md` (post-contact immutability), `a3_outbox_design_v2.md`.
@@ -38,14 +39,17 @@ not implementation**.
 
 ## 2. Responsibility split
 
-Four record types, four distinct responsibilities. None may absorb another's role.
+Refund and payment records have distinct responsibilities. None may absorb another's role.
 
 | Record | Responsibility | Is NOT |
 |---|---|---|
 | `Order.status` (`OrderStatus`) | Customer-facing commerce state of the order as a whole. What the shopper sees on `/orders`. | A money-movement log. Not a provider state mirror. |
 | `Payment.status` (`PaymentAttemptStatus`) | State of one **payment attempt** against a checkout session (capture lifecycle). | An order state. Not a refund history. `VOIDED` has completion-compensation semantics (§3, §6). |
-| `RefundAttempt` ledger (future, §7) | Money-movement **evidence and idempotency record** for each refund/cancel money operation. Source of truth for "how much has actually been returned". | A UI convenience table. Rows are never deleted; money facts are immutable once terminal. |
-| `PaymentEvent` | Provider/payment **event evidence** (webhooks, lookups; append-only, `@@unique([provider, transmissionId])`, verified mode/credential binding). | Sufficient input for order refund state by itself. Events inform the ledger; they never directly set `OrderStatus` (§6). |
+| `RefundAttempt` | Merchant-approved refund intent, immutable financial identity, provider-neutral idempotency key, and current refund-domain status. `SUCCEEDED` attempts are the source for cumulative returned amount. | Dispatch state or append-only provider observations. |
+| `RefundExecutionCommand` (future) | Durable execution work and mutable operational dispatch projection. | A replacement for `RefundAttempt` or provider evidence. |
+| `RefundExecutionEvidence` (future) | Append-only normalized provider/operator observations used by the resolution core. | Current domain status, raw provider payload storage, or a transition edge. |
+| `RefundAttemptTransition` | Append-only domain decision edge and related Order-state evidence. | Provider evidence; a transition reason is not proof of money movement. |
+| `PaymentEvent` | Provider/payment transmission evidence for existing webhook flows. | Generic refund evidence or sufficient input for Order refund state by itself. |
 
 `Order.disputeStatus` (chargebacks/disputes) is an **orthogonal axis** and is not part of this
 state machine. It is mentioned here only to state that nothing in this document reads or writes it.
@@ -62,11 +66,10 @@ state machine. It is mentioned here only to state that nothing in this document 
 | `CANCELLED` | Terminal: the full captured amount has verifiably been returned **and** the order will not be (or was not) fulfilled — the cancellation flavor of a full refund (e.g., before production start; MR aborted/`CANCELLED`). | 주문 취소 |
 | `REFUNDED` | Terminal: the full captured amount has verifiably been returned, where fulfillment had progressed (return-style full refund), or the cancellation flavor does not apply. | 환불 완료 |
 
-`CANCELLED` vs `REFUNDED` is a **commerce-semantics distinction, not a money distinction** — both
-require identical full-refund ledger evidence. The choice between them is made by the actor
-(admin, v1) based on fulfillment state, and the exact fulfillment-based eligibility rule
-(MR/production cutoff — `payment_policy_open_v6.md` §4-1, MFG-2) is a policy-track decision that
-gates the customer-facing flow, not this state machine.
+`CANCELLED` vs `REFUNDED` is a **commerce-semantics distinction, not a money distinction**. Generic
+refund execution always maps verified full success to `REFUNDED`. Producing `CANCELLED` additionally
+requires a separately proven fulfillment/cancellation policy and is not authorized by the generic
+executor (`refund_execution_v1.md` §19).
 
 ### 3.2 `PaymentAttemptStatus` — and why it must not be overloaded
 
@@ -97,30 +100,35 @@ Adding refund-ish values (e.g., `REFUNDED`) to `PaymentAttemptStatus` is **rejec
 | Customer cancellation request | A shopper's **request** to cancel/refund. In v1 this is an inquiry (CS channel); it creates no state transition by itself. Future: may create a `RefundAttempt` in `REQUESTED` after policy lock (§11). |
 | Admin/merchant cancellation | An admin-initiated cancel/refund workflow. The **first implemented workflow** (§12). Request-creation eligibility and merchant approval follow `refund_request_eligibility_v1.md`; execution remains a separate later boundary. |
 | Provider void/cancel | Provider-side reversal of a capture (`pg.void`, `ProviderVoidExecutor`). Today: completion-compensation only, pre-order. Distinct from refund execution and from this state machine. |
-| Full refund | Cumulative succeeded refunded amount equals the captured `Payment.amount`. Enables `CANCELLED` or `REFUNDED`. |
+| Full refund | Cumulative succeeded refunded amount equals the captured `Payment.amount`. Generic execution produces `REFUNDED`; a separate cancellation policy may later produce `CANCELLED`. |
 | Partial refund | A succeeded refund attempt with amount < remaining refundable. Leads to `PARTIALLY_REFUNDED` as the resting state. |
 | Refund pending | An open workflow: ≥1 `RefundAttempt` in a non-terminal status (`REQUESTED/PROCESSING/FAILED_RETRYABLE/MANUAL_REVIEW`). Order shows `REFUND_PENDING`. |
-| Provider retryable failure | Provider refund call failed with a transient class (timeout, 5xx, rate limit). The same attempt may be retried **with the same idempotency key**. |
-| Provider terminal failure | Provider definitively refused (invalid state, already refunded elsewhere, policy refusal). The attempt is closed `FAILED_TERMINAL`; a new attempt (new key) is required to try again. |
+| Provider retryable failure | Authoritative evidence proves no money moved and retry with the same attempt, command, and idempotency key is safe. Ambiguous timeouts do not qualify. |
+| Provider terminal failure | Authoritative evidence proves no money moved and the operation must not retry. Ambiguous outcomes never release the reservation as terminal failure. |
 | Ambiguous/manual-review state | Provider response does not durably establish success or failure (ambiguous HTTP outcome, mismatched echo, lookup unavailable). Attempt parks in `MANUAL_REVIEW`; **no order terminal transition may consume it** until resolved by verified lookup or operator decision. |
 
 ## 5. Allowed `OrderStatus` transitions
 
 General mechanics (locked): every transition is applied as a **guarded conditional update**
 (`updateMany where { id, status: from }`, count must equal 1 — same pattern as the existing
-finalizer/void transitions), inside the same DB transaction as the ledger write that evidences it.
-Provider calls happen **before** the terminal-transition transaction, and their results must be
-durably recorded on the `RefundAttempt` row first.
+finalizer/void transitions). Where execution evidence causes or authorizes an Order transition,
+the evidence and domain transition commit atomically through `refund_execution_v1.md`'s
+resolution core. Provider calls happen outside database transactions.
+
+Request creation follows `refund_request_eligibility_v1.md`'s request transaction. Pre-contact
+`REQUESTED -> CANCELLED` requires no provider/execution evidence and follows
+`order_refund_request_closure_v1.md`, which atomically commits attempt closure, Order restoration,
+and transition audit evidence.
 
 | From | To | Trigger | Actor | Required evidence | Provider call in this step? | Idempotency required? | Shopper-facing copy |
 |---|---|---|---|---|---|---|---|
 | `PAID` | `REFUND_PENDING` | Refund/cancel workflow opened | Admin (v1); system on future customer request | ≥1 `RefundAttempt` row created in `REQUESTED` with amount, currency, reason, actor | No (ledger only) | Yes — attempt row carries its unique `idempotencyKey` from creation | 환불 요청 처리 중 |
-| `REFUND_PENDING` | `CANCELLED` | Full refund succeeded; order not fulfilled | Admin decision + system | Cumulative `SUCCEEDED` refunds == `Payment.amount`; each with durable provider result (`providerRefundId` and/or verified lookup); no in-flight attempts; fulfillment not started (MR aborted/absent) | Executed in prior step(s); transition consumes recorded results | Yes (execution steps); transition itself is guarded-conditional | 주문 취소 |
-| `REFUND_PENDING` | `REFUNDED` | Full refund succeeded; cancellation flavor not applicable | Admin decision + system | Same money evidence as above (cumulative == `Payment.amount`, durable provider results, no in-flight attempts) | Executed in prior step(s) | Yes | 환불 완료 |
-| `REFUND_PENDING` | `PARTIALLY_REFUNDED` | Workflow closes with partial success | Admin decision + system | Cumulative `SUCCEEDED` > 0 and < `Payment.amount`; no in-flight attempts remain | Executed in prior step(s) | Yes | 부분 환불 |
+| `REFUND_PENDING` | `CANCELLED` | Separate future commerce-cancellation resolution after full refund | Admin decision + system | Cumulative `SUCCEEDED` refunds == `Payment.amount` plus separately locked fulfillment/cancellation eligibility; no guarded attempt remains | No generic executor authority; separate operator path | Yes | 주문 취소 |
+| `REFUND_PENDING` | `REFUNDED` | Generic full refund succeeded | System through evidence-resolution core | Cumulative `SUCCEEDED` == `Payment.amount`; authoritative immutable execution evidence; no guarded attempt remains | Executed before resolution transaction | Yes | 환불 완료 |
+| `REFUND_PENDING` | `PARTIALLY_REFUNDED` | Generic partial refund succeeded | System through evidence-resolution core | Cumulative `SUCCEEDED` > 0 and < `Payment.amount`; authoritative immutable evidence; no guarded attempt remains | Executed before resolution transaction | Yes | 부분 환불 |
 | `REFUND_PENDING` | `PAID` | Request withdrawn/declined with **zero** money moved | Admin | Zero `SUCCEEDED` refunds; all attempts closed (`FAILED_TERMINAL`/`CANCELLED`); decline reason recorded | No | Guarded-conditional transition only | 결제 완료 |
 | `PARTIALLY_REFUNDED` | `REFUND_PENDING` | Another refund round opened | Admin (v1) | New `RefundAttempt` in `REQUESTED`; over-refund guard passes (§9) | No (ledger only) | Yes | 환불 요청 처리 중 |
-| `PARTIALLY_REFUNDED` | `REFUNDED` | Final round brings cumulative to total | Admin decision + system | Cumulative `SUCCEEDED` == `Payment.amount`; durable provider results; no in-flight attempts | Executed in prior step(s) | Yes | 환불 완료 |
+| `PARTIALLY_REFUNDED` | `REFUNDED` | Final round brings cumulative to total | System through evidence-resolution core | Cumulative `SUCCEEDED` == `Payment.amount`; authoritative immutable evidence; no guarded attempt remains | Executed before resolution transaction | Yes | 환불 완료 |
 
 Notes:
 
@@ -143,15 +151,15 @@ Notes:
 | Any `OrderStatus` change inferred **only** from `Payment.status == VOIDED` | `VOIDED` is completion-compensation semantics (capture voided because no order could be created). Where an order exists, voiding/refunding must go through the ledger. `Payment.VOIDED` never implies `Order.CANCELLED`. |
 | Any `OrderStatus` change based **only** on a raw webhook body | Webhooks are untrusted input until verified (query-verified/lookup posture, `webhook_verified_mode_design_v1.md`). Even verified events only update the **ledger**; order transitions consume ledger state. |
 | A customer button directly mutating `OrderStatus` | Customer actions may at most create a request record (post policy lock). Transitions are applied only by the workflow engine/admin action with ledger evidence. |
-| Local terminal transition before provider/local evidence is durable | The provider result (or verified lookup outcome) must be persisted on the `RefundAttempt` row before the transaction that flips the order to `CANCELLED/REFUNDED/PARTIALLY_REFUNDED`. No "optimistic terminal" states. |
+| Local terminal transition without durable authoritative evidence | Immutable execution evidence, attempt/command updates, and the Order transition must commit through the resolution contract. No "optimistic terminal" states. |
 | Writing refund history into `PaymentAttemptStatus` | §3.2. |
 
 ## 7. Refund ledger requirement (`RefundAttempt`)
 
-**Locked requirement:** a dedicated refund ledger model must exist before any cancel/refund
-action is implemented. Proposed name `RefundAttempt` (mirrors `Payment` attempt naming). Rows are
-append-only in spirit: status advances within a row's lifecycle, money facts
-(amount/currency/provider identity) are immutable after creation, and rows are never deleted.
+`RefundAttempt` owns one merchant-approved money intent and its current refund-domain status.
+Status advances within the row's lifecycle, while amount, currency, designated Payment, provider,
+mode, and provider-neutral idempotency identity are immutable after creation. Append-only external
+observations belong to `RefundExecutionEvidence`, not this row.
 
 Proposed minimal fields (schema slice B, separately approved migration):
 
@@ -197,12 +205,12 @@ Adopt the proposed set unchanged:
 | Status | Meaning | Maps to provider result classes |
 |---|---|---|
 | `REQUESTED` | Merchant-approved intent to attempt returning a specific amount; payment refundability was verified at creation, provider **not yet contacted**, and success not guaranteed. Withdrawable only while the close contract permits. Creation eligibility is owned by `refund_request_eligibility_v1.md`. | — |
-| `PROCESSING` | Provider contacted (or contact in flight). Post-contact immutability applies from here. | `pending` results park here |
-| `SUCCEEDED` | Durable provider success (direct result or verified lookup). Counts toward cumulative refunded. | `succeeded`, `idempotent_succeeded` |
-| `FAILED_RETRYABLE` | Transient failure; retry reuses the **same row and same idempotency key**. | `retryable` |
-| `FAILED_TERMINAL` | Definitive refusal; row closed; a new attempt requires a new row/key. | `terminal`, `auth_stop` |
-| `MANUAL_REVIEW` | Ambiguous provider state; operator/lookup resolution required; blocks order terminal transitions. | `manual_review`, `ambiguous_state` |
-| `CANCELLED` | Withdrawn before provider contact (`REQUESTED → CANCELLED` only). | — |
+| `PROCESSING` | The intent is durably claimed and exactly one durable execution command exists. Provider contact is authorized and may have occurred, but acceptance and money return are unproven. | Command `READY`/`LEASED`/`WAITING_EVIDENCE`; accepted-pending remains here. |
+| `SUCCEEDED` | Durable authoritative success (direct result or verified lookup). Counts toward cumulative refunded. | `SUCCEEDED` |
+| `FAILED_RETRYABLE` | Confirmed non-execution permits retry using the **same row, command, and idempotency key**. | `NOT_EXECUTED_RETRYABLE` |
+| `FAILED_TERMINAL` | Definitive zero-money terminal outcome; row closed and guarded amount released. | `NOT_EXECUTED_TERMINAL` |
+| `MANUAL_REVIEW` | Ambiguous or conflicting evidence requires operator/lookup resolution and blocks Order terminalization. | `UNKNOWN`, identity conflict, or amount/currency conflict |
+| `CANCELLED` | Pre-contact withdrawal, or a future evidence-gated operator cancellation under a separately locked policy. The current close control supports only `REQUESTED -> CANCELLED`. | — |
 
 Deliberate choice: **no separate `PENDING` status**. Async provider rails (e.g., a future
 bank-transfer/konbini-style refund that completes later) map to `PROCESSING` with
@@ -233,36 +241,16 @@ split `PENDING_PROVIDER` out then. Adding it speculatively now would create a de
 - **Tax/shipping/customs refund math is deferred** (shipping fees are not charged yet; tax/customs
   are not modeled). The ledger stores plain amounts; allocation semantics come later.
 
-## 10. Provider interface recommendation
+## 10. Provider execution ownership
 
-A future **refund executor** contract, separate from the existing `ProviderVoidExecutor`
-(pg.void / completion compensation) and from confirm/capture:
+The provider-neutral adapter input, result taxonomy, idempotency, command polling, immutable
+evidence, retry, ambiguity, and resolution contracts are owned exclusively by
+`refund_execution_v1.md`. In particular, free-text request reason is not generic provider input,
+and a network error is not retryable unless the adapter proves non-execution.
 
-```
-refund({ providerPaymentKey, amount, currency, operationKey, reason })
-```
-
-Result categories (aligned with the existing void/confirm normalization vocabulary):
-
-- `succeeded` — durable success now.
-- `idempotent_succeeded` — provider recognized `operationKey`/refund identity as already done.
-- `pending` — provider accepted; completion is asynchronous (maps to `PROCESSING`).
-- `retryable` — transient; same attempt + same `operationKey` may retry.
-- `terminal` — definitive refusal.
-- `manual_review` — provider signaled a state requiring human/lookup resolution.
-- `auth_stop` — credential/authorization failure; stop, do not retry blindly.
-- `ambiguous_state` — outcome not establishable; `providerLookupRequired: true` semantics, parks
-  the attempt in `MANUAL_REVIEW`.
-
-Deltas vs `ProviderVoidResult`, on purpose: refund adds `amount`/`currency` (partial refunds) and
-`pending` (async rails). Everything else mirrors the existing classification so the bridge/mapping
-layer can be shared conceptually.
-
-**Do not encode Toss-only semantics into the generic interface** — e.g., Toss cancel's
-`cancelAmount`/`taxFreeAmount` fields, virtual-account refund receive-account collection, or
-settlement-window behavior belong in the Toss adapter (slice E), sourced from official docs only
-(AGENTS §7). Likewise the Japan cash-like-method refund-account wait state (open_v6 §0-1) is a
-policy/adapter concern, not a contract field.
+Provider-specific fields and finality rules require an official-provider design lock under
+`AGENTS.md` §7. The existing `ProviderVoidExecutor` remains completion-compensation infrastructure
+and is not a refund executor.
 
 ## 11. Customer UI policy (v1)
 
@@ -282,9 +270,10 @@ policy/adapter concern, not a contract field.
 - `REFUND_PENDING` alone does not prove provider contact and promises neither approval, money
   movement, successful completion, nor timing. Internal attempt phases remain hidden from customer
   pages in v1.
-- A succeeded refund must move the Order to the appropriate resting `PARTIALLY_REFUNDED`,
-  `CANCELLED`, or `REFUNDED` state. Withdrawal or terminal failure must restore the appropriate
-  non-pending resting state, which removes the pending badge and explanation.
+- Generic succeeded execution moves the Order to `PARTIALLY_REFUNDED` or `REFUNDED`. `CANCELLED`
+  requires the separate commerce policy described in §3. Withdrawal or definitive zero-money
+  terminal failure restores the appropriate non-pending resting state, which removes the pending
+  badge and explanation.
 
 ## 12. Admin workflow recommendation (first real workflow)
 
@@ -309,28 +298,26 @@ workflow sequencing and does not duplicate that eligibility contract.
 - **`PaymentEvent` alone is not enough.** It is keyed to provider transmissions
   (`[provider, transmissionId]`) and admin/manual actions have no transmission. It also carries no
   actor identity or order-state semantics.
-- A future **`OrderEvent`/`RefundEvent`** (or one generic audit table) is likely needed at slice
-  B/D time. Minimum recordable facts for every manual/admin action and every applied transition:
-  actor type + actor user id, previous status → next status, reason, amount, idempotency key,
-  provider result summary (normalized code + safe message, never raw payloads), related
-  `refundAttemptId`, and free-form operator notes.
-- `RefundAttempt` itself carries much of this for money operations; the audit table covers status
-  transitions and decisions (e.g., declines) that move no money.
+- `RefundAttemptTransition` records lifecycle and Order decision edges with actor and operation
+  identity. `RefundExecutionEvidence` separately records normalized external/operator
+  observations. Neither record may substitute for the other.
+- Raw provider payloads, secrets, and unrestricted errors do not belong in refund execution
+  evidence. Source-specific transmission storage remains separately owned.
 
 ## 14. Risks / failure modes
 
 | Risk | Mitigation locked in this design |
 |---|---|
-| Double refund | Unique `idempotencyKey` per attempt passed as provider `operationKey`; `idempotent_succeeded` result class; single-in-flight guard. |
+| Double refund | Stable unique `RefundAttempt.idempotencyKey`, one command per attempt, provider idempotent replay, evidence deduplication, and the single-open-attempt guard. |
 | Over-refund | §9 transactional guard: Σ(succeeded) + Σ(in-flight) + new ≤ `Payment.amount`; `INSUFFICIENT_REFUNDABLE`. |
-| Provider success + local failure | Provider result durably recorded on the attempt row before any order transition; recovery = re-resolve attempt from provider identity/lookup, never re-execute blindly. |
+| Provider success + local failure | Durable command plus stable provider identity allows idempotent replay/lookup; resolution commits evidence and domain effects atomically. |
 | Local terminal state without provider success | Forbidden by §6 (no optimistic terminal); transitions consume recorded evidence only. |
 | Ambiguous provider response | `MANUAL_REVIEW` parking state; blocks terminal transitions; resolution via verified lookup or operator decision with audit. |
-| Out-of-order / duplicate webhook | Events append to `PaymentEvent` (deduped by transmission id) and update the **ledger** only via resolution logic; order state never reads raw webhooks (§6). |
+| Out-of-order / duplicate webhook | Source identity is deduplicated; normalized evidence reaches the single resolution core, and Order state never reads raw webhooks (§6). |
 | Confusing `Payment.VOIDED` with `Order.CANCELLED` | Explicitly forbidden inference (§3.2, §6). |
 | Partial refund tax/shipping/customs ambiguity | Deferred with explicit scope statement (§9); ledger stores plain amounts so later allocation logic attaches cleanly. |
 | Customer legal/policy promise risk | No customer affordance until policy lock (§11); slice G is last. |
-| Provider internals leakage | `safeFailureMessage` only on the ledger; raw payloads confined to `PaymentEvent`/diagnostics with existing redaction discipline; customer pages already select no provider internals. |
+| Provider internals leakage | Refund evidence stores only bounded safe fields; customer pages expose no provider internals. |
 
 ## 15. Recommended implementation sequence
 
@@ -338,8 +325,8 @@ workflow sequencing and does not duplicate that eligibility contract.
 |---|---|---|
 | A | **This docs-only design lock.** | Human review of this document. |
 | B | Schema-only `RefundAttempt` ledger (+ audit table decision), migration, no actions. | Separately approved migration; STRICT recon → design confirmation against §7/§8. |
-| C | MOCK-only refund executor + behavioral tests (idempotency, over-refund guard, classification mapping, transition math). | Verify green; no real provider surface. |
-| D | Admin-only refund request/execution action + minimal admin UI, wired to §5 transitions. | Admin auth + audit trail in place; runtime smoke on MOCK. |
+| C | `refund_execution_v1.md` plus schema-only command/evidence slice. | Separate docs and schema review; no runtime. |
+| D | Claim, resolution core, provider-neutral adapter, and deterministic dormant MOCK in isolated STRICT slices. | Behavioral, DB, concurrency, and crash-recovery tests; no active UI. |
 | E | Toss refund adapter (official docs only, sandbox first, own design lock like the confirm/void adapters). | Official Toss cancel-API doc verification; sandbox smoke procedure. |
 | F | Reconciliation/webhook repair for refunds (verified-event → ledger resolution, drift detection). | Follows existing reconciliation posture. |
 | G | Customer-facing request flow (request-only; still no direct mutation). | MTO/legal/fulfillment policy lock (§11) — hard gate. |
@@ -361,4 +348,5 @@ This document does **not** implement, and must not be read as authorizing:
 - line-level refund allocation,
 - tax/shipping/customs refund math.
 
-It locks vocabulary, transitions, evidence rules, ledger shape, and sequencing — nothing else.
+It locks Order/refund transition vocabulary and amount semantics. Execution-command and provider
+evidence rules are delegated to `refund_execution_v1.md`.

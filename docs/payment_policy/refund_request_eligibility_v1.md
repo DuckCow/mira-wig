@@ -4,6 +4,7 @@
 - **Status:** DESIGN LOCK — documentation only; this document changes no runtime behavior.
 - **Base commit context:** `9896ae6 docs(refund): include retryable attempts in guarded set`
 - **Related:** `order_refund_state_machine_v1.md`, `order_refund_request_closure_v1.md`,
+  `refund_execution_v1.md` (execution suitability, command, and evidence ownership),
   `payment_policy_confirmed_v6.md`, `payment_policy_open_v6.md`
 
 ## 1. Purpose and ownership
@@ -24,7 +25,8 @@ owns:
 
 It does not own refund status transitions or terminal order-state derivation; those remain in
 `order_refund_state_machine_v1.md`. It does not own withdrawal of an unexecuted request; that
-remains in `order_refund_request_closure_v1.md`. It does not design a provider executor.
+remains in `order_refund_request_closure_v1.md`. Provider-neutral execution architecture and
+evidence resolution are owned by `refund_execution_v1.md`.
 
 ## 2. Stable meaning of `REQUESTED`
 
@@ -83,8 +85,8 @@ workflow and must not overload `RefundAttempt`.
 
 ### 3.3 Execution suitability
 
-Execution suitability is owned by a future executor boundary. It answers whether the approved
-intent can be executed:
+Execution suitability is owned by the executor boundary locked in `refund_execution_v1.md`. It
+answers whether the approved intent can be executed:
 
 - automatically through a supported provider rail;
 - through a legitimate manual execution path; or
@@ -231,7 +233,9 @@ refundability unless a later design lock proves a concrete invariant requiring c
 
 ## 9. Execution-suitability boundary
 
-Execution suitability is future work, separate from request creation. Potential outcomes are:
+Execution suitability remains separate from request creation. Its architecture is locked by
+`refund_execution_v1.md`; actual provider/manual capability remains future work. Potential
+outcomes are:
 
 - automatic provider execution is available;
 - legitimate manual execution is required; or
@@ -241,9 +245,9 @@ The decision may depend on provider refund capability, provider reference use, a
 manual routing, official provider semantics, normalized failure/result classes, and
 reconciliation coverage.
 
-This document does not design the executor, provider contract, outbox command, retries, or
-resolution states. An approved request must not be activated in production when neither an
-execution rail nor a genuine manual-resolution path exists.
+This document does not duplicate the executor, command, retry, or resolution contract. An
+approved request must not be activated in production when neither an execution rail nor a
+genuine manual-resolution path exists.
 
 ## 10. UI projection and stale-state authority
 
@@ -496,14 +500,15 @@ Require:
 
 ### 15.6 Before an automatic provider executor
 
-Require a separate executor design lock covering:
+The provider-neutral requirement is satisfied only by accepted `refund_execution_v1.md`. Before
+an automatic real-provider executor, additionally require official-provider design covering:
 
-- the official provider contract;
-- execution idempotency;
-- command/outbox ownership;
-- response-loss behavior;
-- retry, ambiguous, and terminal result taxonomy; and
-- reconciliation.
+- the official provider contract and authoritative-finality rules;
+- provider-specific idempotency and replay guarantees;
+- provider capability and wire-key derivation;
+- response-loss lookup behavior;
+- mapping into the locked retry, ambiguous, and terminal taxonomy; and
+- provider-specific reconciliation.
 
 ## 16. Human and product decisions
 

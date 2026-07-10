@@ -4,6 +4,7 @@
 - **Status:** DESIGN LOCK — documentation only; this document does not implement code or schema.
 - **Base commit context:** `d6e1845 feat(admin): read-only order detail with refund ledger and review summary`
 - **Related:** `refund_request_eligibility_v1.md` (request-creation eligibility SSOT),
+  `refund_execution_v1.md` (execution-command and evidence-resolution SSOT),
   `order_refund_state_machine_v1.md`, `payment_policy_confirmed_v6.md`,
   `payment_policy_open_v6.md`
 
@@ -17,19 +18,17 @@ This document locks two related contracts:
 It is a design lock, not an implementation. It authorizes no code, schema, action, UI,
 provider, webhook, outbox, reconciliation, or data mutation by itself.
 
-The admin refund request form must remain inactive. The current request flow creates a
-`RefundAttempt` in `REQUESTED` and atomically changes an `Order` from `PAID` or
-`PARTIALLY_REFUNDED` to `REFUND_PENDING`. No refund executor or request-close path currently
-exists. Activating the form in that state would create a permanent operational dead end: the
-order would remain `REFUND_PENDING`, the open attempt would block later requests, and an
-operator would have no supported way to restore a resting state.
+The transition audit and pre-contact request-close path defined here are now implemented. The
+admin refund request form must remain inactive because no refund executor, durable execution
+command, or evidence-resolution path exists yet. Activating the form before those later gates
+would still create requests with no supported money-execution path.
 
-The transition-audit schema and close core defined here are prerequisites for form activation.
-They are necessary but not sufficient: the later activation gates in §16 still apply.
+Their implementations satisfy the transition-audit and pre-contact-close prerequisites for form
+activation, but not the execution prerequisite. The later gates in §16 still apply.
 
 ## 2. Authoritative model responsibility
 
-The future model name is `RefundAttemptTransition`.
+The model name is `RefundAttemptTransition`.
 
 Its responsibilities are limited to:
 
@@ -52,9 +51,9 @@ Provider transmissions remain in `PaymentEvent`; provider refund identity and sa
 failure fields remain on `RefundAttempt`. `RefundAttemptTransition` records only the decision
 edge, actor, reason, operation identity, and related order-state evidence.
 
-## 3. Exact future Prisma model
+## 3. Exact Prisma model contract
 
-The schema slice must implement this conceptual model:
+The implemented schema follows this conceptual model:
 
 ```prisma
 model RefundAttemptTransition {
@@ -114,8 +113,7 @@ be deleted while transition evidence exists.
 ## 4. Database constraints
 
 Prisma 7 cannot express the required PostgreSQL `CHECK` constraints in the Prisma schema. The
-later schema slice must create its migration with `prisma migrate dev --create-only`, then edit
-the generated SQL to add checks equivalent to the following rules:
+schema migration therefore required generated SQL checks equivalent to the following rules:
 
 1. `fromStatus IS NULL` if and only if `toStatus = REQUESTED`.
 2. No legal non-null transition may target `REQUESTED`.
@@ -152,8 +150,8 @@ The biconditional creation check already prevents a non-null transition from tar
 `REQUESTED`. The migration may still name and document that invariant explicitly, but it must
 not duplicate the same logical condition in competing forms.
 
-The schema slice must verify against the repository's bundled Prisma 7 documentation and
-tooling that later migration generation does not silently drop or recreate these manual
+Schema work must verify against the repository's bundled Prisma 7 documentation and tooling that
+later migration generation does not silently drop or recreate these manual
 constraints. Application validation remains mandatory. SQL checks are final defense only.
 
 Do not encode the full `RefundAttemptStatus` transition graph as SQL checks. The graph remains
@@ -184,8 +182,8 @@ The existing `RefundAttempt` row remains valid creation evidence. The transition
 explicit lifecycle edge, order edge, actor decision, and replay identity required by the new
 audit contract.
 
-Writing creation transitions is a separate STRICT retrofit after the schema slice. Existing
-`RefundAttempt` rows must not receive guessed or fabricated transition rows. Rows without a
+The implemented request retrofit writes creation transitions atomically. Existing
+`RefundAttempt` rows did not receive guessed or fabricated transition rows. Rows without a
 creation transition are explicitly pre-transition-audit legacy rows, and the attempt itself
 remains their creation evidence.
 
@@ -196,7 +194,7 @@ The transition audit uses these operation-key namespaces:
 ```text
 refund-request:{refundAttemptId}
 refund-close:{refundAttemptId}:{operationId}
-refund-exec:{refundAttemptId}:{executionCommandId}
+refund-exec:{serverIssuedClaimIdentity}
 refund-resolve:{refundAttemptId}:{resolutionId}
 ```
 
@@ -205,8 +203,10 @@ Rules:
 - `operationKey` is globally unique within `RefundAttemptTransition`.
 - Operation identity is server-issued; callers do not supply provider idempotency values.
 - Provider idempotency remains separate from transition replay identity.
-- A future stable executor command identity may derive a provider operation key at the provider
-  boundary, but that does not turn this transition key into provider evidence.
+- The `refund-exec:` namespace is reserved for claim-transition replay. Its exact suffix contract
+  is finalized with the command schema/core and is never the provider operation identity.
+- Provider operation identity is the existing `RefundAttempt.idempotencyKey`, as locked by
+  `refund_execution_v1.md`; it is not copied onto the command.
 - Do not add uniqueness on `(refundAttemptId, transitionType)` or equivalent. Legitimate
   lifecycles may repeat transition classes through retry and manual-resolution paths.
 
@@ -224,7 +224,7 @@ All of these preconditions are required:
 - The target `RefundAttempt` belongs to that order.
 - The target status is exactly `REQUESTED`.
 - `providerRefundId` is null.
-- No committed executor or refund-execution outbox claim exists.
+- No committed `RefundExecutionCommand` claim exists.
 - The target is the only non-terminal/open attempt.
 - Order, Payment, and refund-ledger identities are internally consistent.
 - Order, Payment, and refund-ledger amounts and currencies are internally consistent.
@@ -357,9 +357,10 @@ If the executor wins:
 - close observes or re-reads the advanced/contact state; and
 - close returns `PROVIDER_CONTACT_ALREADY_STARTED` without writes.
 
-Provider contact before the `PROCESSING` claim transaction commits is forbidden. A future refund
-execution outbox command and the `PROCESSING` claim must be committed atomically. An execution
-command must never coexist with a still-`REQUESTED` attempt.
+Provider contact before the `PROCESSING` claim transaction commits is forbidden. The durable
+`RefundExecutionCommand`, claim transition, and `PROCESSING` CAS must commit atomically. A command
+must never coexist with a still-`REQUESTED` attempt. Command polling, evidence, and result
+resolution are owned by `refund_execution_v1.md`.
 
 The CAS is the authoritative winner even though both operations also use explicit row locks.
 
@@ -477,9 +478,9 @@ error before mapping to `ORDER_STATUS_CONFLICT` outside the transaction.
 Unknown database failures and deadlocks throw. They are not serialized as expected domain
 failures.
 
-## 15. Required future tests
+## 15. Required behavioral contract
 
-The close-core slice requires real database integration coverage for:
+The close core is required to retain real database integration coverage for:
 
 - `REQUESTED` close with zero succeeded refunds restores `PAID`.
 - `REQUESTED` close after earlier partial success restores `PARTIALLY_REFUNDED`.
@@ -515,7 +516,8 @@ Implementation order is locked as follows:
 7. Customer `REFUND_PENDING` copy decision and correction.
 8. Refund-request eligibility design lock (`refund_request_eligibility_v1.md`), including
    merchant advisory context and the contract for required activation hardening.
-9. MOCK executor and provider-evidence resolution paths.
+9. Refund execution/evidence design lock (`refund_execution_v1.md`), then isolated schema,
+   claim, resolution, provider-neutral MOCK, and dormant-dispatcher slices.
 10. Only after all preceding gates, activate a MOCK/SANDBOX admin request form.
 
 Each item is an isolated review/commit slice. No slice may pull provider execution, customer
@@ -555,7 +557,7 @@ This design does not alter or weaken:
 - checkout; or
 - customer order ownership and privacy.
 
-The future close core reads locked Order/refund evidence and writes only the target
+The close core reads locked Order/refund evidence and writes only the target
 `RefundAttempt`, the related `Order`, and one `RefundAttemptTransition` in a single transaction.
 
 ## 19. Explicit out of scope
@@ -564,7 +566,7 @@ This design lock does not implement or authorize:
 
 - real or MOCK provider execution;
 - provider adapters or credentials;
-- refund execution outbox topics;
+- refund execution command/evidence implementation or dispatch;
 - manufacturing holds;
 - customer withdrawal controls;
 - a generic audit table;
@@ -579,12 +581,7 @@ This design lock does not implement or authorize:
 
 ## 20. Implementation-entry gate
 
-The next implementation slice after human approval of this document is schema-only. It may touch
-only `prisma/schema.prisma` and one generated migration for `RefundAttemptTransition` and the
-manual checks in §4. It must not include request retrofit, close-core logic, actions, UI, provider
-code, outbox, webhook, reconciliation, customer copy, or data backfill.
-
-Before that schema slice is accepted, it must verify the manual PostgreSQL checks using the
-repository's actual Prisma 7 tooling and confirm that migration generation preserves rather than
-silently removes them. Runtime behavior remains prohibited until the later STRICT slices and
-their tests are approved.
+The transition-audit and close implementation stages governed by this document are complete. The
+next refund-execution implementation entry, after human acceptance of `refund_execution_v1.md`,
+is a separately reviewed schema-only command/evidence slice. This closure document does not
+authorize that schema, provider code, dispatcher, webhook, reconciliation, UI, or data backfill.
