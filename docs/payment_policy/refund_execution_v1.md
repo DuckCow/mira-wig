@@ -227,6 +227,7 @@ Transition, provider, and observation identities remain distinct:
 request creation     refund-request:{refundAttemptId}
 pre-contact close    refund-close:{refundAttemptId}:{operationId}
 execution claim      refund-exec-claim:{commandId}
+execution result     refund-exec-apply:{evidenceId}
 provider operation   RefundAttempt.idempotencyKey
 worker observation   refund-result:{commandId}:{dispatchAttempt}
 webhook observation  refund-webhook:{provider}:{providerTransmissionId}
@@ -316,10 +317,31 @@ Application classifications are:
 
 | Application | Meaning |
 |---|---|
-| `APPLIED` | Evidence caused an allowed domain or command transition. |
-| `PARKED` | Evidence was recorded while the operation remains guarded pending later resolution. |
-| `DUPLICATE` | Equivalent evidence or resulting state already exists. |
-| `CONFLICT` | Evidence contradicts immutable identity or existing applied evidence. |
+| `APPLIED` | New authoritative compatible evidence changed an allowed domain, command, or provider-identity projection. |
+| `PARKED` | New compatible evidence lacks authority for the requested terminal result and remains guarded pending later resolution. |
+| `DUPLICATE` | A new-key compatible observation adds no decision because its result is already reflected. |
+| `CONFLICT` | New-key evidence contradicts immutable identity or existing applied evidence. |
+
+Classification describes the evidence's relationship to the authoritative aggregate, not merely
+whether any projection changed. The resolver applies this precedence:
+
+1. An existing `sourceDedupKey` with the exact immutable observation returns the stored
+   application without a new row or write. Changed immutable evidence under that key returns
+   `EVIDENCE_IDEMPOTENCY_CONFLICT` without a write.
+2. Aggregate or artifact corruption that prevents safe attribution fails closed without an
+   evidence row.
+3. A new-key immutable-identity contradiction is inserted as `CONFLICT`.
+4. A new compatible observation whose result is already reflected is inserted as `DUPLICATE`.
+5. A new authoritative compatible observation changing allowed projections is inserted as
+   `APPLIED`.
+6. A new compatible observation lacking terminal authority is inserted as `PARKED`.
+
+A `CONFLICT` observation may move a non-terminal attempt to or retain it in `MANUAL_REVIEW` and
+park the command; its application remains `CONFLICT`, not `APPLIED`. The application records the
+evidence-to-aggregate meaning, while `RefundAttemptTransition` records the safe domain reaction.
+Safely attributable conflict evidence arriving after a terminal attempt is retained as
+`CONFLICT`, does not reopen the attempt, leaves the command `DONE`, and requires later operational
+review.
 
 Evidence is immutable after insertion. A parked observation later consumed by a resolution does
 not change from `PARKED` to `APPLIED`. The later decision is represented by a new resolution
@@ -343,6 +365,10 @@ writers.
 | Reconciliation | May apply only lookup-level authoritative evidence. |
 | Operator/manual | Requires a dedicated authorized resolution operation, bounded justification, source attribution, and the same locks/CAS. Raw provider payload is forbidden. |
 
+The first exported result-resolution entry point accepts only `ADAPTER_RESPONSE`. Lookup,
+webhook, reconciliation, operator, and stale-worker entry points remain deferred; reserving their
+source enum values grants no runtime authority.
+
 ## 13. Evidence deduplication
 
 Source-dedup identity distinguishes exact observation replay, a later new observation, an
@@ -362,15 +388,26 @@ equivalent duplicate, and contradictory evidence.
 A fresh manual browser invocation with a new server-issued resolution ID is not exact replay, but
 the Order/attempt/command locks and status CAS still prevent a second money application.
 
-One dispatch ordinal identifies one provider invocation. Persistence retries for that invocation
-reuse its ordinal and evidence key. A newly authorized provider invocation receives a new durable
-ordinal; lease reacquisition alone does not authorize it. Process-local UUIDs are never
-worker-evidence dedup identities.
+One dispatch ordinal identifies one provider invocation. The resolver derives
+`refund-result:{commandId}:{dispatchAttempt}` internally; callers do not supply the source,
+source-dedup key, Order ID, RefundAttempt ID, Payment identity, provider, mode, expected
+amount/currency, or provider operation identity. Persistence retries for that invocation reuse
+its original normalized observation, ordinal, and evidence key. A newly authorized provider
+invocation receives a new durable ordinal; lease reacquisition alone does not authorize it.
+Process-local UUIDs are never worker-evidence dedup identities.
 
-An exact key replay compares immutable source, command, attempt, outcome, reported identity,
-amount, currency, normalized code, and observation identity. Exact match returns the stored
-evidence/result; mismatch is an idempotency conflict. Equivalent observations under different
-valid source operations may be recorded as `DUPLICATE` without applying money twice.
+An exact key replay compares command, source, outcome, observed provider-refund identity,
+reported amount, reported currency, normalized safe code, normalized safe message, and
+`observedAt`. `application` is computed and is not caller evidence. Exact match returns the stored
+historical evidence/result even after Attempt, Command, or Order projections advance; mismatch is
+`EVIDENCE_IDEMPOTENCY_CONFLICT` with no write. The persistence retry must preserve `observedAt`
+and normalized diagnostics exactly, so a safe-message difference is a conflict. Equivalent
+observations under different valid source operations may be recorded as `DUPLICATE` without
+applying money twice.
+
+Normalization must be deterministic. Safe-message normalization cannot read the clock or include
+random values, invocation counters, process-specific content, raw provider errors, secrets, or
+internal identifiers.
 
 ## 14. State-transition evidence prerequisites
 
@@ -401,7 +438,7 @@ act on either status.
 |---|---|
 | `REQUESTED` | No command. |
 | `PROCESSING` | Exactly one command in `READY`, `LEASED`, or `WAITING_EVIDENCE`. |
-| `FAILED_RETRYABLE` | Same command in `WAITING_RETRY`, or `PARKED` after policy exhaustion. |
+| `FAILED_RETRYABLE` | Same command in `PARKED` when no retry schedule is authorized or after policy exhaustion; `WAITING_RETRY` only under a separately trusted retry policy. |
 | `MANUAL_REVIEW` | Same command in `WAITING_EVIDENCE` or `PARKED`. |
 | `SUCCEEDED` / `FAILED_TERMINAL` | Command `DONE`. |
 | Pre-contact `CANCELLED` | No command. |
@@ -437,6 +474,11 @@ Retry policy owns retry budget, backoff, `availableAt`, re-arm authorization, an
 `PARKED` or `MANUAL_REVIEW`. This lock deliberately chooses no numeric values. Fields needed to
 support the policy may exist in the dormant schema without assigning production values.
 
+The first generic adapter-response resolver does not own a retry policy. It parks confirmed
+retryable non-execution instead of selecting `WAITING_RETRY`, inventing `availableAt`, or
+authorizing another dispatch. `WAITING_RETRY` becomes legal only when provider-specific retry
+classification, backoff, scheduling, and execution ownership are decided together.
+
 Credential, authorization, configuration, disabled-account, or equivalent operational failures
 may authoritatively prove non-execution, but that alone does not make blind automatic retry useful.
 Unless a later provider-specific policy classifies the condition as safely and usefully
@@ -448,6 +490,27 @@ provider result category is introduced.
 automatically retry. They require authoritative lookup or manual resolution.
 
 ## 17. Evidence-resolution transaction
+
+### 17.1 First adapter-response freshness boundary
+
+The first exported entry point accepts a new `ADAPTER_RESPONSE` only when all of these facts hold
+under lock:
+
+```text
+RefundAttempt.status = PROCESSING
+RefundExecutionCommand.status = LEASED
+input dispatchAttempt = persisted command.dispatchAttempt
+dispatchAttempt > 0
+```
+
+Exact equality is required; `dispatchAttempt <= command.dispatchAttempt` is not sufficient. A
+stale ordinal may be real evidence, but its handling belongs to later lease/worker recovery
+policy. Existing-key replay is resolved before freshness checks, so exact persistence replay
+remains valid after projections advance. `READY`, `WAITING_EVIDENCE`, `WAITING_RETRY`, `PARKED`,
+and `DONE` accept no new adapter-response observation in this slice and may only acknowledge an
+exact previously persisted replay.
+
+### 17.2 Atomic application
 
 Every writer that applies execution evidence uses:
 
@@ -481,51 +544,117 @@ transition graph permits. It must not be discarded merely because it cannot driv
 terminal transition. Recording still observes privacy, bounded-text, and immutable-identity
 constraints.
 
-Worker lease ownership is not authority to ignore late authoritative evidence. A stale worker,
-webhook, lookup, and manual operation all serialize through this transaction. Exactly one state
-application wins; compatible later observations are duplicates, and contradictions are retained
-without double-applying money.
+Future stale-worker, webhook, lookup, reconciliation, and manual entry points must serialize
+through this transaction. Their authority and freshness rules are deferred; the first
+adapter-response entry point must not silently admit them.
 
 ## 18. Result application
 
 ### 18.1 Verified success
 
-- Apply `PROCESSING -> SUCCEEDED` or `MANUAL_REVIEW -> SUCCEEDED`.
-- Persist compatible provider identity and authoritative reported amount/currency evidence.
+- Record compatible authoritative evidence as `APPLIED`.
+- Require a present positive reported amount/currency pair exactly matching the RefundAttempt and
+  designated Payment.
+- Apply `PROCESSING -> SUCCEEDED`; set `processedAt = now`; clear `failedAt`, `failureCode`, and
+  `safeFailureMessage`.
+- Persist the first compatible provider identity when supplied; a provider refund ID is not
+  mandatory for generic success.
 - Derive cumulative succeeded amount including the target.
 - Move Order to `PARTIALLY_REFUNDED` or `REFUNDED` per section 19.
 - Keep `Payment.status` `SUCCEEDED`.
-- Mark command `DONE` and append the transition.
+- Move command `LEASED -> DONE`; clear lease fields and last-safe-error projections; append the
+  transition.
 
 ### 18.2 Accepted pending
 
 - Record `ACCEPTED_PENDING` as `APPLIED` to command state.
-- Keep attempt `PROCESSING` and Order `REFUND_PENDING`.
-- Move command to `WAITING_EVIDENCE`.
+- Keep attempt `PROCESSING`; keep `processedAt`, `failedAt`, `failureCode`, and
+  `safeFailureMessage` null; compatibly first-write `providerRefundId` when supplied.
+- Move command `LEASED -> WAITING_EVIDENCE`; clear lease fields and last-safe-error projections.
+- Keep Order `REFUND_PENDING` and Payment unchanged.
 - Do not create a self-transition for the attempt.
+
+`APPLIED` is correct because authoritative command and possibly provider-identity projections
+changed. The provider operation has an outstanding finality obligation, so `WAITING_EVIDENCE` is
+semantically valid. Restricted or general production activation remains blocked until a durable
+lookup, webhook, reconciliation, or equivalent finality-acquisition owner exists; none is
+implemented by this policy clarification.
 
 ### 18.3 Confirmed retryable non-execution
 
-- Apply `PROCESSING -> FAILED_RETRYABLE`.
+- Record the evidence as `APPLIED`.
+- Apply `PROCESSING -> FAILED_RETRYABLE`; keep `processedAt` and `failedAt` null; project the
+  canonical normalized diagnostic to `failureCode` and `safeFailureMessage`.
 - Keep Order `REFUND_PENDING` and the amount reserved.
-- Move command to `WAITING_RETRY` with policy-owned `availableAt`.
-- Re-arm only through explicit retry authorization.
+- Move command `LEASED -> PARKED`; clear lease fields and project the same diagnostic to
+  `lastSafeErrorCode` and `lastSafeErrorMessage`.
+- Keep Payment unchanged. No automatic retry is scheduled or authorized.
+
+`FAILED_RETRYABLE + PARKED` is coherent: the Attempt states that same-identity retry remains
+permissible, while the Command states that no retry is currently authorized.
 
 ### 18.4 Confirmed terminal non-execution
 
-- Apply `PROCESSING -> FAILED_TERMINAL`, or the corresponding evidence-gated edge from
-  `FAILED_RETRYABLE`/`MANUAL_REVIEW`.
+- Require definitive zero-money evidence and record it as `APPLIED`.
+- Apply `PROCESSING -> FAILED_TERMINAL`; keep `processedAt` null; set `failedAt = now`; project the
+  canonical normalized diagnostic to `failureCode` and `safeFailureMessage`.
 - Restore Order to `PAID` when prior succeeded sum is zero, otherwise
   `PARTIALLY_REFUNDED` when it is below captured total.
-- Mark command `DONE`.
+- Move command `LEASED -> DONE`; clear lease fields and project the same diagnostic to its
+  last-safe-error fields. Keep Payment unchanged.
 
 ### 18.5 Unknown or conflicting outcome
 
-- Record `UNKNOWN` or conflict evidence.
-- Apply or retain `MANUAL_REVIEW` when permitted.
-- Keep Order `REFUND_PENDING` and preserve the guarded amount.
-- Move command to `WAITING_EVIDENCE` or `PARKED`.
-- Do not automatically retry or release the reservation.
+- Record a compatible `UNKNOWN` observation as `APPLIED`.
+- Apply `PROCESSING -> MANUAL_REVIEW`; keep `processedAt` and `failedAt` null; project the
+  canonical ambiguity diagnostic to `failureCode` and `safeFailureMessage`.
+- Move command `LEASED -> PARKED`; clear lease fields and project the same diagnostic to its
+  last-safe-error fields.
+- Keep Order `REFUND_PENDING`, preserve the guarded amount, and keep Payment unchanged.
+- Do not automatically retry or release the reservation. `WAITING_EVIDENCE` is not selected in
+  the first slice because no named durable evidence-acquisition path owns the case.
+
+### 18.6 Diagnostic projection ownership
+
+`RefundExecutionEvidence.safeCode` and `safeMessage` are the immutable normalized diagnostic for
+one observation. `RefundAttempt.failureCode` and `safeFailureMessage` are the current refund-domain
+failure or manual-review projection and already have an admin-detail reader.
+`RefundExecutionCommand.lastSafeErrorCode` and `lastSafeErrorMessage` are the current operational
+execution projection.
+
+One normalized safe candidate is reused for every applicable projection; each table must not
+normalize or rewrite it independently. Every non-success outcome requires a stable canonical,
+bounded, deterministic, non-sensitive `safeCode`, even when the adapter supplies no code. Exact
+code strings are selected in the implementation slice. `safeMessage` may be null; when present it
+must be bounded, deterministic, privacy-safe, and free of raw provider text, timestamps, random
+values, secrets, and internal identifiers.
+
+### 18.7 Amount, currency, and provider-identity conflicts
+
+Every supplied normalized amount/currency pair must match the RefundAttempt and designated
+Payment. `SUCCEEDED` additionally requires the pair to be present. A success observation with no
+pair is insufficiently authoritative: insert it as `PARKED`, move the Attempt to `MANUAL_REVIEW`,
+park the Command, and keep the Order `REFUND_PENDING`. A supplied mismatched pair is `CONFLICT`.
+
+A different non-null observed provider-refund ID from the authoritative Attempt projection is
+`CONFLICT`; the projection is never overwritten. Non-execution and `UNKNOWN` evidence may record
+an observed provider ID but cannot establish the Attempt projection. Malformed or raw values are
+not persisted. In the first slice, a safely attributable new amount/currency or provider-identity
+conflict moves `PROCESSING -> MANUAL_REVIEW`, moves `LEASED -> PARKED`, retains Order
+`REFUND_PENDING`, and leaves Payment unchanged; the evidence application remains `CONFLICT`.
+
+### 18.8 Result-transition operation identity
+
+`refund-exec-apply:{evidenceId}` identifies a RefundAttempt status transition caused by execution
+evidence. It is derived from the server-generated immutable evidence ID, globally unique through
+the transition operation-key constraint, stable for replay, and not caller-supplied. It is not a
+request, close, claim, provider-operation, evidence-source-dedup, retry, reconciliation, or manual
+resolution identity.
+
+Use this namespace only when RefundAttempt status changes. `ACCEPTED_PENDING` creates no
+RefundAttempt self-transition. A `CONFLICT` or `PARKED` observation that safely moves a
+non-terminal Attempt to `MANUAL_REVIEW` uses the same evidence-derived transition namespace while
+retaining its own evidence application classification.
 
 ## 19. Order and Payment effects
 
@@ -671,7 +800,8 @@ Before restricted internal production execution, require:
 
 - named operator ownership;
 - a runbook; and
-- reliable discovery of active, retryable, and parked requests.
+- reliable discovery of active, retryable, and parked requests; and
+- a durable finality-acquisition owner for every path that can produce `WAITING_EVIDENCE`.
 
 Before general production, require:
 
@@ -702,6 +832,11 @@ This document does not decide:
 - webhook terminal authority;
 - reconciliation cadence; or
 - evidence-gated post-contact cancellation policy.
+
+Lease acquisition and worker dispatch, stale-ordinal evidence, lease-expiry replay, retry budget
+and backoff, retry re-arm, provider lookup, webhook authority, reconciliation, operator/manual
+resolution, worklist/queue implementation, database-level evidence immutability, and production
+finality-acquisition ownership remain deferred. No numeric retry or lease values are selected.
 
 It does ratify command/evidence separation, the revised `PROCESSING` meaning,
 `RefundAttempt.idempotencyKey` authority, `providerRefundId` projection authority, full verified

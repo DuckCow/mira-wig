@@ -195,6 +195,7 @@ The transition audit uses these operation-key namespaces:
 refund-request:{refundAttemptId}
 refund-close:{refundAttemptId}:{operationId}
 refund-exec-claim:{commandId}
+refund-exec-apply:{evidenceId}
 refund-resolve:{refundAttemptId}:{resolutionId}
 ```
 
@@ -209,6 +210,10 @@ Rules:
   not caller-supplied, the request-creation operation key, `RefundAttempt.idempotencyKey`, or
   provider-visible, and is not reused for result persistence, retry re-arm, reconciliation, or
   manual resolution.
+- The `refund-exec-apply:` namespace is derived from an immutable server-generated execution
+  evidence ID and is used only when that evidence causes a RefundAttempt status transition. It is
+  distinct from evidence source deduplication and every request, close, claim, provider, retry,
+  reconciliation, and manual-resolution identity.
 - Provider operation identity is the existing `RefundAttempt.idempotencyKey`, as locked by
   `refund_execution_v1.md`; it is not copied onto the command.
 - Do not add uniqueness on `(refundAttemptId, transitionType)` or equivalent. Legitimate
