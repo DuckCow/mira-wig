@@ -92,10 +92,12 @@ The claim validates at least:
 - amount, currency, provider, mode, and historical sibling identity are consistent; and
 - the current single-open-attempt invariant holds.
 
-Claim replay has a distinct transition operation identity. Its exact shape may be finalized in
-the schema/core slice, but it must be globally unique, server-issued or deterministically derived
-from one command creation, stable for replay, not browser-visible, and never reused for provider
-contact or result persistence.
+Claim replay uses `refund-exec-claim:{commandId}` as its distinct transition operation identity.
+The operation key is deterministically derived from the server-generated command ID, globally
+unique through the transition operation-key constraint, and stable for historical claim replay.
+It is not caller-supplied, the request-creation operation key, `RefundAttempt.idempotencyKey`, or
+provider-visible. It is not reused for result persistence, retry re-arm, reconciliation, manual
+resolution, or provider contact.
 
 The safe claim result exposes only local IDs, statuses, and replay state. It does not expose the
 provider payment reference or provider operation key.
@@ -224,7 +226,7 @@ Transition, provider, and observation identities remain distinct:
 ```text
 request creation     refund-request:{refundAttemptId}
 pre-contact close    refund-close:{refundAttemptId}:{operationId}
-execution claim      separate stable claim/command operation identity
+execution claim      refund-exec-claim:{commandId}
 provider operation   RefundAttempt.idempotencyKey
 worker observation   refund-result:{commandId}:{dispatchAttempt}
 webhook observation  refund-webhook:{provider}:{providerTransmissionId}

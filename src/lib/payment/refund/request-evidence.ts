@@ -6,6 +6,11 @@ import {
 } from "@prisma/client";
 import type { PreparedRefundAttempt } from "./prepare";
 
+type RefundRequestEvidenceCandidate = Pick<
+  PreparedRefundAttempt,
+  "id" | "actorType" | "actorUserId" | "reason"
+>;
+
 export type RefundRequestCreationEvidence =
   | { kind: "legacy" }
   | { kind: "matched"; orderStatus: typeof OrderStatus.REFUND_PENDING }
@@ -45,7 +50,7 @@ function samePaymentContext(existing: RefundAttempt, candidate: PreparedRefundAt
 
 export function resolveRefundRequestCreationEvidence(
   transitions: readonly RefundAttemptTransition[],
-  candidate: PreparedRefundAttempt,
+  candidate: RefundRequestEvidenceCandidate,
 ): RefundRequestCreationEvidence {
   const operationKey = buildRefundRequestOperationKey(candidate.id);
   const creationRows = transitions.filter((transition) => (
@@ -63,7 +68,7 @@ export function resolveRefundRequestCreationEvidence(
 
 function matchesCreationEvidence(
   transition: RefundAttemptTransition,
-  candidate: PreparedRefundAttempt,
+  candidate: RefundRequestEvidenceCandidate,
   operationKey: string,
 ): boolean {
   return sameCreationIdentity(transition, candidate, operationKey)
@@ -73,7 +78,7 @@ function matchesCreationEvidence(
 
 function sameCreationIdentity(
   transition: RefundAttemptTransition,
-  candidate: PreparedRefundAttempt,
+  candidate: RefundRequestEvidenceCandidate,
   operationKey: string,
 ): boolean {
   return transition.refundAttemptId === candidate.id
@@ -89,7 +94,7 @@ function sameCreationOrderEdge(transition: RefundAttemptTransition): boolean {
 
 function sameCreationDecision(
   transition: RefundAttemptTransition,
-  candidate: PreparedRefundAttempt,
+  candidate: RefundRequestEvidenceCandidate,
 ): boolean {
   return transition.actorType === candidate.actorType
     && transition.actorUserId === candidate.actorUserId

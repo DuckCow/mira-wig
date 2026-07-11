@@ -13,10 +13,19 @@ import {
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import {
+  claimRefundAttemptForExecution,
+  type ClaimRefundAttemptForExecutionInput,
+} from "../claim";
+import {
   closeRefundRequest,
   type CloseRefundRequestInput,
   type CloseRefundRequestResult,
 } from "../close";
+import {
+  createNamedDbSession,
+  disconnectSessions,
+  queueBehindObservedOrderLock,
+} from "./refund-order-lock-barrier";
 
 const NOW = new Date("2026-07-10T08:00:00.000Z");
 const MARKET_CODE = "KR";
@@ -400,45 +409,74 @@ describe("closeRefundRequest", () => {
     await expect(transitionCount(targetId)).resolves.toBe(1);
   });
 
-  it("loses safely when an executor claim wins before close", async () => {
+  it("loses safely when the production claim is first in the observed Order-lock queue", async () => {
     const fixture = await createOrder(ctx);
     const targetId = await seedAttempt(fixture);
-    let executor: Promise<boolean>;
-    let close: Promise<CloseRefundRequestResult>;
+    await seedRequestCreationTransition(targetId);
+    const claimSession = createNamedDbSession("claim_first");
+    const closeSession = createNamedDbSession("close_second");
 
-    await db.$transaction(async (tx) => {
-      await lockOrder(tx, fixture.orderId);
-      executor = simulateExecutorClaim(fixture.orderId, targetId);
-      expect(await settlesWithin(executor, 40)).toBe(false);
-      close = closeRefundRequest(db, input(fixture.orderId, targetId));
-    });
+    try {
+      const queued = await queueBehindObservedOrderLock(
+        fixture.orderId,
+        claimSession,
+        () => claimRefundAttemptForExecution(
+          claimSession.client,
+          claimInput(fixture.orderId, targetId),
+        ),
+        closeSession,
+        () => closeRefundRequest(closeSession.client, input(fixture.orderId, targetId)),
+      );
+      const [claim, close] = await Promise.all([queued.first, queued.second]);
 
-    await expect(executor!).resolves.toBe(true);
-    await expect(close!).resolves.toMatchObject({
-      ok: false,
-      code: "PROVIDER_CONTACT_ALREADY_STARTED",
-    });
-    await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.PROCESSING);
-    await expect(transitionCount(targetId)).resolves.toBe(0);
+      expect(claim).toMatchObject({ ok: true, replayed: false });
+      expect(close).toMatchObject({ ok: false, code: "PROVIDER_CONTACT_ALREADY_STARTED" });
+      expect(queued.firstWait.blockingPids).toContain(queued.holderPid);
+      expect(queued.secondWait.blockingPids).toContain(queued.firstWait.pid);
+      await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.PROCESSING);
+      await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+      await expect(paymentStatus(fixture.paymentId)).resolves.toBe(PaymentAttemptStatus.SUCCEEDED);
+      await expect(commandCount(targetId)).resolves.toBe(1);
+      await expect(claimTransitionCount(targetId)).resolves.toBe(1);
+      await expect(closeTransitionCount(targetId)).resolves.toBe(0);
+    } finally {
+      await disconnectSessions(claimSession, closeSession);
+    }
   });
 
-  it("prevents executor progress when close wins the REQUESTED CAS", async () => {
+  it("prevents production claim when close is first in the observed Order-lock queue", async () => {
     const fixture = await createOrder(ctx);
     const targetId = await seedAttempt(fixture);
-    let close: Promise<CloseRefundRequestResult>;
-    let executor: Promise<boolean>;
+    await seedRequestCreationTransition(targetId);
+    const closeSession = createNamedDbSession("close_first");
+    const claimSession = createNamedDbSession("claim_second");
 
-    await db.$transaction(async (tx) => {
-      await lockOrder(tx, fixture.orderId);
-      close = closeRefundRequest(db, input(fixture.orderId, targetId));
-      expect(await settlesWithin(close, 40)).toBe(false);
-      executor = simulateExecutorClaim(fixture.orderId, targetId);
-    });
+    try {
+      const queued = await queueBehindObservedOrderLock(
+        fixture.orderId,
+        closeSession,
+        () => closeRefundRequest(closeSession.client, input(fixture.orderId, targetId)),
+        claimSession,
+        () => claimRefundAttemptForExecution(
+          claimSession.client,
+          claimInput(fixture.orderId, targetId),
+        ),
+      );
+      const [close, claim] = await Promise.all([queued.first, queued.second]);
 
-    await expect(close!).resolves.toMatchObject({ ok: true, replayed: false });
-    await expect(executor!).resolves.toBe(false);
-    await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.CANCELLED);
-    await expect(transitionCount(targetId)).resolves.toBe(1);
+      expect(close).toMatchObject({ ok: true, replayed: false });
+      expect(claim).toMatchObject({ ok: false, code: "REFUND_ATTEMPT_NOT_CLAIMABLE" });
+      expect(queued.firstWait.blockingPids).toContain(queued.holderPid);
+      expect(queued.secondWait.blockingPids).toContain(queued.firstWait.pid);
+      await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.CANCELLED);
+      await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.PAID);
+      await expect(paymentStatus(fixture.paymentId)).resolves.toBe(PaymentAttemptStatus.SUCCEEDED);
+      await expect(commandCount(targetId)).resolves.toBe(0);
+      await expect(claimTransitionCount(targetId)).resolves.toBe(0);
+      await expect(closeTransitionCount(targetId)).resolves.toBe(1);
+    } finally {
+      await disconnectSessions(closeSession, claimSession);
+    }
   });
 });
 
@@ -456,6 +494,16 @@ function input(
     actorUserId: "admin_123",
     now: NOW,
     ...overrides,
+  };
+}
+
+function claimInput(orderId: string, refundAttemptId: string): ClaimRefundAttemptForExecutionInput {
+  return {
+    orderId,
+    refundAttemptId,
+    actorType: RefundAttemptActorType.ADMIN,
+    actorUserId: "admin_123",
+    now: NOW,
   };
 }
 
@@ -573,19 +621,20 @@ async function seedCloseTransition(
   });
 }
 
-async function simulateExecutorClaim(orderId: string, refundAttemptId: string): Promise<boolean> {
-  return db.$transaction(async (tx) => {
-    await lockOrder(tx, orderId);
-    await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-      SELECT "id" FROM "RefundAttempt"
-      WHERE "id" = ${refundAttemptId} AND "orderId" = ${orderId}
-      FOR UPDATE
-    `);
-    const claim = await tx.refundAttempt.updateMany({
-      where: { id: refundAttemptId, orderId, status: RefundAttemptStatus.REQUESTED },
-      data: { status: RefundAttemptStatus.PROCESSING },
-    });
-    return claim.count === 1;
+async function seedRequestCreationTransition(refundAttemptId: string): Promise<void> {
+  await db.refundAttemptTransition.create({
+    data: {
+      refundAttemptId,
+      fromStatus: null,
+      toStatus: RefundAttemptStatus.REQUESTED,
+      orderStatusBefore: OrderStatus.PAID,
+      orderStatusAfter: OrderStatus.REFUND_PENDING,
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+      reason: "Seed refund request",
+      operationKey: `refund-request:${refundAttemptId}`,
+      createdAt: NOW,
+    },
   });
 }
 
@@ -631,6 +680,35 @@ function orderStatus(orderId: string): Promise<OrderStatus> {
     .then((order) => order.status);
 }
 
+function paymentStatus(paymentId: string): Promise<PaymentAttemptStatus> {
+  return db.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true } })
+    .then((payment) => payment.status);
+}
+
+function commandCount(refundAttemptId: string): Promise<number> {
+  return db.refundExecutionCommand.count({ where: { refundAttemptId } });
+}
+
+function claimTransitionCount(refundAttemptId: string): Promise<number> {
+  return db.refundAttemptTransition.count({
+    where: {
+      refundAttemptId,
+      fromStatus: RefundAttemptStatus.REQUESTED,
+      toStatus: RefundAttemptStatus.PROCESSING,
+    },
+  });
+}
+
+function closeTransitionCount(refundAttemptId: string): Promise<number> {
+  return db.refundAttemptTransition.count({
+    where: {
+      refundAttemptId,
+      fromStatus: RefundAttemptStatus.REQUESTED,
+      toStatus: RefundAttemptStatus.CANCELLED,
+    },
+  });
+}
+
 function closeTransitions(refundAttemptId: string) {
   return db.refundAttemptTransition.findMany({
     where: { refundAttemptId, fromStatus: RefundAttemptStatus.REQUESTED },
@@ -674,6 +752,16 @@ async function cleanup(contexts: readonly TestContext[]): Promise<void> {
   const attempts = await db.refundAttempt.findMany({
     where: { orderId: { in: orderIds } },
     select: { id: true },
+  });
+  const commands = await db.refundExecutionCommand.findMany({
+    where: { refundAttemptId: { in: attempts.map((attempt) => attempt.id) } },
+    select: { id: true },
+  });
+  await db.refundExecutionEvidence.deleteMany({
+    where: { commandId: { in: commands.map((command) => command.id) } },
+  });
+  await db.refundExecutionCommand.deleteMany({
+    where: { id: { in: commands.map((command) => command.id) } },
   });
   await db.refundAttemptTransition.deleteMany({
     where: { refundAttemptId: { in: attempts.map((attempt) => attempt.id) } },
