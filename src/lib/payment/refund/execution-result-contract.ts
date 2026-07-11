@@ -6,9 +6,9 @@ import {
 } from "@prisma/client";
 
 const SOURCE_DEDUP_KEY_MAX = 512;
-const PROVIDER_REFUND_ID_MAX = 512;
-const SAFE_CODE_MAX = 128;
-const SAFE_MESSAGE_MAX = 500;
+export const REFUND_EVIDENCE_PROVIDER_ID_MAX_CODE_POINTS = 512;
+export const REFUND_EVIDENCE_SAFE_CODE_MAX_CODE_POINTS = 128;
+export const REFUND_EVIDENCE_SAFE_MESSAGE_MAX_CODE_POINTS = 500;
 const RESULT_KEY_PREFIX = "refund-result:";
 const APPLY_KEY_PREFIX = "refund-exec-apply:";
 
@@ -103,7 +103,10 @@ function normalizeEvidenceFields(
   commandId: string,
   sourceDedupKey: string,
 ): { ok: true; input: NormalizedRefundAdapterResponse } | ResolveRefundAdapterResponseFailure {
-  const providerId = normalizeOptional(input.observedProviderRefundId, PROVIDER_REFUND_ID_MAX);
+  const providerId = normalizeBoundedOptionalEvidenceText(
+    input.observedProviderRefundId,
+    REFUND_EVIDENCE_PROVIDER_ID_MAX_CODE_POINTS,
+  );
   if (!providerId.ok) {
     return resolutionFailure("INVALID_EVIDENCE", "Evidence text exceeds its normalized storage bound.");
   }
@@ -129,12 +132,12 @@ function normalizeDiagnostics(
   code: string | null,
   message: string | null,
 ): { ok: true; safeCode: string | null; safeMessage: string | null } | ResolveRefundAdapterResponseFailure {
-  const safeCode = normalizeOptional(code, SAFE_CODE_MAX);
-  const safeMessage = normalizeOptional(message, SAFE_MESSAGE_MAX);
+  const safeCode = normalizeBoundedOptionalEvidenceText(code, REFUND_EVIDENCE_SAFE_CODE_MAX_CODE_POINTS);
+  const safeMessage = normalizeBoundedOptionalEvidenceText(message, REFUND_EVIDENCE_SAFE_MESSAGE_MAX_CODE_POINTS);
   if (!safeCode.ok || !safeMessage.ok) {
     return resolutionFailure("INVALID_EVIDENCE", "Evidence text exceeds its normalized storage bound.");
   }
-  if (!isSafeCode(safeCode.value) || !isPrivacySafeMessage(safeMessage.value)) {
+  if (!isRefundEvidenceSafeCode(safeCode.value) || !isRefundEvidencePrivacySafeMessage(safeMessage.value)) {
     return resolutionFailure("INVALID_EVIDENCE", "Evidence diagnostics are not safe for persistence.");
   }
   return { ok: true, safeCode: safeCode.value, safeMessage: safeMessage.value };
@@ -175,14 +178,14 @@ function normalizeMoney(
   if (amount === null || currency === null || !isPositiveSafeInteger(amount)) {
     return resolutionFailure("INVALID_EVIDENCE", "Reported amount and currency must be a valid pair.");
   }
-  const normalizedCurrency = currency.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(normalizedCurrency)) {
+  const normalizedCurrency = normalizeRefundEvidenceCurrency(currency);
+  if (!normalizedCurrency) {
     return resolutionFailure("INVALID_EVIDENCE", "Reported currency must be a three-letter code.");
   }
   return { ok: true, amount, currency: normalizedCurrency };
 }
 
-function normalizeOptional(
+export function normalizeBoundedOptionalEvidenceText(
   value: string | null,
   maximum: number,
 ): { ok: true; value: string | null } | { ok: false } {
@@ -193,16 +196,21 @@ function normalizeOptional(
   return { ok: true, value: normalized };
 }
 
-function isSafeCode(value: string | null): boolean {
+export function isRefundEvidenceSafeCode(value: string | null): boolean {
   return value === null || /^[A-Z0-9_.:-]+$/.test(value);
 }
 
-function isPrivacySafeMessage(value: string | null): boolean {
+export function isRefundEvidencePrivacySafeMessage(value: string | null): boolean {
   if (value === null) return true;
   if (/[\r\n\t]/.test(value)) return false;
   if (/https?:\/\/[^/\s@]+@/i.test(value)) return false;
   if (/\b(?:authorization|password|secret|api[_-]?key|token)\b\s*[:=]/i.test(value)) return false;
   return !/\b(?:payment|order|refund|command|attempt|request)_[A-Za-z0-9-]{4,}\b/i.test(value);
+}
+
+export function normalizeRefundEvidenceCurrency(value: string): string | null {
+  const normalized = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : null;
 }
 
 function canonicalCode(outcome: RefundExecutionEvidenceOutcome): string | null {
