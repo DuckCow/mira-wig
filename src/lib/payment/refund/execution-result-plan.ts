@@ -1,17 +1,13 @@
 import {
   OrderStatus,
-  PaymentAttemptStatus,
-  RefundAttemptActorType,
   RefundAttemptStatus,
   RefundExecutionCommandStatus,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
   type Payment,
   type RefundAttempt,
-  type RefundAttemptTransition,
   type RefundExecutionCommand,
 } from "@prisma/client";
-import { CLAIM_TRANSITION_REASON, buildRefundExecutionClaimOperationKey, isClaimTransitionCandidate } from "./claim-contract";
 import {
   EVIDENCE_CONFLICT_CODE,
   INSUFFICIENT_SUCCESS_CODE,
@@ -20,12 +16,10 @@ import {
   type ResolveRefundAdapterResponseFailure,
 } from "./execution-result-contract";
 import {
-  buildRefundAttemptIdempotencyKey,
-  hasConsistentRefundAttemptLedgerIdentity,
-  isTerminalRefundAttemptStatus,
-  validateRefundRequest,
-} from "./invariants";
-import { resolveRefundRequestCreationEvidence } from "./request-evidence";
+  validateInitialRefundExecutionSuitability,
+  type InitialExecutionAggregate,
+  type InitialExecutionTarget,
+} from "./execution-suitability";
 import { deriveRefundRestingOrderStatus } from "./resting-state";
 import { deriveOrderStatusAfterSucceededRefund } from "./success-state";
 import { validateRefundAttemptStatusTransition } from "./transitions";
@@ -35,20 +29,8 @@ export const EXECUTION_TERMINAL_TRANSITION_REASON = "Refund execution ended with
 export const EXECUTION_MANUAL_REVIEW_TRANSITION_REASON = "Refund execution outcome requires manual review.";
 export const EXECUTION_CONFLICT_REVIEW_TRANSITION_REASON = "Refund execution evidence conflict requires manual review.";
 export const EXECUTION_INSUFFICIENT_SUCCESS_TRANSITION_REASON = "Refund success evidence requires manual review.";
-export type ResolutionTarget = RefundAttempt & {
-  transitions: RefundAttemptTransition[];
-  executionCommand: RefundExecutionCommand | null;
-};
-
-export interface ResolutionAggregate {
-  id: string;
-  paymentId: string;
-  totalAmount: number;
-  currency: string;
-  status: OrderStatus;
-  payment: Payment;
-  refundAttempts: ResolutionTarget[];
-}
+export type ResolutionTarget = InitialExecutionTarget;
+export type ResolutionAggregate = InitialExecutionAggregate;
 
 export interface ResolutionDiagnostic {
   safeCode: string | null;
@@ -72,89 +54,7 @@ export function validateFreshResolutionAggregate(
   target: ResolutionTarget,
   command: RefundExecutionCommand,
 ): ResolveRefundAdapterResponseFailure | null {
-  if (!hasCoherentOwnership(aggregate, target, command)) return ledgerFailure();
-  if (!hasCoherentPayment(aggregate)) return ledgerFailure();
-  if (!hasConsistentRefundAttemptLedgerIdentity(aggregate.payment, aggregate.refundAttempts)) {
-    return ledgerFailure();
-  }
-  if (!hasCoherentTargetIdentity(target, aggregate.paymentId)) return ledgerFailure();
-  if (!hasSingleOpenTarget(aggregate.refundAttempts, target.id)) return ledgerFailure();
-  if (!hasValidReservation(aggregate, target)) return ledgerFailure();
-  if (!hasExactCreationAndClaim(target, command.id)) return ledgerFailure();
-  return null;
-}
-
-function hasCoherentOwnership(
-  aggregate: ResolutionAggregate,
-  target: ResolutionTarget,
-  command: RefundExecutionCommand,
-): boolean {
-  return target.orderId === aggregate.id
-    && target.paymentId === aggregate.paymentId
-    && command.refundAttemptId === target.id
-    && target.executionCommand?.id === command.id;
-}
-
-function hasCoherentPayment(aggregate: ResolutionAggregate): boolean {
-  const payment = aggregate.payment;
-  return payment.id === aggregate.paymentId
-    && payment.status === PaymentAttemptStatus.SUCCEEDED
-    && Boolean(payment.providerPaymentKey?.trim())
-    && payment.amount === aggregate.totalAmount
-    && payment.currency === aggregate.currency;
-}
-
-function hasCoherentTargetIdentity(target: ResolutionTarget, paymentId: string): boolean {
-  return target.idempotencyKey === buildRefundAttemptIdempotencyKey(paymentId, target.id)
-    && Number.isSafeInteger(target.amount)
-    && target.amount > 0
-    && target.processedAt === null
-    && target.failedAt === null
-    && target.failureCode === null
-    && target.safeFailureMessage === null;
-}
-
-function hasSingleOpenTarget(attempts: readonly RefundAttempt[], targetId: string): boolean {
-  const open = attempts.filter((attempt) => !isTerminalRefundAttemptStatus(attempt.status));
-  return open.length === 1 && open[0].id === targetId;
-}
-
-function hasValidReservation(aggregate: ResolutionAggregate, target: ResolutionTarget): boolean {
-  return validateRefundRequest({
-    totalAmount: aggregate.payment.amount,
-    currency: aggregate.payment.currency,
-    requestedAmount: target.amount,
-    requestedCurrency: target.currency,
-    attempts: aggregate.refundAttempts.filter((attempt) => attempt.id !== target.id),
-  }).ok;
-}
-
-function hasExactCreationAndClaim(target: ResolutionTarget, commandId: string): boolean {
-  if (resolveRefundRequestCreationEvidence(target.transitions, target).kind !== "matched") return false;
-  const claims = target.transitions.filter(isClaimTransitionCandidate);
-  if (claims.length !== 1 || target.transitions.length !== 2) return false;
-  return matchesClaimArtifact(claims[0], target.id, commandId);
-}
-
-function matchesClaimArtifact(
-  claim: RefundAttemptTransition,
-  refundAttemptId: string,
-  commandId: string,
-): boolean {
-  return claim.refundAttemptId === refundAttemptId
-    && claim.operationKey === buildRefundExecutionClaimOperationKey(commandId)
-    && claim.fromStatus === RefundAttemptStatus.REQUESTED
-    && claim.toStatus === RefundAttemptStatus.PROCESSING
-    && claim.orderStatusBefore === OrderStatus.REFUND_PENDING
-    && claim.orderStatusAfter === OrderStatus.REFUND_PENDING
-    && claim.reason === CLAIM_TRANSITION_REASON
-    && hasCoherentClaimActor(claim);
-}
-
-function hasCoherentClaimActor(claim: RefundAttemptTransition): boolean {
-  if (claim.actorType === RefundAttemptActorType.ADMIN) return Boolean(claim.actorUserId?.trim());
-  if (claim.actorType !== RefundAttemptActorType.SYSTEM) return false;
-  return claim.actorUserId === null || Boolean(claim.actorUserId.trim());
+  return validateInitialRefundExecutionSuitability(aggregate, target, command).ok ? null : ledgerFailure();
 }
 
 export function buildResolutionPlan(
