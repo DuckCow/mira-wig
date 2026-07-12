@@ -4,6 +4,7 @@
 - **Status**: DESIGN LOCK — docs only. Nothing in this document is implemented by this document.
 - **Base commit context**: `2f5838f feat(orders): add cancellation and refund order statuses`
 - **Related**: `refund_request_eligibility_v1.md` (request-creation eligibility SSOT),
+  `customer_refund_intake_v1.md` (non-financial customer review intake),
   `refund_execution_v1.md` (execution-command and evidence-resolution SSOT),
   `payment_policy_open_v6.md` (환불/취소 트랙 — "나가는 절반"),
   `payment_policy_confirmed_v6.md`, `b5_void_design_v3.md` (pg.void / completion compensation),
@@ -45,6 +46,7 @@ Refund and payment records have distinct responsibilities. None may absorb anoth
 |---|---|---|
 | `Order.status` (`OrderStatus`) | Customer-facing commerce state of the order as a whole. What the shopper sees on `/orders`. | A money-movement log. Not a provider state mirror. |
 | `Payment.status` (`PaymentAttemptStatus`) | State of one **payment attempt** against a checkout session (capture lifecycle). | An order state. Not a refund history. `VOIDED` has completion-compensation semantics (§3, §6). |
+| `CustomerRefundIntake` (future) | Customer-authored, non-financial request for merchant review. | Merchant approval, refund balance reservation, or execution evidence. |
 | `RefundAttempt` | Merchant-approved refund intent, immutable financial identity, provider-neutral idempotency key, and current refund-domain status. `SUCCEEDED` attempts are the source for cumulative returned amount. | Dispatch state or append-only provider observations. |
 | `RefundExecutionCommand` (future) | Durable execution work and mutable operational dispatch projection. | A replacement for `RefundAttempt` or provider evidence. |
 | `RefundExecutionEvidence` (future) | Append-only normalized provider/operator observations used by the resolution core. | Current domain status, raw provider payload storage, or a transition edge. |
@@ -97,7 +99,7 @@ Adding refund-ish values (e.g., `REFUNDED`) to `PaymentAttemptStatus` is **rejec
 
 | Term | Definition (locked) |
 |---|---|
-| Customer cancellation request | A shopper's **request** to cancel/refund. In v1 this is an inquiry (CS channel); it creates no state transition by itself. Future: may create a `RefundAttempt` in `REQUESTED` after policy lock (§11). |
+| Customer refund intake | A shopper's non-financial request for merchant review under `customer_refund_intake_v1.md`. Submission creates no `RefundAttempt`, reserves no balance, and changes no Order or Payment state. Only explicit admin approval may atomically create `RefundAttempt.REQUESTED`. |
 | Admin/merchant cancellation | An admin-initiated cancel/refund workflow. The **first implemented workflow** (§12). Request-creation eligibility and merchant approval follow `refund_request_eligibility_v1.md`; execution remains a separate later boundary. |
 | Provider void/cancel | Provider-side reversal of a capture (`pg.void`, `ProviderVoidExecutor`). Today: completion-compensation only, pre-order. Distinct from refund execution and from this state machine. |
 | Full refund | Cumulative succeeded refunded amount equals the captured `Payment.amount`. Generic execution produces `REFUNDED`; a separate cancellation policy may later produce `CANCELLED`. |
@@ -122,12 +124,12 @@ and transition audit evidence.
 
 | From | To | Trigger | Actor | Required evidence | Provider call in this step? | Idempotency required? | Shopper-facing copy |
 |---|---|---|---|---|---|---|---|
-| `PAID` | `REFUND_PENDING` | Refund/cancel workflow opened | Admin (v1); system on future customer request | ≥1 `RefundAttempt` row created in `REQUESTED` with amount, currency, reason, actor | No (ledger only) | Yes — attempt row carries its unique `idempotencyKey` from creation | 환불 요청 처리 중 |
+| `PAID` | `REFUND_PENDING` | Merchant-approved refund workflow opened, directly or through intake approval | Admin approval | ≥1 `RefundAttempt` row created in `REQUESTED` with amount, currency, merchant reason, and admin actor | No (ledger only) | Yes — attempt row carries its unique `idempotencyKey` from creation | 환불 요청 처리 중 |
 | `REFUND_PENDING` | `CANCELLED` | Separate future commerce-cancellation resolution after full refund | Admin decision + system | Cumulative `SUCCEEDED` refunds == `Payment.amount` plus separately locked fulfillment/cancellation eligibility; no guarded attempt remains | No generic executor authority; separate operator path | Yes | 주문 취소 |
 | `REFUND_PENDING` | `REFUNDED` | Generic full refund succeeded | System through evidence-resolution core | Cumulative `SUCCEEDED` == `Payment.amount`; authoritative immutable execution evidence; no guarded attempt remains | Executed before resolution transaction | Yes | 환불 완료 |
 | `REFUND_PENDING` | `PARTIALLY_REFUNDED` | Generic partial refund succeeded | System through evidence-resolution core | Cumulative `SUCCEEDED` > 0 and < `Payment.amount`; authoritative immutable evidence; no guarded attempt remains | Executed before resolution transaction | Yes | 부분 환불 |
 | `REFUND_PENDING` | `PAID` | Request withdrawn/declined with **zero** money moved | Admin | Zero `SUCCEEDED` refunds; all attempts closed (`FAILED_TERMINAL`/`CANCELLED`); decline reason recorded | No | Guarded-conditional transition only | 결제 완료 |
-| `PARTIALLY_REFUNDED` | `REFUND_PENDING` | Another refund round opened | Admin (v1) | New `RefundAttempt` in `REQUESTED`; over-refund guard passes (§9) | No (ledger only) | Yes | 환불 요청 처리 중 |
+| `PARTIALLY_REFUNDED` | `REFUND_PENDING` | Another merchant-approved refund round opened, directly or through intake approval | Admin approval | New `RefundAttempt` in `REQUESTED`; over-refund guard passes (§9) | No (ledger only) | Yes | 환불 요청 처리 중 |
 | `PARTIALLY_REFUNDED` | `REFUNDED` | Final round brings cumulative to total | System through evidence-resolution core | Cumulative `SUCCEEDED` == `Payment.amount`; authoritative immutable evidence; no guarded attempt remains | Executed before resolution transaction | Yes | 환불 완료 |
 
 Notes:
@@ -172,7 +174,7 @@ Proposed minimal fields (schema slice B, separately approved migration):
 | `currency` | `String` | Must equal `Payment.currency` (§9). |
 | `status` | `RefundAttemptStatus` | §8. |
 | `reason` | `String` | Required non-empty (existing copy `REASON_REQUIRED` already anticipates this). |
-| `actorType` | enum-ish (`ADMIN / CUSTOMER / SYSTEM`) | v1 writes only `ADMIN`/`SYSTEM`. |
+| `actorType` | enum-ish (`ADMIN / SYSTEM`) | Admin approval and system execution provenance only. |
 | `actorUserId` | `String?` | Required when `actorType != SYSTEM`. |
 | `provider` | `PaymentProvider` | Copied from payment; frozen after provider contact. |
 | `mode` | `PaymentMode` | Copied from payment; frozen after provider contact. |
@@ -184,6 +186,11 @@ Proposed minimal fields (schema slice B, separately approved migration):
 | `failureCode` | `String?` | Normalized code (aligned with `ProviderErrorCode`). |
 | `safeFailureMessage` | `String?` | Redacted, shopper/admin-safe. Raw provider payloads stay in `PaymentEvent`/diagnostics, never here. |
 | `createdAt` / `updatedAt` | `DateTime` | |
+
+`CUSTOMER` is deliberately not a `RefundAttempt` actor. Customer provenance is owned by
+`CustomerRefundIntake` under `customer_refund_intake_v1.md`; customers never create
+`RefundAttempt` transitions. Admin approval provenance remains `ADMIN`, and execution provenance
+remains `SYSTEM`.
 
 Likely indexes/constraints:
 
@@ -254,12 +261,15 @@ and is not a refund executor.
 
 ## 11. Customer UI policy (v1)
 
-- **No customer cancel/refund buttons.** Not on `/orders`, not on `/orders/[id]`, not anywhere.
+- The non-financial customer review-intake contract is locked in
+  `customer_refund_intake_v1.md`. Schema, dormant core, tests, and SANDBOX UI may proceed under that
+  contract, but no production customer intake control is authorized yet.
 - The custom-wig/MTO production-start cutoff policy (open_v6 §4-1; MFG-2 per-state cancellability)
-  and jurisdictional refund windows (§6.0, including US state notice requirements) must be locked
-  **before** any customer-facing commitment is rendered, because a button is a legal promise.
-- Until then, customer-facing copy stays **inquiry-style only** ("고객센터로 문의해주세요" tier),
-  with no self-service affordance.
+  and jurisdictional refund windows (§6.0, including US state notice requirements) require
+  explicit legal and product signoff before production activation. A no-promise review button is
+  still a customer-facing commitment.
+- Until that signoff, production customer-facing copy stays **inquiry-style only**
+  ("고객센터로 문의해주세요" tier), with no self-service affordance.
 - `/orders` pages may **display** the five statuses (labels already shipped in
   `order-status.ts`) but must not trigger transitions. Display-only is the locked ceiling for
   customer UI until slice G.
@@ -329,7 +339,7 @@ workflow sequencing and does not duplicate that eligibility contract.
 | D | Claim, resolution core, provider-neutral adapter, and deterministic dormant MOCK in isolated STRICT slices. | Behavioral, DB, concurrency, and crash-recovery tests; no active UI. |
 | E | Toss refund adapter (official docs only, sandbox first, own design lock like the confirm/void adapters). | Official Toss cancel-API doc verification; sandbox smoke procedure. |
 | F | Reconciliation/webhook repair for refunds (verified-event → ledger resolution, drift detection). | Follows existing reconciliation posture. |
-| G | Customer-facing request flow (request-only; still no direct mutation). | MTO/legal/fulfillment policy lock (§11) — hard gate. |
+| G | Customer-facing non-financial intake flow under `customer_refund_intake_v1.md`. | Dormant/SANDBOX work may proceed; production activation requires MTO/legal/product signoff (§11). |
 
 Each slice is a separate commit series with its own review; no slice may pull forward a later
 slice's surface "while we're here".

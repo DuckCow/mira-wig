@@ -4,6 +4,7 @@
 - **Status:** DESIGN LOCK - documentation only; this document changes no runtime behavior.
 - **Base commit context:** `c9ad7b5 fix(refund): harden refund request action contract`
 - **Related:** `refund_request_eligibility_v1.md` (request creation),
+  `customer_refund_intake_v1.md` (non-financial customer review intake),
   `order_refund_request_closure_v1.md` (pre-contact withdrawal),
   `order_refund_state_machine_v1.md` (domain transition vocabulary and Order states),
   `a3_outbox_design_v2.md` (capture-compensation transport precedent)
@@ -32,13 +33,17 @@ It does not own:
 - request-creation eligibility (`refund_request_eligibility_v1.md`);
 - pre-contact `REQUESTED -> CANCELLED` withdrawal
   (`order_refund_request_closure_v1.md`);
-- customer refund-request UI;
+- customer refund intake or intake UI (`customer_refund_intake_v1.md`);
 - provider-specific API fields or finality guarantees; or
 - manufacturing or cancellation eligibility.
 
 This document authorizes no schema, migration, executor, worker, provider, queue, action, UI, or
 database mutation by itself. Real-provider behavior still requires an official-provider design
 lock under `AGENTS.md` section 7.
+
+`CustomerRefundIntake` is invisible to the executor. Only an approved `RefundAttempt` with its
+durable execution command may become pollable work; intake identifiers, customer reason text, and
+unapproved submissions never enter provider input, command identity, or execution evidence.
 
 ## 2. Stable responsibility split
 

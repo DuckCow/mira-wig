@@ -4,6 +4,7 @@
 - **Status:** DESIGN LOCK — documentation only; this document does not implement code or schema.
 - **Base commit context:** `d6e1845 feat(admin): read-only order detail with refund ledger and review summary`
 - **Related:** `refund_request_eligibility_v1.md` (request-creation eligibility SSOT),
+  `customer_refund_intake_v1.md` (customer intake withdrawal),
   `refund_execution_v1.md` (execution-command and evidence-resolution SSOT),
   `order_refund_state_machine_v1.md`, `payment_policy_confirmed_v6.md`,
   `payment_policy_open_v6.md`
@@ -223,6 +224,10 @@ The operation namespace identifies the kind of logical command. The actual trans
 typed by `fromStatus` and `toStatus`; no additional generic event-type or JSON field is needed.
 
 ## 7. Unexecuted request closure semantics
+
+This section closes a merchant-approved `RefundAttempt.REQUESTED`. It is distinct from customer
+withdrawal of `CustomerRefundIntake.SUBMITTED`, which is non-financial, creates no attempt, and is
+owned by `customer_refund_intake_v1.md`. Intake withdrawal must never invoke this close path.
 
 “Cancel an unexecuted refund request” means withdrawing a pre-provider-contact `REQUESTED`
 attempt and restoring the order to its ledger-derived resting state.

@@ -5,11 +5,13 @@
 - **Base commit context:** `9896ae6 docs(refund): include retryable attempts in guarded set`
 - **Related:** `order_refund_state_machine_v1.md`, `order_refund_request_closure_v1.md`,
   `refund_execution_v1.md` (execution suitability, command, and evidence ownership),
+  `customer_refund_intake_v1.md` (customer-authored review intake and approval boundary),
   `payment_policy_confirmed_v6.md`, `payment_policy_open_v6.md`
 
 ## 1. Purpose and ownership
 
-This document is the authoritative policy source for creating a new admin refund request. It
+This document is the authoritative policy source for creating a new merchant-approved refund
+request, whether through the existing direct admin path or approval of a customer intake. It
 owns:
 
 - the stable meaning of `RefundAttemptStatus.REQUESTED`;
@@ -43,7 +45,8 @@ merchant-approved refund intent
 != successful money return
 ```
 
-An undecided review intake creates no `RefundAttempt`. `REQUESTED` is not:
+An undecided customer review intake is owned by `customer_refund_intake_v1.md` and creates no
+`RefundAttempt`. `REQUESTED` is not:
 
 - a customer request awaiting merchant approval;
 - an unapproved operational ticket;
@@ -79,9 +82,11 @@ business context cannot make this predicate true.
 Merchant approval is a human decision, or a future business-policy decision, informed by safe
 advisory context. It answers whether the merchant has decided to attempt returning the amount.
 
-Cases still awaiting this decision remain outside the refund ledger. Submitting the future admin
-request control is the approval act; a separate review intake would require a separately designed
-workflow and must not overload `RefundAttempt`.
+Cases still awaiting this decision remain outside the refund ledger. The existing direct admin
+request control is one approval act. The other locked approval act is an administrator approving a
+`CustomerRefundIntake.SUBMITTED` under `customer_refund_intake_v1.md`; that approval atomically
+creates `RefundAttempt.REQUESTED`. Intake submission itself is never approval and must not overload
+`RefundAttempt`.
 
 ### 3.3 Execution suitability
 
@@ -376,6 +381,9 @@ RefundAttemptTransition.reason on the null → REQUESTED creation edge
 
 The two records must not independently normalize the text or store semantically divergent
 reasons. The reason is admin-only audit evidence and is not exposed on customer order surfaces.
+Customer intake category or detail MUST NOT be automatically copied into this merchant rationale.
+An approving administrator may deliberately summarize relevant facts, but the resulting
+non-empty reason remains a separate merchant-authored decision record.
 
 ### 13.3 Enforcement ownership
 
@@ -560,7 +568,8 @@ This document does not implement or authorize:
 - provider refund calls or executor design;
 - queue, notification, webhook, outbox, or reconciliation behavior;
 - ManufacturingRequest changes or manufacturing locks;
-- a review-intake schema or approval status;
+- the customer review-intake schema, lifecycle, or approval UI governed by
+  `customer_refund_intake_v1.md`;
 - customer refund/cancel controls;
 - line, shipping, tax, discount, return, or customs allocation; or
 - any database mutation or data backfill.
