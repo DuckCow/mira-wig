@@ -75,14 +75,14 @@ export async function requestRefundAttempt(
   if (!orderId) return failure("INVALID_ORDER_ID", "Order id is required.");
 
   try {
-    return await client.$transaction((tx) => requestInTransaction(tx, { ...input, orderId }));
+    return await client.$transaction((tx) => requestRefundAttemptInTransaction(tx, { ...input, orderId }));
   } catch (error) {
     if (isUniqueConflict(error)) return classifyUniqueConflict(client, { ...input, orderId }, error);
     throw error;
   }
 }
 
-async function requestInTransaction(
+export async function requestRefundAttemptInTransaction(
   tx: RefundRequestTx,
   input: RequestRefundAttemptInput,
 ): Promise<RequestRefundAttemptResult> {

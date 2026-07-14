@@ -15,12 +15,15 @@ import { db } from "@/lib/db";
 import { REFUND_REQUEST_REASON_MAX_CODE_POINTS } from "../invariants";
 import {
   requestRefundAttempt,
+  requestRefundAttemptInTransaction,
   type RequestRefundAttemptInput,
   type RequestRefundAttemptResult,
 } from "../request";
 
 const NOW = new Date("2026-07-10T04:00:00.000Z");
 const MARKET_CODE = "KR";
+
+class CallerOwnedTransactionRollbackProbe extends Error {}
 
 interface TestContext {
   userId: string;
@@ -116,6 +119,32 @@ describe("requestRefundAttempt", () => {
       }),
     ]);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+  });
+
+  it("participates atomically in a caller-owned transaction that rolls back", async () => {
+    const fixture = await createOrder(ctx);
+    const request = input(fixture.orderId);
+    const before = await requestPersistenceState(fixture);
+
+    await expect(db.$transaction(async (tx) => {
+      await lockOrder(tx, fixture.orderId);
+      const result = success(await requestRefundAttemptInTransaction(tx, request));
+
+      expect(result).toMatchObject({
+        orderStatus: OrderStatus.REFUND_PENDING,
+        replayed: false,
+        refundAttempt: { id: request.refundAttemptId },
+      });
+      throw new CallerOwnedTransactionRollbackProbe();
+    })).rejects.toBeInstanceOf(CallerOwnedTransactionRollbackProbe);
+
+    await expect(requestPersistenceState(fixture)).resolves.toEqual(before);
+    await expect(db.refundAttempt.findUnique({
+      where: { id: request.refundAttemptId },
+    })).resolves.toBeNull();
+    await expect(db.refundAttemptTransition.findUnique({
+      where: { operationKey: `refund-request:${request.refundAttemptId}` },
+    })).resolves.toBeNull();
   });
 
   it("trims before accepting exactly 500 ASCII code points and writes one reason value", async () => {
