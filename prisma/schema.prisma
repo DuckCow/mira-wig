@@ -24,14 +24,15 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts         Account[]
-  sessions         Session[]
-  fittings         Fitting[]
-  reviews          Review[]
-  wishlistItems    WishlistItem[]
-  cartItems        CartItem[]
-  checkoutSessions CheckoutSession[]
-  orders           Order[]
+  accounts              Account[]
+  sessions              Session[]
+  fittings              Fitting[]
+  reviews               Review[]
+  wishlistItems         WishlistItem[]
+  cartItems             CartItem[]
+  checkoutSessions      CheckoutSession[]
+  orders                Order[]
+  customerRefundIntakes CustomerRefundIntake[]
 }
 
 enum UserRole {
@@ -293,6 +294,20 @@ enum RefundAttemptActorType {
   SYSTEM
 }
 
+enum CustomerRefundIntakeStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum CustomerRefundIntakeReasonCode {
+  CHANGE_OF_MIND
+  PRODUCT_DEFECT
+  DELIVERY_ISSUE
+  OTHER
+}
+
 enum RefundExecutionCommandStatus {
   READY
   LEASED
@@ -476,38 +491,70 @@ model Order {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  items          OrderItem[]
-  shipping       OrderShipping?
-  refundAttempts RefundAttempt[]
+  items                 OrderItem[]
+  shipping              OrderShipping?
+  refundAttempts        RefundAttempt[]
+  customerRefundIntakes CustomerRefundIntake[]
 
   @@index([userId, createdAt])
 }
 
+/// Manual database invariants are owned by the migration and real-PostgreSQL tests per
+/// docs/payment_policy/customer_refund_intake_v1.md: CustomerRefundIntake_orderId_submitted_key
+/// and the eight CustomerRefundIntake_* CHECK constraints. `prisma validate` does not enforce them.
+/// reviewedByUserId is an immutable authenticated actor-ID snapshot and deliberately has no User FK.
+/// Migration-owned btrim checks narrowly reject simple blank raw writes; full Unicode trimming,
+/// Cc/Cf handling, authorization, and normalization remain future-core responsibilities.
+model CustomerRefundIntake {
+  id                      String                         @id @default(cuid())
+  orderId                 String
+  customerUserId          String
+  status                  CustomerRefundIntakeStatus     @default(SUBMITTED)
+  reasonCode              CustomerRefundIntakeReasonCode
+  reasonDetail            String?                        @db.VarChar(500)
+  submittedAt             DateTime                       @default(now())
+  withdrawnAt             DateTime?
+  reviewedAt              DateTime?
+  reviewedByUserId        String?
+  adminRejectionReason    String?                        @db.VarChar(500)
+  approvedRefundAttemptId String?                        @unique
+  createdAt               DateTime                       @default(now())
+  updatedAt               DateTime                       @updatedAt
+
+  order                 Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  customer              User           @relation(fields: [customerUserId], references: [id], onDelete: Restrict)
+  approvedRefundAttempt RefundAttempt? @relation(fields: [approvedRefundAttemptId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, submittedAt])
+  @@index([status, submittedAt])
+}
+
 model RefundAttempt {
-  id                 String                    @id @default(cuid())
-  orderId            String
-  order              Order                     @relation(fields: [orderId], references: [id])
-  paymentId          String
-  payment            Payment                   @relation(fields: [paymentId], references: [id])
-  amount             Int
-  currency           String
-  status             RefundAttemptStatus       @default(REQUESTED)
-  reason             String
-  actorType          RefundAttemptActorType
-  actorUserId        String?
-  provider           PaymentProvider
-  mode               PaymentMode
-  providerRefundId   String?
-  idempotencyKey     String                    @unique
-  requestedAt        DateTime                  @default(now())
-  processedAt        DateTime?
-  failedAt           DateTime?
-  failureCode        String?
-  safeFailureMessage String?
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
-  transitions        RefundAttemptTransition[]
-  executionCommand   RefundExecutionCommand?
+  id                           String                    @id @default(cuid())
+  orderId                      String
+  order                        Order                     @relation(fields: [orderId], references: [id])
+  paymentId                    String
+  payment                      Payment                   @relation(fields: [paymentId], references: [id])
+  amount                       Int
+  currency                     String
+  status                       RefundAttemptStatus       @default(REQUESTED)
+  reason                       String
+  actorType                    RefundAttemptActorType
+  actorUserId                  String?
+  provider                     PaymentProvider
+  mode                         PaymentMode
+  providerRefundId             String?
+  idempotencyKey               String                    @unique
+  requestedAt                  DateTime                  @default(now())
+  processedAt                  DateTime?
+  failedAt                     DateTime?
+  failureCode                  String?
+  safeFailureMessage           String?
+  createdAt                    DateTime                  @default(now())
+  updatedAt                    DateTime                  @updatedAt
+  transitions                  RefundAttemptTransition[]
+  executionCommand             RefundExecutionCommand?
+  approvedCustomerRefundIntake CustomerRefundIntake?
 
   @@unique([provider, providerRefundId])
   @@index([orderId, status])
