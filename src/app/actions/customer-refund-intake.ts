@@ -4,6 +4,7 @@ import {
   CustomerRefundIntakeReasonCode,
   CustomerRefundIntakeStatus,
 } from "@prisma/client";
+import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
   isCustomerRefundIntakeSubmitEnabled,
@@ -130,11 +131,14 @@ export async function submitCustomerRefundIntakeAction(
     : samePayload
       ? "REPLAYED_SAME_PAYLOAD"
       : "REPLAYED_DIFFERENT_PAYLOAD";
+  const storedOrderId = result.intake.orderId;
+  revalidatePath(`/admin/orders/${storedOrderId}`);
+  revalidatePath("/admin/refunds/intakes");
   return {
     success: true,
     outcome,
     intake: {
-      orderId: result.intake.orderId,
+      orderId: storedOrderId,
       status: result.intake.status,
       reasonCode: result.intake.reasonCode,
       reasonDetail: result.intake.reasonDetail,
@@ -165,11 +169,14 @@ export async function withdrawCustomerRefundIntakeAction(
     now: normalized.input.operationAt,
   });
   if (!result.ok) return failure(mapWithdrawCoreFailure(result.code));
+  const storedOrderId = result.intake.orderId;
+  revalidatePath(`/admin/orders/${storedOrderId}`);
+  revalidatePath("/admin/refunds/intakes");
   return {
     success: true,
     outcome: result.replayed ? "ALREADY_WITHDRAWN" : "WITHDRAWN",
     intake: {
-      orderId: result.intake.orderId,
+      orderId: storedOrderId,
       status: result.intake.status,
       withdrawnAt: result.intake.withdrawnAt.toISOString(),
     },

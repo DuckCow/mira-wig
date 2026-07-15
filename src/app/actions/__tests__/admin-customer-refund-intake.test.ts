@@ -186,7 +186,10 @@ describe("administrator reject boundary", () => {
     });
     expect(JSON.stringify(result)).not.toContain(ADMIN_ID);
     expect(JSON.stringify(result)).not.toContain("retry rationale");
-    expect(mockRevalidatePath).not.toHaveBeenCalled();
+    expect(mockRevalidatePath.mock.calls).toEqual([
+      ["/admin/orders/stored_order_123"],
+      ["/admin/refunds/intakes"],
+    ]);
   });
 
   it.each([
@@ -366,6 +369,7 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
       ["/orders/stored_order_123"],
       ["/orders"],
       ["/admin/orders/stored_order_123"],
+      ["/admin/refunds/intakes"],
     ]);
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain(ADMIN_ID);

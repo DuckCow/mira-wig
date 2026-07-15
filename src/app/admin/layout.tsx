@@ -27,6 +27,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           >
             주문 관리
           </Link>
+          <Link
+            href="/admin/refunds/intakes"
+            className="text-sm text-gray-600 hover:text-gray-900"
+          >
+            환불 검토 요청
+          </Link>
         </nav>
         <main className="max-w-5xl mx-auto px-6 py-8">{children}</main>
       </div>

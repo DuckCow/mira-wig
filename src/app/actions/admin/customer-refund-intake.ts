@@ -164,12 +164,15 @@ export async function rejectCustomerRefundIntakeAction(
     now: normalized.input.reviewedAt,
   });
   if (!result.ok) return failure(mappedFailureOrInvariant(REJECT_CORE_FAILURES[result.code]));
+  const storedOrderId = result.intake.orderId;
+  revalidatePath(`/admin/orders/${storedOrderId}`);
+  revalidatePath("/admin/refunds/intakes");
   return {
     success: true,
     outcome: result.replayed ? "ALREADY_REJECTED" : "REJECTED",
     intake: {
       id: result.intake.id,
-      orderId: result.intake.orderId,
+      orderId: storedOrderId,
       status: result.intake.status,
       reviewedAt: result.intake.reviewedAt.toISOString(),
       adminRejectionReason: result.intake.adminRejectionReason,
@@ -185,7 +188,6 @@ export async function approveCustomerRefundIntakeAction(
   const reviewedByUserId = guard.session.user.id.trim();
   if (!reviewedByUserId) throw actionInvariant();
   if (!isCustomerRefundIntakeApproveEnabled()) return failure("FEATURE_DISABLED");
-
   const parsed = parseApproveInput(input);
   if (!parsed.success) return failure(parsed.errorCode);
   const operationAt = new Date();
@@ -207,9 +209,7 @@ export async function approveCustomerRefundIntakeAction(
   if (!result.ok) return failure(mappedFailureOrInvariant(APPROVE_CORE_FAILURES[result.code]));
 
   const storedOrderId = result.intake.orderId;
-  revalidatePath(`/orders/${storedOrderId}`);
-  revalidatePath("/orders");
-  revalidatePath(`/admin/orders/${storedOrderId}`);
+  revalidateApprovedCustomerRefundIntake(storedOrderId);
   return {
     success: true,
     outcome: result.replayed ? "ALREADY_APPROVED" : "APPROVED",
@@ -229,6 +229,13 @@ export async function approveCustomerRefundIntakeAction(
       requestedAt: result.attempt.requestedAt.toISOString(),
     },
   };
+}
+
+function revalidateApprovedCustomerRefundIntake(orderId: string): void {
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/refunds/intakes");
 }
 
 function parseRejectInput(value: unknown): ParsedRejectInput | null {

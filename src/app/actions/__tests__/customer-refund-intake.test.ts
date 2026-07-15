@@ -365,12 +365,31 @@ describe("customer action exception and side-effect boundary", () => {
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
-  it("never revalidates submit or withdraw successes", async () => {
-    await submitCustomerRefundIntakeAction(VALID_SUBMIT);
-    await withdrawCustomerRefundIntakeAction(VALID_WITHDRAW);
+  it.each([false, true])(
+    "revalidates the exact admin dependencies after submit replay=%s",
+    async (replayed) => {
+      mockSubmit.mockResolvedValue(submitSuccess({ replayed }));
+      await submitCustomerRefundIntakeAction(VALID_SUBMIT);
 
-    expect(mockRevalidatePath).not.toHaveBeenCalled();
-  });
+      expect(mockRevalidatePath.mock.calls).toEqual([
+        ["/admin/orders/stored_order_123"],
+        ["/admin/refunds/intakes"],
+      ]);
+    },
+  );
+
+  it.each([false, true])(
+    "revalidates the exact admin dependencies after withdraw replay=%s",
+    async (replayed) => {
+      mockWithdraw.mockResolvedValue(withdrawSuccess({ replayed }));
+      await withdrawCustomerRefundIntakeAction(VALID_WITHDRAW);
+
+      expect(mockRevalidatePath.mock.calls).toEqual([
+        ["/admin/orders/stored_order_123"],
+        ["/admin/refunds/intakes"],
+      ]);
+    },
+  );
 });
 
 function customerSession(id = CUSTOMER_ID) {

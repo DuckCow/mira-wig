@@ -18,9 +18,12 @@ import {
   sumGuardedRefundAmount,
   sumSucceededRefundAmount,
 } from "@/lib/payment/refund/invariants";
+import { refundAttemptStatusLabel } from "@/app/admin/refunds/intake-labels";
 import { getCurlLabel, getLengthLabel } from "@/lib/wig-option-labels";
 import type { AdminOrderDetailSource, AdminOrderDetailViewModel } from "./admin-order-detail-types";
 import { buildRefundCloseAdvisory } from "./refund-close-presentation";
+
+export { refundAttemptStatusLabel } from "@/app/admin/refunds/intake-labels";
 
 export function buildAdminOrderDetailViewModel(order: AdminOrderDetailSource): AdminOrderDetailViewModel {
   const refundAmounts = buildRefundAmounts(order);
@@ -208,17 +211,6 @@ function attemptStatusChangeLabel(
 ): string {
   const fromLabel = fromStatus === null ? "생성" : refundAttemptStatusLabel(fromStatus);
   return `${fromLabel} → ${refundAttemptStatusLabel(toStatus)}`;
-}
-
-export function refundAttemptStatusLabel(status: RefundAttemptStatus): string {
-  if (status === RefundAttemptStatus.REQUESTED) return "환불 요청됨";
-  if (status === RefundAttemptStatus.PROCESSING) return "환불 처리 중";
-  if (status === RefundAttemptStatus.SUCCEEDED) return "환불 완료";
-  if (status === RefundAttemptStatus.FAILED_RETRYABLE) return "재시도 필요";
-  if (status === RefundAttemptStatus.FAILED_TERMINAL) return "환불 실패";
-  if (status === RefundAttemptStatus.MANUAL_REVIEW) return "수동 확인 필요";
-  if (status === RefundAttemptStatus.CANCELLED) return "요청 철회";
-  return "상태 확인 중";
 }
 
 function orderStatusLabel(status: OrderStatus): string {

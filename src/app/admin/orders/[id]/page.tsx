@@ -1,20 +1,45 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Card } from "@/components/ui/Card";
-import { loadAdminOrderDetail } from "./admin-order-detail-data";
-import type { AdminOrderDetailViewModel } from "./admin-order-detail-types";
+import { requireAdmin } from "@/lib/admin";
+import {
+  CustomerRefundIntakeActivationConfigError,
+  isCustomerRefundIntakeApproveEnabled,
+} from "@/lib/payment/refund/customer-intake-activation";
+import {
+  loadAdminOrderDetail,
+  type AdminOrderDetailReadModel,
+} from "./admin-order-detail-data";
+import { CustomerRefundIntakeSection } from "./CustomerRefundIntakeSection";
+import type { CustomerRefundIntakeApproveState } from "./customer-intake-presentation";
 import { RefundRequestCloseControl } from "./RefundRequestCloseControl";
 
 type Params = Promise<{ id: string }>;
-type Detail = AdminOrderDetailViewModel;
+type Detail = AdminOrderDetailReadModel;
 
 export const metadata = { title: "관리자 주문 상세" };
 
 export default async function AdminOrderDetailPage({ params }: { params: Params }) {
+  const guard = await requireAdmin();
+  if (!guard.success) redirect("/");
+
   const { id } = await params;
   const order = await loadAdminOrderDetail(id);
   if (!order) notFound();
+  const approveState = order.customerRefundIntakes.some((intake) => intake.status === "SUBMITTED")
+    ? resolveApproveState()
+    : "disabled";
 
+  return <AdminOrderDetailView order={order} approveState={approveState} />;
+}
+
+export function AdminOrderDetailView({
+  order,
+  approveState,
+}: {
+  order: Detail;
+  approveState: CustomerRefundIntakeApproveState;
+}) {
   return (
     <div className="space-y-6">
       <Link href="/admin/orders" className="text-sm text-gray-500 hover:text-gray-900">
@@ -26,10 +51,26 @@ export default async function AdminOrderDetailPage({ params }: { params: Params 
       <ShippingSummary shipping={order.shipping} />
       <PaymentSummary order={order} />
       <RefundReview review={order.refundReview} />
+      <CustomerRefundIntakeSection
+        orderId={order.id}
+        intakes={order.customerRefundIntakes}
+        approveState={approveState}
+        currency={order.currency}
+        remainingRequestableAmount={order.refundReview.remainingRequestableAmount}
+      />
       <RefundLedger orderId={order.id} attempts={order.refundAttempts} />
       <FulfillmentPolicyNote />
     </div>
   );
+}
+
+export function resolveApproveState(): CustomerRefundIntakeApproveState {
+  try {
+    return isCustomerRefundIntakeApproveEnabled() ? "enabled" : "disabled";
+  } catch (error) {
+    if (error instanceof CustomerRefundIntakeActivationConfigError) return "misconfigured";
+    throw error;
+  }
 }
 
 function OrderHeader({ order }: { order: Detail }) {
@@ -133,7 +174,7 @@ function RefundReview({ review }: { review: Detail["refundReview"] }) {
   return (
     <Card title="환불 검토 요약">
       <p className="mb-4 text-sm text-amber-700">
-        새 환불 요청과 환불 실행 버튼은 아직 연결되지 않았습니다. 아래 정보는 운영 검토용입니다.
+        환불 실행 버튼은 아직 연결되지 않았습니다. 아래 정보는 운영 검토용입니다.
       </p>
       <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
         <Info label="주문 합계" value={review.orderTotal} />

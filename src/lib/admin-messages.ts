@@ -34,10 +34,29 @@ const REFUND_CLOSE_ERROR_MESSAGES: Record<string, string> = {
   MANUAL_REVIEW_REQUIRED: "환불 장부 상태에 확인이 필요합니다. 운영 검토 후 진행해 주세요.",
 };
 
+const CUSTOMER_REFUND_INTAKE_ERROR_MESSAGES: Record<string, string> = {
+  REJECTION_REASON_REQUIRED: "거절 사유를 입력해 주세요.",
+  REJECTION_REASON_TOO_LONG: "거절 사유는 500자 이내로 입력해 주세요.",
+  ORDER_NOT_FOUND: "주문을 찾을 수 없습니다. 최신 상태를 확인해 주세요.",
+  INTAKE_NOT_FOUND: "환불 검토 요청을 찾을 수 없습니다. 최신 상태를 확인해 주세요.",
+  NOT_REJECTABLE: "이미 철회되었거나 검토가 끝난 요청입니다. 최신 상태를 확인해 주세요.",
+  FEATURE_DISABLED: "환불 승인 기능이 현재 비활성화되어 있습니다.",
+  INTAKE_INCONSISTENT: "요청과 주문의 소유 관계를 확인해야 합니다. 최신 상태를 확인해 주세요.",
+  NOT_APPROVABLE: "이미 철회되었거나 검토가 끝난 요청입니다. 최신 상태를 확인해 주세요.",
+  INSUFFICIENT_REFUNDABLE: "현재 요청 가능한 환불 금액을 초과했습니다. 최신 금액을 확인해 주세요.",
+  REFUND_IN_PROGRESS: "처리 중인 환불 요청이 있습니다. 최신 상태를 확인해 주세요.",
+  INVALID_TRANSITION: "현재 주문 또는 결제 상태에서는 승인할 수 없습니다. 최신 상태를 확인해 주세요.",
+  MANUAL_REVIEW_REQUIRED: "주문·결제·환불 장부의 정합성을 수동으로 확인해야 합니다.",
+};
+
 export function getAdminErrorMessage(errorCode: string): string {
   return ERROR_MESSAGES[errorCode] ?? `오류가 발생했습니다. (${errorCode})`;
 }
 
 export function getAdminRefundCloseErrorMessage(errorCode: string): string {
   return REFUND_CLOSE_ERROR_MESSAGES[errorCode] ?? getAdminErrorMessage(errorCode);
+}
+
+export function getAdminCustomerRefundIntakeErrorMessage(errorCode: string): string {
+  return CUSTOMER_REFUND_INTAKE_ERROR_MESSAGES[errorCode] ?? getAdminErrorMessage(errorCode);
 }
