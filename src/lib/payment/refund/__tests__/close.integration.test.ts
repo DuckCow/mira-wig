@@ -14,8 +14,8 @@ import {
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import {
-  claimRefundAttemptForExecution,
-  type ClaimRefundAttemptForExecutionInput,
+  claimRefundAttemptForManualSandboxExecution,
+  type ClaimRefundAttemptForManualSandboxExecutionInput,
 } from "../claim";
 import {
   closeRefundRequest,
@@ -439,7 +439,7 @@ describe("closeRefundRequest", () => {
     await expect(transitionCount(targetId)).resolves.toBe(1);
   });
 
-  it("loses safely when the production claim is first in the observed Order-lock queue", async () => {
+  it("loses safely when the manual SANDBOX claim is first in the observed Order-lock queue", async () => {
     const fixture = await createOrder(ctx);
     const targetId = await seedAttempt(fixture);
     await seedRequestCreationTransition(targetId);
@@ -450,7 +450,7 @@ describe("closeRefundRequest", () => {
       const queued = await queueBehindObservedOrderLock(
         fixture.orderId,
         claimSession,
-        () => claimRefundAttemptForExecution(
+        () => claimRefundAttemptForManualSandboxExecution(
           claimSession.client,
           claimInput(fixture.orderId, targetId),
         ),
@@ -474,7 +474,7 @@ describe("closeRefundRequest", () => {
     }
   });
 
-  it("prevents production claim when close is first in the observed Order-lock queue", async () => {
+  it("prevents manual SANDBOX claim when close is first in the observed Order-lock queue", async () => {
     const fixture = await createOrder(ctx);
     const targetId = await seedAttempt(fixture);
     await seedRequestCreationTransition(targetId);
@@ -487,7 +487,7 @@ describe("closeRefundRequest", () => {
         closeSession,
         () => closeRefundRequest(closeSession.client, input(fixture.orderId, targetId)),
         claimSession,
-        () => claimRefundAttemptForExecution(
+        () => claimRefundAttemptForManualSandboxExecution(
           claimSession.client,
           claimInput(fixture.orderId, targetId),
         ),
@@ -527,11 +527,13 @@ function input(
   };
 }
 
-function claimInput(orderId: string, refundAttemptId: string): ClaimRefundAttemptForExecutionInput {
+function claimInput(
+  orderId: string,
+  refundAttemptId: string,
+): ClaimRefundAttemptForManualSandboxExecutionInput {
   return {
     orderId,
     refundAttemptId,
-    actorType: RefundAttemptActorType.ADMIN,
     actorUserId: "admin_123",
     now: NOW,
   };

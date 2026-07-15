@@ -20,13 +20,22 @@ import {
 } from "@/lib/payment/refund/invariants";
 import { refundAttemptStatusLabel } from "@/app/admin/refunds/intake-labels";
 import { getCurlLabel, getLengthLabel } from "@/lib/wig-option-labels";
-import type { AdminOrderDetailSource, AdminOrderDetailViewModel } from "./admin-order-detail-types";
+import type {
+  AdminOrderDetailSource,
+  AdminOrderDetailViewModel,
+  BuildAdminOrderDetailViewModelOptions,
+} from "./admin-order-detail-types";
 import { buildRefundCloseAdvisory } from "./refund-close-presentation";
+import { buildRefundExecutionClaimPresentationForOrder } from "./refund-claim-presentation";
 
 export { refundAttemptStatusLabel } from "@/app/admin/refunds/intake-labels";
 
-export function buildAdminOrderDetailViewModel(order: AdminOrderDetailSource): AdminOrderDetailViewModel {
+export function buildAdminOrderDetailViewModel(
+  order: AdminOrderDetailSource,
+  options: BuildAdminOrderDetailViewModelOptions = { claimActivationState: "disabled" },
+): AdminOrderDetailViewModel {
   const refundAmounts = buildRefundAmounts(order);
+  const openAttempts = order.refundAttempts.filter((attempt) => !isTerminalRefundAttemptStatus(attempt.status));
   return {
     id: order.id,
     statusLabel: orderStatusLabel(order.status),
@@ -49,7 +58,12 @@ export function buildAdminOrderDetailViewModel(order: AdminOrderDetailSource): A
     items: order.items.map((item) => buildItem(item, order.currency)),
     payment: buildPayment(order.payment),
     refundReview: buildRefundReview(order, refundAmounts),
-    refundAttempts: order.refundAttempts.map((attempt) => buildRefundAttempt(attempt, order.status)),
+    refundAttempts: order.refundAttempts.map((attempt) => buildRefundAttempt(
+      attempt,
+      order,
+      options,
+      openAttempts.length === 1 && openAttempts[0].id === attempt.id,
+    )),
   };
 }
 
@@ -159,10 +173,12 @@ function unavailableAmounts(): RefundAmountLabels {
 
 function buildRefundAttempt(
   attempt: AdminOrderDetailSource["refundAttempts"][number],
-  orderStatus: OrderStatus,
+  order: AdminOrderDetailSource,
+  options: BuildAdminOrderDetailViewModelOptions,
+  singleOpenTarget: boolean,
 ): AdminOrderDetailViewModel["refundAttempts"][number] {
   const closeAdvisory = buildRefundCloseAdvisory({
-    orderStatus,
+    orderStatus: order.status,
     attemptStatus: attempt.status,
     hasProviderRefundId: attempt.hasProviderRefundId,
     hasExecutionCommand: attempt.hasExecutionCommand,
@@ -180,6 +196,13 @@ function buildRefundAttempt(
     providerContext: `${attempt.provider} / ${attempt.mode}`,
     safeFailureMessage: attempt.safeFailureMessage,
     ...closeAdvisory,
+    claim: buildRefundExecutionClaimPresentationForOrder({
+      activationState: options.claimActivationState,
+      order,
+      attempt,
+      singleOpenTarget,
+      formattedAmount: formatMoney(attempt.amount, attempt.currency),
+    }),
     transitionHistory: buildRefundTransitionHistory(attempt.transitions),
   };
 }

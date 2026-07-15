@@ -34,6 +34,16 @@ const REFUND_CLOSE_ERROR_MESSAGES: Record<string, string> = {
   MANUAL_REVIEW_REQUIRED: "환불 장부 상태에 확인이 필요합니다. 운영 검토 후 진행해 주세요.",
 };
 
+const REFUND_CLAIM_ERROR_MESSAGES: Record<string, string> = {
+  FEATURE_DISABLED: "환불 실행 승인이 현재 비활성화되어 있습니다. 최신 상태를 확인해 주세요.",
+  CAPABILITY_UNSUPPORTED: "수동 실행 승인은 MOCK / SANDBOX 결제에만 제공됩니다. 최신 상태를 확인해 주세요.",
+  NOT_CLAIMABLE: "현재 상태에서는 환불 실행을 승인할 수 없습니다. 최신 상태를 확인해 주세요.",
+  CONFLICT: "다른 작업과 겹쳐 실행 승인을 기록하지 못했습니다. 최신 상태를 확인해 주세요.",
+  MANUAL_REVIEW_REQUIRED: "환불 실행 승인 기록의 정합성을 수동으로 확인해야 합니다.",
+  NOT_FOUND: "환불 요청을 찾을 수 없습니다. 최신 상태를 확인해 주세요.",
+  INVALID_INPUT: "실행 승인 요청이 올바르지 않습니다. 최신 상태를 확인해 주세요.",
+};
+
 const CUSTOMER_REFUND_INTAKE_ERROR_MESSAGES: Record<string, string> = {
   REJECTION_REASON_REQUIRED: "거절 사유를 입력해 주세요.",
   REJECTION_REASON_TOO_LONG: "거절 사유는 500자 이내로 입력해 주세요.",
@@ -55,6 +65,10 @@ export function getAdminErrorMessage(errorCode: string): string {
 
 export function getAdminRefundCloseErrorMessage(errorCode: string): string {
   return REFUND_CLOSE_ERROR_MESSAGES[errorCode] ?? getAdminErrorMessage(errorCode);
+}
+
+export function getAdminRefundClaimErrorMessage(errorCode: string): string {
+  return REFUND_CLAIM_ERROR_MESSAGES[errorCode] ?? getAdminErrorMessage(errorCode);
 }
 
 export function getAdminCustomerRefundIntakeErrorMessage(errorCode: string): string {

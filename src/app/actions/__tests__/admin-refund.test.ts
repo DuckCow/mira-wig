@@ -10,6 +10,14 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockDb = vi.hoisted(() => ({ kind: "mock-db" }));
+const claimMocks = vi.hoisted(() => ({
+  claim: vi.fn<(
+    client: unknown,
+    input: { orderId: string; refundAttemptId: string; actorUserId: string; now: Date },
+  ) => Promise<unknown>>(),
+  classify: vi.fn(),
+  enabled: vi.fn(),
+}));
 
 vi.mock("crypto", () => ({ randomUUID: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -17,6 +25,14 @@ vi.mock("@/lib/db", () => ({ db: mockDb }));
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn() }));
 vi.mock("@/lib/payment/refund/close", () => ({ closeRefundRequest: vi.fn() }));
 vi.mock("@/lib/payment/refund/request", () => ({ requestRefundAttempt: vi.fn() }));
+vi.mock("@/lib/payment/refund/claim", () => ({
+  claimRefundAttemptForManualSandboxExecution: claimMocks.claim,
+  classifyExistingRefundExecutionClaim: claimMocks.classify,
+}));
+vi.mock("@/lib/payment/refund/execution-activation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/payment/refund/execution-activation")>();
+  return { ...actual, isRefundExecutionClaimEnabled: claimMocks.enabled };
+});
 
 import { requireAdmin } from "@/lib/admin";
 import { revalidatePath } from "next/cache";
@@ -30,7 +46,16 @@ import {
   type RequestRefundAttemptFailureCode,
   type RequestRefundAttemptResult,
 } from "@/lib/payment/refund/request";
-import { closeRefundRequestAction, requestRefundAttemptAction } from "../admin/refund";
+import {
+  type ClaimRefundAttemptForExecutionFailureCode,
+  type ClaimRefundAttemptForExecutionResult,
+} from "@/lib/payment/refund/claim";
+import { RefundExecutionActivationConfigError } from "@/lib/payment/refund/execution-activation";
+import {
+  claimRefundExecutionAction,
+  closeRefundRequestAction,
+  requestRefundAttemptAction,
+} from "../admin/refund";
 
 const NOW = new Date("2026-07-10T08:00:00.000Z");
 const GENERATED_ID = "11111111-1111-4111-8111-111111111111";
@@ -41,12 +66,20 @@ const VALID_CLOSE_INPUT = {
   orderId: "order_123",
   refundAttemptId: "refund_123",
 };
+const VALID_CLAIM_INPUT = {
+  orderId: "order_123",
+  refundAttemptId: "refund_123",
+};
 const ADMIN_CLOSE_REASON = "관리자가 처리 전 환불 요청을 철회함";
 const CLOSE_REVALIDATION_PATHS = [
   "/admin/orders/order_123",
   "/orders/order_123",
   "/orders",
   "/admin/refunds/intakes",
+] as const;
+const CLAIM_REVALIDATION_PATHS = [
+  "/admin/orders/order_123",
+  "/admin/refunds/execution",
 ] as const;
 
 const mockRequireAdmin = vi.mocked(requireAdmin);
@@ -63,6 +96,9 @@ beforeEach(() => {
   mockRequireAdmin.mockResolvedValue(adminGuard());
   mockCloseRefundRequest.mockResolvedValue(closeSuccessResult());
   mockRequestRefundAttempt.mockResolvedValue(successResult());
+  claimMocks.enabled.mockReturnValue(true);
+  claimMocks.claim.mockResolvedValue(claimSuccessResult());
+  claimMocks.classify.mockResolvedValue("UNPROVEN");
 });
 
 afterEach(() => {
@@ -412,6 +448,182 @@ describe("closeRefundRequestAction failure mapping", () => {
   });
 });
 
+describe("claimRefundExecutionAction authorization and activation", () => {
+  it.each([
+    ["UNAUTHENTICATED", { success: false, errorCode: "UNAUTHENTICATED" }],
+    ["FORBIDDEN", { success: false, errorCode: "FORBIDDEN" }],
+  ] as const)("returns %s before gate evaluation or parsing", async (errorCode, guard) => {
+    mockRequireAdmin.mockResolvedValue(guard);
+
+    const result = await claimRefundExecutionAction(null);
+
+    expect(result).toEqual({ success: false, errorCode });
+    expect(claimMocks.enabled).not.toHaveBeenCalled();
+    expect(claimMocks.claim).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before input parsing when the gate is disabled", async () => {
+    claimMocks.enabled.mockReturnValue(false);
+
+    const result = await claimRefundExecutionAction(null);
+
+    expect(result).toEqual({ success: false, errorCode: "FEATURE_DISABLED" });
+    expect(claimMocks.claim).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on typed invalid gate configuration", async () => {
+    claimMocks.enabled.mockImplementation(() => {
+      throw new RefundExecutionActivationConfigError("REFUND_EXECUTION_CLAIM_ENABLED");
+    });
+
+    const result = await claimRefundExecutionAction(VALID_CLAIM_INPUT);
+
+    expect(result).toEqual({ success: false, errorCode: "FEATURE_DISABLED" });
+    expect(claimMocks.claim).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("claimRefundExecutionAction exact input boundary", () => {
+  const hostileContext = {
+    actorType: RefundAttemptActorType.SYSTEM,
+    actorUserId: "caller_actor",
+    rationale: "caller rationale",
+    now: new Date("2000-01-01T00:00:00.000Z"),
+    provider: PaymentProvider.TOSS,
+    mode: PaymentMode.LIVE,
+    amount: 1,
+    currency: "USD",
+    commandId: "caller_command",
+    operationKey: "caller_key",
+  };
+
+  it.each([
+    null,
+    [],
+    {},
+    { ...VALID_CLAIM_INPUT, orderId: "   " },
+    { ...VALID_CLAIM_INPUT, refundAttemptId: "   " },
+    { ...VALID_CLAIM_INPUT, ...hostileContext },
+    Object.assign(new (class HostileInput {})(), VALID_CLAIM_INPUT),
+  ])("rejects malformed or extra-key input: %j", async (input) => {
+    const result = await claimRefundExecutionAction(input);
+
+    expect(result).toEqual({ success: false, errorCode: "INVALID_INPUT" });
+    expect(claimMocks.claim).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("rejects symbol keys and accepts an exact null-prototype object", async () => {
+    const symbolInput = { ...VALID_CLAIM_INPUT, [Symbol("hidden")]: "value" };
+    const nullPrototypeInput = { ...VALID_CLAIM_INPUT };
+    Object.setPrototypeOf(nullPrototypeInput, null);
+
+    await expect(claimRefundExecutionAction(symbolInput)).resolves.toEqual({
+      success: false,
+      errorCode: "INVALID_INPUT",
+    });
+    await expect(claimRefundExecutionAction(nullPrototypeInput)).resolves.toEqual({
+      success: true,
+      outcome: "CLAIMED",
+    });
+    expect(claimMocks.claim).toHaveBeenCalledOnce();
+  });
+});
+
+describe("claimRefundExecutionAction delegation and revalidation", () => {
+  it("supplies only normalized identity, authenticated admin, and server time", async () => {
+    const result = await claimRefundExecutionAction({
+      orderId: "  order_123  ",
+      refundAttemptId: "  refund_123  ",
+    });
+
+    expect(claimMocks.claim).toHaveBeenCalledWith(mockDb, {
+      orderId: "order_123",
+      refundAttemptId: "refund_123",
+      actorUserId: ADMIN_ID,
+      now: NOW,
+    });
+    expect(Object.keys(claimMocks.claim.mock.calls[0][1]).sort()).toEqual([
+      "actorUserId", "now", "orderId", "refundAttemptId",
+    ]);
+    expect(result).toEqual({ success: true, outcome: "CLAIMED" });
+    expect(mockRevalidatePath.mock.calls.map(([path]) => path)).toEqual(CLAIM_REVALIDATION_PATHS);
+  });
+
+  it.each([
+    [false, "CLAIMED"],
+    [true, "REPLAYED"],
+  ] as const)("maps replayed=%s to %s with the exact two admin paths", async (replayed, outcome) => {
+    claimMocks.claim.mockResolvedValue(claimSuccessResult({ replayed }));
+
+    const result = await claimRefundExecutionAction(VALID_CLAIM_INPUT);
+
+    expect(result).toEqual({ success: true, outcome });
+    expect(mockRevalidatePath.mock.calls.map(([path]) => path)).toEqual(CLAIM_REVALIDATION_PATHS);
+    for (const excluded of [
+      "/orders/order_123", "/orders", "/admin/refunds/intakes", "/admin/orders", "/",
+    ]) {
+      expect(mockRevalidatePath).not.toHaveBeenCalledWith(excluded);
+    }
+  });
+
+  it("rethrows unexpected wrapper errors without revalidation", async () => {
+    claimMocks.claim.mockRejectedValue(new Error("database unavailable"));
+
+    await expect(claimRefundExecutionAction(VALID_CLAIM_INPUT)).rejects.toThrow("database unavailable");
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("claimRefundExecutionAction result taxonomy", () => {
+  it.each([
+    ["CLAIM_CAPABILITY_UNSUPPORTED", "CAPABILITY_UNSUPPORTED"],
+    ["REFUND_ATTEMPT_NOT_CLAIMABLE", "NOT_CLAIMABLE"],
+    ["ORDER_STATUS_CONFLICT", "NOT_CLAIMABLE"],
+    ["PAYMENT_NOT_REFUNDABLE", "NOT_CLAIMABLE"],
+    ["ORDER_NOT_FOUND", "NOT_FOUND"],
+    ["REFUND_ATTEMPT_NOT_FOUND", "NOT_FOUND"],
+    ["REFUND_LEDGER_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
+    ["INVALID_ORDER_ID", "CONFLICT"],
+    ["INVALID_REFUND_ATTEMPT_ID", "CONFLICT"],
+    ["INVALID_ACTOR_TYPE", "CONFLICT"],
+    ["INVALID_ACTOR_USER_ID", "CONFLICT"],
+    ["INVALID_CLAIM_TIMESTAMP", "CONFLICT"],
+  ] as const)("maps %s to %s without internal evidence", async (code, errorCode) => {
+    claimMocks.claim.mockResolvedValue(claimCoreFailure(code));
+
+    const result = await claimRefundExecutionAction(VALID_CLAIM_INPUT);
+
+    expect(result).toEqual({ success: false, errorCode });
+    expect(claimMocks.classify).not.toHaveBeenCalled();
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("maps a healthy foreign-admin conflict to calm ALREADY_CLAIMED without server revalidation", async () => {
+    claimMocks.claim.mockResolvedValue(claimCoreFailure("CLAIM_ARTIFACT_CONFLICT"));
+    claimMocks.classify.mockResolvedValue("HEALTHY_EXISTING_CLAIM");
+
+    const result = await claimRefundExecutionAction(VALID_CLAIM_INPUT);
+
+    expect(claimMocks.classify).toHaveBeenCalledWith(mockDb, VALID_CLAIM_INPUT);
+    expect(result).toEqual({ success: true, outcome: "ALREADY_CLAIMED" });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("retains malformed conflict evidence as manual review", async () => {
+    claimMocks.claim.mockResolvedValue(claimCoreFailure("CLAIM_ARTIFACT_CONFLICT"));
+    claimMocks.classify.mockResolvedValue("UNPROVEN");
+
+    const result = await claimRefundExecutionAction(VALID_CLAIM_INPUT);
+
+    expect(result).toEqual({ success: false, errorCode: "MANUAL_REVIEW_REQUIRED" });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
 function adminGuard() {
   return {
     success: true as const,
@@ -472,6 +684,24 @@ function closeActionSuccess(
 
 function closeCoreFailure(code: CloseRefundRequestFailureCode): CloseRefundRequestResult {
   return { ok: false, code, message: "internal domain detail" };
+}
+
+function claimSuccessResult(
+  overrides: Partial<Extract<ClaimRefundAttemptForExecutionResult, { ok: true }>> = {},
+): ClaimRefundAttemptForExecutionResult {
+  return {
+    ok: true,
+    refundAttemptId: VALID_CLAIM_INPUT.refundAttemptId,
+    commandId: "private_command_id",
+    replayed: false,
+    ...overrides,
+  };
+}
+
+function claimCoreFailure(
+  code: ClaimRefundAttemptForExecutionFailureCode,
+): ClaimRefundAttemptForExecutionResult {
+  return { ok: false, code, message: "private claim evidence" };
 }
 
 function refundAttempt(): RefundAttempt {

@@ -10,6 +10,12 @@ import type {
   ShippingCountry,
 } from "@prisma/client";
 import type { RefundAmountStateInput } from "@/lib/payment/refund/invariants";
+import type {
+  RefundExecutionClaimActivationState,
+  RefundExecutionClaimPresentation,
+} from "./refund-claim-presentation";
+
+export type { RefundExecutionClaimActivationState } from "./refund-claim-presentation";
 
 type NullableDate = Date | null;
 
@@ -81,6 +87,7 @@ interface RefundAttemptSource extends RefundAmountStateInput {
   updatedAt: Date;
   hasProviderRefundId: boolean;
   hasExecutionCommand: boolean;
+  paymentIdentityMatches: boolean;
   transitions: RefundAttemptTransitionSource[];
 }
 
@@ -170,7 +177,12 @@ interface RefundAttemptViewModel {
   safeFailureMessage: string | null;
   canCloseRequest: boolean;
   closeWarning: string | null;
+  claim: RefundExecutionClaimPresentation;
   transitionHistory: RefundTransitionHistoryViewModel;
+}
+
+export interface BuildAdminOrderDetailViewModelOptions {
+  claimActivationState: RefundExecutionClaimActivationState;
 }
 
 interface RefundTransitionHistoryViewModel {

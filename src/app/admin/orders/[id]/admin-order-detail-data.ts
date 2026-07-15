@@ -14,6 +14,7 @@ import type {
   AdminOrderDetailSource,
   AdminOrderDetailViewModel,
 } from "./admin-order-detail-types";
+import type { RefundExecutionClaimActivationState } from "./refund-claim-presentation";
 
 const ORDER_DETAIL_SELECT = {
   id: true,
@@ -69,6 +70,7 @@ const ORDER_DETAIL_SELECT = {
     orderBy: [{ requestedAt: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,
+      paymentId: true,
       amount: true,
       currency: true,
       status: true,
@@ -145,11 +147,12 @@ export type AdminOrderDetailReadModel = AdminOrderDetailViewModel & {
 
 export async function loadAdminOrderDetail(
   orderId: string,
+  claimActivationState: RefundExecutionClaimActivationState = "disabled",
 ): Promise<AdminOrderDetailReadModel | null> {
   const order = await db.order.findUnique({ where: { id: orderId }, select: ORDER_DETAIL_SELECT });
   if (!order) return null;
   return {
-    ...buildAdminOrderDetailViewModel(toSafeSource(order)),
+    ...buildAdminOrderDetailViewModel(toSafeSource(order), { claimActivationState }),
     customerRefundIntakes: toSafeCustomerRefundIntakes(order),
   };
 }
@@ -169,10 +172,11 @@ function toSafeSource(order: OrderDetailRecord): AdminOrderDetailSource {
       updatedAt: payment.updatedAt,
       providerPaymentKeyPresent: Boolean(payment.providerPaymentKey?.trim()),
     },
-    refundAttempts: refundAttempts.map(({ providerRefundId, executionCommand, ...attempt }) => ({
+    refundAttempts: refundAttempts.map(({ paymentId, providerRefundId, executionCommand, ...attempt }) => ({
       ...attempt,
       hasProviderRefundId: Boolean(providerRefundId?.trim()),
       hasExecutionCommand: executionCommand !== null,
+      paymentIdentityMatches: paymentId === payment.id,
     })),
   };
 }

@@ -61,6 +61,7 @@ describe("admin Order-detail intake history query", () => {
     expect(query.select.customerRefundIntakes.select).not.toHaveProperty("reviewedByUserId");
     expect(query.select.refundAttempts.select).toMatchObject({
       id: true,
+      paymentId: true,
       status: true,
       amount: true,
       currency: true,
@@ -197,6 +198,28 @@ describe("admin Order-detail intake history query", () => {
     expect(serialized).not.toContain("hasExecutionCommand");
   });
 
+  it("derives payment identity coherence internally for an enabled bounded claim target", async () => {
+    const record = orderRecord(OrderStatus.REFUND_PENDING);
+    record.refundAttempts = [refundAttempt("attempt_claim_123456", RefundAttemptStatus.REQUESTED, {
+      providerRefundId: null,
+    })];
+    mockFindUnique.mockResolvedValue(record);
+
+    const result = await loadAdminOrderDetail("order_123", "enabled");
+    const serialized = JSON.stringify(result?.refundAttempts[0].claim);
+
+    expect(result?.refundAttempts[0].claim.control).toEqual({
+      refundAttemptId: "attempt_claim_123456",
+      shortAttemptId: "attempt_",
+      amount: "₩2,500",
+      currency: "KRW",
+      provider: PaymentProvider.MOCK,
+      mode: PaymentMode.SANDBOX,
+    });
+    expect(serialized).not.toContain("paymentId");
+    expect(serialized).not.toContain("private_provider_payment_key");
+  });
+
   it("leaves the existing financial readout unchanged", async () => {
     const withoutIntake = orderRecord();
     const withIntake = orderRecord();
@@ -256,6 +279,7 @@ function refundAttempt(
 ) {
   return {
     id,
+    paymentId: "payment_123",
     amount: 2_500,
     currency: "KRW",
     status,

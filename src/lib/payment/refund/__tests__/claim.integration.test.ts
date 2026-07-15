@@ -16,8 +16,11 @@ import { db } from "@/lib/db";
 import {
   buildRefundExecutionClaimOperationKey,
   claimRefundAttemptForExecution,
+  claimRefundAttemptForManualSandboxExecution,
+  classifyExistingRefundExecutionClaim,
   type ClaimRefundAttemptForExecutionInput,
   type ClaimRefundAttemptForExecutionResult,
+  type ClaimRefundAttemptForManualSandboxExecutionInput,
 } from "../claim";
 import {
   createNamedDbSession,
@@ -437,6 +440,159 @@ describe("claimRefundAttemptForExecution", () => {
       now: new Date(Number.NaN),
     }))).resolves.toMatchObject({ ok: false, code: "INVALID_CLAIM_TIMESTAMP" });
   });
+
+  it("manual wrapper claims fresh without changing Order, Payment, evidence, events, or outbox", async () => {
+      const fixture = await createOrder(ctx);
+      const targetId = await seedAttempt(fixture);
+      const beforePayment = await db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } });
+      const beforeEvents = await db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } });
+      const beforeOutbox = await db.paymentOutbox.count({ where: { dedupKey: { contains: targetId } } });
+
+      const result = success(await claimRefundAttemptForManualSandboxExecution(
+        db,
+        manualClaimInput(fixture.orderId, targetId),
+      ));
+      const command = await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: result.commandId } });
+      const transitions = await claimTransitions(targetId);
+
+      expect(result.replayed).toBe(false);
+      await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.PROCESSING);
+      await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+      await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } })).resolves.toEqual(beforePayment);
+      expect(command.status).toBe(RefundExecutionCommandStatus.READY);
+      expect(transitions).toEqual([
+        expect.objectContaining({
+          actorType: RefundAttemptActorType.ADMIN,
+          actorUserId: "manual_admin_1",
+          reason: "Refund execution claimed.",
+          operationKey: buildRefundExecutionClaimOperationKey(result.commandId),
+        }),
+      ]);
+      await expect(db.refundExecutionEvidence.count({ where: { commandId: result.commandId } })).resolves.toBe(0);
+      await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(beforeEvents);
+      await expect(db.paymentOutbox.count({ where: { dedupKey: { contains: targetId } } })).resolves.toBe(beforeOutbox);
+    });
+
+    it("returns exact same-admin replay with no write", async () => {
+      const fixture = await createOrder(ctx);
+      const targetId = await seedAttempt(fixture);
+      const input = manualClaimInput(fixture.orderId, targetId);
+      const first = success(await claimRefundAttemptForManualSandboxExecution(db, input));
+      const before = await persistenceState(fixture, targetId);
+
+      const replay = success(await claimRefundAttemptForManualSandboxExecution(db, input));
+
+      expect(replay).toEqual({ ...first, replayed: true });
+      await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+    });
+
+    it.each([
+      [PaymentProvider.TOSS, PaymentMode.SANDBOX],
+      [PaymentProvider.MOCK, PaymentMode.LIVE],
+    ])("rejects unsupported capability %s / %s before writes", async (provider, mode) => {
+      const fixture = await createOrder(ctx, { provider, mode });
+      const targetId = await seedAttempt(fixture);
+      const before = await persistenceState(fixture, targetId);
+
+      const result = await claimRefundAttemptForManualSandboxExecution(
+        db,
+        manualClaimInput(fixture.orderId, targetId),
+      );
+
+      expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+      await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+      await expect(commandCount(targetId)).resolves.toBe(0);
+      await expect(claimTransitionCount(targetId)).resolves.toBe(0);
+    });
+
+    it("serializes same-admin claims into one fresh result and one exact replay", async () => {
+      const fixture = await createOrder(ctx);
+      const targetId = await seedAttempt(fixture);
+      const input = manualClaimInput(fixture.orderId, targetId);
+      const firstSession = createNamedDbSession("manual_claim_same_first");
+      const secondSession = createNamedDbSession("manual_claim_same_second");
+
+      try {
+        const queued = await queueBehindObservedOrderLock(
+          fixture.orderId,
+          firstSession,
+          () => claimRefundAttemptForManualSandboxExecution(firstSession.client, input),
+          secondSession,
+          () => claimRefundAttemptForManualSandboxExecution(secondSession.client, input),
+        );
+        const [first, second] = await Promise.all([queued.first, queued.second]);
+
+        expect(first).toMatchObject({ ok: true, replayed: false });
+        expect(second).toMatchObject({ ok: true, replayed: true });
+        await expect(commandCount(targetId)).resolves.toBe(1);
+        await expect(claimTransitionCount(targetId)).resolves.toBe(1);
+      } finally {
+        await disconnectSessions(firstSession, secondSession);
+      }
+    });
+
+    it("keeps strict core identity for a foreign-admin race and classifies healthy evidence safely", async () => {
+      const fixture = await createOrder(ctx);
+      const targetId = await seedAttempt(fixture);
+      const firstSession = createNamedDbSession("manual_claim_foreign_first");
+      const secondSession = createNamedDbSession("manual_claim_foreign_second");
+
+      try {
+        const queued = await queueBehindObservedOrderLock(
+          fixture.orderId,
+          firstSession,
+          () => claimRefundAttemptForManualSandboxExecution(
+            firstSession.client,
+            manualClaimInput(fixture.orderId, targetId, "manual_admin_a"),
+          ),
+          secondSession,
+          () => claimRefundAttemptForManualSandboxExecution(
+            secondSession.client,
+            manualClaimInput(fixture.orderId, targetId, "manual_admin_b"),
+          ),
+        );
+        const [first, second] = await Promise.all([queued.first, queued.second]);
+
+        expect(first).toMatchObject({ ok: true, replayed: false });
+        expect(second).toMatchObject({ ok: false, code: "CLAIM_ARTIFACT_CONFLICT" });
+        await expect(classifyExistingRefundExecutionClaim(db, {
+          orderId: fixture.orderId,
+          refundAttemptId: targetId,
+        })).resolves.toBe("HEALTHY_EXISTING_CLAIM");
+        await expect(commandCount(targetId)).resolves.toBe(1);
+        await expect(claimTransitionCount(targetId)).resolves.toBe(1);
+      } finally {
+        await disconnectSessions(firstSession, secondSession);
+      }
+    });
+
+    it("classifies malformed existing claim artifacts as unproven", async () => {
+      const fixture = await createOrder(ctx);
+      const targetId = await seedAttempt(fixture, { status: RefundAttemptStatus.PROCESSING });
+      const commandId = await seedCommand(targetId);
+      await seedClaimTransition(targetId, commandId, { operationKey: `wrong-claim-key:${commandId}` });
+
+      await expect(classifyExistingRefundExecutionClaim(db, {
+        orderId: fixture.orderId,
+        refundAttemptId: targetId,
+      })).resolves.toBe("UNPROVEN");
+    });
+
+    it("rolls back every wrapper write after an injected persistence failure", async () => {
+      const fixture = await createOrder(ctx);
+      const targetId = await seedAttempt(fixture);
+      const before = await persistenceState(fixture, targetId);
+
+      await expect(claimRefundAttemptForManualSandboxExecution(db, {
+        ...manualClaimInput(fixture.orderId, targetId),
+        now: new Date(-8_640_000_000_000_000),
+      })).rejects.toBeDefined();
+
+      await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+      await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.REQUESTED);
+      await expect(commandCount(targetId)).resolves.toBe(0);
+      await expect(claimTransitionCount(targetId)).resolves.toBe(0);
+    });
 });
 
 function claimInput(
@@ -452,6 +608,14 @@ function claimInput(
     now: NOW,
     ...override,
   };
+}
+
+function manualClaimInput(
+  orderId: string,
+  refundAttemptId: string,
+  actorUserId = "manual_admin_1",
+): ClaimRefundAttemptForManualSandboxExecutionInput {
+  return { orderId, refundAttemptId, actorUserId, now: NOW };
 }
 
 async function createOrder(context: TestContext, options: OrderOptions = {}): Promise<OrderFixture> {

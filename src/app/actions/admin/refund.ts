@@ -10,6 +10,15 @@ import {
   type CloseRefundRequestFailureCode,
 } from "@/lib/payment/refund/close";
 import {
+  claimRefundAttemptForManualSandboxExecution,
+  classifyExistingRefundExecutionClaim,
+  type ClaimRefundAttemptForExecutionFailureCode,
+} from "@/lib/payment/refund/claim";
+import {
+  isRefundExecutionClaimEnabled,
+  RefundExecutionActivationConfigError,
+} from "@/lib/payment/refund/execution-activation";
+import {
   requestRefundAttempt,
   type RequestRefundAttemptFailureCode,
 } from "@/lib/payment/refund/request";
@@ -21,6 +30,11 @@ export interface AdminRequestRefundAttemptInput {
 }
 
 export interface AdminCloseRefundRequestInput {
+  orderId: string;
+  refundAttemptId: string;
+}
+
+export interface AdminClaimRefundExecutionInput {
   orderId: string;
   refundAttemptId: string;
 }
@@ -57,6 +71,21 @@ export type AdminCloseRefundRequestResult =
     }
   | ActionFailure;
 
+export type AdminClaimRefundExecutionErrorCode =
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
+  | "FEATURE_DISABLED"
+  | "CAPABILITY_UNSUPPORTED"
+  | "NOT_CLAIMABLE"
+  | "CONFLICT"
+  | "MANUAL_REVIEW_REQUIRED"
+  | "NOT_FOUND"
+  | "INVALID_INPUT";
+
+export type AdminClaimRefundExecutionResult =
+  | { success: true; outcome: "CLAIMED" | "REPLAYED" | "ALREADY_CLAIMED" }
+  | { success: false; errorCode: AdminClaimRefundExecutionErrorCode };
+
 type InputValidationResult =
   | { success: true; input: AdminRequestRefundAttemptInput }
   | ActionFailure;
@@ -64,6 +93,10 @@ type InputValidationResult =
 type CloseInputValidationResult =
   | { success: true; input: AdminCloseRefundRequestInput }
   | ActionFailure;
+
+type ClaimInputValidationResult =
+  | { success: true; input: AdminClaimRefundExecutionInput }
+  | { success: false; errorCode: "INVALID_INPUT" };
 
 const REQUEST_FAILURE_CODE_MAP: Record<RequestRefundAttemptFailureCode, AdminRefundActionErrorCode> = {
   INVALID_REASON: "REASON_REQUIRED",
@@ -103,6 +136,24 @@ const CLOSE_FAILURE_CODE_MAP: Record<CloseRefundRequestFailureCode, AdminRefundA
   PROVIDER_CONTACT_ALREADY_STARTED: "PROVIDER_CONTACT_ALREADY_STARTED",
   ORDER_STATUS_CONFLICT: "CONFLICT",
   IDEMPOTENCY_CONFLICT: "CONFLICT",
+  REFUND_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
+};
+
+const CLAIM_FAILURE_CODE_MAP: Record<
+  Exclude<ClaimRefundAttemptForExecutionFailureCode, "CLAIM_ARTIFACT_CONFLICT">,
+  AdminClaimRefundExecutionErrorCode
+> = {
+  INVALID_ORDER_ID: "CONFLICT",
+  INVALID_REFUND_ATTEMPT_ID: "CONFLICT",
+  INVALID_ACTOR_TYPE: "CONFLICT",
+  INVALID_ACTOR_USER_ID: "CONFLICT",
+  INVALID_CLAIM_TIMESTAMP: "CONFLICT",
+  ORDER_NOT_FOUND: "NOT_FOUND",
+  REFUND_ATTEMPT_NOT_FOUND: "NOT_FOUND",
+  REFUND_ATTEMPT_NOT_CLAIMABLE: "NOT_CLAIMABLE",
+  ORDER_STATUS_CONFLICT: "NOT_CLAIMABLE",
+  PAYMENT_NOT_REFUNDABLE: "NOT_CLAIMABLE",
+  CLAIM_CAPABILITY_UNSUPPORTED: "CAPABILITY_UNSUPPORTED",
   REFUND_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
 };
 
@@ -163,6 +214,28 @@ export async function closeRefundRequestAction(
   };
 }
 
+export async function claimRefundExecutionAction(
+  input: unknown,
+): Promise<AdminClaimRefundExecutionResult> {
+  const guard = await requireAdmin();
+  if (!guard.success) return guard;
+  if (!claimGateEnabled()) return { success: false, errorCode: "FEATURE_DISABLED" };
+
+  const validated = validateClaimInput(input);
+  if (!validated.success) return validated;
+
+  const result = await claimRefundAttemptForManualSandboxExecution(db, {
+    ...validated.input,
+    actorUserId: guard.session.user.id,
+    now: new Date(),
+  });
+  if (!result.ok) return mapClaimFailure(result.code, validated.input);
+
+  revalidatePath(`/admin/orders/${validated.input.orderId}`);
+  revalidatePath("/admin/refunds/execution");
+  return { success: true, outcome: result.replayed ? "REPLAYED" : "CLAIMED" };
+}
+
 function validateInput(input: unknown): InputValidationResult {
   if (!isPlainRecord(input)) return failure("INVALID_INPUT");
   const orderId = input.orderId;
@@ -192,6 +265,26 @@ function validateCloseInput(input: unknown): CloseInputValidationResult {
   };
 }
 
+function validateClaimInput(input: unknown): ClaimInputValidationResult {
+  if (!isPlainRecord(input)) {
+    return { success: false, errorCode: "INVALID_INPUT" };
+  }
+  const keys = Reflect.ownKeys(input);
+  if (keys.length !== 2 || !keys.every((key) => key === "orderId" || key === "refundAttemptId")) {
+    return { success: false, errorCode: "INVALID_INPUT" };
+  }
+  const orderId = input.orderId;
+  const refundAttemptId = input.refundAttemptId;
+  if (typeof orderId !== "string" || !orderId.trim()) return { success: false, errorCode: "INVALID_INPUT" };
+  if (typeof refundAttemptId !== "string" || !refundAttemptId.trim()) {
+    return { success: false, errorCode: "INVALID_INPUT" };
+  }
+  return {
+    success: true,
+    input: { orderId: orderId.trim(), refundAttemptId: refundAttemptId.trim() },
+  };
+}
+
 function revalidateClosedRefundRequest(orderId: string): void {
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath(`/orders/${orderId}`);
@@ -205,6 +298,29 @@ function mapFailureCode(code: RequestRefundAttemptFailureCode): AdminRefundActio
 
 function mapCloseFailureCode(code: CloseRefundRequestFailureCode): AdminRefundActionErrorCode {
   return CLOSE_FAILURE_CODE_MAP[code];
+}
+
+async function mapClaimFailure(
+  code: ClaimRefundAttemptForExecutionFailureCode,
+  input: AdminClaimRefundExecutionInput,
+): Promise<AdminClaimRefundExecutionResult> {
+  if (code !== "CLAIM_ARTIFACT_CONFLICT") {
+    return { success: false, errorCode: CLAIM_FAILURE_CODE_MAP[code] };
+  }
+  const classification = await classifyExistingRefundExecutionClaim(db, input);
+  if (classification === "HEALTHY_EXISTING_CLAIM") {
+    return { success: true, outcome: "ALREADY_CLAIMED" };
+  }
+  return { success: false, errorCode: "MANUAL_REVIEW_REQUIRED" };
+}
+
+function claimGateEnabled(): boolean {
+  try {
+    return isRefundExecutionClaimEnabled();
+  } catch (error) {
+    if (error instanceof RefundExecutionActivationConfigError) return false;
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

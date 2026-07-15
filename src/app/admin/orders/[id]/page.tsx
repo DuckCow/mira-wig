@@ -7,12 +7,18 @@ import {
   isCustomerRefundIntakeApproveEnabled,
 } from "@/lib/payment/refund/customer-intake-activation";
 import {
+  isRefundExecutionClaimEnabled,
+  RefundExecutionActivationConfigError,
+} from "@/lib/payment/refund/execution-activation";
+import {
   loadAdminOrderDetail,
   type AdminOrderDetailReadModel,
 } from "./admin-order-detail-data";
 import { CustomerRefundIntakeSection } from "./CustomerRefundIntakeSection";
 import type { CustomerRefundIntakeApproveState } from "./customer-intake-presentation";
+import { RefundExecutionClaimControl } from "./RefundExecutionClaimControl";
 import { RefundRequestCloseControl } from "./RefundRequestCloseControl";
+import type { RefundExecutionClaimActivationState } from "./refund-claim-presentation";
 
 type Params = Promise<{ id: string }>;
 type Detail = AdminOrderDetailReadModel;
@@ -24,7 +30,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Params 
   if (!guard.success) redirect("/");
 
   const { id } = await params;
-  const order = await loadAdminOrderDetail(id);
+  const order = await loadAdminOrderDetail(id, resolveClaimState());
   if (!order) notFound();
   const approveState = order.customerRefundIntakes.some((intake) => intake.status === "SUBMITTED")
     ? resolveApproveState()
@@ -69,6 +75,15 @@ export function resolveApproveState(): CustomerRefundIntakeApproveState {
     return isCustomerRefundIntakeApproveEnabled() ? "enabled" : "disabled";
   } catch (error) {
     if (error instanceof CustomerRefundIntakeActivationConfigError) return "misconfigured";
+    throw error;
+  }
+}
+
+export function resolveClaimState(): RefundExecutionClaimActivationState {
+  try {
+    return isRefundExecutionClaimEnabled() ? "enabled" : "disabled";
+  } catch (error) {
+    if (error instanceof RefundExecutionActivationConfigError) return "misconfigured";
     throw error;
   }
 }
@@ -229,6 +244,14 @@ function RefundLedger({ orderId, attempts }: { orderId: string; attempts: Detail
               ) : null}
               {attempt.canCloseRequest ? (
                 <RefundRequestCloseControl orderId={orderId} refundAttemptId={attempt.refundAttemptId} />
+              ) : null}
+              {attempt.claim.advisory ? (
+                <p className="border-l-2 border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  {attempt.claim.advisory}
+                </p>
+              ) : null}
+              {attempt.claim.control ? (
+                <RefundExecutionClaimControl orderId={orderId} target={attempt.claim.control} />
               ) : null}
               <RefundTransitionHistory history={attempt.transitionHistory} />
             </li>

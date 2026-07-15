@@ -9,8 +9,9 @@ import type { AdminOrderDetailReadModel } from "./admin-order-detail-data";
 
 const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn<() => Promise<AdminGuardResult>>(),
-  loadOrder: vi.fn<() => Promise<AdminOrderDetailReadModel | null>>(),
+  loadOrder: vi.fn<(id: string, claimState: "enabled" | "disabled" | "misconfigured") => Promise<AdminOrderDetailReadModel | null>>(),
   approveEnabled: vi.fn<() => boolean>(),
+  claimEnabled: vi.fn<() => boolean>(),
   redirect: vi.fn((path: string): never => { throw new Error(`REDIRECT:${path}`); }),
   notFound: vi.fn((): never => { throw new Error("NOT_FOUND"); }),
 }));
@@ -22,10 +23,15 @@ vi.mock("@/lib/payment/refund/customer-intake-activation", async (importOriginal
   const actual = await importOriginal<typeof import("@/lib/payment/refund/customer-intake-activation")>();
   return { ...actual, isCustomerRefundIntakeApproveEnabled: mocks.approveEnabled };
 });
+vi.mock("@/lib/payment/refund/execution-activation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/payment/refund/execution-activation")>();
+  return { ...actual, isRefundExecutionClaimEnabled: mocks.claimEnabled };
+});
 
 import {
   CustomerRefundIntakeActivationConfigError,
 } from "@/lib/payment/refund/customer-intake-activation";
+import { RefundExecutionActivationConfigError } from "@/lib/payment/refund/execution-activation";
 import AdminOrderDetailPage, { AdminOrderDetailView } from "./page";
 
 describe("administrator Order-detail page authorization and intake gate", () => {
@@ -34,6 +40,7 @@ describe("administrator Order-detail page authorization and intake gate", () => 
     mocks.requireAdmin.mockResolvedValue(adminGuard());
     mocks.loadOrder.mockResolvedValue(orderDetail());
     mocks.approveEnabled.mockReturnValue(true);
+    mocks.claimEnabled.mockReturnValue(true);
   });
 
   it.each(["UNAUTHENTICATED", "FORBIDDEN"] as const)(
@@ -47,6 +54,7 @@ describe("administrator Order-detail page authorization and intake gate", () => 
       expect(mocks.redirect).toHaveBeenCalledWith("/");
       expect(mocks.loadOrder).not.toHaveBeenCalled();
       expect(mocks.approveEnabled).not.toHaveBeenCalled();
+      expect(mocks.claimEnabled).not.toHaveBeenCalled();
     },
   );
 
@@ -65,7 +73,7 @@ describe("administrator Order-detail page authorization and intake gate", () => 
     const element = await AdminOrderDetailPage({ params });
 
     expect(order).toEqual(["guard", "params", "loader"]);
-    expect(mocks.loadOrder).toHaveBeenCalledWith("order_1");
+    expect(mocks.loadOrder).toHaveBeenCalledWith("order_1", "enabled");
     expect(mocks.loadOrder).toHaveBeenCalledOnce();
     expect(isValidElement(element) && element.type).toBe(AdminOrderDetailView);
   });
@@ -107,6 +115,27 @@ describe("administrator Order-detail page authorization and intake gate", () => 
 
     expect(mocks.approveEnabled).not.toHaveBeenCalled();
     expect(approveStateOf(element)).toBe("disabled");
+  });
+
+  it.each([
+    [true, "enabled"],
+    [false, "disabled"],
+  ] as const)("threads claim gate value %s into the safe loader as %s", async (enabled, expected) => {
+    mocks.claimEnabled.mockReturnValue(enabled);
+
+    await AdminOrderDetailPage({ params: Promise.resolve({ id: "order_1" }) });
+
+    expect(mocks.loadOrder).toHaveBeenCalledWith("order_1", expected);
+  });
+
+  it("degrades the typed claim activation error to a misconfigured presentation state", async () => {
+    mocks.claimEnabled.mockImplementation(() => {
+      throw new RefundExecutionActivationConfigError("REFUND_EXECUTION_CLAIM_ENABLED");
+    });
+
+    await AdminOrderDetailPage({ params: Promise.resolve({ id: "order_1" }) });
+
+    expect(mocks.loadOrder).toHaveBeenCalledWith("order_1", "misconfigured");
   });
 });
 

@@ -16,6 +16,13 @@ export interface ClaimRefundAttemptForExecutionInput {
   now: Date;
 }
 
+export interface ClaimRefundAttemptForManualSandboxExecutionInput {
+  orderId: string;
+  refundAttemptId: string;
+  actorUserId: string;
+  now: Date;
+}
+
 export type ClaimRefundAttemptForExecutionFailureCode =
   | "INVALID_ORDER_ID"
   | "INVALID_REFUND_ATTEMPT_ID"
@@ -27,6 +34,7 @@ export type ClaimRefundAttemptForExecutionFailureCode =
   | "REFUND_ATTEMPT_NOT_CLAIMABLE"
   | "ORDER_STATUS_CONFLICT"
   | "PAYMENT_NOT_REFUNDABLE"
+  | "CLAIM_CAPABILITY_UNSUPPORTED"
   | "REFUND_LEDGER_INCONSISTENT"
   | "CLAIM_ARTIFACT_CONFLICT";
 

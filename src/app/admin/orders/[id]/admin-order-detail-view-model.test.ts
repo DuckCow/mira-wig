@@ -87,6 +87,31 @@ describe("admin order detail view model", () => {
     expect(view.transitionHistory.entries).toEqual([]);
   });
 
+  it("offers one bounded claim target only when the claim gate is enabled", () => {
+    const order = source({
+      status: OrderStatus.REFUND_PENDING,
+      refundAttempts: [attempt("refund_claim_123456", 1_000, RefundAttemptStatus.REQUESTED)],
+    });
+
+    const enabled = buildAdminOrderDetailViewModel(order, { claimActivationState: "enabled" }).refundAttempts[0];
+    const disabled = buildAdminOrderDetailViewModel(order, { claimActivationState: "disabled" }).refundAttempts[0];
+
+    expect(enabled.claim).toEqual({
+      control: {
+        refundAttemptId: "refund_claim_123456",
+        shortAttemptId: "refund_c",
+        amount: "₩1,000",
+        currency: "KRW",
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+      },
+      advisory: null,
+    });
+    expect(enabled.canCloseRequest).toBe(true);
+    expect(disabled.claim.control).toBeNull();
+    expect(disabled.claim.advisory).toContain("비활성화");
+  });
+
   it("withholds close advice and explains REQUESTED provider evidence", () => {
     const requested = attempt("refund_provider", 1_000, RefundAttemptStatus.REQUESTED);
     requested.hasProviderRefundId = true;
@@ -362,6 +387,7 @@ function attempt(
     updatedAt: now,
     hasProviderRefundId: false,
     hasExecutionCommand: false,
+    paymentIdentityMatches: true,
     transitions,
   };
 }
