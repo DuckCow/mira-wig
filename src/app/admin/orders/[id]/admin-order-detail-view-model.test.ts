@@ -100,6 +100,33 @@ describe("admin order detail view model", () => {
     );
   });
 
+  it("withholds close advice and explains REQUESTED execution-command evidence", () => {
+    const requested = attempt("refund_command", 1_000, RefundAttemptStatus.REQUESTED);
+    requested.hasExecutionCommand = true;
+    const order = source({ status: OrderStatus.REFUND_PENDING, refundAttempts: [requested] });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(false);
+    expect(view.closeWarning).toBe(
+      "환불 실행 명령 기록이 있어 이 요청의 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    );
+  });
+
+  it("preserves provider-evidence warning precedence when command evidence also exists", () => {
+    const requested = attempt("refund_provider_command", 1_000, RefundAttemptStatus.REQUESTED);
+    requested.hasProviderRefundId = true;
+    requested.hasExecutionCommand = true;
+    const order = source({ status: OrderStatus.REFUND_PENDING, refundAttempts: [requested] });
+
+    const view = buildAdminOrderDetailViewModel(order).refundAttempts[0];
+
+    expect(view.canCloseRequest).toBe(false);
+    expect(view.closeWarning).toBe(
+      "제공자 처리 정보가 있어 현재 요청의 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    );
+  });
+
   it("withholds close advice and explains a REQUESTED order-status mismatch", () => {
     const order = source({
       status: OrderStatus.PAID,
@@ -219,6 +246,7 @@ describe("admin order detail view model", () => {
     expect(keys.has("providerContext")).toBe(true);
     expect(keys.has("canCloseRequest")).toBe(true);
     expect(keys.has("hasProviderRefundId")).toBe(false);
+    expect(keys.has("hasExecutionCommand")).toBe(false);
     for (const forbidden of [
       "operationKey",
       "actorUserId",
@@ -333,6 +361,7 @@ function attempt(
     createdAt: now,
     updatedAt: now,
     hasProviderRefundId: false,
+    hasExecutionCommand: false,
     transitions,
   };
 }

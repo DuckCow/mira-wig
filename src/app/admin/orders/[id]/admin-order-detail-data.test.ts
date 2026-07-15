@@ -65,6 +65,7 @@ describe("admin Order-detail intake history query", () => {
       amount: true,
       currency: true,
       requestedAt: true,
+      executionCommand: { select: { id: true } },
     });
   });
 
@@ -175,6 +176,27 @@ describe("admin Order-detail intake history query", () => {
     }
   });
 
+  it("projects command existence to close advice without exposing the command id", async () => {
+    const record = orderRecord(OrderStatus.REFUND_PENDING);
+    const requested = refundAttempt("attempt_with_command", RefundAttemptStatus.REQUESTED, {
+      providerRefundId: null,
+      executionCommand: { id: "private_execution_command_id" },
+    });
+    record.refundAttempts = [requested];
+    mockFindUnique.mockResolvedValue(record);
+
+    const result = await loadAdminOrderDetail("order_123");
+    const serialized = JSON.stringify(result);
+
+    expect(result?.refundAttempts[0]).toMatchObject({
+      canCloseRequest: false,
+      closeWarning: "환불 실행 명령 기록이 있어 이 요청의 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    });
+    expect(serialized).not.toContain("private_execution_command_id");
+    expect(serialized).not.toContain("executionCommand");
+    expect(serialized).not.toContain("hasExecutionCommand");
+  });
+
   it("leaves the existing financial readout unchanged", async () => {
     const withoutIntake = orderRecord();
     const withIntake = orderRecord();
@@ -190,12 +212,12 @@ describe("admin Order-detail intake history query", () => {
   });
 });
 
-function orderRecord() {
+function orderRecord(status: OrderStatus = OrderStatus.PAID) {
   const refundAttempts: ReturnType<typeof refundAttempt>[] = [];
   const customerRefundIntakes: ReturnType<typeof intakeRecord>[] = [];
   return {
     id: "order_123",
-    status: OrderStatus.PAID,
+    status,
     disputeStatus: null,
     paidAt: NOW,
     createdAt: NOW,
@@ -224,7 +246,14 @@ function orderRecord() {
   };
 }
 
-function refundAttempt(id: string, status: RefundAttemptStatus) {
+function refundAttempt(
+  id: string,
+  status: RefundAttemptStatus,
+  options: {
+    providerRefundId?: string | null;
+    executionCommand?: { id: string } | null;
+  } = {},
+) {
   return {
     id,
     amount: 2_500,
@@ -241,7 +270,10 @@ function refundAttempt(id: string, status: RefundAttemptStatus) {
     safeFailureMessage: null,
     createdAt: NOW,
     updatedAt: NOW,
-    providerRefundId: "private_provider_refund_id",
+    providerRefundId: options.providerRefundId === undefined
+      ? "private_provider_refund_id"
+      : options.providerRefundId,
+    executionCommand: options.executionCommand ?? null,
     transitions: [],
   };
 }

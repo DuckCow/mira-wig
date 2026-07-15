@@ -84,6 +84,7 @@ const ORDER_DETAIL_SELECT = {
       createdAt: true,
       updatedAt: true,
       providerRefundId: true,
+      executionCommand: { select: { id: true } },
       transitions: {
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
@@ -168,9 +169,10 @@ function toSafeSource(order: OrderDetailRecord): AdminOrderDetailSource {
       updatedAt: payment.updatedAt,
       providerPaymentKeyPresent: Boolean(payment.providerPaymentKey?.trim()),
     },
-    refundAttempts: refundAttempts.map(({ providerRefundId, ...attempt }) => ({
+    refundAttempts: refundAttempts.map(({ providerRefundId, executionCommand, ...attempt }) => ({
       ...attempt,
       hasProviderRefundId: Boolean(providerRefundId?.trim()),
+      hasExecutionCommand: executionCommand !== null,
     })),
   };
 }

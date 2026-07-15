@@ -11,7 +11,6 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { getAdminRefundCloseErrorMessage } from "@/lib/admin-messages";
 
-const CLOSE_REASON = "관리자가 처리 전 환불 요청을 철회함";
 const REFRESH_FAILURES = new Set<AdminRefundActionErrorCode>([
   "PROVIDER_CONTACT_ALREADY_STARTED",
   "INVALID_TRANSITION",
@@ -40,7 +39,7 @@ export function RefundRequestCloseControl({ orderId, refundAttemptId }: Props) {
     submittingRef.current = true;
     startTransition(async () => {
       try {
-        const result = await closeRefundRequestAction({ orderId, refundAttemptId, reason: CLOSE_REASON });
+        const result = await closeRefundRequestAction({ orderId, refundAttemptId });
         handleResult(result);
       } catch {
         setOpen(false);

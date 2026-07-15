@@ -8,6 +8,7 @@ import {
   Prisma,
   RefundAttemptActorType,
   RefundAttemptStatus,
+  RefundExecutionCommandStatus,
   ShippingCountry,
 } from "@prisma/client";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -288,6 +289,35 @@ describe("closeRefundRequest", () => {
 
     await expect(closeRefundRequest(db, input(fixture.orderId, targetId)))
       .resolves.toMatchObject({ ok: false, code: "PROVIDER_CONTACT_ALREADY_STARTED" });
+  });
+
+  it.each([
+    RefundExecutionCommandStatus.READY,
+    RefundExecutionCommandStatus.LEASED,
+    RefundExecutionCommandStatus.WAITING_EVIDENCE,
+    RefundExecutionCommandStatus.WAITING_RETRY,
+    RefundExecutionCommandStatus.PARKED,
+    RefundExecutionCommandStatus.DONE,
+  ])("rejects REQUESTED with a %s execution command without repairing the aggregate", async (status) => {
+    const fixture = await createOrder(ctx);
+    const targetId = await seedAttempt(fixture);
+    const beforeCommand = await seedExecutionCommand(targetId, status);
+    const beforePayment = await paymentRecord(fixture.paymentId);
+    const beforeEventCount = await eventCount(fixture.sessionId);
+    const beforeOutboxCount = await outboxCount(targetId);
+    const beforeTransitionCount = await transitionCount(targetId);
+
+    const result = await closeRefundRequest(db, input(fixture.orderId, targetId));
+
+    expect(result).toMatchObject({ ok: false, code: "PROVIDER_CONTACT_ALREADY_STARTED" });
+    await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.REQUESTED);
+    await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+    await expect(paymentRecord(fixture.paymentId)).resolves.toEqual(beforePayment);
+    await expect(commandRecord(targetId)).resolves.toEqual(beforeCommand);
+    await expect(transitionCount(targetId)).resolves.toBe(beforeTransitionCount);
+    await expect(closeTransitionCount(targetId)).resolves.toBe(0);
+    await expect(eventCount(fixture.sessionId)).resolves.toBe(beforeEventCount);
+    await expect(outboxCount(targetId)).resolves.toBe(beforeOutboxCount);
   });
 
   it("rejects multiple open attempts", async () => {
@@ -638,6 +668,24 @@ async function seedRequestCreationTransition(refundAttemptId: string): Promise<v
   });
 }
 
+async function seedExecutionCommand(
+  refundAttemptId: string,
+  status: RefundExecutionCommandStatus,
+) {
+  const leased = status === RefundExecutionCommandStatus.LEASED;
+  await db.refundExecutionCommand.create({
+    data: {
+      refundAttemptId,
+      status,
+      availableAt: NOW,
+      leaseOwner: leased ? "close_test_worker" : null,
+      leaseUntil: leased ? new Date(NOW.getTime() + 60_000) : null,
+      dispatchAttempt: leased ? 1 : 0,
+    },
+  });
+  return commandRecord(refundAttemptId);
+}
+
 async function expectLedgerFailure(fixture: OrderFixture, targetId: string): Promise<void> {
   const beforePayment = await db.payment.findUniqueOrThrow({
     where: { id: fixture.paymentId },
@@ -683,6 +731,32 @@ function orderStatus(orderId: string): Promise<OrderStatus> {
 function paymentStatus(paymentId: string): Promise<PaymentAttemptStatus> {
   return db.payment.findUniqueOrThrow({ where: { id: paymentId }, select: { status: true } })
     .then((payment) => payment.status);
+}
+
+function paymentRecord(paymentId: string) {
+  return db.payment.findUniqueOrThrow({
+    where: { id: paymentId },
+    select: { id: true, status: true, amount: true, currency: true, provider: true, mode: true, updatedAt: true },
+  });
+}
+
+function commandRecord(refundAttemptId: string) {
+  return db.refundExecutionCommand.findUniqueOrThrow({
+    where: { refundAttemptId },
+    select: {
+      id: true,
+      refundAttemptId: true,
+      status: true,
+      availableAt: true,
+      leaseOwner: true,
+      leaseUntil: true,
+      dispatchAttempt: true,
+      lastSafeErrorCode: true,
+      lastSafeErrorMessage: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 }
 
 function commandCount(refundAttemptId: string): Promise<number> {

@@ -40,8 +40,14 @@ const VALID_INPUT = { orderId: "order_123", amount: 4_000, reason: "Customer req
 const VALID_CLOSE_INPUT = {
   orderId: "order_123",
   refundAttemptId: "refund_123",
-  reason: "Withdraw unexecuted request",
 };
+const ADMIN_CLOSE_REASON = "관리자가 처리 전 환불 요청을 철회함";
+const CLOSE_REVALIDATION_PATHS = [
+  "/admin/orders/order_123",
+  "/orders/order_123",
+  "/orders",
+  "/admin/refunds/intakes",
+] as const;
 
 const mockRequireAdmin = vi.mocked(requireAdmin);
 const mockCloseRefundRequest = vi.mocked(closeRefundRequest);
@@ -271,7 +277,6 @@ describe("closeRefundRequestAction input boundary", () => {
     {},
     { ...VALID_CLOSE_INPUT, orderId: "   " },
     { ...VALID_CLOSE_INPUT, refundAttemptId: "   " },
-    { ...VALID_CLOSE_INPUT, reason: 123 },
     Object.assign(new (class HostileInput {})(), VALID_CLOSE_INPUT),
   ])("rejects malformed input without generating operation identity: %j", async (input) => {
     // @ts-expect-error Runtime validation intentionally covers untrusted action payloads.
@@ -283,14 +288,6 @@ describe("closeRefundRequestAction input boundary", () => {
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
-  it("returns REASON_REQUIRED for a blank reason", async () => {
-    const result = await closeRefundRequestAction({ ...VALID_CLOSE_INPUT, reason: "  " });
-
-    expect(result).toEqual({ success: false, errorCode: "REASON_REQUIRED" });
-    expect(mockRandomUUID).not.toHaveBeenCalled();
-    expect(mockCloseRefundRequest).not.toHaveBeenCalled();
-    expect(mockRevalidatePath).not.toHaveBeenCalled();
-  });
 });
 
 describe("closeRefundRequestAction delegation", () => {
@@ -298,7 +295,6 @@ describe("closeRefundRequestAction delegation", () => {
     const result = await closeRefundRequestAction({
       orderId: "  order_123  ",
       refundAttemptId: "  refund_123  ",
-      reason: "  Withdraw unexecuted request  ",
     });
 
     expect(mockRandomUUID).toHaveBeenCalledTimes(1);
@@ -307,19 +303,20 @@ describe("closeRefundRequestAction delegation", () => {
       orderId: "order_123",
       refundAttemptId: "refund_123",
       closeOperationId: GENERATED_ID,
-      reason: "Withdraw unexecuted request",
+      reason: ADMIN_CLOSE_REASON,
       actorType: RefundAttemptActorType.ADMIN,
       actorUserId: ADMIN_ID,
       now: NOW,
     });
     expect(result).toEqual(closeActionSuccess());
-    expect(mockRevalidatePath).toHaveBeenCalledOnce();
-    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
+    expect(mockRevalidatePath.mock.calls.map(([path]) => path)).toEqual(CLOSE_REVALIDATION_PATHS);
+    expect(mockRevalidatePath).not.toHaveBeenCalledWith("/admin/orders");
   });
 
   it("discards hostile caller context and forwards exactly seven trusted fields", async () => {
     const hostileInput = {
       ...VALID_CLOSE_INPUT,
+      reason: "caller-controlled rationale",
       closeOperationId: "caller_operation",
       operationKey: "caller_key",
       actorType: RefundAttemptActorType.SYSTEM,
@@ -342,7 +339,7 @@ describe("closeRefundRequestAction delegation", () => {
       orderId: VALID_CLOSE_INPUT.orderId,
       refundAttemptId: VALID_CLOSE_INPUT.refundAttemptId,
       closeOperationId: GENERATED_ID,
-      reason: VALID_CLOSE_INPUT.reason,
+      reason: ADMIN_CLOSE_REASON,
       actorType: RefundAttemptActorType.ADMIN,
       actorUserId: ADMIN_ID,
       now: NOW,
@@ -356,6 +353,7 @@ describe("closeRefundRequestAction delegation", () => {
       "reason",
       "refundAttemptId",
     ]);
+    expect(Object.keys(VALID_CLOSE_INPUT).sort()).toEqual(["orderId", "refundAttemptId"]);
   });
 
   it("rethrows unexpected core errors", async () => {
@@ -384,8 +382,8 @@ describe("closeRefundRequestAction success result", () => {
       "success",
       "transitionId",
     ]);
-    expect(mockRevalidatePath).toHaveBeenCalledOnce();
-    expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
+    expect(mockRevalidatePath.mock.calls.map(([path]) => path)).toEqual(CLOSE_REVALIDATION_PATHS);
+    expect(mockRevalidatePath).not.toHaveBeenCalledWith("/admin/orders");
   });
 });
 

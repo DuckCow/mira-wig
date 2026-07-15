@@ -4,7 +4,6 @@ import {
   Prisma,
   RefundAttemptStatus,
   type PrismaClient,
-  type RefundAttempt,
 } from "@prisma/client";
 import {
   closeFailure as failure,
@@ -27,6 +26,7 @@ import {
 
 type CloseRefundTx = Prisma.TransactionClient;
 type CloseRefundAggregate = NonNullable<Awaited<ReturnType<typeof loadAggregate>>>;
+type CloseRefundTarget = CloseRefundAggregate["refundAttempts"][number];
 
 class OrderStatusRollbackError extends Error {}
 
@@ -106,13 +106,19 @@ async function lockTarget(tx: CloseRefundTx, input: NormalizedCloseInput): Promi
 function loadAggregate(tx: CloseRefundTx, orderId: string) {
   return tx.order.findUnique({
     where: { id: orderId },
-    include: { payment: true, refundAttempts: { orderBy: { createdAt: "asc" } } },
+    include: {
+      payment: true,
+      refundAttempts: {
+        orderBy: { createdAt: "asc" },
+        include: { executionCommand: { select: { id: true } } },
+      },
+    },
   });
 }
 
 function validateAggregate(
   aggregate: CloseRefundAggregate,
-  target: RefundAttempt,
+  target: CloseRefundTarget,
 ): CloseRefundRequestFailure | null {
   if (aggregate.status !== OrderStatus.REFUND_PENDING) {
     return failure("ORDER_STATUS_CONFLICT", "Order is not awaiting a refund decision.");
@@ -137,8 +143,8 @@ function hasConsistentPaymentIdentity(
   return hasConsistentRefundAttemptLedgerIdentity(payment, aggregate.refundAttempts);
 }
 
-function classifyTarget(target: RefundAttempt): CloseRefundRequestFailure | null {
-  if (target.providerRefundId !== null) {
+function classifyTarget(target: CloseRefundTarget): CloseRefundRequestFailure | null {
+  if (target.providerRefundId !== null || target.executionCommand !== null) {
     return failure("PROVIDER_CONTACT_ALREADY_STARTED", "Refund provider contact may already have started.");
   }
   if (isContactStatus(target.status)) {
@@ -159,7 +165,7 @@ function isContactStatus(status: RefundAttemptStatus): boolean {
 async function persistClose(
   tx: CloseRefundTx,
   orderId: string,
-  target: RefundAttempt,
+  target: CloseRefundTarget,
   input: NormalizedCloseInput,
   restingStatus: RefundRestingOrderStatus,
 ): Promise<CloseRefundRequestResult> {
@@ -189,7 +195,10 @@ async function classifyCasLoss(
   orderId: string,
   refundAttemptId: string,
 ): Promise<CloseRefundRequestFailure> {
-  const target = await tx.refundAttempt.findFirst({ where: { id: refundAttemptId, orderId } });
+  const target = await tx.refundAttempt.findFirst({
+    where: { id: refundAttemptId, orderId },
+    include: { executionCommand: { select: { id: true } } },
+  });
   if (target) {
     const targetFailure = classifyTarget(target);
     if (targetFailure) return targetFailure;

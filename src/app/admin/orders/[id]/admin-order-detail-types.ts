@@ -80,6 +80,7 @@ interface RefundAttemptSource extends RefundAmountStateInput {
   createdAt: Date;
   updatedAt: Date;
   hasProviderRefundId: boolean;
+  hasExecutionCommand: boolean;
   transitions: RefundAttemptTransitionSource[];
 }
 

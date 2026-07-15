@@ -4,6 +4,7 @@ interface RefundCloseAdvisoryInput {
   orderStatus: OrderStatus;
   attemptStatus: RefundAttemptStatus;
   hasProviderRefundId: boolean;
+  hasExecutionCommand: boolean;
 }
 
 interface RefundCloseAdvisory {
@@ -28,6 +29,12 @@ export function buildRefundCloseAdvisory(
     return {
       canCloseRequest: false,
       closeWarning: "제공자 처리 정보가 있어 현재 요청의 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
+    };
+  }
+  if (input.hasExecutionCommand) {
+    return {
+      canCloseRequest: false,
+      closeWarning: "환불 실행 명령 기록이 있어 이 요청의 철회를 제공하지 않습니다. 수동 확인이 필요합니다.",
     };
   }
   if (orderMismatch) {

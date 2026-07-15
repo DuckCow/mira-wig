@@ -165,6 +165,7 @@ function buildRefundAttempt(
     orderStatus,
     attemptStatus: attempt.status,
     hasProviderRefundId: attempt.hasProviderRefundId,
+    hasExecutionCommand: attempt.hasExecutionCommand,
   });
   return {
     refundAttemptId: attempt.id,

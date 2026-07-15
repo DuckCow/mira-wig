@@ -23,7 +23,6 @@ export interface AdminRequestRefundAttemptInput {
 export interface AdminCloseRefundRequestInput {
   orderId: string;
   refundAttemptId: string;
-  reason: string;
 }
 
 export type AdminRefundActionErrorCode =
@@ -107,6 +106,8 @@ const CLOSE_FAILURE_CODE_MAP: Record<CloseRefundRequestFailureCode, AdminRefundA
   REFUND_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
 };
 
+const ADMIN_CLOSE_REASON = "관리자가 처리 전 환불 요청을 철회함";
+
 export async function requestRefundAttemptAction(
   input: AdminRequestRefundAttemptInput,
 ): Promise<AdminRequestRefundAttemptResult> {
@@ -145,13 +146,13 @@ export async function closeRefundRequestAction(
     orderId: validated.input.orderId,
     refundAttemptId: validated.input.refundAttemptId,
     closeOperationId: randomUUID(),
-    reason: validated.input.reason,
+    reason: ADMIN_CLOSE_REASON,
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: guard.session.user.id,
     now: new Date(),
   });
   if (!result.ok) return failure(mapCloseFailureCode(result.code));
-  revalidatePath(`/admin/orders/${validated.input.orderId}`);
+  revalidateClosedRefundRequest(validated.input.orderId);
   return {
     success: true,
     transitionId: result.transitionId,
@@ -180,19 +181,22 @@ function validateCloseInput(input: unknown): CloseInputValidationResult {
   if (!isPlainRecord(input)) return failure("INVALID_INPUT");
   const orderId = input.orderId;
   const refundAttemptId = input.refundAttemptId;
-  const reason = input.reason;
   if (typeof orderId !== "string" || !orderId.trim()) return failure("INVALID_INPUT");
   if (typeof refundAttemptId !== "string" || !refundAttemptId.trim()) return failure("INVALID_INPUT");
-  if (typeof reason !== "string") return failure("INVALID_INPUT");
-  if (!reason.trim()) return failure("REASON_REQUIRED");
   return {
     success: true,
     input: {
       orderId: orderId.trim(),
       refundAttemptId: refundAttemptId.trim(),
-      reason: reason.trim(),
     },
   };
+}
+
+function revalidateClosedRefundRequest(orderId: string): void {
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+  revalidatePath("/admin/refunds/intakes");
 }
 
 function mapFailureCode(code: RequestRefundAttemptFailureCode): AdminRefundActionErrorCode {
