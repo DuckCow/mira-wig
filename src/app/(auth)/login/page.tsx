@@ -1,12 +1,20 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { GoogleSignInButton } from "./GoogleSignInButton";
+import { resolveLoginCallbackUrl } from "./login-callback";
+
+type LoginPageProps = {
+  searchParams: Promise<{
+    callbackUrl?: string | string[];
+  }>;
+};
 
 export const metadata = { title: "로그인" };
 
-export default async function LoginPage() {
+export default async function LoginPage({ searchParams }: LoginPageProps) {
   const session = await getSession();
-  if (session) redirect("/styles");
+  const callbackUrl = resolveLoginCallbackUrl((await searchParams).callbackUrl);
+  if (session) redirect(callbackUrl);
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -17,7 +25,7 @@ export default async function LoginPage() {
         </header>
 
         <div className="space-y-3">
-          <GoogleSignInButton />
+          <GoogleSignInButton callbackUrl={callbackUrl} />
         </div>
 
         <p className="text-xs text-center text-gray-400">

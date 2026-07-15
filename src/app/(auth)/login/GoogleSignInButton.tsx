@@ -3,14 +3,18 @@
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 
-export function GoogleSignInButton() {
+type GoogleSignInButtonProps = {
+  callbackUrl: string;
+};
+
+export function GoogleSignInButton({ callbackUrl }: GoogleSignInButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSignIn() {
     setLoading(true);
     setError(null);
-    const result = await signIn("google", { callbackUrl: "/styles" });
+    const result = await signIn("google", { callbackUrl });
     if (result?.error) {
       setError("로그인 중 오류가 발생했습니다. 다시 시도해 주세요.");
       setLoading(false);
