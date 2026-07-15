@@ -167,6 +167,7 @@ export async function rejectCustomerRefundIntakeAction(
   const storedOrderId = result.intake.orderId;
   revalidatePath(`/admin/orders/${storedOrderId}`);
   revalidatePath("/admin/refunds/intakes");
+  revalidatePath(`/orders/${storedOrderId}`);
   return {
     success: true,
     outcome: result.replayed ? "ALREADY_REJECTED" : "REJECTED",

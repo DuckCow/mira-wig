@@ -134,6 +134,7 @@ export async function submitCustomerRefundIntakeAction(
   const storedOrderId = result.intake.orderId;
   revalidatePath(`/admin/orders/${storedOrderId}`);
   revalidatePath("/admin/refunds/intakes");
+  revalidatePath(`/orders/${storedOrderId}`);
   return {
     success: true,
     outcome,
@@ -172,6 +173,7 @@ export async function withdrawCustomerRefundIntakeAction(
   const storedOrderId = result.intake.orderId;
   revalidatePath(`/admin/orders/${storedOrderId}`);
   revalidatePath("/admin/refunds/intakes");
+  revalidatePath(`/orders/${storedOrderId}`);
   return {
     success: true,
     outcome: result.replayed ? "ALREADY_WITHDRAWN" : "WITHDRAWN",

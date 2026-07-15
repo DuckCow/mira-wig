@@ -189,6 +189,7 @@ describe("administrator reject boundary", () => {
     expect(mockRevalidatePath.mock.calls).toEqual([
       ["/admin/orders/stored_order_123"],
       ["/admin/refunds/intakes"],
+      ["/orders/stored_order_123"],
     ]);
   });
 

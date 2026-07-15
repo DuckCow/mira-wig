@@ -8,16 +8,25 @@ import {
 } from "@prisma/client";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { db } from "@/lib/db";
 import { CURRENCY_META, formatPrice, type CurrencyMeta } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import { getSession } from "@/lib/session";
 import { getCurlLabel, getLengthLabel } from "@/lib/wig-option-labels";
+import {
+  CustomerRefundIntakeActivationConfigError,
+  isCustomerRefundIntakeSubmitEnabled,
+} from "@/lib/payment/refund/customer-intake-activation";
+import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
 import { orderStatusLabel } from "../order-status";
+import { CustomerRefundIntakeSection } from "./CustomerRefundIntakeSection";
+import {
+  loadCustomerOrderDetail,
+  type CustomerOrderDetailRecord,
+} from "./customer-order-detail-data";
 
 type PageParams = Promise<{ id: string }>;
-type OrderDetail = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
+type OrderDetail = CustomerOrderDetailRecord;
 type OrderLine = OrderDetail["items"][number];
 type OrderShipping = NonNullable<OrderDetail["shipping"]>;
 type PaymentSummary = OrderDetail["payment"];
@@ -25,13 +34,30 @@ type PaymentSummary = OrderDetail["payment"];
 export const metadata = { title: "주문 상세" };
 
 export default async function OrderPage({ params }: { params: PageParams }) {
-  const { id } = await params;
   const session = await getSession();
-  if (!session?.user.id) redirect(loginPath(id));
+  if (!session?.user.id) {
+    const { id } = await params;
+    redirect(loginPath(id));
+  }
 
-  const order = await loadOrder(id, session.user.id);
-  if (!order) notFound();
+  const customerUserId = session.user.id.trim();
+  if (!customerUserId) throw customerOrderDetailInvariant();
 
+  const { id } = await params;
+  const submitEnabled = resolveCustomerRefundIntakeSubmitEnabled();
+  const detail = await loadCustomerOrderDetail(id, customerUserId, submitEnabled);
+  if (!detail) notFound();
+
+  return <CustomerOrderDetailView order={detail.order} intake={detail.intake} />;
+}
+
+export function CustomerOrderDetailView({
+  order,
+  intake,
+}: {
+  order: OrderDetail;
+  intake: CustomerRefundIntakeReadModel;
+}) {
   const currency = currencyMeta(order.currency);
 
   return (
@@ -41,6 +67,7 @@ export default async function OrderPage({ params }: { params: PageParams }) {
       </Link>
 
       <OrderHeader order={order} />
+      <CustomerRefundIntakeSection model={intake} />
       <OrderItems items={order.items} currency={currency} />
       <ShippingSection shipping={order.shipping} />
       <PaymentDetails order={order} />
@@ -49,50 +76,13 @@ export default async function OrderPage({ params }: { params: PageParams }) {
   );
 }
 
-async function loadOrder(orderId: string, userId: string) {
-  return db.order.findFirst({
-    where: { id: orderId, userId },
-    select: {
-      id: true,
-      status: true,
-      paidAt: true,
-      currency: true,
-      subtotalAmount: true,
-      shippingAmount: true,
-      totalAmount: true,
-      items: {
-        select: {
-          id: true,
-          quantity: true,
-          unitAmount: true,
-          fulfillmentType: true,
-          snapshotData: true,
-        },
-      },
-      shipping: {
-        select: {
-          recipientName: true,
-          phone: true,
-          country: true,
-          postalCode: true,
-          administrativeArea: true,
-          city: true,
-          addressLine1: true,
-          addressLine2: true,
-          memo: true,
-        },
-      },
-      payment: {
-        select: {
-          status: true,
-          amount: true,
-          currency: true,
-          provider: true,
-          mode: true,
-        },
-      },
-    },
-  });
+export function resolveCustomerRefundIntakeSubmitEnabled(): boolean {
+  try {
+    return isCustomerRefundIntakeSubmitEnabled();
+  } catch (error) {
+    if (error instanceof CustomerRefundIntakeActivationConfigError) return false;
+    throw error;
+  }
 }
 
 function OrderHeader({ order }: { order: OrderDetail }) {
@@ -227,6 +217,10 @@ function SummaryRow({ label, value, strong = false }: { label: string; value: st
 
 function loginPath(orderId: string): string {
   return `/login?callbackUrl=${encodeURIComponent(`/orders/${orderId}`)}`;
+}
+
+function customerOrderDetailInvariant(): Error {
+  return new Error("Customer Order-detail boundary invariant failed.");
 }
 
 function currencyMeta(currencyCode: string): CurrencyMeta {

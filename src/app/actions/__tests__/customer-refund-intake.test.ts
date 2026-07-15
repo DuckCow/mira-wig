@@ -374,6 +374,7 @@ describe("customer action exception and side-effect boundary", () => {
       expect(mockRevalidatePath.mock.calls).toEqual([
         ["/admin/orders/stored_order_123"],
         ["/admin/refunds/intakes"],
+        ["/orders/stored_order_123"],
       ]);
     },
   );
@@ -387,6 +388,7 @@ describe("customer action exception and side-effect boundary", () => {
       expect(mockRevalidatePath.mock.calls).toEqual([
         ["/admin/orders/stored_order_123"],
         ["/admin/refunds/intakes"],
+        ["/orders/stored_order_123"],
       ]);
     },
   );
