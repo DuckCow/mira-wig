@@ -59,6 +59,28 @@ describe("payment completion core", () => {
     await expect(db.cartItem.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
   });
 
+  it("KR 빈 administrativeArea 세션은 완료 시 OrderShipping에도 빈 문자열로 복사한다", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const session = await createCheckoutSession(db, {
+      userId: ctx.userId,
+      marketCode: MarketCode.KR,
+      shipping: { ...validShipping(), administrativeArea: "" },
+      now: defaultNow(),
+    });
+    const sessionShipping = await db.checkoutSessionShipping.findUnique({
+      where: { sessionId: session.sessionId },
+      select: { administrativeArea: true },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+    const order = await requireOrder(ctx.userId);
+
+    expect(sessionShipping?.administrativeArea).toBe("");
+    expect(result.kind).toBe("completed");
+    expect(order.shipping?.administrativeArea).toBe("");
+  });
+
   it("STOCKED 라인은 완료 시 stock을 조건부 차감하고 MR을 만들지 않는다", async () => {
     const variant = await createCatalogVariant(ctx, {
       amount: 9_000,

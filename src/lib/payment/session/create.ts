@@ -1,6 +1,7 @@
 import { CheckoutSessionStatus } from "@prisma/client";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { snapshotToJson } from "@/lib/order/snapshot";
+import { normalizeShippingAddress } from "@/lib/order/validation";
 import { SESSION_TTL_MS, SessionException, type CreateCheckoutSessionInput, type CreateCheckoutSessionResult } from "./types";
 
 type SessionTx = Prisma.TransactionClient;
@@ -12,15 +13,18 @@ export async function createCheckoutSession(
   client: PrismaClient,
   input: CreateCheckoutSessionInput,
 ): Promise<CreateCheckoutSessionResult> {
-  validateShippingFields(input.shipping);
-  const now = input.now ?? new Date();
+  const normalizedInput: CreateCheckoutSessionInput = {
+    ...input,
+    shipping: requireNormalizedShipping(input.shipping),
+  };
+  const now = normalizedInput.now ?? new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
 
   return client.$transaction(async (tx) => {
-    const market = await loadMarket(tx, input.marketCode);
-    validateShippingCountry(input.shipping.country, market.shippableCountries);
-    const cartItems = await loadCartItems(tx, input.userId);
-    const lines = await buildLines(tx, cartItems, input.marketCode, market.currency);
+    const market = await loadMarket(tx, normalizedInput.marketCode);
+    validateShippingCountry(normalizedInput.shipping.country, market.shippableCountries);
+    const cartItems = await loadCartItems(tx, normalizedInput.userId);
+    const lines = await buildLines(tx, cartItems, normalizedInput.marketCode, market.currency);
     const subtotalAmount = sumLines(lines);
     const shippingAmount = 0;
     const totalAmount = subtotalAmount + shippingAmount;
@@ -31,7 +35,7 @@ export async function createCheckoutSession(
     }
     const created = await createSession(
       tx,
-      input,
+      normalizedInput,
       lines,
       subtotalAmount,
       shippingAmount,
@@ -44,26 +48,36 @@ export async function createCheckoutSession(
   });
 }
 
-function validateShippingFields(shipping: CreateCheckoutSessionInput["shipping"]): void {
-  if (missingShippingFields(shipping)) {
-    throw new SessionException("SHIPPING_ADDRESS_INVALID", "배송지 필수 항목이 비어 있습니다.");
-  }
+function requireNormalizedShipping(
+  shipping: CreateCheckoutSessionInput["shipping"],
+): CreateCheckoutSessionInput["shipping"] {
+  const normalized = normalizeShippingAddress(shipping);
+  if (normalized.kind === "invalidCountry") throwInvalidShippingCountry();
+  if (normalized.kind === "invalidAddress") throwInvalidShippingAddress();
+  return {
+    recipientName: normalized.address.recipientName,
+    phone: normalized.address.phone,
+    country: shipping.country,
+    postalCode: normalized.address.postalCode,
+    administrativeArea: normalized.address.administrativeArea,
+    city: normalized.address.city,
+    addressLine1: normalized.address.addressLine1,
+    addressLine2: shipping.addressLine2,
+    memo: shipping.memo,
+  };
 }
 
 function validateShippingCountry(country: string, shippableCountries: string[]): void {
   if (shippableCountries.includes(country)) return;
+  throwInvalidShippingCountry();
+}
+
+function throwInvalidShippingCountry(): never {
   throw new SessionException("SHIPPING_COUNTRY_INVALID", "해당 마켓으로 배송할 수 없는 국가입니다.");
 }
 
-function missingShippingFields(shipping: CreateCheckoutSessionInput["shipping"]): boolean {
-  return [
-    shipping.recipientName,
-    shipping.phone,
-    shipping.postalCode,
-    shipping.administrativeArea,
-    shipping.city,
-    shipping.addressLine1,
-  ].some((value) => value.trim().length === 0);
+function throwInvalidShippingAddress(): never {
+  throw new SessionException("SHIPPING_ADDRESS_INVALID", "배송지 필수 항목이 비어 있습니다.");
 }
 
 async function loadMarket(tx: SessionTx, marketCode: string) {

@@ -9,25 +9,12 @@ import {
   getFieldError,
   collectFromFormData,
   hasSubmitError,
+  normalizeShippingAddress,
   REQUIRED_FIELDS,
 } from "../validation";
-import type { CountryFormConfig } from "../address-config";
+import { COUNTRY_FORM_CONFIGS } from "../address-config";
 
-// ── 테스트용 최소 config ──────────────────────────────────────
-
-const KR_CONFIG: CountryFormConfig = {
-  countryCode: "KR",
-  postalCodeLabel: "우편번호",
-  postalCodePlaceholder: "12345",
-  postalCodePattern: /^\d{5}$/,
-  phonePrefix: "+82",
-  phonePlaceholder: "010-1234-5678",
-  phonePattern: /^0\d{1,2}-\d{3,4}-\d{4}$/,
-  administrativeAreaLabel: "시/도",
-  administrativeAreaRequired: true,
-  administrativeAreaOptions: null,
-  cityLabel: "시/군/구",
-};
+const KR_CONFIG = COUNTRY_FORM_CONFIGS.KR;
 
 // ── checkSimpleRequired ───────────────────────────────────────
 
@@ -101,12 +88,11 @@ describe("getFieldError", () => {
   });
 
   it("administrativeArea — required=true이고 빈 값이면 에러", () => {
-    expect(getFieldError("administrativeArea", "", KR_CONFIG)).toBeTruthy();
+    expect(getFieldError("administrativeArea", "", COUNTRY_FORM_CONFIGS.US)).toBeTruthy();
   });
 
   it("administrativeArea — required=false이면 빈 값도 null", () => {
-    const config: CountryFormConfig = { ...KR_CONFIG, administrativeAreaRequired: false, administrativeAreaOptions: null };
-    expect(getFieldError("administrativeArea", "", config)).toBeNull();
+    expect(getFieldError("administrativeArea", "", KR_CONFIG)).toBeNull();
   });
 
   it("city — 빈 값이면 에러", () => {
@@ -120,6 +106,89 @@ describe("getFieldError", () => {
   it("addressLine2, memo — 필수 아닌 필드는 항상 null", () => {
     expect(getFieldError("addressLine2", "", KR_CONFIG)).toBeNull();
     expect(getFieldError("memo", "", KR_CONFIG)).toBeNull();
+  });
+});
+
+// ── production country-aware normalization ──────────────────
+
+const PRODUCTION_COUNTRY_CASES = [
+  { config: COUNTRY_FORM_CONFIGS.KR, blankAccepted: true, validAdministrativeArea: "서울특별시" },
+  { config: COUNTRY_FORM_CONFIGS.US, blankAccepted: false, validAdministrativeArea: "CA" },
+  { config: COUNTRY_FORM_CONFIGS.JP, blankAccepted: false, validAdministrativeArea: "東京都" },
+];
+
+function validAddress(country: string, administrativeArea: string) {
+  return {
+    recipientName: "Test Recipient",
+    phone: "010-0000-0000",
+    country,
+    postalCode: "00000",
+    administrativeArea,
+    city: "Test City",
+    addressLine1: "Test Address 1",
+  };
+}
+
+describe("normalizeShippingAddress — production country matrix", () => {
+  it.each(PRODUCTION_COUNTRY_CASES)(
+    "$config.countryCode blank/whitespace requiredness follows production config",
+    ({ config, blankAccepted }) => {
+      for (const administrativeArea of ["", "   "]) {
+        const result = normalizeShippingAddress(validAddress(config.countryCode, administrativeArea));
+        expect(result.kind).toBe(blankAccepted ? "valid" : "invalidAddress");
+        if (result.kind === "valid") expect(result.address.administrativeArea).toBe("");
+      }
+    },
+  );
+
+  it.each(PRODUCTION_COUNTRY_CASES)(
+    "$config.countryCode rejects every blank common required field",
+    ({ config, validAdministrativeArea }) => {
+      for (const field of REQUIRED_FIELDS) {
+        if (field === "administrativeArea") continue;
+        const result = normalizeShippingAddress({
+          ...validAddress(config.countryCode, validAdministrativeArea),
+          [field]: "   ",
+        });
+        expect(result.kind).toBe("invalidAddress");
+      }
+    },
+  );
+
+  it.each(PRODUCTION_COUNTRY_CASES)(
+    "$config.countryCode accepts and preserves a nonblank administrative area",
+    ({ config, validAdministrativeArea }) => {
+      const preserved = `  ${validAdministrativeArea}  `;
+      const result = normalizeShippingAddress(validAddress(config.countryCode, preserved));
+
+      expect(result.kind).toBe("valid");
+      if (result.kind === "valid") expect(result.address.administrativeArea).toBe(preserved);
+    },
+  );
+
+  it.each(PRODUCTION_COUNTRY_CASES)(
+    "$config.countryCode rejects missing and non-string administrative areas",
+    ({ config, validAdministrativeArea }) => {
+      const missing = validAddress(config.countryCode, validAdministrativeArea);
+      Reflect.deleteProperty(missing, "administrativeArea");
+      expect(normalizeShippingAddress(missing).kind).toBe("invalidAddress");
+
+      for (const malformed of [undefined, null, 7, {}, [], true]) {
+        const result = normalizeShippingAddress({
+          ...validAddress(config.countryCode, validAdministrativeArea),
+          administrativeArea: malformed,
+        });
+        expect(result.kind).toBe("invalidAddress");
+      }
+    },
+  );
+
+  it("fails closed for unsupported and malformed countries", () => {
+    expect(normalizeShippingAddress(validAddress("CA", "ON")).kind).toBe("invalidCountry");
+    expect(normalizeShippingAddress(validAddress("toString", "prototype key")).kind)
+      .toBe("invalidCountry");
+    expect(normalizeShippingAddress({ ...validAddress("KR", "서울특별시"), country: null }).kind)
+      .toBe("invalidCountry");
   });
 });
 
@@ -214,6 +283,10 @@ describe("hasSubmitError", () => {
 
   it("모든 필드가 올바르면 false", () => {
     expect(hasSubmitError(makeAddress(), KR_CONFIG)).toBe(false);
+  });
+
+  it("production KR config에서는 administrativeArea 공백도 false", () => {
+    expect(hasSubmitError(makeAddress({ administrativeArea: "   " }), KR_CONFIG)).toBe(false);
   });
 
   it("필수 필드가 비어있으면 true", () => {

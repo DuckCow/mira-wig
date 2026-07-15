@@ -3,16 +3,91 @@
 // server-only 없음 — 클라이언트·테스트 모두 import 가능
 // ============================================================
 
-import type { CountryFormConfig } from "./address-config";
-import type { CheckoutShippingInput } from "@/lib/payment/session/types";
+import { COUNTRY_FORM_CONFIGS, type CountryFormConfig } from "./address-config";
 
-export type AddressFieldKey = keyof CheckoutShippingInput;
+export interface CheckoutAddress<TCountry extends string = string> {
+  recipientName: string;
+  phone: string;
+  country: TCountry;
+  postalCode: string;
+  administrativeArea: string;
+  city: string;
+  addressLine1: string;
+  addressLine2?: string;
+  memo?: string;
+}
+
+interface NormalizedShippingAddress {
+  recipientName: string;
+  phone: string;
+  country: string;
+  postalCode: string;
+  administrativeArea: string;
+  city: string;
+  addressLine1: string;
+}
+
+type NormalizedCommonAddress = Omit<NormalizedShippingAddress, "country" | "administrativeArea">;
+
+export type ShippingAddressNormalizationResult =
+  | { kind: "valid"; address: NormalizedShippingAddress }
+  | { kind: "invalidCountry" }
+  | { kind: "invalidAddress" };
+
+export type AddressFieldKey = keyof CheckoutAddress;
 
 // 제출 시 검증할 필수 필드 목록 (국가무관 공통)
 export const REQUIRED_FIELDS: AddressFieldKey[] = [
   "recipientName", "phone", "postalCode", "administrativeArea",
   "city", "addressLine1",
 ];
+
+export function normalizeShippingAddress(input: unknown): ShippingAddressNormalizationResult {
+  if (!isRecord(input)) return { kind: "invalidAddress" };
+  const country = input.country;
+  if (typeof country !== "string") return { kind: "invalidCountry" };
+  if (!Object.prototype.hasOwnProperty.call(COUNTRY_FORM_CONFIGS, country)) {
+    return { kind: "invalidCountry" };
+  }
+  const config = COUNTRY_FORM_CONFIGS[country];
+  const common = readCommonAddress(input);
+  if (!common) return { kind: "invalidAddress" };
+  if (!Object.prototype.hasOwnProperty.call(input, "administrativeArea")) {
+    return { kind: "invalidAddress" };
+  }
+  const rawAdministrativeArea = input.administrativeArea;
+  if (typeof rawAdministrativeArea !== "string") return { kind: "invalidAddress" };
+  const administrativeArea = rawAdministrativeArea.trim().length === 0 ? "" : rawAdministrativeArea;
+  if (config.administrativeAreaRequired && administrativeArea.length === 0) {
+    return { kind: "invalidAddress" };
+  }
+  return {
+    kind: "valid",
+    address: { ...common, country, administrativeArea },
+  };
+}
+
+function readCommonAddress(input: Record<string, unknown>): NormalizedCommonAddress | null {
+  const { recipientName, phone, postalCode, city, addressLine1 } = input;
+  if (
+    !isNonblankString(recipientName)
+    || !isNonblankString(phone)
+    || !isNonblankString(postalCode)
+    || !isNonblankString(city)
+    || !isNonblankString(addressLine1)
+  ) {
+    return null;
+  }
+  return { recipientName, phone, postalCode, city, addressLine1 };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonblankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
 // ── 필드별 단순 헬퍼 ──────────────────────────────────────────
 
@@ -66,10 +141,10 @@ export function getFieldError(
 // 브라우저 자동완성이 onChange를 건너뛰어 state가 비어 있어도 정확히 수집된다.
 // country는 마켓 설정에서 결정되므로 state 값을 그대로 사용한다(외부 주입).
 
-export function collectFromFormData(
+export function collectFromFormData<TCountry extends string>(
   formData: FormData,
-  country: CheckoutShippingInput["country"],
-): CheckoutShippingInput {
+  country: TCountry,
+): CheckoutAddress<TCountry> {
   function str(key: string): string {
     const v = formData.get(key);
     return typeof v === "string" ? v : "";
@@ -90,7 +165,7 @@ export function collectFromFormData(
 // ── 제출 전 전체 에러 유무 확인 ───────────────────────────────
 
 export function hasSubmitError(
-  address: CheckoutShippingInput,
+  address: CheckoutAddress,
   config: CountryFormConfig,
 ): boolean {
   return REQUIRED_FIELDS.some(

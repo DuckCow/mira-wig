@@ -66,6 +66,74 @@ describe("checkout session lifecycle", () => {
     expect(session.lines).toHaveLength(2);
   });
 
+  it("KR administrativeArea 빈 문자열은 canonical 빈 문자열로 저장한다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const shipping = { ...validShipping(ShippingCountry.KR), administrativeArea: "" };
+
+    const result = await createCheckoutSession(db, baseInput(ctx, { shipping }));
+    const session = await findSession(result.sessionId);
+
+    expect(session.shipping?.administrativeArea).toBe("");
+  });
+
+  it("KR administrativeArea 공백만 있으면 canonical 빈 문자열로 저장한다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const shipping = { ...validShipping(ShippingCountry.KR), administrativeArea: "   " };
+
+    const result = await createCheckoutSession(db, baseInput(ctx, { shipping }));
+    const session = await findSession(result.sessionId);
+
+    expect(session.shipping?.administrativeArea).toBe("");
+  });
+
+  it("US administrativeArea 빈 문자열은 SHIPPING_ADDRESS_INVALID이고 residue가 없다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 2_999, stock: 5, marketCode: MarketCode.US });
+    await addCart(ctx, variant, 1);
+    const shipping = { ...validShipping(ShippingCountry.US), administrativeArea: "" };
+
+    await expectFailure("SHIPPING_ADDRESS_INVALID", () => {
+      return createCheckoutSession(db, baseInput(ctx, { marketCode: MarketCode.US, shipping }));
+    });
+    await expectNoSessionResidue(ctx.userId);
+  });
+
+  it("JP administrativeArea 공백만 있으면 SHIPPING_ADDRESS_INVALID이고 residue가 없다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 1_500, stock: 5, marketCode: MarketCode.JP });
+    await addCart(ctx, variant, 1);
+    const shipping = { ...validShipping(ShippingCountry.JP), administrativeArea: "   " };
+
+    await expectFailure("SHIPPING_ADDRESS_INVALID", () => {
+      return createCheckoutSession(db, baseInput(ctx, { marketCode: MarketCode.JP, shipping }));
+    });
+    await expectNoSessionResidue(ctx.userId);
+  });
+
+  it("runtime에서 administrativeArea property가 없으면 안전하게 거부하고 residue가 없다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const shipping = validShipping(ShippingCountry.KR);
+    Reflect.deleteProperty(shipping, "administrativeArea");
+
+    await expectFailure("SHIPPING_ADDRESS_INVALID", () => {
+      return createCheckoutSession(db, baseInput(ctx, { shipping }));
+    });
+    await expectNoSessionResidue(ctx.userId);
+  });
+
+  it("runtime에서 administrativeArea가 null이면 안전하게 거부하고 residue가 없다", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const shipping = validShipping(ShippingCountry.KR);
+    Reflect.set(shipping, "administrativeArea", null);
+
+    await expectFailure("SHIPPING_ADDRESS_INVALID", () => {
+      return createCheckoutSession(db, baseInput(ctx, { shipping }));
+    });
+    await expectNoSessionResidue(ctx.userId);
+  });
+
   it("정상 생성 라인은 시장 정가와 fulfillmentType을 복사한다", async () => {
     const variant = await createCartVariant(ctx, {
       amount: 12_000,
@@ -347,6 +415,7 @@ function makeContext(): TestContext {
 async function ensureMarkets(): Promise<void> {
   await upsertMarket(MarketCode.KR, "KRW", [ShippingCountry.KR], "ko");
   await upsertMarket(MarketCode.US, "USD", [ShippingCountry.US], "en");
+  await upsertMarket(MarketCode.JP, "JPY", [ShippingCountry.JP], "ja");
 }
 
 async function upsertMarket(
@@ -507,6 +576,7 @@ async function expectFailure(
 async function expectNoSessionResidue(userId: string): Promise<void> {
   await expect(db.checkoutSession.count({ where: { userId } })).resolves.toBe(0);
   await expect(db.checkoutSessionLine.count({ where: { session: { userId } } })).resolves.toBe(0);
+  await expect(db.checkoutSessionShipping.count({ where: { session: { userId } } })).resolves.toBe(0);
 }
 
 async function findSession(id: string) {
