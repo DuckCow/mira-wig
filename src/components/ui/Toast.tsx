@@ -8,27 +8,29 @@
 // ============================================================
 "use client";
 
-import { createContext, useCallback, useContext, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { usePathname } from "next/navigation";
+import {
+  toastStore,
+  type ToastChannel,
+  type ToastInput,
+  type ToastVariant,
+} from "./toast-store";
+
+export type { ToastInput, ToastVariant } from "./toast-store";
 
 // ── 타입 ─────────────────────────────────────────────────────
 
-export type ToastVariant = "success" | "error" | "warning";
-
-interface ToastItem {
-  id: number;
-  message: string;
-  variant: ToastVariant;
-}
-
-interface ShowToastOptions {
-  message: string;
-  variant?: ToastVariant;
-  /** 자동 닫힘 ms (기본 3000) */
-  duration?: number;
-}
-
 interface ToastContextValue {
-  showToast: (options: ShowToastOptions) => void;
+  showToast: (options: ToastInput) => void;
 }
 
 // ── Context ───────────────────────────────────────────────────
@@ -43,33 +45,45 @@ const VARIANT_CLASSES: Record<ToastVariant, string> = {
   warning: "bg-yellow-500 text-white",
 };
 
-/** 특정 id의 토스트를 제거하는 순수 함수 — callback 중첩 방지. */
-function removeById(id: number, list: ToastItem[]): ToastItem[] {
-  return list.filter((t) => t.id !== id);
+function channelForPathname(pathname: string): ToastChannel {
+  // A future provider outside /admin intentionally joins the shop feedback channel.
+  return pathname.startsWith("/admin") ? "admin" : "shop";
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const nextIdRef = useRef(0);
+  const pathname = usePathname();
+  const [channel] = useState<ToastChannel>(() => channelForPathname(pathname));
+  const subscribe = useCallback(
+    (listener: () => void) => toastStore.subscribe(channel, listener),
+    [channel],
+  );
+  const getSnapshot = useCallback(() => toastStore.getSnapshot(channel), [channel]);
+  const getServerSnapshot = useCallback(() => toastStore.getServerSnapshot(), []);
+  const toasts = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  const showToast = useCallback(({ message, variant = "success", duration = 3000 }: ShowToastOptions) => {
-    nextIdRef.current += 1;
-    const id = nextIdRef.current;
-    setToasts((prev) => [...prev, { id, message, variant }]);
-    setTimeout(() => setToasts((prev) => removeById(id, prev)), duration);
-  }, []);
+  const showToast = useCallback((options: ToastInput) => {
+    toastStore.enqueue(channel, options);
+  }, [channel]);
+  const contextValue = useMemo(() => Object.freeze({ showToast }), [showToast]);
+
+  useEffect(() => toastStore.mountPresenter(channel), [channel]);
+
+  useEffect(() => {
+    for (const toast of toasts) toastStore.acknowledge(channel, toast.id);
+  }, [channel, toasts]);
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <div
         aria-live="polite"
+        aria-atomic="false"
+        aria-relevant="additions text"
         className="fixed bottom-4 right-4 flex flex-col gap-2 z-50"
       >
         {toasts.map((t) => (
           <div
             key={t.id}
-            role="status"
             className={`px-4 py-3 rounded shadow-md text-sm font-medium max-w-xs ${VARIANT_CLASSES[t.variant]}`}
           >
             {t.message}
