@@ -8,6 +8,7 @@ import {
   Prisma,
   RefundAttemptActorType,
   RefundAttemptStatus,
+  RefundExecutionCommandEventType,
   RefundExecutionCommandStatus,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
@@ -120,6 +121,11 @@ describe("acquireRefundExecutionLease", () => {
     expect(state.command.leaseUntil?.getTime()).toBe(result.lease.leaseUntil.getTime());
     expect(state.command.leaseGeneration).toBe(1);
     expect(state.command.dispatchAttempt).toBe(0);
+    expect(state.commandEvents.length).toBe(1);
+    expect(state.commandEvents[0].eventType).toBe(RefundExecutionCommandEventType.LEASE_ACQUIRED);
+    expect(state.commandEvents[0].leaseGeneration).toBe(1);
+    expect(state.commandEvents[0].dispatchAttempt).toBe(0);
+    expect(state.commandEvents[0].occurredAt.getTime()).toBe(capturedTime);
     expect(digestHasExpectedFormat).toBe(true);
     expect(digestMatchesToken).toBe(true);
     expect(digestDiffersFromToken).toBe(true);
@@ -139,6 +145,32 @@ describe("acquireRefundExecutionLease", () => {
     const result = await acquireRefundExecutionLease(db, leaseInput(fixture), ENABLED_ENV);
 
     expect(result.ok).toBe(true);
+  });
+
+  it("rolls back the lease CAS when the acquisition event cannot be inserted", async () => {
+    const fixture = await trackedFixture(fixtures);
+    const occurredAt = await databaseTime();
+    await db.refundExecutionCommandEvent.create({
+      data: {
+        commandId: fixture.commandId,
+        eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+        leaseGeneration: 1,
+        dispatchAttempt: 0,
+        occurredAt,
+      },
+    });
+    const before = await dispatchState(fixture);
+
+    const result = await acquireRefundExecutionLease(db, leaseInput(fixture), ENABLED_ENV);
+
+    expect(result.ok).toBe(false);
+    expect(safeLeaseFailureCode(result)).toBe("LEDGER_INCONSISTENT");
+    const after = await dispatchState(fixture);
+    expect(isDeepStrictEqual(after, before)).toBe(true);
+    expect(after.command.status).toBe(RefundExecutionCommandStatus.READY);
+    expect(after.command.leaseGeneration).toBe(0);
+    expect(after.command.leaseTokenHash).toBeNull();
+    expect(after.commandEvents.length).toBe(1);
   });
 
   it("fails closed at the existing ordinal-positive result boundary for an E2A lease", async () => {
@@ -412,6 +444,8 @@ describe("acquireRefundExecutionLease", () => {
       expect(state.command.dispatchAttempt).toBe(0);
       expect(digestHasExpectedFormat).toBe(true);
       expect(state.evidence.length).toBe(0);
+      expect(state.commandEvents.length).toBe(1);
+      expect(state.commandEvents[0].eventType).toBe(RefundExecutionCommandEventType.LEASE_ACQUIRED);
       expect(state.transitions.length).toBe(2);
     } finally {
       await disconnectSessions(firstSession, secondSession);

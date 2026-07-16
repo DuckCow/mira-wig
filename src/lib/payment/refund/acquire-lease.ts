@@ -4,6 +4,7 @@ import {
   PaymentAttemptStatus,
   Prisma,
   RefundAttemptStatus,
+  RefundExecutionCommandEventType,
   RefundExecutionCommandStatus,
   type PrismaClient,
 } from "@prisma/client";
@@ -38,6 +39,7 @@ type LeaseContext = Readonly<{
 }>;
 
 class LeaseAcquisitionRollbackError extends Error {}
+class LeaseAcquisitionLedgerRollbackError extends Error {}
 
 export async function acquireRefundExecutionLease(
   client: PrismaClient,
@@ -49,6 +51,7 @@ export async function acquireRefundExecutionLease(
   try {
     return await client.$transaction((tx) => acquireInTransaction(tx, normalized.input, env));
   } catch (error) {
+    if (error instanceof LeaseAcquisitionLedgerRollbackError) return ledgerFailure();
     if (error instanceof LeaseAcquisitionRollbackError) {
       return failure("LEASE_CONFLICT", "Refund execution lease acquisition conflicted.");
     }
@@ -85,14 +88,18 @@ async function acquireInTransaction(
     leaseTokenHash,
   );
   if (updated !== 1) throw new LeaseAcquisitionRollbackError();
-  return success(
-    context.command.id,
-    context.target.id,
-    context.aggregate.id,
-    nextGeneration,
-    leaseToken,
-    leaseUntil,
-  );
+  await appendAcquisitionEvent(tx, context.command.id, nextGeneration, capturedAt);
+  return success(context.command.id, context.target.id, context.aggregate.id,
+    nextGeneration, leaseToken, leaseUntil);
+}
+
+async function appendAcquisitionEvent(
+  tx: LeaseTx, commandId: string, leaseGeneration: number, occurredAt: Date,
+): Promise<void> {
+  await tx.refundExecutionCommandEvent.create({
+    data: { commandId, eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+      leaseGeneration, dispatchAttempt: 0, occurredAt },
+  }).catch(() => { throw new LeaseAcquisitionLedgerRollbackError(); });
 }
 
 function validateGate(env: ActivationEnv): AcquireRefundExecutionLeaseResult | null {

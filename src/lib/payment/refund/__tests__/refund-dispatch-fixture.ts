@@ -141,18 +141,22 @@ export async function createDispatchFixture(
 }
 
 export async function dispatchState(fixture: DispatchFixture) {
-  const [order, payment, attempt, command, evidence, transitions] = await Promise.all([
+  const [order, payment, attempt, command, commandEvents, evidence, transitions] = await Promise.all([
     db.order.findUniqueOrThrow({ where: { id: fixture.orderId } }),
     db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }),
     db.refundAttempt.findUniqueOrThrow({ where: { id: fixture.refundAttemptId } }),
     db.refundExecutionCommand.findUniqueOrThrow({ where: { id: fixture.commandId } }),
+    db.refundExecutionCommandEvent.findMany({
+      where: { commandId: fixture.commandId },
+      orderBy: { occurredAt: "asc" },
+    }),
     db.refundExecutionEvidence.findMany({ where: { commandId: fixture.commandId }, orderBy: { createdAt: "asc" } }),
     db.refundAttemptTransition.findMany({
       where: { refundAttemptId: fixture.refundAttemptId },
       orderBy: { createdAt: "asc" },
     }),
   ]);
-  return { order, payment, attempt, command, evidence, transitions };
+  return { order, payment, attempt, command, commandEvents, evidence, transitions };
 }
 
 export async function addOpenAttempt(fixture: DispatchFixture): Promise<string> {
@@ -188,6 +192,7 @@ export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixt
     select: { id: true },
   });
   const commandIds = commands.map((command) => command.id);
+  await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
   await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });

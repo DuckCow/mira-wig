@@ -317,6 +317,11 @@ enum RefundExecutionCommandStatus {
   DONE
 }
 
+enum RefundExecutionCommandEventType {
+  LEASE_ACQUIRED
+  PRE_CONTACT_RELEASED
+}
+
 enum RefundExecutionEvidenceSource {
   ADAPTER_RESPONSE
   PROVIDER_LOOKUP
@@ -604,9 +609,25 @@ model RefundExecutionCommand {
   updatedAt DateTime @updatedAt
 
   evidence RefundExecutionEvidence[]
+  events   RefundExecutionCommandEvent[]
 
   @@index([status, availableAt, createdAt])
   @@index([status, leaseUntil])
+}
+
+model RefundExecutionCommandEvent {
+  id              String                          @id @default(cuid())
+  commandId       String
+  eventType       RefundExecutionCommandEventType
+  leaseGeneration Int
+  dispatchAttempt Int
+  occurredAt      DateTime                        @db.Timestamp(3)
+  createdAt       DateTime                        @default(now()) @db.Timestamp(3)
+
+  command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+
+  @@unique([commandId, leaseGeneration, eventType])
+  @@index([commandId, occurredAt])
 }
 
 model RefundExecutionEvidence {

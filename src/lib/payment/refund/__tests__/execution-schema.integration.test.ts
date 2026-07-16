@@ -10,6 +10,7 @@ import {
   Prisma,
   RefundAttemptActorType,
   RefundAttemptStatus,
+  RefundExecutionCommandEventType,
   RefundExecutionCommandStatus,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
@@ -22,9 +23,13 @@ import { db } from "@/lib/db";
 const MARKET_CODE = "KR";
 const NOW = new Date("2026-07-11T02:45:00.000Z");
 const VALID_TOKEN_HASH = "a".repeat(64);
-const MIGRATION_PATH = join(
+const E2A_MIGRATION_PATH = join(
   process.cwd(),
   "prisma/migrations/20260716090000_e2a_refund_execution_lease_fence/migration.sql",
+);
+const E2B1_MIGRATION_PATH = join(
+  process.cwd(),
+  "prisma/migrations/20260716160000_e2b1_refund_execution_command_events/migration.sql",
 );
 
 interface TestContext {
@@ -251,7 +256,7 @@ describe("refund execution schema", () => {
         leaseTokenHash: VALID_TOKEN_HASH,
       }),
     });
-    const migration = readFileSync(MIGRATION_PATH, "utf8");
+    const migration = readFileSync(E2A_MIGRATION_PATH, "utf8");
     const preflight = migration.match(/DO \$\$[\s\S]*?\$\$;/)?.[0];
     if (!preflight) throw new Error("E2A migration preflight block was not found.");
 
@@ -259,6 +264,138 @@ describe("refund execution schema", () => {
       db.$executeRawUnsafe(preflight),
       "Refund execution lease fence migration requires zero pre-existing LEASED commands.",
     );
+  });
+
+  it("stores both command-event types for one generation with truthful timestamps", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    const acquired = await db.refundExecutionCommandEvent.create({
+      data: commandEventData(command.id, RefundExecutionCommandEventType.LEASE_ACQUIRED),
+    });
+    const released = await db.refundExecutionCommandEvent.create({
+      data: commandEventData(command.id, RefundExecutionCommandEventType.PRE_CONTACT_RELEASED),
+    });
+
+    expect(acquired.eventType).toBe(RefundExecutionCommandEventType.LEASE_ACQUIRED);
+    expect(released.eventType).toBe(RefundExecutionCommandEventType.PRE_CONTACT_RELEASED);
+    expect(acquired.leaseGeneration).toBe(1);
+    expect(acquired.dispatchAttempt).toBe(0);
+    expect(acquired.occurredAt).toEqual(NOW);
+    expect(acquired.createdAt).toBeInstanceOf(Date);
+  });
+
+  it.each([
+    { label: "zero generation", leaseGeneration: 0, constraint: "RefundExecutionCommandEvent_lease_generation_positive_check" },
+    { label: "negative generation", leaseGeneration: -1, constraint: "RefundExecutionCommandEvent_lease_generation_positive_check" },
+    { label: "negative dispatch ordinal", dispatchAttempt: -1, constraint: "RefundExecutionCommandEvent_dispatch_attempt_nonnegative_check" },
+  ])("rejects command event with $label", async ({ leaseGeneration = 1, dispatchAttempt = 0, constraint }) => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    await expectConstraint(
+      db.refundExecutionCommandEvent.create({
+        data: commandEventData(command.id, RefundExecutionCommandEventType.LEASE_ACQUIRED, {
+          leaseGeneration,
+          dispatchAttempt,
+        }),
+      }),
+      constraint,
+    );
+  });
+
+  it("rejects duplicate event types but accepts the other type for the same command generation", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    await db.refundExecutionCommandEvent.create({
+      data: commandEventData(command.id, RefundExecutionCommandEventType.LEASE_ACQUIRED),
+    });
+    await expectPrismaCode(
+      db.refundExecutionCommandEvent.create({
+        data: commandEventData(command.id, RefundExecutionCommandEventType.LEASE_ACQUIRED),
+      }),
+      "P2002",
+    );
+    await db.refundExecutionCommandEvent.create({
+      data: commandEventData(command.id, RefundExecutionCommandEventType.PRE_CONTACT_RELEASED),
+    });
+    await expectPrismaCode(
+      db.refundExecutionCommandEvent.create({
+        data: commandEventData(command.id, RefundExecutionCommandEventType.PRE_CONTACT_RELEASED),
+      }),
+      "P2002",
+    );
+
+    await expect(db.refundExecutionCommandEvent.count({ where: { commandId: command.id } })).resolves.toBe(2);
+  });
+
+  it("requires occurredAt and restricts command deletion while an event exists", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    await expectConstraint(
+      db.$executeRaw(Prisma.sql`
+        INSERT INTO "RefundExecutionCommandEvent"
+          ("id", "commandId", "eventType", "leaseGeneration", "dispatchAttempt")
+        VALUES
+          (${`event_${randomUUID()}`}, ${command.id}, 'LEASE_ACQUIRED', 1, 0)
+      `),
+      "occurredAt",
+    );
+    await db.refundExecutionCommandEvent.create({
+      data: commandEventData(command.id, RefundExecutionCommandEventType.LEASE_ACQUIRED),
+    });
+    await expectConstraint(
+      db.refundExecutionCommand.delete({ where: { id: command.id } }),
+      "RefundExecutionCommandEvent_commandId_fkey",
+    );
+  });
+
+  it("keeps the command-event ledger free of secret, owner, provider, and customer columns", async () => {
+    const columns = await db.$queryRaw<{ columnName: string }[]>(Prisma.sql`
+      SELECT column_name AS "columnName"
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'RefundExecutionCommandEvent'
+      ORDER BY ordinal_position
+    `);
+    const names = columns.map((column) => column.columnName);
+
+    expect(names).toEqual([
+      "id",
+      "commandId",
+      "eventType",
+      "leaseGeneration",
+      "dispatchAttempt",
+      "occurredAt",
+      "createdAt",
+    ]);
+    expect(names.some((name) => /token|digest|owner|provider|customer|actor|operation/i.test(name))).toBe(false);
+  });
+
+  it("allows a pristine E2A-era database to pass the E2B1 preflight", async () => {
+    await expect(runE2B1Preflight()).resolves.toBeUndefined();
+  });
+
+  it("blocks E2B1 migration preflight when a LEASED command exists", async () => {
+    await db.refundExecutionCommand.create({
+      data: commandData(ctx.refundAttemptId, {
+        status: RefundExecutionCommandStatus.LEASED,
+        leaseOwner: "preflight-worker",
+        leaseUntil: NOW,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
+      }),
+    });
+
+    await expectConstraint(runE2B1Preflight(), "requires zero LEASED commands");
+  });
+
+  it("blocks E2B1 migration preflight when a positive dispatch ordinal exists", async () => {
+    await db.refundExecutionCommand.create({
+      data: commandData(ctx.refundAttemptId, { dispatchAttempt: 1 }),
+    });
+
+    await expectConstraint(runE2B1Preflight(), "requires zero positive dispatch ordinals");
+  });
+
+  it("blocks E2B1 migration preflight when execution evidence exists", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    await db.refundExecutionEvidence.create({ data: evidenceData(command.id) });
+
+    await expectConstraint(runE2B1Preflight(), "requires zero execution evidence rows");
   });
 
   it("stores evidence under its command, deduplicates globally, and restricts parent deletion", async () => {
@@ -408,6 +545,28 @@ function evidenceData(
   };
 }
 
+function commandEventData(
+  commandId: string,
+  eventType: RefundExecutionCommandEventType,
+  override: Partial<Prisma.RefundExecutionCommandEventUncheckedCreateInput> = {},
+): Prisma.RefundExecutionCommandEventUncheckedCreateInput {
+  return {
+    commandId,
+    eventType,
+    leaseGeneration: 1,
+    dispatchAttempt: 0,
+    occurredAt: NOW,
+    ...override,
+  };
+}
+
+async function runE2B1Preflight(): Promise<void> {
+  const migration = readFileSync(E2B1_MIGRATION_PATH, "utf8");
+  const preflight = migration.match(/DO \$\$[\s\S]*?\$\$;/)?.[0];
+  if (!preflight) throw new Error("E2B1 migration preflight block was not found.");
+  await db.$executeRawUnsafe(preflight);
+}
+
 async function expectConstraint(promise: Promise<unknown>, constraint: string): Promise<void> {
   try {
     await promise;
@@ -530,6 +689,7 @@ async function cleanup(context: TestContext): Promise<void> {
     select: { id: true },
   });
   const commandIds = commands.map((command) => command.id);
+  await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
   await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: context.refundAttemptId } });
