@@ -12,6 +12,7 @@ import {
   RefundAttemptStatus,
   RefundExecutionCommandEventType,
   RefundExecutionCommandStatus,
+  RefundExecutionDispatchAttemptState,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
   RefundExecutionEvidenceSource,
@@ -30,6 +31,10 @@ const E2A_MIGRATION_PATH = join(
 const E2B1_MIGRATION_PATH = join(
   process.cwd(),
   "prisma/migrations/20260716160000_e2b1_refund_execution_command_events/migration.sql",
+);
+const E3A_MIGRATION_PATH = join(
+  process.cwd(),
+  "prisma/migrations/20260716190000_e3a_refund_dispatch_authorization/migration.sql",
 );
 
 interface TestContext {
@@ -517,6 +522,186 @@ describe("refund execution schema", () => {
       application: RefundExecutionEvidenceApplication.CONFLICT,
     });
   });
+
+  it("installs the exact dispatch-attempt enum values and columns", async () => {
+    const enumValues = await db.$queryRaw<{ value: string }[]>(Prisma.sql`
+      SELECT enumlabel AS value
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'RefundExecutionDispatchAttemptState'
+      ORDER BY enumsortorder
+    `);
+    const columns = await db.$queryRaw<{ columnName: string }[]>(Prisma.sql`
+      SELECT column_name AS "columnName"
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'RefundExecutionDispatchAttempt'
+      ORDER BY ordinal_position
+    `);
+
+    expect(enumValues.map((row) => row.value)).toEqual([
+      "AUTHORIZED",
+      "CONTACT_MAY_HAVE_OCCURRED",
+    ]);
+    expect(columns.map((row) => row.columnName)).toEqual([
+      "id",
+      "commandId",
+      "ordinal",
+      "leaseGeneration",
+      "provider",
+      "mode",
+      "providerOperationKey",
+      "requestFingerprint",
+      "state",
+      "authorizedAt",
+      "contactMarkedAt",
+      "createdAt",
+    ]);
+  });
+
+  it.each([
+    {
+      label: "nonpositive ordinal",
+      override: { ordinal: 0 },
+      constraint: "RefundExecutionDispatchAttempt_ordinal_positive_check",
+    },
+    {
+      label: "nonpositive generation",
+      override: { leaseGeneration: 0 },
+      constraint: "RefundExecutionDispatchAttempt_lease_generation_positive_check",
+    },
+    {
+      label: "blank operation key",
+      override: { providerOperationKey: "   " },
+      constraint: "RefundExecutionDispatchAttempt_provider_operation_key_nonblank_",
+    },
+    {
+      label: "malformed fingerprint",
+      override: { requestFingerprint: "A".repeat(64) },
+      constraint: "RefundExecutionDispatchAttempt_request_fingerprint_format_check",
+    },
+    {
+      label: "AUTHORIZED with contact timestamp",
+      override: { contactMarkedAt: NOW },
+      constraint: "RefundExecutionDispatchAttempt_state_contact_coherence_check",
+    },
+    {
+      label: "contacted state without timestamp",
+      override: { state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED },
+      constraint: "RefundExecutionDispatchAttempt_state_contact_coherence_check",
+    },
+    {
+      label: "contact timestamp before authorization",
+      override: {
+        state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
+        contactMarkedAt: new Date(NOW.getTime() - 1),
+      },
+      constraint: "RefundExecutionDispatchAttempt_state_contact_coherence_check",
+    },
+  ])("rejects dispatch attempt with $label", async ({ override, constraint }) => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+
+    await expectConstraint(
+      db.refundExecutionDispatchAttempt.create({ data: dispatchAttemptData(command.id, override) }),
+      constraint,
+    );
+  });
+
+  it("enforces one row per command ordinal and restricts command deletion", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    await db.refundExecutionDispatchAttempt.create({ data: dispatchAttemptData(command.id) });
+
+    await expectPrismaCode(
+      db.refundExecutionDispatchAttempt.create({ data: dispatchAttemptData(command.id) }),
+      "P2002",
+    );
+    await expectConstraint(
+      db.refundExecutionCommand.delete({ where: { id: command.id } }),
+      "RefundExecutionDispatchAttempt_commandId_fkey",
+    );
+  });
+
+  it("uses RESTRICT deletion and CASCADE parent-key update semantics", async () => {
+    const rules = await db.$queryRaw<{ deleteRule: string; updateRule: string }[]>(Prisma.sql`
+      SELECT delete_rule AS "deleteRule", update_rule AS "updateRule"
+      FROM information_schema.referential_constraints
+      WHERE constraint_schema = 'public'
+        AND constraint_name = 'RefundExecutionDispatchAttempt_commandId_fkey'
+    `);
+
+    expect(rules.length).toBe(1);
+    expect(rules[0].deleteRule).toBe("RESTRICT");
+    expect(rules[0].updateRule).toBe("CASCADE");
+  });
+
+  it("adds no dispatch backfill and leaves a READY ordinal-zero command unchanged", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    const migration = readFileSync(E3A_MIGRATION_PATH, "utf8");
+    const hasBackfillStatement = /(?:INSERT\s+INTO|UPDATE)\s+"RefundExecutionDispatchAttempt"/i
+      .test(migration);
+    const dispatchCount = await db.refundExecutionDispatchAttempt.count({
+      where: { commandId: command.id },
+    });
+    const current = await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: command.id } });
+
+    expect(hasBackfillStatement).toBe(false);
+    expect(dispatchCount).toBe(0);
+    expect(current.status).toBe(RefundExecutionCommandStatus.READY);
+    expect(current.dispatchAttempt).toBe(0);
+  });
+
+  it("allows pristine state to pass the E3A preflight", async () => {
+    await expect(runE3APreflight()).resolves.toBeUndefined();
+  });
+
+  it("blocks E3A preflight for a LEASED command", async () => {
+    await db.refundExecutionCommand.create({
+      data: commandData(ctx.refundAttemptId, {
+        status: RefundExecutionCommandStatus.LEASED,
+        leaseOwner: "preflight-worker",
+        leaseUntil: NOW,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
+      }),
+    });
+
+    await expectConstraint(
+      runE3APreflight(),
+      "Refund dispatch-attempt migration requires zero pre-existing LEASED commands.",
+    );
+  });
+
+  it("blocks E3A preflight for a positive dispatch ordinal", async () => {
+    await db.refundExecutionCommand.create({
+      data: commandData(ctx.refundAttemptId, { dispatchAttempt: 1 }),
+    });
+
+    await expectConstraint(
+      runE3APreflight(),
+      "Refund dispatch-attempt migration requires zero positive dispatch ordinals.",
+    );
+  });
+
+  it("blocks E3A preflight for execution evidence", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+    await db.refundExecutionEvidence.create({ data: evidenceData(command.id) });
+
+    await expectConstraint(
+      runE3APreflight(),
+      "Refund dispatch-attempt migration requires zero execution evidence rows.",
+    );
+  });
+
+  it("blocks E3A preflight for a provider refund identity", async () => {
+    await db.refundAttempt.update({
+      where: { id: ctx.refundAttemptId },
+      data: { providerRefundId: `schema_preflight_${randomUUID()}` },
+    });
+
+    await expectConstraint(
+      runE3APreflight(),
+      "Refund dispatch-attempt migration requires zero provider refund identities.",
+    );
+  });
 });
 
 function commandData(
@@ -545,6 +730,24 @@ function evidenceData(
   };
 }
 
+function dispatchAttemptData(
+  commandId: string,
+  override: Partial<Prisma.RefundExecutionDispatchAttemptUncheckedCreateInput> = {},
+): Prisma.RefundExecutionDispatchAttemptUncheckedCreateInput {
+  return {
+    commandId,
+    ordinal: 1,
+    leaseGeneration: 1,
+    provider: PaymentProvider.MOCK,
+    mode: PaymentMode.SANDBOX,
+    providerOperationKey: `refund-operation-${randomUUID()}`,
+    requestFingerprint: "b".repeat(64),
+    state: RefundExecutionDispatchAttemptState.AUTHORIZED,
+    authorizedAt: NOW,
+    ...override,
+  };
+}
+
 function commandEventData(
   commandId: string,
   eventType: RefundExecutionCommandEventType,
@@ -564,6 +767,13 @@ async function runE2B1Preflight(): Promise<void> {
   const migration = readFileSync(E2B1_MIGRATION_PATH, "utf8");
   const preflight = migration.match(/DO \$\$[\s\S]*?\$\$;/)?.[0];
   if (!preflight) throw new Error("E2B1 migration preflight block was not found.");
+  await db.$executeRawUnsafe(preflight);
+}
+
+async function runE3APreflight(): Promise<void> {
+  const migration = readFileSync(E3A_MIGRATION_PATH, "utf8");
+  const preflight = migration.match(/DO \$\$[\s\S]*?\$\$;/)?.[0];
+  if (!preflight) throw new Error("E3A migration preflight block was not found.");
   await db.$executeRawUnsafe(preflight);
 }
 
@@ -689,6 +899,7 @@ async function cleanup(context: TestContext): Promise<void> {
     select: { id: true },
   });
   const commandIds = commands.map((command) => command.id);
+  await db.refundExecutionDispatchAttempt.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });

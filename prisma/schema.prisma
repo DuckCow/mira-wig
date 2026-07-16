@@ -322,6 +322,11 @@ enum RefundExecutionCommandEventType {
   PRE_CONTACT_RELEASED
 }
 
+enum RefundExecutionDispatchAttemptState {
+  AUTHORIZED
+  CONTACT_MAY_HAVE_OCCURRED
+}
+
 enum RefundExecutionEvidenceSource {
   ADAPTER_RESPONSE
   PROVIDER_LOOKUP
@@ -610,6 +615,7 @@ model RefundExecutionCommand {
 
   evidence RefundExecutionEvidence[]
   events   RefundExecutionCommandEvent[]
+  dispatchAttempts RefundExecutionDispatchAttempt[]
 
   @@index([status, availableAt, createdAt])
   @@index([status, leaseUntil])
@@ -628,6 +634,25 @@ model RefundExecutionCommandEvent {
 
   @@unique([commandId, leaseGeneration, eventType])
   @@index([commandId, occurredAt])
+}
+
+model RefundExecutionDispatchAttempt {
+  id                   String                              @id @default(cuid())
+  commandId            String
+  ordinal              Int
+  leaseGeneration      Int
+  provider             PaymentProvider
+  mode                 PaymentMode
+  providerOperationKey String                              @db.VarChar(512)
+  requestFingerprint   String                              @db.VarChar(64)
+  state                RefundExecutionDispatchAttemptState
+  authorizedAt         DateTime                            @db.Timestamp(3)
+  contactMarkedAt      DateTime?                           @db.Timestamp(3)
+  createdAt            DateTime                            @default(now()) @db.Timestamp(3)
+
+  command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+
+  @@unique([commandId, ordinal])
 }
 
 model RefundExecutionEvidence {

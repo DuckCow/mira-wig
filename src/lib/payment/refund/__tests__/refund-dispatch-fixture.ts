@@ -159,6 +159,60 @@ export async function dispatchState(fixture: DispatchFixture) {
   return { order, payment, attempt, command, commandEvents, evidence, transitions };
 }
 
+export async function redactedDispatchAuthorizationState(fixture: DispatchFixture) {
+  const [order, payment, attempt, command, commandEvents, evidence, transitions, dispatchAttempts] =
+    await Promise.all([
+      db.order.findUniqueOrThrow({ where: { id: fixture.orderId } }),
+      db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }),
+      db.refundAttempt.findUniqueOrThrow({ where: { id: fixture.refundAttemptId } }),
+      db.refundExecutionCommand.findUniqueOrThrow({ where: { id: fixture.commandId } }),
+      db.refundExecutionCommandEvent.findMany({ where: { commandId: fixture.commandId } }),
+      db.refundExecutionEvidence.findMany({ where: { commandId: fixture.commandId } }),
+      db.refundAttemptTransition.findMany({ where: { refundAttemptId: fixture.refundAttemptId } }),
+      db.refundExecutionDispatchAttempt.findMany({ where: { commandId: fixture.commandId } }),
+    ]);
+  return {
+    orderStatus: order.status,
+    orderTotalAmount: order.totalAmount,
+    orderCurrency: order.currency,
+    orderUpdatedAt: order.updatedAt.getTime(),
+    paymentStatus: payment.status,
+    paymentAmount: payment.amount,
+    paymentCurrency: payment.currency,
+    paymentProvider: payment.provider,
+    paymentMode: payment.mode,
+    attemptStatus: attempt.status,
+    attemptAmount: attempt.amount,
+    attemptCurrency: attempt.currency,
+    attemptProvider: attempt.provider,
+    attemptMode: attempt.mode,
+    providerRefundIdPresent: attempt.providerRefundId !== null,
+    commandStatus: command.status,
+    commandDispatchAttempt: command.dispatchAttempt,
+    commandLeaseGeneration: command.leaseGeneration,
+    commandLeaseUntilMs: command.leaseUntil?.getTime() ?? null,
+    commandAvailableAtMs: command.availableAt.getTime(),
+    commandLeaseOwnerPresent: Boolean(command.leaseOwner?.trim()),
+    commandTokenHashPresent: command.leaseTokenHash !== null,
+    commandTokenHashFormatValid: /^[0-9a-f]{64}$/.test(command.leaseTokenHash ?? ""),
+    commandSafeErrorCodePresent: command.lastSafeErrorCode !== null,
+    commandSafeErrorMessagePresent: command.lastSafeErrorMessage !== null,
+    commandEventCount: commandEvents.length,
+    evidenceCount: evidence.length,
+    transitionCount: transitions.length,
+    dispatchAttemptCount: dispatchAttempts.length,
+    dispatchOrdinals: dispatchAttempts.map((row) => row.ordinal),
+    dispatchGenerations: dispatchAttempts.map((row) => row.leaseGeneration),
+    dispatchStates: dispatchAttempts.map((row) => row.state),
+    dispatchContactMarked: dispatchAttempts.map((row) => row.contactMarkedAt !== null),
+    dispatchAuthorizedAtMs: dispatchAttempts.map((row) => row.authorizedAt.getTime()),
+    dispatchOperationKeysPresent: dispatchAttempts.map((row) => row.providerOperationKey.length > 0),
+    dispatchFingerprintsValid: dispatchAttempts.map((row) => /^[0-9a-f]{64}$/.test(
+      row.requestFingerprint,
+    )),
+  };
+}
+
 export async function addOpenAttempt(fixture: DispatchFixture): Promise<string> {
   const id = `refund_open_${randomUUID()}`;
   await db.refundAttempt.create({
@@ -192,6 +246,7 @@ export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixt
     select: { id: true },
   });
   const commandIds = commands.map((command) => command.id);
+  await db.refundExecutionDispatchAttempt.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });

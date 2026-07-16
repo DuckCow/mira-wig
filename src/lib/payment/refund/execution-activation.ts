@@ -3,6 +3,8 @@ type ActivationEnv = Readonly<Record<string, string | undefined>>;
 export const REFUND_EXECUTION_CLAIM_ENABLED = "REFUND_EXECUTION_CLAIM_ENABLED";
 export const REFUND_EXECUTION_LEASE_ENABLED = "REFUND_EXECUTION_LEASE_ENABLED";
 export const REFUND_EXECUTION_LEASE_RELEASE_ENABLED = "REFUND_EXECUTION_LEASE_RELEASE_ENABLED";
+export const REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED =
+  "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED";
 
 export class RefundExecutionActivationConfigError extends Error {
   constructor(key: string) {
@@ -27,6 +29,15 @@ export function isRefundExecutionLeaseReleaseEnabled(
   env: ActivationEnv = process.env,
 ): boolean {
   return isRefundExecutionCapabilityEnabled(REFUND_EXECUTION_LEASE_RELEASE_ENABLED, env);
+}
+
+export function isRefundExecutionDispatchAuthorizationEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(
+    REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
+    env,
+  );
 }
 
 function isRefundExecutionCapabilityEnabled(key: string, env: ActivationEnv): boolean {
