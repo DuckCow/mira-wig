@@ -5,16 +5,23 @@ import {
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
   type Payment,
+  type Prisma,
   type RefundAttempt,
+  type RefundExecutionDispatchAttempt,
+  type RefundExecutionEvidence,
   type RefundExecutionCommand,
 } from "@prisma/client";
 import {
   EVIDENCE_CONFLICT_CODE,
   INSUFFICIENT_SUCCESS_CODE,
-  resolutionFailure,
-  type NormalizedRefundAdapterResponse,
-  type ResolveRefundAdapterResponseFailure,
+  resultFailure,
+  type RefundExecutionResultFailure,
 } from "./execution-result-contract";
+import type { NormalizedRefundObservation } from "./refund-observation-contract";
+import {
+  RefundRequestFingerprintInputError,
+  fingerprintRefundRequest,
+} from "./refund-request-fingerprint";
 import {
   validateInitialRefundExecutionSuitability,
   type InitialExecutionAggregate,
@@ -53,69 +60,149 @@ export function validateFreshResolutionAggregate(
   aggregate: ResolutionAggregate,
   target: ResolutionTarget,
   command: RefundExecutionCommand,
-): ResolveRefundAdapterResponseFailure | null {
+): RefundExecutionResultFailure | null {
   return validateInitialRefundExecutionSuitability(aggregate, target, command).ok ? null : ledgerFailure();
+}
+
+export function matchesAuthorizedResultRequest(
+  aggregate: ResolutionAggregate,
+  target: ResolutionTarget,
+  dispatch: RefundExecutionDispatchAttempt,
+): boolean {
+  const providerPaymentReference = aggregate.payment.providerPaymentKey;
+  if (!providerPaymentReference) return false;
+  const coherentIdentity = [
+    aggregate.payment.provider === target.provider,
+    aggregate.payment.mode === target.mode,
+    aggregate.payment.amount === aggregate.totalAmount,
+    aggregate.payment.currency === aggregate.currency,
+    target.amount <= aggregate.payment.amount,
+    target.currency === aggregate.currency,
+    dispatch.provider === target.provider,
+    dispatch.mode === target.mode,
+    dispatch.providerOperationKey === target.idempotencyKey,
+  ].every(Boolean);
+  if (!coherentIdentity) return false;
+  try {
+    return dispatch.requestFingerprint === fingerprintRefundRequest({
+      provider: target.provider,
+      mode: target.mode,
+      providerPaymentReference,
+      amountMinor: target.amount,
+      currency: target.currency,
+      providerOperationKey: target.idempotencyKey,
+    });
+  } catch (error) {
+    if (error instanceof RefundRequestFingerprintInputError) return false;
+    throw error;
+  }
+}
+
+export async function hasRefundProviderIdentityConflict(
+  tx: Prisma.TransactionClient,
+  target: ResolutionTarget,
+  observation: NormalizedRefundObservation,
+): Promise<boolean> {
+  const observed = observation.observedProviderRefundId;
+  if (observed === null) return false;
+  if (target.providerRefundId !== null && target.providerRefundId !== observed) return true;
+  const owner = await tx.refundAttempt.findFirst({
+    where: { provider: target.provider, providerRefundId: observed, id: { not: target.id } },
+    select: { id: true },
+  });
+  return owner !== null;
+}
+
+export function expectedReplayOrderStatus(
+  aggregate: ResolutionAggregate,
+  target: ResolutionTarget,
+  evidence: RefundExecutionEvidence,
+): OrderStatus | null {
+  if (evidence.application !== RefundExecutionEvidenceApplication.APPLIED
+    || evidence.outcome === RefundExecutionEvidenceOutcome.NOT_EXECUTED_RETRYABLE
+    || evidence.outcome === RefundExecutionEvidenceOutcome.UNKNOWN) return OrderStatus.REFUND_PENDING;
+  if (evidence.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED) {
+    const derived = deriveOrderStatusAfterSucceededRefund({
+      capturedAmount: aggregate.payment.amount,
+      currency: aggregate.payment.currency,
+      succeedingAttemptId: target.id,
+      attempts: aggregate.refundAttempts,
+    });
+    return derived.ok ? derived.orderStatus : null;
+  }
+  if (evidence.outcome === RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL) {
+    const derived = deriveRefundRestingOrderStatus({
+      totalAmount: aggregate.payment.amount,
+      currency: aggregate.payment.currency,
+      attempts: aggregate.refundAttempts,
+    });
+    return derived.ok ? derived.orderStatus : null;
+  }
+  return OrderStatus.REFUND_PENDING;
 }
 
 export function buildResolutionPlan(
   aggregate: ResolutionAggregate,
   target: ResolutionTarget,
-  input: NormalizedRefundAdapterResponse,
+  observation: NormalizedRefundObservation,
+  capturedAt: Date,
   providerIdentityConflict: boolean,
-): ResolutionPlan | ResolveRefundAdapterResponseFailure {
-  if (hasMoneyConflict(target, aggregate.payment, input) || providerIdentityConflict) {
+): ResolutionPlan | RefundExecutionResultFailure {
+  if (hasMoneyConflict(target, aggregate.payment, observation) || providerIdentityConflict) {
     return manualReviewPlan(
       RefundExecutionEvidenceApplication.CONFLICT,
       EVIDENCE_CONFLICT_CODE,
-      input.safeMessage,
+      observation.safeMessage,
     );
   }
-  if (input.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED && input.reportedAmount === null) {
+  if (observation.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED && observation.reportedAmount === null) {
     return manualReviewPlan(
       RefundExecutionEvidenceApplication.PARKED,
       INSUFFICIENT_SUCCESS_CODE,
-      input.safeMessage,
+      observation.safeMessage,
     );
   }
-  return appliedPlan(aggregate, target, input);
+  return appliedPlan(aggregate, target, observation, capturedAt);
 }
 
 function hasMoneyConflict(
   target: RefundAttempt,
   payment: Payment,
-  input: NormalizedRefundAdapterResponse,
+  observation: NormalizedRefundObservation,
 ): boolean {
-  if (input.reportedAmount === null || input.reportedCurrency === null) return false;
-  return input.reportedAmount !== target.amount
-    || input.reportedCurrency !== target.currency
-    || input.reportedCurrency !== payment.currency;
+  if (observation.reportedAmount === null || observation.reportedCurrency === null) return false;
+  return observation.reportedAmount !== target.amount
+    || observation.reportedCurrency !== target.currency
+    || observation.reportedCurrency !== payment.currency;
 }
 
 function appliedPlan(
   aggregate: ResolutionAggregate,
   target: ResolutionTarget,
-  input: NormalizedRefundAdapterResponse,
-): ResolutionPlan | ResolveRefundAdapterResponseFailure {
-  if (input.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED) {
-    return successPlan(aggregate, target, input);
+  observation: NormalizedRefundObservation,
+  capturedAt: Date,
+): ResolutionPlan | RefundExecutionResultFailure {
+  if (observation.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED) {
+    return successPlan(aggregate, target, observation, capturedAt);
   }
-  if (input.outcome === RefundExecutionEvidenceOutcome.ACCEPTED_PENDING) {
-    return pendingPlan(target, input);
+  if (observation.outcome === RefundExecutionEvidenceOutcome.ACCEPTED_PENDING) {
+    return pendingPlan(target, observation);
   }
-  if (input.outcome === RefundExecutionEvidenceOutcome.NOT_EXECUTED_RETRYABLE) {
-    return failurePlan(RefundAttemptStatus.FAILED_RETRYABLE, RefundExecutionCommandStatus.PARKED, input, false);
+  if (observation.outcome === RefundExecutionEvidenceOutcome.NOT_EXECUTED_RETRYABLE) {
+    return failurePlan(RefundAttemptStatus.FAILED_RETRYABLE, RefundExecutionCommandStatus.PARKED, observation, capturedAt, false);
   }
-  if (input.outcome === RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL) {
-    return terminalFailurePlan(aggregate, input);
+  if (observation.outcome === RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL) {
+    return terminalFailurePlan(aggregate, observation, capturedAt);
   }
-  return failurePlan(RefundAttemptStatus.MANUAL_REVIEW, RefundExecutionCommandStatus.PARKED, input, false);
+  return failurePlan(RefundAttemptStatus.MANUAL_REVIEW, RefundExecutionCommandStatus.PARKED, observation, capturedAt, false);
 }
 
 function successPlan(
   aggregate: ResolutionAggregate,
   target: ResolutionTarget,
-  input: NormalizedRefundAdapterResponse,
-): ResolutionPlan | ResolveRefundAdapterResponseFailure {
+  observation: NormalizedRefundObservation,
+  capturedAt: Date,
+): ResolutionPlan | RefundExecutionResultFailure {
   const derived = deriveOrderStatusAfterSucceededRefund({
     capturedAmount: aggregate.payment.amount,
     currency: aggregate.payment.currency,
@@ -125,35 +212,36 @@ function successPlan(
   if (!derived.ok) return ledgerFailure();
   return {
     application: RefundExecutionEvidenceApplication.APPLIED,
-    diagnostic: { safeCode: input.safeCode, safeMessage: input.safeMessage },
+    diagnostic: { safeCode: observation.safeCode, safeMessage: observation.safeMessage },
     attemptStatus: RefundAttemptStatus.SUCCEEDED,
     commandStatus: RefundExecutionCommandStatus.DONE,
     orderStatus: derived.orderStatus,
-    processedAt: input.now,
+    processedAt: capturedAt,
     failedAt: null,
-    providerRefundId: input.observedProviderRefundId,
+    providerRefundId: observation.observedProviderRefundId,
     transitionReason: EXECUTION_SUCCEEDED_TRANSITION_REASON,
   };
 }
 
-function pendingPlan(target: ResolutionTarget, input: NormalizedRefundAdapterResponse): ResolutionPlan {
+function pendingPlan(target: ResolutionTarget, observation: NormalizedRefundObservation): ResolutionPlan {
   return {
     application: RefundExecutionEvidenceApplication.APPLIED,
-    diagnostic: { safeCode: input.safeCode, safeMessage: input.safeMessage },
+    diagnostic: { safeCode: observation.safeCode, safeMessage: observation.safeMessage },
     attemptStatus: RefundAttemptStatus.PROCESSING,
     commandStatus: RefundExecutionCommandStatus.WAITING_EVIDENCE,
     orderStatus: OrderStatus.REFUND_PENDING,
     processedAt: null,
     failedAt: null,
-    providerRefundId: target.providerRefundId ?? input.observedProviderRefundId,
+    providerRefundId: target.providerRefundId ?? observation.observedProviderRefundId,
     transitionReason: null,
   };
 }
 
 function terminalFailurePlan(
   aggregate: ResolutionAggregate,
-  input: NormalizedRefundAdapterResponse,
-): ResolutionPlan | ResolveRefundAdapterResponseFailure {
+  observation: NormalizedRefundObservation,
+  capturedAt: Date,
+): ResolutionPlan | RefundExecutionResultFailure {
   const resting = deriveRefundRestingOrderStatus({
     totalAmount: aggregate.payment.amount,
     currency: aggregate.payment.currency,
@@ -163,7 +251,8 @@ function terminalFailurePlan(
   const plan = failurePlan(
     RefundAttemptStatus.FAILED_TERMINAL,
     RefundExecutionCommandStatus.DONE,
-    input,
+    observation,
+    capturedAt,
     true,
   );
   return { ...plan, orderStatus: resting.orderStatus };
@@ -172,7 +261,8 @@ function terminalFailurePlan(
 function failurePlan(
   attemptStatus: RefundAttemptStatus,
   commandStatus: RefundExecutionCommandStatus,
-  input: NormalizedRefundAdapterResponse,
+  observation: NormalizedRefundObservation,
+  capturedAt: Date,
   terminal: boolean,
 ): ResolutionPlan {
   const reason = attemptStatus === RefundAttemptStatus.FAILED_RETRYABLE
@@ -182,12 +272,12 @@ function failurePlan(
       : EXECUTION_MANUAL_REVIEW_TRANSITION_REASON;
   return {
     application: RefundExecutionEvidenceApplication.APPLIED,
-    diagnostic: { safeCode: input.safeCode, safeMessage: input.safeMessage },
+    diagnostic: { safeCode: observation.safeCode, safeMessage: observation.safeMessage },
     attemptStatus,
     commandStatus,
     orderStatus: OrderStatus.REFUND_PENDING,
     processedAt: null,
-    failedAt: terminal ? input.now : null,
+    failedAt: terminal ? capturedAt : null,
     providerRefundId: null,
     transitionReason: reason,
   };
@@ -215,6 +305,6 @@ export function validatePlanTransition(plan: ResolutionPlan): boolean {
     && validateRefundAttemptStatusTransition(RefundAttemptStatus.PROCESSING, plan.attemptStatus).ok;
 }
 
-function ledgerFailure(): ResolveRefundAdapterResponseFailure {
-  return resolutionFailure("REFUND_LEDGER_INCONSISTENT", "Refund execution aggregate is inconsistent.");
+function ledgerFailure(): RefundExecutionResultFailure {
+  return resultFailure("REFUND_LEDGER_INCONSISTENT", "Refund execution aggregate is inconsistent.");
 }

@@ -4,10 +4,12 @@ import {
   isRefundExecutionLeaseEnabled,
   isRefundExecutionLeaseReleaseEnabled,
   isRefundExecutionDispatchAuthorizationEnabled,
+  isRefundExecutionObservationApplicationEnabled,
   REFUND_EXECUTION_CLAIM_ENABLED,
   REFUND_EXECUTION_LEASE_ENABLED,
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
+  REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
   RefundExecutionActivationConfigError,
 } from "../execution-activation";
 
@@ -48,6 +50,37 @@ describe(REFUND_EXECUTION_CLAIM_ENABLED, () => {
       CUSTOMER_REFUND_INTAKE_SUBMIT_ENABLED: "ENABLED",
       CUSTOMER_REFUND_INTAKE_APPROVE_ENABLED: "ENABLED",
     })).toBe(false);
+  });
+});
+
+describe(REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED, () => {
+  it.each([undefined, "", "   "])("treats %j as disabled", (value) => {
+    expect(isRefundExecutionObservationApplicationEnabled({
+      [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: value,
+    })).toBe(false);
+  });
+
+  it.each(["ENABLED", "  ENABLED  "])("treats %j as enabled", (value) => {
+    expect(isRefundExecutionObservationApplicationEnabled({
+      [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: value,
+    })).toBe(true);
+  });
+
+  it("rejects and does not retain malformed nonblank configuration", () => {
+    const malformed = "unexpected-secret-value";
+    let thrown: unknown;
+    try {
+      isRefundExecutionObservationApplicationEnabled({
+        [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: malformed,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(RefundExecutionActivationConfigError);
+    if (!(thrown instanceof Error)) throw new Error("Expected a configuration error.");
+    expect(thrown.message).not.toContain(malformed);
+    expect(JSON.stringify(thrown)).not.toContain(malformed);
+    expect(Object.values(thrown)).not.toContain(malformed);
   });
 });
 

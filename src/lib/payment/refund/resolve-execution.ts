@@ -1,161 +1,227 @@
+import { createHash } from "node:crypto";
 import {
-  OrderStatus,
   Prisma,
-  RefundAttemptStatus,
   RefundExecutionCommandStatus,
+  RefundExecutionDispatchAttemptState,
   type PrismaClient,
+  type RefundExecutionDispatchAttempt,
 } from "@prisma/client";
 import {
-  normalizeRefundAdapterResponse,
-  resolutionFailure as failure,
-  type NormalizedRefundAdapterResponse,
-  type ResolveRefundAdapterResponseInput,
-  type ResolveRefundAdapterResponseResult,
+  RefundExecutionActivationConfigError,
+  isRefundExecutionObservationApplicationEnabled,
+} from "./execution-activation";
+import {
+  buildRefundResultDedupKey,
+  normalizePersistFreshRefundExecutionObservationInput,
+  normalizeReplayRefundExecutionResultInput,
+  resultFailure,
+  type NormalizedPersistFreshRefundExecutionObservationInput,
+  type NormalizedReplayRefundExecutionResultInput,
+  type NormalizedRefundResultInput,
+  type PersistFreshRefundExecutionObservationInput,
+  type RefundExecutionResult,
+  type ReplayRefundExecutionResultInput,
 } from "./execution-result-contract";
 import {
   buildResolutionPlan,
+  hasRefundProviderIdentityConflict,
+  matchesAuthorizedResultRequest,
   validateFreshResolutionAggregate,
   validatePlanTransition,
   type ResolutionAggregate,
   type ResolutionTarget,
 } from "./execution-result-plan";
 import {
+  captureRefundResultDatabaseTime,
+  lockRefundResultRows,
   persistResolution,
   ResolutionRollbackError,
 } from "./execution-result-persistence";
 import { resolveRefundEvidenceReplay } from "./execution-result-replay";
 
 type ResolutionTx = Prisma.TransactionClient;
+type ActivationEnv = Readonly<Record<string, string | undefined>>;
+type Ownership = { orderId: string; refundAttemptId: string };
 type LockedContext = {
   aggregate: ResolutionAggregate;
   target: ResolutionTarget;
   command: NonNullable<ResolutionTarget["executionCommand"]>;
+  dispatch: RefundExecutionDispatchAttempt | null;
+  capturedAt: Date;
 };
+type ResultOperation =
+  | { kind: "fresh"; input: NormalizedPersistFreshRefundExecutionObservationInput; env: ActivationEnv }
+  | { kind: "replay"; input: NormalizedReplayRefundExecutionResultInput };
 
-export async function resolveRefundAdapterResponse(
+export async function persistFreshRefundExecutionObservation(
   client: PrismaClient,
-  input: ResolveRefundAdapterResponseInput,
-): Promise<ResolveRefundAdapterResponseResult> {
-  const normalized = normalizeRefundAdapterResponse(input);
+  input: PersistFreshRefundExecutionObservationInput,
+  env: ActivationEnv = process.env,
+): Promise<RefundExecutionResult> {
+  const normalized = normalizePersistFreshRefundExecutionObservationInput(input);
   if (!normalized.ok) return normalized;
-  const ownership = await discoverOwnership(client, normalized.input.commandId);
-  if (!ownership) return failure("COMMAND_NOT_FOUND", "Refund execution command was not found.");
+  return executeResultOperation(client, { kind: "fresh", input: normalized.input, env });
+}
+
+export async function replayRefundExecutionResult(
+  client: PrismaClient,
+  input: ReplayRefundExecutionResultInput,
+): Promise<RefundExecutionResult> {
+  const normalized = normalizeReplayRefundExecutionResultInput(input);
+  if (!normalized.ok) return normalized;
+  return executeResultOperation(client, { kind: "replay", input: normalized.input });
+}
+
+async function executeResultOperation(
+  client: PrismaClient,
+  operation: ResultOperation,
+): Promise<RefundExecutionResult> {
+  const ownership = await discoverOwnership(client, operation.input.commandId);
+  if (!ownership) return commandNotFound();
   try {
-    return await runResolution(client, ownership, normalized.input);
+    return await runResultTransaction(client, ownership, operation);
   } catch (error) {
     if (error instanceof ResolutionRollbackError) return persistenceConflict();
     if (!isUniqueConflict(error)) throw error;
-    return retryUniqueConflict(client, normalized.input);
+    return retryUniqueConflict(client, operation);
   }
 }
 
 async function retryUniqueConflict(
   client: PrismaClient,
-  input: NormalizedRefundAdapterResponse,
-): Promise<ResolveRefundAdapterResponseResult> {
-  const ownership = await discoverOwnership(client, input.commandId);
-  if (!ownership) return failure("COMMAND_NOT_FOUND", "Refund execution command was not found.");
+  operation: ResultOperation,
+): Promise<RefundExecutionResult> {
+  const ownership = await discoverOwnership(client, operation.input.commandId);
+  if (!ownership) return commandNotFound();
   try {
-    return await runResolution(client, ownership, input);
+    return await runResultTransaction(client, ownership, operation);
   } catch (error) {
     if (error instanceof ResolutionRollbackError || isUniqueConflict(error)) return persistenceConflict();
     throw error;
   }
 }
 
-function runResolution(
+function runResultTransaction(
   client: PrismaClient,
-  ownership: { orderId: string; refundAttemptId: string },
-  input: NormalizedRefundAdapterResponse,
-): Promise<ResolveRefundAdapterResponseResult> {
-  return client.$transaction((tx) => resolveInTransaction(tx, ownership, input));
+  ownership: Ownership,
+  operation: ResultOperation,
+): Promise<RefundExecutionResult> {
+  return client.$transaction((tx) => resolveInTransaction(tx, ownership, operation));
 }
 
 async function resolveInTransaction(
   tx: ResolutionTx,
-  ownership: { orderId: string; refundAttemptId: string },
-  input: NormalizedRefundAdapterResponse,
-): Promise<ResolveRefundAdapterResponseResult> {
-  const locked = await lockAndLoad(tx, ownership, input.commandId);
-  if (!locked.ok) return locked.result;
-  const existing = await tx.refundExecutionEvidence.findUnique({ where: { sourceDedupKey: input.sourceDedupKey } });
-  if (existing) return resolveRefundEvidenceReplay(tx, locked.context.target, existing, input);
-  const freshFailure = validateFresh(locked.context, input);
-  if (freshFailure) return freshFailure;
-  const providerConflict = await hasProviderIdentityConflict(tx, locked.context.target, input);
-  const plan = buildResolutionPlan(locked.context.aggregate, locked.context.target, input, providerConflict);
-  if ("ok" in plan) return plan;
-  if (!validatePlanTransition(plan)) return failure("REFUND_LEDGER_INCONSISTENT", "Resolution transition is invalid.");
-  return persistResolution(tx, locked.context, input, plan);
+  ownership: Ownership,
+  operation: ResultOperation,
+): Promise<RefundExecutionResult> {
+  const context = await lockAndLoad(tx, ownership, operation.input);
+  if (!context) return commandNotFound();
+  const sourceDedupKey = buildRefundResultDedupKey(
+    operation.input.commandId,
+    operation.input.dispatchAttempt,
+  );
+  const evidence = await tx.refundExecutionEvidence.findUnique({
+    where: { sourceDedupKey },
+  });
+  // Durable evidence is final: exact replay remains available after the fresh-write gate closes.
+  if (evidence) {
+    if (!context.dispatch) return ledgerFailure();
+    return resolveRefundEvidenceReplay(tx, context, context.dispatch, evidence, operation.input);
+  }
+  if (operation.kind === "replay") {
+    return resultFailure("FRESH_FENCE_REQUIRED", "No durable result exists for replay.");
+  }
+  return resolveFreshInTransaction(tx, context, operation);
 }
 
-async function discoverOwnership(client: PrismaClient, commandId: string) {
+async function resolveFreshInTransaction(
+  tx: ResolutionTx,
+  context: LockedContext,
+  operation: Extract<ResultOperation, { kind: "fresh" }>,
+): Promise<RefundExecutionResult> {
+  const gateFailure = validateFreshGate(operation.env);
+  if (gateFailure) return gateFailure;
+  const fenceFailure = validateFreshFence(context, operation.input);
+  if (fenceFailure) return fenceFailure;
+  const evidenceCount = await tx.refundExecutionEvidence.count({
+    where: { commandId: context.command.id },
+  });
+  const coherenceFailure = validateFreshCoherence(context, evidenceCount);
+  if (coherenceFailure) return coherenceFailure;
+  const providerConflict = await hasRefundProviderIdentityConflict(
+    tx,
+    context.target,
+    operation.input.observation,
+  );
+  const plan = buildResolutionPlan(
+    context.aggregate,
+    context.target,
+    operation.input.observation,
+    context.capturedAt,
+    providerConflict,
+  );
+  if ("ok" in plan) return plan;
+  if (!validatePlanTransition(plan)) return ledgerFailure();
+  return persistResolution(tx, context, operation.input, plan, context.capturedAt);
+}
+
+function validateFreshCoherence(
+  context: LockedContext,
+  evidenceCount: number,
+): RefundExecutionResult | null {
+  if (evidenceCount !== 0) return ledgerFailure();
+  const aggregateFailure = validateFreshResolutionAggregate(
+    context.aggregate,
+    context.target,
+    context.command,
+  );
+  if (aggregateFailure) return aggregateFailure;
+  if (!context.dispatch) return ledgerFailure();
+  return matchesAuthorizedResultRequest(context.aggregate, context.target, context.dispatch)
+    ? null
+    : ledgerFailure();
+}
+
+async function discoverOwnership(client: PrismaClient, commandId: string): Promise<Ownership | null> {
   const command = await client.refundExecutionCommand.findUnique({
     where: { id: commandId },
     select: { refundAttemptId: true, refundAttempt: { select: { orderId: true } } },
   });
-  if (!command) return null;
-  return { orderId: command.refundAttempt.orderId, refundAttemptId: command.refundAttemptId };
+  return command
+    ? { orderId: command.refundAttempt.orderId, refundAttemptId: command.refundAttemptId }
+    : null;
 }
 
 async function lockAndLoad(
   tx: ResolutionTx,
-  ownership: { orderId: string; refundAttemptId: string },
-  commandId: string,
-): Promise<{ ok: true; context: LockedContext } | { ok: false; result: ResolveRefundAdapterResponseResult }> {
-  if (!(await lockOwnershipRows(tx, ownership, commandId))) return ownershipFailure();
+  ownership: Ownership,
+  input: NormalizedRefundResultInput,
+): Promise<LockedContext | null> {
+  const locks = await lockCanonicalRows(tx, ownership, input);
+  if (!locks.ok) return null;
   const aggregate = await loadAggregate(tx, ownership.orderId);
-  if (!aggregate) return ownershipFailure();
-  const context = contextFromAggregate(aggregate, ownership.refundAttemptId, commandId);
-  return context ? { ok: true, context } : ownershipFailure();
+  if (!aggregate) return null;
+  const target = aggregate.refundAttempts.find((row) => row.id === ownership.refundAttemptId);
+  if (!target?.executionCommand || target.executionCommand.id !== input.commandId) return null;
+  const dispatch = locks.dispatchId
+    ? await tx.refundExecutionDispatchAttempt.findUnique({ where: { id: locks.dispatchId } })
+    : null;
+  const capturedAt = await captureRefundResultDatabaseTime(tx);
+  return { aggregate, target, command: target.executionCommand, dispatch, capturedAt };
 }
 
-async function lockOwnershipRows(
+async function lockCanonicalRows(
   tx: ResolutionTx,
-  ownership: { orderId: string; refundAttemptId: string },
-  commandId: string,
-): Promise<boolean> {
-  if (!(await lockOrder(tx, ownership.orderId))) return false;
-  if (!(await lockAttempt(tx, ownership))) return false;
-  return lockCommand(tx, commandId, ownership.refundAttemptId);
-}
-
-function contextFromAggregate(
-  aggregate: ResolutionAggregate,
-  refundAttemptId: string,
-  commandId: string,
-): LockedContext | null {
-  const target = aggregate.refundAttempts.find((attempt) => attempt.id === refundAttemptId);
-  if (!target?.executionCommand || target.executionCommand.id !== commandId) return null;
-  return { aggregate, target, command: target.executionCommand };
-}
-
-async function lockOrder(tx: ResolutionTx, orderId: string): Promise<boolean> {
-  const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE
-  `);
-  return rows.length === 1;
-}
-
-async function lockAttempt(
-  tx: ResolutionTx,
-  ownership: { orderId: string; refundAttemptId: string },
-): Promise<boolean> {
-  const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "RefundAttempt"
-    WHERE "id" = ${ownership.refundAttemptId} AND "orderId" = ${ownership.orderId}
-    FOR UPDATE
-  `);
-  return rows.length === 1;
-}
-
-async function lockCommand(tx: ResolutionTx, commandId: string, refundAttemptId: string): Promise<boolean> {
-  const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "RefundExecutionCommand"
-    WHERE "id" = ${commandId} AND "refundAttemptId" = ${refundAttemptId}
-    FOR UPDATE
-  `);
-  return rows.length === 1;
+  ownership: Ownership,
+  input: NormalizedRefundResultInput,
+): Promise<{ ok: true; dispatchId: string | null } | { ok: false }> {
+  return lockRefundResultRows(
+    tx,
+    ownership.orderId,
+    ownership.refundAttemptId,
+    input.commandId,
+    input.dispatchAttempt,
+  );
 }
 
 function loadAggregate(tx: ResolutionTx, orderId: string) {
@@ -174,51 +240,82 @@ function loadAggregate(tx: ResolutionTx, orderId: string) {
   });
 }
 
-function validateFresh(context: LockedContext, input: NormalizedRefundAdapterResponse) {
-  if (context.aggregate.status !== OrderStatus.REFUND_PENDING) return commandStateFailure();
-  if (context.target.status !== RefundAttemptStatus.PROCESSING) return commandStateFailure();
-  if (context.command.status !== RefundExecutionCommandStatus.LEASED) return commandStateFailure();
-  if (context.command.dispatchAttempt !== input.dispatchAttempt || context.command.dispatchAttempt <= 0) {
-    return commandStateFailure();
+function validateFreshGate(env: ActivationEnv): RefundExecutionResult | null {
+  try {
+    return isRefundExecutionObservationApplicationEnabled(env)
+      ? null
+      : resultFailure("FEATURE_DISABLED", "Refund observation application is disabled.");
+  } catch (error) {
+    if (error instanceof RefundExecutionActivationConfigError) {
+      return resultFailure("CONFIG_INVALID", "Refund observation application configuration is invalid.");
+    }
+    throw error;
   }
-  return validateFreshResolutionAggregate(context.aggregate, context.target, context.command);
 }
 
-async function hasProviderIdentityConflict(
-  tx: ResolutionTx,
-  target: ResolutionTarget,
-  input: NormalizedRefundAdapterResponse,
-): Promise<boolean> {
-  const observed = input.observedProviderRefundId;
-  if (observed === null) return false;
-  if (target.providerRefundId !== null && target.providerRefundId !== observed) return true;
-  const owner = await tx.refundAttempt.findFirst({
-    where: { provider: target.provider, providerRefundId: observed, id: { not: target.id } },
-    select: { id: true },
-  });
-  return owner !== null;
+function validateFreshFence(
+  context: LockedContext,
+  input: NormalizedPersistFreshRefundExecutionObservationInput,
+): RefundExecutionResult | null {
+  const leaseTokenHash = createHash("sha256").update(input.leaseToken, "utf8").digest("hex");
+  if (!matchesLeaseFence(context, input, leaseTokenHash)) {
+    return resultFailure("FRESH_LEASE_FENCE_MISMATCH", "The fresh lease fence does not match.");
+  }
+  if (context.command.dispatchAttempt !== input.dispatchAttempt) {
+    return resultFailure("DISPATCH_ATTEMPT_MISMATCH", "The dispatch attempt ordinal does not match.");
+  }
+  if (!context.dispatch) {
+    return resultFailure("CONTACT_NOT_AUTHORIZED", "Provider contact was not durably authorized.");
+  }
+  const contacted = [
+    context.dispatch.state === RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
+    context.dispatch.contactMarkedAt !== null,
+  ].every(Boolean);
+  if (!contacted) return resultFailure(
+    "CONTACT_NOT_AUTHORIZED",
+    "Provider contact was not durably authorized.",
+  );
+  const coherentDispatch = [
+    context.dispatch.commandId === context.command.id,
+    context.dispatch.ordinal === input.dispatchAttempt,
+    context.dispatch.leaseGeneration === input.leaseGeneration,
+  ].every(Boolean);
+  if (!coherentDispatch) return ledgerFailure();
+  return null;
 }
 
-function ownershipFailure(): { ok: false; result: ResolveRefundAdapterResponseResult } {
-  return { ok: false, result: failure("COMMAND_ATTEMPT_MISMATCH", "Command ownership is inconsistent.") };
+function matchesLeaseFence(
+  context: LockedContext,
+  input: NormalizedPersistFreshRefundExecutionObservationInput,
+  leaseTokenHash: string,
+): boolean {
+  return [
+    context.command.status === RefundExecutionCommandStatus.LEASED,
+    context.command.leaseGeneration === input.leaseGeneration,
+    context.command.leaseTokenHash === leaseTokenHash,
+  ].every(Boolean);
 }
 
-function commandStateFailure() {
-  return failure("COMMAND_STATE_CONFLICT", "Command is not eligible for a fresh adapter response.");
+function commandNotFound(): RefundExecutionResult {
+  return resultFailure("COMMAND_NOT_FOUND_OR_INELIGIBLE", "Refund execution command was not found or is ineligible.");
 }
 
-function persistenceConflict() {
-  return failure("PERSISTENCE_CONFLICT", "Refund execution persistence conflicted with stored state.");
+function ledgerFailure(): RefundExecutionResult {
+  return resultFailure("REFUND_LEDGER_INCONSISTENT", "Refund execution aggregate is inconsistent.");
+}
+
+function persistenceConflict(): RefundExecutionResult {
+  return resultFailure("PERSISTENCE_CONFLICT", "Refund execution persistence conflicted with stored state.");
 }
 
 function isUniqueConflict(error: unknown): boolean {
   if (error instanceof Prisma.PrismaClientKnownRequestError) return error.code === "P2002";
-  if (typeof error !== "object" || error === null || !("code" in error)) return false;
-  return error.code === "P2002";
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }
 
 export type {
-  ResolveRefundAdapterResponseFailureCode,
-  ResolveRefundAdapterResponseInput,
-  ResolveRefundAdapterResponseResult,
+  PersistFreshRefundExecutionObservationInput,
+  RefundExecutionResult,
+  RefundExecutionResultFailureCode,
+  ReplayRefundExecutionResultInput,
 } from "./execution-result-contract";

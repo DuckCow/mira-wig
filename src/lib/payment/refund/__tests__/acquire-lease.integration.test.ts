@@ -21,8 +21,11 @@ import {
   REFUND_EXECUTION_LEASE_DURATION_MS,
   type AcquireRefundExecutionLeaseResult,
 } from "../acquire-lease";
-import { REFUND_EXECUTION_LEASE_ENABLED } from "../execution-activation";
-import { resolveRefundAdapterResponse } from "../resolve-execution";
+import {
+  REFUND_EXECUTION_LEASE_ENABLED,
+  REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
+} from "../execution-activation";
+import { persistFreshRefundExecutionObservation } from "../resolve-execution";
 import {
   addOpenAttempt,
   cleanupDispatchFixtures,
@@ -179,20 +182,23 @@ describe("acquireRefundExecutionLease", () => {
     const before = await dispatchState(fixture);
     const observedAt = new Date(lease.lease.leaseUntil.getTime() - 1);
 
-    const result = await resolveRefundAdapterResponse(db, {
+    const result = await persistFreshRefundExecutionObservation(db, {
       commandId: fixture.commandId,
       dispatchAttempt: 1,
-      outcome: RefundExecutionEvidenceOutcome.UNKNOWN,
-      observedProviderRefundId: null,
-      reportedAmount: null,
-      reportedCurrency: null,
-      safeCode: null,
-      safeMessage: null,
-      observedAt,
-      now: observedAt,
-    });
+      leaseGeneration: lease.lease.leaseGeneration,
+      leaseToken: lease.lease.leaseToken,
+      observation: {
+        outcome: RefundExecutionEvidenceOutcome.UNKNOWN,
+        observedProviderRefundId: null,
+        reportedAmount: null,
+        reportedCurrency: null,
+        safeCode: null,
+        safeMessage: null,
+        observedAt,
+      },
+    }, { [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "ENABLED" });
 
-    expect(result).toMatchObject({ ok: false, code: "COMMAND_STATE_CONFLICT" });
+    expect(result).toMatchObject({ ok: false, code: "DISPATCH_ATTEMPT_MISMATCH" });
     await expectDispatchStateUnchanged(fixture, before);
   });
 

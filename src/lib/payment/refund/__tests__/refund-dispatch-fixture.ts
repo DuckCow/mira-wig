@@ -7,6 +7,7 @@ import {
   PaymentProvider,
   RefundAttemptActorType,
   RefundAttemptStatus,
+  RefundExecutionDispatchAttemptState,
   ShippingCountry,
 } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -232,6 +233,37 @@ export async function addOpenAttempt(fixture: DispatchFixture): Promise<string> 
     },
   });
   return id;
+}
+
+export async function markDispatchContactForTest(
+  fixture: DispatchFixture,
+  ordinal = 1,
+): Promise<void> {
+  const database = await db.$queryRaw<{ databaseName: string }[]>`
+    SELECT current_database() AS "databaseName"
+  `;
+  if (database.length !== 1 || database[0].databaseName !== "wig_platform_test") {
+    throw new Error("Refund dispatch contact fixture writes are restricted to wig_platform_test.");
+  }
+  const clock = await db.$queryRaw<{ capturedAt: Date }[]>`
+    SELECT date_trunc('milliseconds', clock_timestamp()) AS "capturedAt"
+  `;
+  if (clock.length !== 1 || !(clock[0].capturedAt instanceof Date)) {
+    throw new Error("Unable to capture refund dispatch contact fixture time.");
+  }
+  const updated = await db.refundExecutionDispatchAttempt.updateMany({
+    where: {
+      commandId: fixture.commandId,
+      ordinal,
+      state: RefundExecutionDispatchAttemptState.AUTHORIZED,
+      contactMarkedAt: null,
+    },
+    data: {
+      state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
+      contactMarkedAt: clock[0].capturedAt,
+    },
+  });
+  if (updated.count !== 1) throw new Error("Expected one authorized dispatch fixture row.");
 }
 
 export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixture[]): Promise<void> {

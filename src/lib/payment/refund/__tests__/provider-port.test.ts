@@ -1,6 +1,5 @@
 import { RefundExecutionEvidenceOutcome } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { normalizeRefundAdapterResponse, type ResolveRefundAdapterResponseInput } from "../execution-result-contract";
 import {
   RefundProviderContractError,
   normalizeRefundProviderObservation,
@@ -127,20 +126,6 @@ describe("refund provider observation contract", () => {
     expectObservationFailure(observation(override));
   });
 
-  it("maps mechanically into resolver observation fields", () => {
-    const providerObservation = normalizeRefundProviderObservation(observation());
-    const resolverInput: ResolveRefundAdapterResponseInput = {
-      commandId: "command_1",
-      dispatchAttempt: 1,
-      ...providerObservation,
-      now: new Date("2026-07-11T05:01:00.000Z"),
-    };
-
-    const normalized = normalizeRefundAdapterResponse(resolverInput);
-    expect(normalized).toMatchObject({ ok: true });
-    if (!normalized.ok) throw new Error("Expected resolver-compatible provider observation.");
-    expect(normalized.input).toMatchObject(providerObservation);
-  });
 });
 
 function request(overrides: Partial<RefundProviderRequest> = {}): RefundProviderRequest {

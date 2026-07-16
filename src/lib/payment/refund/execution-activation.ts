@@ -5,6 +5,8 @@ export const REFUND_EXECUTION_LEASE_ENABLED = "REFUND_EXECUTION_LEASE_ENABLED";
 export const REFUND_EXECUTION_LEASE_RELEASE_ENABLED = "REFUND_EXECUTION_LEASE_RELEASE_ENABLED";
 export const REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED =
   "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED";
+export const REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED =
+  "REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED";
 
 export class RefundExecutionActivationConfigError extends Error {
   constructor(key: string) {
@@ -36,6 +38,15 @@ export function isRefundExecutionDispatchAuthorizationEnabled(
 ): boolean {
   return isRefundExecutionCapabilityEnabled(
     REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
+    env,
+  );
+}
+
+export function isRefundExecutionObservationApplicationEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(
+    REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
     env,
   );
 }

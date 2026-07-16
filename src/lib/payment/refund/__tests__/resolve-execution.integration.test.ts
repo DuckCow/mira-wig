@@ -1,722 +1,835 @@
-import { randomUUID } from "crypto";
 import {
-  CheckoutSessionStatus,
   OrderStatus,
-  PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
+  Prisma,
+  type PrismaClient,
   RefundAttemptActorType,
   RefundAttemptStatus,
   RefundExecutionCommandStatus,
+  RefundExecutionDispatchAttemptState,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
-  ShippingCountry,
 } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isDeepStrictEqual } from "node:util";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { buildRefundExecutionClaimOperationKey } from "../claim";
+import { acquireRefundExecutionLease } from "../acquire-lease";
 import {
-  buildRefundExecutionApplyOperationKey,
-  type ResolveRefundAdapterResponseInput,
-  type ResolveRefundAdapterResponseResult,
-} from "../execution-result-contract";
-import { resolveRefundAdapterResponse } from "../resolve-execution";
+  REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
+  REFUND_EXECUTION_LEASE_ENABLED,
+  REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
+} from "../execution-activation";
+import { authorizeRefundExecutionDispatch } from "../dispatch-authorization";
+import {
+  persistFreshRefundExecutionObservation,
+  replayRefundExecutionResult,
+  type PersistFreshRefundExecutionObservationInput,
+  type RefundExecutionResult,
+} from "../resolve-execution";
+import {
+  cleanupDispatchFixtures,
+  createDispatchFixture,
+  dispatchState,
+  markDispatchContactForTest,
+  redactedDispatchAuthorizationState,
+  type DispatchFixture,
+} from "./refund-dispatch-fixture";
 import {
   createNamedDbSession,
   disconnectSessions,
   queueBehindObservedOrderLock,
 } from "./refund-order-lock-barrier";
 
-const MARKET_CODE = "KR";
-const NOW = new Date("2026-07-11T05:00:00.000Z");
-const OBSERVED_AT = new Date("2026-07-11T04:59:59.000Z");
-const LEASE_GENERATION = 3;
-const LEASE_TOKEN_HASH = "d".repeat(64);
+const LEASE_ENV = { [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" };
+const AUTH_ENV = { [REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED]: "ENABLED" };
+const RESULT_ENV = { [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "ENABLED" };
+const OBSERVED_AT = new Date("2026-07-15T02:00:00.000Z");
 
-interface TestContext {
-  userIds: string[];
-  orderIds: string[];
-  paymentIds: string[];
-  sessionIds: string[];
-}
+type Prepared = {
+  fixture: DispatchFixture;
+  leaseGeneration: number;
+  leaseToken: string;
+  dispatchAttempt: number;
+};
 
-interface Fixture {
-  orderId: string;
-  paymentId: string;
-  refundAttemptId: string;
-  commandId: string;
-  totalAmount: number;
-  targetAmount: number;
-}
+describe("fenced refund execution observation persistence", () => {
+  const fixtures: DispatchFixture[] = [];
 
-describe("resolveRefundAdapterResponse", () => {
-  let ctx: TestContext;
-
-  beforeEach(async () => {
-    ctx = { userIds: [], orderIds: [], paymentIds: [], sessionIds: [] };
-    await ensureMarket();
+  beforeAll(async () => {
+    const rows = await db.$queryRaw<{ databaseName: string }[]>`SELECT current_database() AS "databaseName"`;
+    if (rows.length !== 1 || rows[0].databaseName !== "wig_platform_test") {
+      throw new Error("Refund result integration tests require independently isolated wig_platform_test.");
+    }
   });
 
   afterEach(async () => {
-    await cleanup(ctx);
+    await cleanupDispatchFixtures(...fixtures);
+    fixtures.length = 0;
+  });
+
+  it("applies a fresh exact fence, leaves dispatch immutable, and replays with the gate disabled", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const dispatchBefore = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+      where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+    });
+    const input = freshInput(prepared);
+
+    const fresh = await persistFreshRefundExecutionObservation(db, input, RESULT_ENV);
+    expectSuccess(fresh, false, RefundExecutionEvidenceApplication.APPLIED);
+    expect(Object.keys(fresh).sort()).toEqual([
+      "application", "commandId", "evidenceId", "ok", "refundAttemptId", "replayed",
+    ]);
+    expect(Object.isFrozen(fresh)).toBe(true);
+    const state = await dispatchState(prepared.fixture);
+    expect(state.order.status).toBe(OrderStatus.PARTIALLY_REFUNDED);
+    expect(state.attempt.status).toBe(RefundAttemptStatus.SUCCEEDED);
+    expect(state.attempt.processedAt).not.toBeNull();
+    expect(state.attempt.processedAt?.getTime()).not.toBe(OBSERVED_AT.getTime());
+    expect(state.command.status).toBe(RefundExecutionCommandStatus.DONE);
+    expect(state.command.leaseOwner).toBeNull();
+    expect(state.command.leaseUntil).toBeNull();
+    expect(state.command.leaseTokenHash).toBeNull();
+    expect(state.command.dispatchAttempt).toBe(1);
+    expect(state.command.leaseGeneration).toBe(prepared.leaseGeneration);
+    expect(state.evidence).toHaveLength(1);
+    expect(state.evidence[0].sourceDedupKey === `refund-result:${prepared.fixture.commandId}:1`).toBe(true);
+    const dispatchAfter = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+      where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+    });
+    expect(isDeepStrictEqual(dispatchAfter, dispatchBefore)).toBe(true);
+
+    const replay = await replayRefundExecutionResult(db, replayInput(input));
+    expectSuccess(replay, true, RefundExecutionEvidenceApplication.APPLIED);
+    expect(replay.ok && replay.evidenceId === state.evidence[0].id).toBe(true);
+    const freshShapedReplay = await persistFreshRefundExecutionObservation(
+      db,
+      { ...input, leaseToken: "f".repeat(64) },
+      {},
+    );
+    expectSuccess(freshShapedReplay, true, RefundExecutionEvidenceApplication.APPLIED);
+  });
+
+  it("gates only absent-evidence fresh writes and fails invalid configuration closed", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const before = await redactedDispatchAuthorizationState(prepared.fixture);
+
+    expectFailure(await persistFreshRefundExecutionObservation(db, freshInput(prepared), {}), "FEATURE_DISABLED");
+    expectFailure(await persistFreshRefundExecutionObservation(db, freshInput(prepared), {
+      [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "true",
+    }), "CONFIG_INVALID");
+    expect(await redactedDispatchAuthorizationState(prepared.fixture)).toEqual(before);
+  });
+
+  it("requires an exact lease generation, token, ordinal, and contacted dispatch row", async () => {
+    const contacted = await prepareContacted(fixtures);
+    const before = await redactedDispatchAuthorizationState(contacted.fixture);
+    expectFailure(await persistFreshRefundExecutionObservation(db, {
+      ...freshInput(contacted), leaseToken: "e".repeat(64),
+    }, RESULT_ENV), "FRESH_LEASE_FENCE_MISMATCH");
+    expectFailure(await persistFreshRefundExecutionObservation(db, {
+      ...freshInput(contacted), leaseGeneration: contacted.leaseGeneration + 1,
+    }, RESULT_ENV), "FRESH_LEASE_FENCE_MISMATCH");
+    expectFailure(await persistFreshRefundExecutionObservation(db, {
+      ...freshInput(contacted), dispatchAttempt: 2,
+    }, RESULT_ENV), "DISPATCH_ATTEMPT_MISMATCH");
+    expect(await redactedDispatchAuthorizationState(contacted.fixture)).toEqual(before);
+
+    const authorized = await prepareAuthorized(fixtures);
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(authorized), RESULT_ENV),
+      "CONTACT_NOT_AUTHORIZED",
+    );
+
+    const missing = await prepareContacted(fixtures);
+    await db.refundExecutionDispatchAttempt.delete({
+      where: { commandId_ordinal: { commandId: missing.fixture.commandId, ordinal: 1 } },
+    });
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(missing), RESULT_ENV),
+      "CONTACT_NOT_AUTHORIZED",
+    );
+  });
+
+  it("classifies stale contacted generation and authorized-request drift as ledger inconsistency", async () => {
+    const stale = await prepareContacted(fixtures);
+    await db.refundExecutionDispatchAttempt.update({
+      where: { commandId_ordinal: { commandId: stale.fixture.commandId, ordinal: 1 } },
+      data: { leaseGeneration: stale.leaseGeneration + 1 },
+    });
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(stale), RESULT_ENV),
+      "REFUND_LEDGER_INCONSISTENT",
+    );
+
+    for (const mutate of [
+      async (prepared: Prepared) => db.refundExecutionDispatchAttempt.update({
+        where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+        data: { providerOperationKey: "drifted-operation-key" },
+      }),
+      async (prepared: Prepared) => db.refundExecutionDispatchAttempt.update({
+        where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+        data: { requestFingerprint: "d".repeat(64) },
+      }),
+      async (prepared: Prepared) => db.refundExecutionDispatchAttempt.update({
+        where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+        data: { provider: PaymentProvider.TOSS, mode: PaymentMode.LIVE },
+      }),
+      async (prepared: Prepared) => db.payment.update({
+        where: { id: prepared.fixture.paymentId },
+        data: { providerPaymentKey: `drifted-reference-${crypto.randomUUID()}` },
+      }),
+      async (prepared: Prepared) => db.payment.update({
+        where: { id: prepared.fixture.paymentId },
+        data: { amount: prepared.fixture.totalAmount + 1 },
+      }),
+    ]) {
+      const prepared = await prepareContacted(fixtures);
+      await mutate(prepared);
+      const result = await persistFreshRefundExecutionObservation(db, freshInput(prepared), RESULT_ENV);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected request drift failure.");
+      expect(result.code).toBe("REFUND_LEDGER_INCONSISTENT");
+    }
+  });
+
+  it("accepts an expired but otherwise exact contacted fence", async () => {
+    const prepared = await prepareContacted(fixtures);
+    await db.refundExecutionCommand.update({
+      where: { id: prepared.fixture.commandId },
+      data: { leaseUntil: new Date("2000-01-01T00:00:00.000Z") },
+    });
+
+    expectSuccess(
+      await persistFreshRefundExecutionObservation(db, freshInput(prepared), RESULT_ENV),
+      false,
+    );
+
+    const wrongGeneration = await prepareContacted(fixtures);
+    await expireLease(wrongGeneration.fixture);
+    expectFailure(await persistFreshRefundExecutionObservation(db, {
+      ...freshInput(wrongGeneration),
+      leaseGeneration: wrongGeneration.leaseGeneration + 1,
+    }, RESULT_ENV), "FRESH_LEASE_FENCE_MISMATCH");
+
+    const wrongToken = await prepareContacted(fixtures);
+    await expireLease(wrongToken.fixture);
+    expectFailure(await persistFreshRefundExecutionObservation(db, {
+      ...freshInput(wrongToken),
+      leaseToken: "e".repeat(64),
+    }, RESULT_ENV), "FRESH_LEASE_FENCE_MISMATCH");
+
+    const wrongOrdinal = await prepareContacted(fixtures);
+    await expireLease(wrongOrdinal.fixture);
+    expectFailure(await persistFreshRefundExecutionObservation(db, {
+      ...freshInput(wrongOrdinal),
+      dispatchAttempt: 2,
+    }, RESULT_ENV), "DISPATCH_ATTEMPT_MISMATCH");
   });
 
   it.each([
-    { targetAmount: 400, expectedOrder: OrderStatus.PARTIALLY_REFUNDED, providerRefundId: null },
-    { targetAmount: 1_000, expectedOrder: OrderStatus.REFUNDED, providerRefundId: "provider_refund_success" },
-  ])("applies authoritative success atomically %#", async ({ targetAmount, expectedOrder, providerRefundId }) => {
-    const fixture = await createFixture(ctx, { targetAmount });
-    const beforePayment = await paymentState(fixture.paymentId);
-    const result = success(await resolveRefundAdapterResponse(db, input(fixture, {
-      outcome: RefundExecutionEvidenceOutcome.SUCCEEDED,
-      observedProviderRefundId: providerRefundId,
-      reportedAmount: targetAmount,
-      reportedCurrency: "krw",
-    })));
-    const state = await resolutionState(fixture);
-
-    expect(result).toMatchObject({ application: RefundExecutionEvidenceApplication.APPLIED, replayed: false });
-    expect(state.order.status).toBe(expectedOrder);
-    expect(state.attempt).toMatchObject({
-      status: RefundAttemptStatus.SUCCEEDED,
-      processedAt: NOW,
-      failedAt: null,
-      providerRefundId,
-      failureCode: null,
-      safeFailureMessage: null,
-    });
-    expect(state.command).toMatchObject({
-      status: RefundExecutionCommandStatus.DONE,
-      leaseOwner: null,
-      leaseUntil: null,
-      leaseTokenHash: null,
-      leaseGeneration: LEASE_GENERATION,
-      dispatchAttempt: 1,
-    });
-    expect(state.evidence).toHaveLength(1);
-    expect(state.evidence[0]).toMatchObject({
-      application: RefundExecutionEvidenceApplication.APPLIED,
-      reportedAmount: targetAmount,
-      reportedCurrency: "KRW",
-    });
-    expect(state.resultTransitions).toHaveLength(1);
-    expect(state.resultTransitions[0].operationKey).toBe(buildRefundExecutionApplyOperationKey(result.evidenceId));
-    await expect(paymentState(fixture.paymentId)).resolves.toEqual(beforePayment);
+    {
+      outcome: RefundExecutionEvidenceOutcome.ACCEPTED_PENDING,
+      attempt: RefundAttemptStatus.PROCESSING,
+      command: RefundExecutionCommandStatus.WAITING_EVIDENCE,
+      order: OrderStatus.REFUND_PENDING,
+    },
+    {
+      outcome: RefundExecutionEvidenceOutcome.NOT_EXECUTED_RETRYABLE,
+      attempt: RefundAttemptStatus.FAILED_RETRYABLE,
+      command: RefundExecutionCommandStatus.PARKED,
+      order: OrderStatus.REFUND_PENDING,
+    },
+    {
+      outcome: RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL,
+      attempt: RefundAttemptStatus.FAILED_TERMINAL,
+      command: RefundExecutionCommandStatus.DONE,
+      order: OrderStatus.PAID,
+    },
+    {
+      outcome: RefundExecutionEvidenceOutcome.UNKNOWN,
+      attempt: RefundAttemptStatus.MANUAL_REVIEW,
+      command: RefundExecutionCommandStatus.PARKED,
+      order: OrderStatus.REFUND_PENDING,
+    },
+  ])("preserves the $outcome result mapping", async ({ outcome, attempt, command, order }) => {
+    const prepared = await prepareContacted(fixtures);
+    const result = await persistFreshRefundExecutionObservation(db, freshInput(prepared, {
+      outcome,
+      observedProviderRefundId: null,
+      reportedAmount: null,
+      reportedCurrency: null,
+    }), RESULT_ENV);
+    expectSuccess(result, false, RefundExecutionEvidenceApplication.APPLIED);
+    const state = await dispatchState(prepared.fixture);
+    expect(state.attempt.status).toBe(attempt);
+    expect(state.command.status).toBe(command);
+    expect(state.order.status).toBe(order);
   });
 
-  it.each([null, "provider_pending_1"])(
-    "applies accepted-pending with provider identity %s without an Attempt self-transition",
-    async (providerRefundId) => {
-    const fixture = await createFixture(ctx);
-    const request = input(fixture, {
+  it("parks incomplete success and conflicting money without changing the result mapping", async () => {
+    const incomplete = await prepareContacted(fixtures);
+    expectSuccess(await persistFreshRefundExecutionObservation(db, freshInput(incomplete, {
+      reportedAmount: null, reportedCurrency: null,
+    }), RESULT_ENV), false, RefundExecutionEvidenceApplication.PARKED);
+    expect((await dispatchState(incomplete.fixture)).attempt.status).toBe(RefundAttemptStatus.MANUAL_REVIEW);
+
+    const conflict = await prepareContacted(fixtures);
+    expectSuccess(await persistFreshRefundExecutionObservation(db, freshInput(conflict, {
+      reportedAmount: conflict.fixture.targetAmount + 1,
+    }), RESULT_ENV), false, RefundExecutionEvidenceApplication.CONFLICT);
+  });
+
+  it("commits CONFLICT when a succeeded sibling owns the observed provider refund identity", async () => {
+    const selfOwned = await prepareContacted(fixtures);
+    const selfOwnedProviderRefundId = `self-provider-refund-${crypto.randomUUID()}`;
+    await db.refundAttempt.update({
+      where: { id: selfOwned.fixture.refundAttemptId },
+      data: { providerRefundId: selfOwnedProviderRefundId },
+    });
+    expectSuccess(
+      await persistFreshRefundExecutionObservation(
+        db,
+        freshInput(selfOwned, { observedProviderRefundId: selfOwnedProviderRefundId }),
+        RESULT_ENV,
+      ),
+      false,
+      RefundExecutionEvidenceApplication.APPLIED,
+    );
+
+    const otherProviderRefundId = `other-provider-refund-${crypto.randomUUID()}`;
+    const otherProviderFixture = await trackedFixture(fixtures);
+    await addSucceededSibling(
+      otherProviderFixture,
+      100,
+      otherProviderRefundId,
+      PaymentProvider.PAYPAL,
+    );
+    const providerScoped = await prepareContacted(fixtures);
+    expectSuccess(
+      await persistFreshRefundExecutionObservation(
+        db,
+        freshInput(providerScoped, { observedProviderRefundId: otherProviderRefundId }),
+        RESULT_ENV,
+      ),
+      false,
+      RefundExecutionEvidenceApplication.APPLIED,
+    );
+
+    const prepared = await prepareContacted(fixtures);
+    const siblingProviderRefundId = `sibling-provider-refund-${crypto.randomUUID()}`;
+    const siblingId = await addSucceededSibling(
+      prepared.fixture,
+      100,
+      siblingProviderRefundId,
+    );
+    const input = freshInput(prepared, { observedProviderRefundId: siblingProviderRefundId });
+
+    const result = await persistFreshRefundExecutionObservation(db, input, RESULT_ENV);
+    expectSuccess(result, false, RefundExecutionEvidenceApplication.CONFLICT);
+    const state = await dispatchState(prepared.fixture);
+    const sibling = await db.refundAttempt.findUniqueOrThrow({
+      where: { id: siblingId },
+      select: { providerRefundId: true },
+    });
+    const siblingIdentityUnchanged = sibling.providerRefundId === siblingProviderRefundId;
+    const targetIdentityWasNotOverwritten = state.attempt.providerRefundId !== siblingProviderRefundId;
+    expect(siblingIdentityUnchanged).toBe(true);
+    expect(targetIdentityWasNotOverwritten).toBe(true);
+    expect(state.attempt.status).toBe(RefundAttemptStatus.MANUAL_REVIEW);
+    expect(state.command.status).toBe(RefundExecutionCommandStatus.PARKED);
+    expect(state.order.status).toBe(OrderStatus.REFUND_PENDING);
+    expect(state.evidence).toHaveLength(1);
+    expect(state.evidence[0].application).toBe(RefundExecutionEvidenceApplication.CONFLICT);
+    expect(state.evidence[0].safeCode).toBe("REFUND_EVIDENCE_IDENTITY_CONFLICT");
+    expect(state.transitions).toHaveLength(3);
+    expect(state.transitions[2].fromStatus).toBe(RefundAttemptStatus.PROCESSING);
+    expect(state.transitions[2].toStatus).toBe(RefundAttemptStatus.MANUAL_REVIEW);
+  });
+
+  it("applies a complete full-refund success end to end", async () => {
+    const prepared = await prepareContacted(fixtures, { totalAmount: 1_000, targetAmount: 1_000 });
+    const providerRefundId = `full-provider-refund-${crypto.randomUUID()}`;
+    const input = freshInput(prepared, { observedProviderRefundId: providerRefundId });
+
+    const result = await persistFreshRefundExecutionObservation(db, input, RESULT_ENV);
+    expectSuccess(result, false, RefundExecutionEvidenceApplication.APPLIED);
+    const state = await dispatchState(prepared.fixture);
+    const targetIdentityMatches = state.attempt.providerRefundId === providerRefundId;
+    const evidenceIdentityMatches = state.evidence[0].observedProviderRefundId === providerRefundId;
+    const leaseWasCleared = state.command.leaseOwner === null
+      && state.command.leaseUntil === null
+      && state.command.leaseTokenHash === null;
+    expect(targetIdentityMatches).toBe(true);
+    expect(evidenceIdentityMatches).toBe(true);
+    expect(leaseWasCleared).toBe(true);
+    expect(state.attempt.status).toBe(RefundAttemptStatus.SUCCEEDED);
+    expect(state.command.status).toBe(RefundExecutionCommandStatus.DONE);
+    expect(state.order.status).toBe(OrderStatus.REFUNDED);
+    expect(state.command.leaseGeneration).toBe(prepared.leaseGeneration);
+    expect(state.command.dispatchAttempt).toBe(prepared.dispatchAttempt);
+    expect(state.evidence).toHaveLength(1);
+  });
+
+  it("restores PARTIALLY_REFUNDED after terminal non-execution follows a succeeded sibling", async () => {
+    const prepared = await prepareContacted(fixtures);
+    await addSucceededSibling(
+      prepared.fixture,
+      300,
+      `prior-provider-refund-${crypto.randomUUID()}`,
+    );
+    const input = freshInput(prepared, {
+      outcome: RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL,
+      observedProviderRefundId: null,
+      reportedAmount: null,
+      reportedCurrency: null,
+    });
+
+    expectSuccess(
+      await persistFreshRefundExecutionObservation(db, input, RESULT_ENV),
+      false,
+      RefundExecutionEvidenceApplication.APPLIED,
+    );
+    const state = await dispatchState(prepared.fixture);
+    expect(state.attempt.status).toBe(RefundAttemptStatus.FAILED_TERMINAL);
+    expect(state.command.status).toBe(RefundExecutionCommandStatus.DONE);
+    expect(state.order.status).toBe(OrderStatus.PARTIALLY_REFUNDED);
+  });
+
+  it("fails closed without writes when the contacted target is not PROCESSING", async () => {
+    const prepared = await prepareContacted(fixtures);
+    await db.refundAttempt.update({
+      where: { id: prepared.fixture.refundAttemptId },
+      data: { status: RefundAttemptStatus.CANCELLED },
+    });
+    const before = await redactedDispatchAuthorizationState(prepared.fixture);
+
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(prepared), RESULT_ENV),
+      "REFUND_LEDGER_INCONSISTENT",
+    );
+    const after = await redactedDispatchAuthorizationState(prepared.fixture);
+    expect(isDeepStrictEqual(after, before)).toBe(true);
+  });
+
+  it("writes accepted-pending provider identity without an Attempt self-transition", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const providerRefundId = `pending-provider-refund-${crypto.randomUUID()}`;
+    const beforeTransitionCount = (await dispatchState(prepared.fixture)).transitions.length;
+    const input = freshInput(prepared, {
       outcome: RefundExecutionEvidenceOutcome.ACCEPTED_PENDING,
       observedProviderRefundId: providerRefundId,
       reportedAmount: null,
       reportedCurrency: null,
     });
-    const result = success(await resolveRefundAdapterResponse(db, request));
-    const replay = success(await resolveRefundAdapterResponse(db, request));
-    const state = await resolutionState(fixture);
 
-    expect(result.application).toBe(RefundExecutionEvidenceApplication.APPLIED);
-    expect(replay).toEqual({ ...result, replayed: true });
-    expect(state.attempt).toMatchObject({
-      status: RefundAttemptStatus.PROCESSING,
-      providerRefundId,
-      failureCode: null,
-      safeFailureMessage: null,
+    expectSuccess(
+      await persistFreshRefundExecutionObservation(db, input, RESULT_ENV),
+      false,
+      RefundExecutionEvidenceApplication.APPLIED,
+    );
+    const state = await dispatchState(prepared.fixture);
+    const targetIdentityMatches = state.attempt.providerRefundId === providerRefundId;
+    const evidenceIdentityMatches = state.evidence[0].observedProviderRefundId === providerRefundId;
+    expect(targetIdentityMatches).toBe(true);
+    expect(evidenceIdentityMatches).toBe(true);
+    expect(state.attempt.status).toBe(RefundAttemptStatus.PROCESSING);
+    expect(state.command.status).toBe(RefundExecutionCommandStatus.WAITING_EVIDENCE);
+    expect(state.order.status).toBe(OrderStatus.REFUND_PENDING);
+    expect(state.transitions.length).toBe(beforeTransitionCount);
+    expect(state.evidence).toHaveLength(1);
+  });
+
+  it("gives replay precedence, rejects changed evidence, and detects damaged replay artifacts", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const input = freshInput(prepared);
+    expectSuccess(await persistFreshRefundExecutionObservation(db, input, RESULT_ENV), false);
+
+    expectFailure(
+      await replayRefundExecutionResult(db, replayInput(input, { safeMessage: "Changed safe message" })),
+      "EVIDENCE_IDEMPOTENCY_CONFLICT",
+    );
+    await db.refundExecutionCommand.update({
+      where: { id: prepared.fixture.commandId },
+      data: { dispatchAttempt: 2 },
     });
-    expect(state.command).toMatchObject({
-      status: RefundExecutionCommandStatus.WAITING_EVIDENCE,
-      leaseOwner: null,
-      leaseUntil: null,
-      leaseTokenHash: null,
-      leaseGeneration: LEASE_GENERATION,
-      dispatchAttempt: 1,
-      lastSafeErrorCode: null,
-      lastSafeErrorMessage: null,
-    });
-    expect(state.resultTransitions).toHaveLength(0);
+    expectFailure(
+      await replayRefundExecutionResult(db, replayInput(input)),
+      "REFUND_LEDGER_INCONSISTENT",
+    );
+  });
+
+  it.each(["attempt", "command", "order", "transition"] as const)(
+    "rejects replay when the evidence-owned %s artifact is damaged",
+    async (artifact) => {
+      const prepared = await prepareContacted(fixtures);
+      const input = freshInput(prepared);
+      const fresh = await persistFreshRefundExecutionObservation(db, input, RESULT_ENV);
+      expect(fresh.ok).toBe(true);
+      if (artifact === "attempt") {
+        await db.refundAttempt.update({
+          where: { id: prepared.fixture.refundAttemptId },
+          data: { processedAt: null },
+        });
+      } else if (artifact === "command") {
+        await db.refundExecutionCommand.update({
+          where: { id: prepared.fixture.commandId },
+          data: { status: RefundExecutionCommandStatus.PARKED },
+        });
+      } else if (artifact === "order") {
+        await db.order.update({
+          where: { id: prepared.fixture.orderId },
+          data: { status: OrderStatus.PAID },
+        });
+      } else {
+        await db.refundAttemptTransition.deleteMany({
+          where: {
+            refundAttemptId: prepared.fixture.refundAttemptId,
+            operationKey: { startsWith: "refund-exec-apply:" },
+          },
+        });
+      }
+      const replay = await replayRefundExecutionResult(db, replayInput(input));
+      expect(replay.ok).toBe(false);
+      if (replay.ok) throw new Error("Expected damaged replay failure.");
+      expect(replay.code).toBe("REFUND_LEDGER_INCONSISTENT");
     },
   );
 
   it.each([
-    {
-      outcome: RefundExecutionEvidenceOutcome.NOT_EXECUTED_RETRYABLE,
-      attemptStatus: RefundAttemptStatus.FAILED_RETRYABLE,
-      commandStatus: RefundExecutionCommandStatus.PARKED,
-      orderStatus: OrderStatus.REFUND_PENDING,
-      failedAt: null,
-      safeCode: "PROVIDER_NOT_EXECUTED_RETRYABLE",
-    },
-    {
-      outcome: RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL,
-      attemptStatus: RefundAttemptStatus.FAILED_TERMINAL,
-      commandStatus: RefundExecutionCommandStatus.DONE,
-      orderStatus: OrderStatus.PAID,
-      failedAt: NOW,
-      safeCode: "PROVIDER_NOT_EXECUTED_TERMINAL",
-    },
-    {
-      outcome: RefundExecutionEvidenceOutcome.UNKNOWN,
-      attemptStatus: RefundAttemptStatus.MANUAL_REVIEW,
-      commandStatus: RefundExecutionCommandStatus.PARKED,
-      orderStatus: OrderStatus.REFUND_PENDING,
-      failedAt: null,
-      safeCode: "PROVIDER_OUTCOME_UNKNOWN",
-    },
-  ])("applies normalized non-success outcome $outcome", async (scenario) => {
-    const fixture = await createFixture(ctx);
-    await resolveRefundAdapterResponse(db, input(fixture, {
-      outcome: scenario.outcome,
-      reportedAmount: null,
-      reportedCurrency: null,
-    }));
-    const state = await resolutionState(fixture);
+    { table: "RefundExecutionEvidence", constraint: "e4a_test_evidence_insert", kind: "evidence" },
+    { table: "RefundAttemptTransition", constraint: "e4a_test_transition_insert", kind: "transition" },
+    { table: "RefundExecutionCommand", constraint: "e4a_test_command_final_cas", kind: "command" },
+  ])("rolls every projection back on $kind persistence failure", async ({ table, constraint, kind }) => {
+    const prepared = await prepareContacted(fixtures);
+    const before = await redactedDispatchAuthorizationState(prepared.fixture);
+    const predicate = faultPredicate(kind, prepared.fixture);
+    await addScopedCheck(table, constraint, predicate);
+    try {
+      const result = await persistFreshRefundExecutionObservation(db, freshInput(prepared), RESULT_ENV);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected persistence conflict.");
+      expect(result.code).toBe("PERSISTENCE_CONFLICT");
+      const after = await redactedDispatchAuthorizationState(prepared.fixture);
+      expect(isDeepStrictEqual(after, before)).toBe(true);
+    } finally {
+      await dropScopedCheck(table, constraint);
+    }
+  });
 
-    expect(state.order.status).toBe(scenario.orderStatus);
-    expect(state.attempt).toMatchObject({
-      status: scenario.attemptStatus,
-      processedAt: null,
-      failedAt: scenario.failedAt,
-      failureCode: scenario.safeCode,
-    });
-    expect(state.command).toMatchObject({
-      status: scenario.commandStatus,
-      leaseOwner: null,
-      leaseUntil: null,
-      leaseTokenHash: null,
-      leaseGeneration: LEASE_GENERATION,
+  it("returns FRESH_FENCE_REQUIRED for replay when no durable evidence exists", async () => {
+    const fixture = await trackedFixture(fixtures);
+    expectFailure(await replayRefundExecutionResult(db, {
+      commandId: fixture.commandId,
       dispatchAttempt: 1,
-      lastSafeErrorCode: scenario.safeCode,
-    });
-    expect(state.evidence[0]).toMatchObject({
-      application: RefundExecutionEvidenceApplication.APPLIED,
-      safeCode: scenario.safeCode,
-    });
-    expect(state.resultTransitions).toHaveLength(1);
+      observation: observation(fixture.targetAmount),
+    }), "FRESH_FENCE_REQUIRED");
   });
 
-  it("restores PARTIALLY_REFUNDED after terminal non-execution follows prior success", async () => {
-    const fixture = await createFixture(ctx, { priorSucceededAmount: 300, targetAmount: 400 });
-    await resolveRefundAdapterResponse(db, input(fixture, {
-      outcome: RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL,
-      reportedAmount: null,
-      reportedCurrency: null,
-    }));
-    await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.PARTIALLY_REFUNDED);
-  });
-
-  it("parks success without money evidence and records one manual-review transition", async () => {
-    const fixture = await createFixture(ctx);
-    const result = success(await resolveRefundAdapterResponse(db, input(fixture, {
-      outcome: RefundExecutionEvidenceOutcome.SUCCEEDED,
-      reportedAmount: null,
-      reportedCurrency: null,
-    })));
-    const state = await resolutionState(fixture);
-
-    expect(result.application).toBe(RefundExecutionEvidenceApplication.PARKED);
-    expect(state.attempt).toMatchObject({
-      status: RefundAttemptStatus.MANUAL_REVIEW,
-      providerRefundId: null,
-      failureCode: "REFUND_SUCCESS_EVIDENCE_INCOMPLETE",
-    });
-    expect(state.command.status).toBe(RefundExecutionCommandStatus.PARKED);
-    expect(state.order.status).toBe(OrderStatus.REFUND_PENDING);
-    expect(state.resultTransitions).toHaveLength(1);
-  });
-
-  it.each([
-    { label: "amount", override: { reportedAmount: 399, reportedCurrency: "KRW" } },
-    { label: "currency", override: { reportedAmount: 400, reportedCurrency: "USD" } },
-  ])("records $label identity mismatch as CONFLICT", async ({ override }) => {
-    const fixture = await createFixture(ctx);
-    const result = success(await resolveRefundAdapterResponse(db, input(fixture, override)));
-    const state = await resolutionState(fixture);
-
-    expect(result.application).toBe(RefundExecutionEvidenceApplication.CONFLICT);
-    expect(state.evidence[0].safeCode).toBe("REFUND_EVIDENCE_IDENTITY_CONFLICT");
-    expect(state.attempt).toMatchObject({
-      status: RefundAttemptStatus.MANUAL_REVIEW,
-      failureCode: "REFUND_EVIDENCE_IDENTITY_CONFLICT",
-    });
-    expect(state.command.status).toBe(RefundExecutionCommandStatus.PARKED);
-  });
-
-  it("records provider-refund identity ownership collision without overwriting either Attempt", async () => {
-    const owner = await createFixture(ctx, { targetProviderRefundId: "provider_owned" });
-    const fixture = await createFixture(ctx);
-    const result = success(await resolveRefundAdapterResponse(db, input(fixture, {
-      observedProviderRefundId: "provider_owned",
-    })));
-
-    expect(result.application).toBe(RefundExecutionEvidenceApplication.CONFLICT);
-    await expect(providerRefundId(fixture.refundAttemptId)).resolves.toBeNull();
-    await expect(providerRefundId(owner.refundAttemptId)).resolves.toBe("provider_owned");
-  });
-
-  it("returns exact historical replay and rejects changed immutable observation", async () => {
-    const fixture = await createFixture(ctx);
-    const request = input(fixture);
-    const first = success(await resolveRefundAdapterResponse(db, request));
-    const before = await resolutionState(fixture);
-
-    const replay = success(await resolveRefundAdapterResponse(db, request));
-    const conflict = await resolveRefundAdapterResponse(db, { ...request, safeMessage: "changed" });
-
-    expect(replay).toEqual({ ...first, replayed: true });
-    expect(conflict).toMatchObject({ ok: false, code: "EVIDENCE_IDEMPOTENCY_CONFLICT" });
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it("replays conflict evidence exactly and rejects a changed conflict safe message", async () => {
-    const fixture = await createFixture(ctx);
-    const request = input(fixture, { reportedAmount: 399, safeMessage: "Safe conflict context" });
-    const first = success(await resolveRefundAdapterResponse(db, request));
-    const replay = success(await resolveRefundAdapterResponse(db, request));
-    const changed = await resolveRefundAdapterResponse(db, { ...request, safeMessage: "Changed context" });
-
-    expect(first.application).toBe(RefundExecutionEvidenceApplication.CONFLICT);
-    expect(replay).toEqual({ ...first, replayed: true });
-    expect(changed).toMatchObject({ ok: false, code: "EVIDENCE_IDEMPOTENCY_CONFLICT" });
-  });
-
-  it.each([
-    {
-      label: "outcome",
-      change: { outcome: RefundExecutionEvidenceOutcome.UNKNOWN },
-    },
-    {
-      label: "observedAt",
-      change: { observedAt: new Date(OBSERVED_AT.getTime() + 1) },
-    },
-    { label: "safeCode", change: { safeCode: "DIFFERENT_CODE" } },
-    { label: "safeMessage", change: { safeMessage: "Different safe message" } },
-    { label: "money", change: { reportedAmount: 399 } },
-    { label: "provider id", change: { observedProviderRefundId: "different_provider_refund" } },
-  ])("rejects changed $label under an existing dedup identity", async ({ change }) => {
-    const fixture = await createFixture(ctx);
-    const request = input(fixture);
-    await resolveRefundAdapterResponse(db, request);
-    const before = await resolutionState(fixture);
-
-    const conflict = await resolveRefundAdapterResponse(db, { ...request, ...change });
-
-    expect(conflict).toMatchObject({ ok: false, code: "EVIDENCE_IDEMPOTENCY_CONFLICT" });
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it.each([
-    RefundExecutionCommandStatus.READY,
-    RefundExecutionCommandStatus.WAITING_EVIDENCE,
-    RefundExecutionCommandStatus.WAITING_RETRY,
-    RefundExecutionCommandStatus.PARKED,
-    RefundExecutionCommandStatus.DONE,
-  ])("rejects a fresh adapter response from command state %s", async (status) => {
-    const fixture = await createFixture(ctx);
-    await db.refundExecutionCommand.update({
-      where: { id: fixture.commandId },
-      data: { status, leaseOwner: null, leaseUntil: null, leaseTokenHash: null },
-    });
-    const before = await resolutionState(fixture);
-
-    const result = await resolveRefundAdapterResponse(db, input(fixture));
-
-    expect(result).toMatchObject({ ok: false, code: "COMMAND_STATE_CONFLICT" });
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it.each([0, 2])("rejects non-equal persisted ordinal %s without writes", async (dispatchAttempt) => {
-    const fixture = await createFixture(ctx);
-    const before = await resolutionState(fixture);
-    const result = await resolveRefundAdapterResponse(db, input(fixture, { dispatchAttempt }));
-
-    expect(result).toMatchObject({
-      ok: false,
-      code: dispatchAttempt === 0 ? "INVALID_DISPATCH_ATTEMPT" : "COMMAND_STATE_CONFLICT",
-    });
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it("rejects a lower positive ordinal without writes", async () => {
-    const fixture = await createFixture(ctx);
-    await db.refundExecutionCommand.update({
-      where: { id: fixture.commandId },
-      data: { dispatchAttempt: 2 },
-    });
-    const before = await resolutionState(fixture);
-
-    const result = await resolveRefundAdapterResponse(db, input(fixture));
-
-    expect(result).toMatchObject({ ok: false, code: "COMMAND_STATE_CONFLICT" });
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it("rejects a fresh response when the Attempt is not PROCESSING", async () => {
-    const fixture = await createFixture(ctx);
-    await db.refundAttempt.update({
-      where: { id: fixture.refundAttemptId },
-      data: { status: RefundAttemptStatus.MANUAL_REVIEW },
-    });
-    const before = await resolutionState(fixture);
-
-    const result = await resolveRefundAdapterResponse(db, input(fixture));
-
-    expect(result).toMatchObject({ ok: false, code: "COMMAND_STATE_CONFLICT" });
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it("fails aggregate corruption before writing evidence", async () => {
-    const fixture = await createFixture(ctx);
-    await db.payment.update({ where: { id: fixture.paymentId }, data: { status: PaymentAttemptStatus.FAILED } });
-
-    const result = await resolveRefundAdapterResponse(db, input(fixture));
-
-    expect(result).toMatchObject({ ok: false, code: "REFUND_LEDGER_INCONSISTENT" });
-    await expect(db.refundExecutionEvidence.count({ where: { commandId: fixture.commandId } })).resolves.toBe(0);
-  });
-
-  it("rolls back evidence and every projection when transition persistence fails", async () => {
-    const fixture = await createFixture(ctx);
-    const before = await resolutionState(fixture);
-    const outOfRangePostgresDate = new Date(-8_640_000_000_000_000);
-
-    await expect(resolveRefundAdapterResponse(db, input(fixture, {
-      outcome: RefundExecutionEvidenceOutcome.UNKNOWN,
-      reportedAmount: null,
-      reportedCurrency: null,
-      now: outOfRangePostgresDate,
-    }))).rejects.toBeDefined();
-
-    await expect(resolutionState(fixture)).resolves.toEqual(before);
-  });
-
-  it("serializes identical concurrent persistence into one apply and one replay", async () => {
-    const fixture = await createFixture(ctx);
-    const request = input(fixture);
-    const firstSession = createNamedDbSession("result_same_first");
-    const secondSession = createNamedDbSession("result_same_second");
-
+  it("serializes exact contenders into one fresh application and one replay", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const input = freshInput(prepared);
+    const firstSession = createNamedDbSession("e4a_result_first");
+    const secondSession = createNamedDbSession("e4a_result_second");
     try {
       const queued = await queueBehindObservedOrderLock(
-        fixture.orderId,
+        prepared.fixture.orderId,
         firstSession,
-        () => resolveRefundAdapterResponse(firstSession.client, request),
+        () => persistFreshRefundExecutionObservation(firstSession.client, input, RESULT_ENV),
         secondSession,
-        () => resolveRefundAdapterResponse(secondSession.client, request),
+        () => persistFreshRefundExecutionObservation(secondSession.client, input, RESULT_ENV),
       );
       const results = await Promise.all([queued.first, queued.second]);
       expect(results.filter((result) => result.ok && !result.replayed)).toHaveLength(1);
       expect(results.filter((result) => result.ok && result.replayed)).toHaveLength(1);
-      const state = await resolutionState(fixture);
-      expect(state.evidence).toHaveLength(1);
-      expect(state.resultTransitions).toHaveLength(1);
+      expect((await dispatchState(prepared.fixture)).evidence).toHaveLength(1);
     } finally {
       await disconnectSessions(firstSession, secondSession);
     }
   });
 
-  it("serializes conflicting same-key observations into one apply and one idempotency conflict", async () => {
-    const fixture = await createFixture(ctx);
-    const firstSession = createNamedDbSession("result_conflict_first");
-    const secondSession = createNamedDbSession("result_conflict_second");
-
+  it("serializes conflicting observations into one commit and one evidence conflict", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const firstInput = freshInput(prepared);
+    const secondInput = freshInput(prepared, { safeMessage: "Different safe observation" });
+    const firstSession = createNamedDbSession("e4a_conflict_first");
+    const secondSession = createNamedDbSession("e4a_conflict_second");
     try {
       const queued = await queueBehindObservedOrderLock(
-        fixture.orderId,
+        prepared.fixture.orderId,
         firstSession,
-        () => resolveRefundAdapterResponse(firstSession.client, input(fixture)),
+        () => persistFreshRefundExecutionObservation(firstSession.client, firstInput, RESULT_ENV),
         secondSession,
-        () => resolveRefundAdapterResponse(secondSession.client, input(fixture, { safeMessage: "different" })),
+        () => persistFreshRefundExecutionObservation(secondSession.client, secondInput, RESULT_ENV),
       );
-      const [first, second] = await Promise.all([queued.first, queued.second]);
-      expect(first).toMatchObject({ ok: true, replayed: false });
-      expect(second).toMatchObject({ ok: false, code: "EVIDENCE_IDEMPOTENCY_CONFLICT" });
-      const state = await resolutionState(fixture);
-      expect(state.evidence).toHaveLength(1);
-      expect(state.resultTransitions).toHaveLength(1);
+      const results = await Promise.all([queued.first, queued.second]);
+      expect(results.filter((result) => result.ok)).toHaveLength(1);
+      expect(results.filter((result) => !result.ok && result.code === "EVIDENCE_IDEMPOTENCY_CONFLICT"))
+        .toHaveLength(1);
+      expect((await dispatchState(prepared.fixture)).evidence).toHaveLength(1);
     } finally {
       await disconnectSessions(firstSession, secondSession);
+    }
+  });
+
+  it("serializes replay behind fresh commit without requiring lease authority", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const input = freshInput(prepared);
+    const freshSession = createNamedDbSession("e4a_fresh_before_replay");
+    const replaySession = createNamedDbSession("e4a_replay_after_fresh");
+    try {
+      const queued = await queueBehindObservedOrderLock(
+        prepared.fixture.orderId,
+        freshSession,
+        () => persistFreshRefundExecutionObservation(freshSession.client, input, RESULT_ENV),
+        replaySession,
+        () => replayRefundExecutionResult(replaySession.client, replayInput(input)),
+      );
+      expectSuccess(await queued.first, false);
+      expectSuccess(await queued.second, true);
+    } finally {
+      await disconnectSessions(freshSession, replaySession);
+    }
+  });
+
+  it("serializes a generation transfer before a stale fresh holder", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const staleInput = freshInput(prepared);
+    const mutationSession = createNamedDbSession("e4a_generation_change");
+    const staleSession = createNamedDbSession("e4a_stale_holder");
+    try {
+      const queued = await queueBehindObservedOrderLock(
+        prepared.fixture.orderId,
+        mutationSession,
+        () => mutateLeaseUnderCanonicalLocks(mutationSession.client, prepared, {
+          leaseGeneration: prepared.leaseGeneration + 1,
+          leaseTokenHash: "c".repeat(64),
+        }),
+        staleSession,
+        () => persistFreshRefundExecutionObservation(staleSession.client, staleInput, RESULT_ENV),
+      );
+      await queued.first;
+      const stale = await queued.second;
+      expect(stale.ok).toBe(false);
+      if (stale.ok) throw new Error("Expected stale fence failure.");
+      expect(stale.code).toBe("FRESH_LEASE_FENCE_MISMATCH");
+      expect((await dispatchState(prepared.fixture)).evidence).toHaveLength(0);
+    } finally {
+      await disconnectSessions(mutationSession, staleSession);
     }
   });
 });
 
-function input(
-  fixture: Fixture,
-  override: Partial<ResolveRefundAdapterResponseInput> = {},
-): ResolveRefundAdapterResponseInput {
-  return {
+async function prepareAuthorized(
+  fixtures: DispatchFixture[],
+  options: Parameters<typeof createDispatchFixture>[0] = {},
+): Promise<Prepared> {
+  const fixture = await trackedFixture(fixtures, options);
+  const lease = await acquireRefundExecutionLease(db, {
     commandId: fixture.commandId,
-    dispatchAttempt: 1,
-    outcome: RefundExecutionEvidenceOutcome.SUCCEEDED,
-    observedProviderRefundId: null,
-    reportedAmount: fixture.targetAmount,
-    reportedCurrency: "KRW",
-    safeCode: null,
-    safeMessage: null,
-    observedAt: OBSERVED_AT,
-    now: NOW,
-    ...override,
+    leaseOwner: "e4a-result-worker",
+  }, LEASE_ENV);
+  if (!lease.ok) throw new Error(`Expected lease success, received ${lease.code}.`);
+  const authorization = await authorizeRefundExecutionDispatch(db, {
+    commandId: fixture.commandId,
+    leaseGeneration: lease.lease.leaseGeneration,
+    leaseToken: lease.lease.leaseToken,
+  }, AUTH_ENV);
+  if (!authorization.ok) throw new Error(`Expected authorization success, received ${authorization.code}.`);
+  return {
+    fixture,
+    leaseGeneration: lease.lease.leaseGeneration,
+    leaseToken: lease.lease.leaseToken,
+    dispatchAttempt: authorization.authorization.dispatchAttempt,
   };
 }
 
-function success(
-  result: ResolveRefundAdapterResponseResult,
-): Extract<ResolveRefundAdapterResponseResult, { ok: true }> {
-  if (!result.ok) throw new Error(`Expected resolution success, received ${result.code}.`);
-  return result;
-}
-
-async function createFixture(
-  context: TestContext,
-  options: {
-    totalAmount?: number;
-    targetAmount?: number;
-    priorSucceededAmount?: number;
-    targetProviderRefundId?: string | null;
-  } = {},
-): Promise<Fixture> {
-  const identity = randomUUID();
-  const totalAmount = options.totalAmount ?? 1_000;
-  const targetAmount = options.targetAmount ?? 400;
-  const userId = `refund_resolution_${identity}`;
-  context.userIds.push(userId);
-  await db.user.create({ data: { id: userId, email: `${userId}@example.test` } });
-  const session = await createSession(context, userId, totalAmount);
-  const paymentId = await createPayment(context, session.id, totalAmount, identity);
-  const orderId = await createOrder(context, session.id, paymentId, userId, totalAmount);
-  if (options.priorSucceededAmount) {
-    await createPriorSucceeded(orderId, paymentId, options.priorSucceededAmount, identity);
-  }
-  const refundAttemptId = await createTarget(
-    orderId,
-    paymentId,
-    targetAmount,
-    identity,
-    options.priorSucceededAmount ?? 0,
-    options.targetProviderRefundId ?? null,
-  );
-  const commandId = await createLeasedCommand(refundAttemptId);
-  await createClaimTransition(refundAttemptId, commandId);
-  return { orderId, paymentId, refundAttemptId, commandId, totalAmount, targetAmount };
-}
-
-async function createSession(context: TestContext, userId: string, totalAmount: number) {
-  const session = await db.checkoutSession.create({
-    data: {
-      userId,
-      marketCode: MARKET_CODE,
-      currency: "KRW",
-      status: CheckoutSessionStatus.COMPLETED,
-      subtotalAmount: totalAmount,
-      shippingAmount: 0,
-      totalAmount,
-      expiresAt: new Date(NOW.getTime() + 30 * 60_000),
-      completedAt: NOW,
+async function prepareContacted(
+  fixtures: DispatchFixture[],
+  options: Parameters<typeof createDispatchFixture>[0] = {},
+): Promise<Prepared> {
+  const prepared = await prepareAuthorized(fixtures, options);
+  await markDispatchContactForTest(prepared.fixture, prepared.dispatchAttempt);
+  const row = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+    where: {
+      commandId_ordinal: {
+        commandId: prepared.fixture.commandId,
+        ordinal: prepared.dispatchAttempt,
+      },
     },
   });
-  context.sessionIds.push(session.id);
-  return session;
+  expect(row.state).toBe(RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED);
+  return prepared;
 }
 
-async function createPayment(context: TestContext, sessionId: string, amount: number, identity: string) {
-  const payment = await db.payment.create({
-    data: {
-      checkoutSessionId: sessionId,
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
-      status: PaymentAttemptStatus.SUCCEEDED,
-      amount,
-      currency: "KRW",
-      providerPaymentKey: `provider_payment_${identity}`,
-      idempotencyKey: `payment_idem_${identity}`,
-    },
-  });
-  context.paymentIds.push(payment.id);
-  return payment.id;
+function freshInput(
+  prepared: Prepared,
+  observationOverride: Record<string, unknown> = {},
+): PersistFreshRefundExecutionObservationInput {
+  return {
+    commandId: prepared.fixture.commandId,
+    dispatchAttempt: prepared.dispatchAttempt,
+    leaseGeneration: prepared.leaseGeneration,
+    leaseToken: prepared.leaseToken,
+    observation: observation(prepared.fixture.targetAmount, observationOverride),
+  };
 }
 
-async function createOrder(
-  context: TestContext,
-  sessionId: string,
-  paymentId: string,
-  userId: string,
-  totalAmount: number,
+function replayInput(
+  input: PersistFreshRefundExecutionObservationInput,
+  observationOverride: Record<string, unknown> = {},
 ) {
-  const order = await db.order.create({
-    data: {
-      checkoutSessionId: sessionId,
-      paymentId,
-      userId,
-      marketCode: MARKET_CODE,
-      currency: "KRW",
-      subtotalAmount: totalAmount,
-      shippingAmount: 0,
-      totalAmount,
-      status: OrderStatus.REFUND_PENDING,
-      paidAt: NOW,
-    },
-  });
-  context.orderIds.push(order.id);
-  return order.id;
+  return {
+    commandId: input.commandId,
+    dispatchAttempt: input.dispatchAttempt,
+    observation: { ...input.observation, ...observationOverride },
+  };
 }
 
-async function createPriorSucceeded(
-  orderId: string,
-  paymentId: string,
-  amount: number,
-  identity: string,
-): Promise<void> {
-  await db.refundAttempt.create({
-    data: {
-      id: `prior_${identity}`,
-      orderId,
-      paymentId,
-      amount,
-      currency: "KRW",
-      status: RefundAttemptStatus.SUCCEEDED,
-      reason: "Prior verified refund",
-      actorType: RefundAttemptActorType.SYSTEM,
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
-      idempotencyKey: `refund:${paymentId}:prior_${identity}`,
-      requestedAt: new Date(NOW.getTime() - 10_000),
-      processedAt: new Date(NOW.getTime() - 5_000),
-    },
-  });
+function observation(amount: number, overrides: Record<string, unknown> = {}) {
+  return {
+    outcome: RefundExecutionEvidenceOutcome.SUCCEEDED,
+    observedProviderRefundId: `provider-refund-${crypto.randomUUID()}`,
+    reportedAmount: amount,
+    reportedCurrency: "KRW",
+    safeCode: null,
+    safeMessage: null,
+    observedAt: new Date(OBSERVED_AT.getTime()),
+    ...overrides,
+  };
 }
 
-async function createTarget(
-  orderId: string,
-  paymentId: string,
+async function trackedFixture(
+  fixtures: DispatchFixture[],
+  options: Parameters<typeof createDispatchFixture>[0] = {},
+): Promise<DispatchFixture> {
+  const fixture = await createDispatchFixture(options);
+  fixtures.push(fixture);
+  return fixture;
+}
+
+async function addSucceededSibling(
+  fixture: DispatchFixture,
   amount: number,
-  identity: string,
-  priorSucceededAmount: number,
-  providerRefundId: string | null,
+  providerRefundId: string,
+  provider: PaymentProvider = PaymentProvider.MOCK,
 ): Promise<string> {
-  const id = `target_${identity}`;
+  const id = `refund_sibling_${crypto.randomUUID()}`;
   await db.refundAttempt.create({
     data: {
       id,
-      orderId,
-      paymentId,
+      orderId: fixture.orderId,
+      paymentId: fixture.paymentId,
       amount,
       currency: "KRW",
-      status: RefundAttemptStatus.PROCESSING,
-      reason: "Approved refund request",
-      actorType: RefundAttemptActorType.ADMIN,
-      actorUserId: "admin_123",
-      provider: PaymentProvider.MOCK,
+      status: RefundAttemptStatus.SUCCEEDED,
+      reason: "Prior verified sibling refund",
+      actorType: RefundAttemptActorType.SYSTEM,
+      actorUserId: null,
+      provider,
       mode: PaymentMode.SANDBOX,
       providerRefundId,
-      idempotencyKey: `refund:${paymentId}:${id}`,
-      requestedAt: NOW,
-    },
-  });
-  await db.refundAttemptTransition.create({
-    data: {
-      refundAttemptId: id,
-      fromStatus: null,
-      toStatus: RefundAttemptStatus.REQUESTED,
-      orderStatusBefore: priorSucceededAmount > 0 ? OrderStatus.PARTIALLY_REFUNDED : OrderStatus.PAID,
-      orderStatusAfter: OrderStatus.REFUND_PENDING,
-      actorType: RefundAttemptActorType.ADMIN,
-      actorUserId: "admin_123",
-      reason: "Approved refund request",
-      operationKey: `refund-request:${id}`,
-      createdAt: NOW,
+      idempotencyKey: `refund:${fixture.paymentId}:${id}`,
+      requestedAt: new Date(OBSERVED_AT.getTime() - 20_000),
+      processedAt: new Date(OBSERVED_AT.getTime() - 10_000),
     },
   });
   return id;
 }
 
-async function createLeasedCommand(refundAttemptId: string): Promise<string> {
-  const command = await db.refundExecutionCommand.create({
-    data: {
-      refundAttemptId,
-      status: RefundExecutionCommandStatus.LEASED,
-      availableAt: NOW,
-      leaseOwner: "worker-1",
-      leaseUntil: new Date(NOW.getTime() + 60_000),
-      leaseGeneration: LEASE_GENERATION,
-      leaseTokenHash: LEASE_TOKEN_HASH,
-      dispatchAttempt: 1,
-    },
-  });
-  return command.id;
-}
-
-async function createClaimTransition(refundAttemptId: string, commandId: string): Promise<void> {
-  await db.refundAttemptTransition.create({
-    data: {
-      refundAttemptId,
-      fromStatus: RefundAttemptStatus.REQUESTED,
-      toStatus: RefundAttemptStatus.PROCESSING,
-      orderStatusBefore: OrderStatus.REFUND_PENDING,
-      orderStatusAfter: OrderStatus.REFUND_PENDING,
-      actorType: RefundAttemptActorType.SYSTEM,
-      actorUserId: null,
-      reason: "Refund execution claimed.",
-      operationKey: buildRefundExecutionClaimOperationKey(commandId),
-      createdAt: NOW,
-    },
+async function expireLease(fixture: DispatchFixture): Promise<void> {
+  await db.refundExecutionCommand.update({
+    where: { id: fixture.commandId },
+    data: { leaseUntil: new Date("2000-01-01T00:00:00.000Z") },
   });
 }
 
-async function resolutionState(fixture: Fixture) {
-  const [order, attempt, command, evidence, resultTransitions] = await Promise.all([
-    db.order.findUniqueOrThrow({ where: { id: fixture.orderId }, select: { status: true } }),
-    db.refundAttempt.findUniqueOrThrow({ where: { id: fixture.refundAttemptId } }),
-    db.refundExecutionCommand.findUniqueOrThrow({ where: { id: fixture.commandId } }),
-    db.refundExecutionEvidence.findMany({ where: { commandId: fixture.commandId }, orderBy: { createdAt: "asc" } }),
-    db.refundAttemptTransition.findMany({
-      where: { refundAttemptId: fixture.refundAttemptId, operationKey: { startsWith: "refund-exec-apply:" } },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
-  return { order, attempt, command, evidence, resultTransitions };
+function expectSuccess(
+  result: RefundExecutionResult,
+  replayed: boolean,
+  application?: RefundExecutionEvidenceApplication,
+): void {
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(`Expected result success, received ${result.code}.`);
+  expect(result.replayed).toBe(replayed);
+  if (application) expect(result.application).toBe(application);
+  expect(Object.isFrozen(result)).toBe(true);
 }
 
-function paymentState(paymentId: string) {
-  return db.payment.findUniqueOrThrow({ where: { id: paymentId } });
+function expectFailure(
+  result: RefundExecutionResult,
+  code: Extract<RefundExecutionResult, { ok: false }>["code"],
+): void {
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected result failure.");
+  expect(result.code).toBe(code);
+  expect(Object.isFrozen(result)).toBe(true);
 }
 
-function orderStatus(orderId: string): Promise<OrderStatus> {
-  return db.order.findUniqueOrThrow({ where: { id: orderId }, select: { status: true } })
-    .then((order) => order.status);
+function faultPredicate(kind: string, fixture: DispatchFixture): string {
+  if (kind === "evidence") return `"commandId" <> '${safeSqlId(fixture.commandId)}'`;
+  if (kind === "transition") {
+    return `"refundAttemptId" <> '${safeSqlId(fixture.refundAttemptId)}' OR "fromStatus" IS DISTINCT FROM 'PROCESSING'::"RefundAttemptStatus"`;
+  }
+  if (kind === "command") {
+    return `"id" <> '${safeSqlId(fixture.commandId)}' OR "leaseTokenHash" IS NOT NULL`;
+  }
+  throw new Error("Unknown refund result fault fixture kind.");
 }
 
-function providerRefundId(refundAttemptId: string): Promise<string | null> {
-  return db.refundAttempt.findUniqueOrThrow({ where: { id: refundAttemptId }, select: { providerRefundId: true } })
-    .then((attempt) => attempt.providerRefundId);
+function safeSqlId(value: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error("Fixture id is not SQL-safe.");
+  return value;
 }
 
-async function ensureMarket(): Promise<void> {
-  await db.market.upsert({
-    where: { code: MARKET_CODE },
-    update: { currency: "KRW", shippableCountries: [ShippingCountry.KR], defaultLocale: "ko", isActive: true },
-    create: { code: MARKET_CODE, currency: "KRW", shippableCountries: [ShippingCountry.KR], defaultLocale: "ko", isActive: true },
+async function addScopedCheck(table: string, constraint: string, predicate: string): Promise<void> {
+  await proveTestDatabase();
+  if (!/^[A-Za-z]+$/.test(table) || !/^[a-z0-9_]+$/.test(constraint)) {
+    throw new Error("Unsafe test constraint identifier.");
+  }
+  await db.$executeRawUnsafe(
+    `ALTER TABLE "${table}" ADD CONSTRAINT "${constraint}" CHECK (${predicate})`,
+  );
+}
+
+async function dropScopedCheck(table: string, constraint: string): Promise<void> {
+  await proveTestDatabase();
+  if (!/^[A-Za-z]+$/.test(table) || !/^[a-z0-9_]+$/.test(constraint)) {
+    throw new Error("Unsafe test constraint identifier.");
+  }
+  await db.$executeRawUnsafe(`ALTER TABLE "${table}" DROP CONSTRAINT "${constraint}"`);
+}
+
+async function proveTestDatabase(): Promise<void> {
+  const rows = await db.$queryRaw<{ databaseName: string }[]>`SELECT current_database() AS "databaseName"`;
+  if (rows.length !== 1 || rows[0].databaseName !== "wig_platform_test") {
+    throw new Error("Refund result fault fixtures require wig_platform_test.");
+  }
+}
+
+async function mutateLeaseUnderCanonicalLocks(
+  client: PrismaClient,
+  prepared: Prepared,
+  data: Prisma.RefundExecutionCommandUpdateInput,
+): Promise<void> {
+  await client.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "Order" WHERE "id" = ${prepared.fixture.orderId} FOR UPDATE
+    `);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "RefundAttempt" WHERE "id" = ${prepared.fixture.refundAttemptId} FOR UPDATE
+    `);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionCommand" WHERE "id" = ${prepared.fixture.commandId} FOR UPDATE
+    `);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionDispatchAttempt"
+      WHERE "commandId" = ${prepared.fixture.commandId} AND "ordinal" = ${prepared.dispatchAttempt}
+      FOR UPDATE
+    `);
+    await tx.refundExecutionCommand.update({
+      where: { id: prepared.fixture.commandId },
+      data,
+    });
   });
-}
-
-async function cleanup(context: TestContext): Promise<void> {
-  const attempts = await db.refundAttempt.findMany({
-    where: { orderId: { in: context.orderIds } },
-    select: { id: true },
-  });
-  const attemptIds = attempts.map((attempt) => attempt.id);
-  const commands = await db.refundExecutionCommand.findMany({
-    where: { refundAttemptId: { in: attemptIds } },
-    select: { id: true },
-  });
-  const commandIds = commands.map((command) => command.id);
-  await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
-  await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
-  await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });
-  await db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } });
-  await db.order.deleteMany({ where: { id: { in: context.orderIds } } });
-  await db.payment.deleteMany({ where: { id: { in: context.paymentIds } } });
-  await db.checkoutSession.deleteMany({ where: { id: { in: context.sessionIds } } });
-  await db.user.deleteMany({ where: { id: { in: context.userIds } } });
 }

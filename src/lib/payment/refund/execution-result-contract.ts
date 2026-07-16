@@ -4,11 +4,21 @@ import {
   RefundExecutionEvidenceSource,
   type RefundExecutionEvidence,
 } from "@prisma/client";
+import {
+  normalizeRefundObservation,
+  type NormalizedRefundObservation,
+} from "./refund-observation-contract";
 
-const SOURCE_DEDUP_KEY_MAX = 512;
-export const REFUND_EVIDENCE_PROVIDER_ID_MAX_CODE_POINTS = 512;
-export const REFUND_EVIDENCE_SAFE_CODE_MAX_CODE_POINTS = 128;
-export const REFUND_EVIDENCE_SAFE_MESSAGE_MAX_CODE_POINTS = 500;
+const FRESH_INPUT_FIELDS = [
+  "commandId",
+  "dispatchAttempt",
+  "leaseGeneration",
+  "leaseToken",
+  "observation",
+] as const;
+const REPLAY_INPUT_FIELDS = ["commandId", "dispatchAttempt", "observation"] as const;
+const INTERNAL_ID_MAX_CODE_POINTS = 128;
+const POSTGRES_INT_MAX = 2_147_483_647;
 const RESULT_KEY_PREFIX = "refund-result:";
 const APPLY_KEY_PREFIX = "refund-exec-apply:";
 
@@ -25,205 +35,128 @@ const CANONICAL_SAFE_CODES: Record<
 export const INSUFFICIENT_SUCCESS_CODE = "REFUND_SUCCESS_EVIDENCE_INCOMPLETE";
 export const EVIDENCE_CONFLICT_CODE = "REFUND_EVIDENCE_IDENTITY_CONFLICT";
 
-export interface ResolveRefundAdapterResponseInput {
+export type PersistFreshRefundExecutionObservationInput = Readonly<{
   commandId: string;
   dispatchAttempt: number;
-  outcome: RefundExecutionEvidenceOutcome;
-  observedProviderRefundId: string | null;
-  reportedAmount: number | null;
-  reportedCurrency: string | null;
-  safeCode: string | null;
-  safeMessage: string | null;
-  observedAt: Date;
-  now: Date;
-}
+  leaseGeneration: number;
+  leaseToken: string;
+  observation: NormalizedRefundObservation;
+}>;
 
-export interface NormalizedRefundAdapterResponse {
+export type ReplayRefundExecutionResultInput = Readonly<{
   commandId: string;
   dispatchAttempt: number;
-  sourceDedupKey: string;
-  outcome: RefundExecutionEvidenceOutcome;
-  observedProviderRefundId: string | null;
-  reportedAmount: number | null;
-  reportedCurrency: string | null;
-  safeCode: string | null;
-  safeMessage: string | null;
-  observedAt: Date;
-  now: Date;
-}
+  observation: NormalizedRefundObservation;
+}>;
 
-export type ResolveRefundAdapterResponseFailureCode =
+export type NormalizedPersistFreshRefundExecutionObservationInput = Readonly<{
+  commandId: string;
+  dispatchAttempt: number;
+  leaseGeneration: number;
+  leaseToken: string;
+  observation: NormalizedRefundObservation;
+}>;
+
+export type NormalizedReplayRefundExecutionResultInput = Readonly<{
+  commandId: string;
+  dispatchAttempt: number;
+  observation: NormalizedRefundObservation;
+}>;
+
+export type NormalizedRefundResultInput =
+  | NormalizedPersistFreshRefundExecutionObservationInput
+  | NormalizedReplayRefundExecutionResultInput;
+
+export type RefundExecutionResultFailureCode =
+  | "FEATURE_DISABLED"
+  | "CONFIG_INVALID"
   | "INVALID_COMMAND_ID"
   | "INVALID_DISPATCH_ATTEMPT"
-  | "INVALID_EVIDENCE"
-  | "COMMAND_NOT_FOUND"
-  | "COMMAND_ATTEMPT_MISMATCH"
-  | "COMMAND_STATE_CONFLICT"
-  | "REFUND_LEDGER_INCONSISTENT"
+  | "INVALID_LEASE_GENERATION"
+  | "INVALID_LEASE_TOKEN"
+  | "INVALID_OBSERVATION"
+  | "COMMAND_NOT_FOUND_OR_INELIGIBLE"
+  | "FRESH_FENCE_REQUIRED"
+  | "FRESH_LEASE_FENCE_MISMATCH"
+  | "DISPATCH_ATTEMPT_MISMATCH"
+  | "CONTACT_NOT_AUTHORIZED"
   | "EVIDENCE_IDEMPOTENCY_CONFLICT"
+  | "REFUND_LEDGER_INCONSISTENT"
   | "PERSISTENCE_CONFLICT";
 
-export interface ResolveRefundAdapterResponseFailure {
+export type RefundExecutionResultFailure = Readonly<{
   ok: false;
-  code: ResolveRefundAdapterResponseFailureCode;
+  code: RefundExecutionResultFailureCode;
   message: string;
-}
+}>;
 
-export type ResolveRefundAdapterResponseResult =
-  | {
-      ok: true;
-      evidenceId: string;
-      commandId: string;
-      refundAttemptId: string;
-      application: RefundExecutionEvidenceApplication;
-      replayed: boolean;
-    }
-  | ResolveRefundAdapterResponseFailure;
+export type RefundExecutionResultSuccess = Readonly<{
+  ok: true;
+  evidenceId: string;
+  commandId: string;
+  refundAttemptId: string;
+  application: RefundExecutionEvidenceApplication;
+  replayed: boolean;
+}>;
 
-export function normalizeRefundAdapterResponse(
-  input: ResolveRefundAdapterResponseInput,
-): { ok: true; input: NormalizedRefundAdapterResponse } | ResolveRefundAdapterResponseFailure {
-  const commandId = input.commandId.trim();
-  if (!commandId) return resolutionFailure("INVALID_COMMAND_ID", "Command id is required.");
-  if (!isPositiveSafeInteger(input.dispatchAttempt)) {
-    return resolutionFailure("INVALID_DISPATCH_ATTEMPT", "Dispatch attempt must be a positive safe integer.");
-  }
-  if (!isEvidenceOutcome(input.outcome)) {
-    return resolutionFailure("INVALID_EVIDENCE", "Evidence outcome is invalid.");
-  }
-  const sourceDedupKey = buildRefundResultDedupKey(commandId, input.dispatchAttempt);
-  if (!withinBound(sourceDedupKey, SOURCE_DEDUP_KEY_MAX)) {
-    return resolutionFailure("INVALID_COMMAND_ID", "Command id is too long for result identity.");
-  }
-  return normalizeEvidenceFields(input, commandId, sourceDedupKey);
-}
+export type RefundExecutionResult = RefundExecutionResultSuccess | RefundExecutionResultFailure;
 
-function normalizeEvidenceFields(
-  input: ResolveRefundAdapterResponseInput,
-  commandId: string,
-  sourceDedupKey: string,
-): { ok: true; input: NormalizedRefundAdapterResponse } | ResolveRefundAdapterResponseFailure {
-  const providerId = normalizeBoundedOptionalEvidenceText(
-    input.observedProviderRefundId,
-    REFUND_EVIDENCE_PROVIDER_ID_MAX_CODE_POINTS,
-  );
-  if (!providerId.ok) {
-    return resolutionFailure("INVALID_EVIDENCE", "Evidence text exceeds its normalized storage bound.");
+export function normalizePersistFreshRefundExecutionObservationInput(
+  input: unknown,
+): { ok: true; input: NormalizedPersistFreshRefundExecutionObservationInput } | RefundExecutionResultFailure {
+  if (!hasExactEnumerableFields(input, FRESH_INPUT_FIELDS)) return invalidObservationInput();
+  const common = normalizeCommonInput(input);
+  if (!common.ok) return common;
+  if (!isPositivePostgresInteger(input.leaseGeneration)) {
+    return resultFailure("INVALID_LEASE_GENERATION", "Lease generation is invalid.");
   }
-  const diagnostics = normalizeDiagnostics(input.safeCode, input.safeMessage);
-  if (!diagnostics.ok) return diagnostics;
-  const money = normalizeMoney(input.reportedAmount, input.reportedCurrency);
-  if (!money.ok) return money;
-  if (!isValidDate(input.observedAt) || !isValidDate(input.now)) {
-    return resolutionFailure("INVALID_EVIDENCE", "Evidence timestamps must be valid dates.");
+  const leaseToken = normalizeRequiredText(input.leaseToken);
+  if (!leaseToken || !/^[0-9a-f]{64}$/.test(leaseToken)) {
+    return resultFailure("INVALID_LEASE_TOKEN", "Lease token is invalid.");
   }
-  return normalizedResult(
-    input,
-    commandId,
-    sourceDedupKey,
-    providerId.value,
-    diagnostics.safeCode,
-    diagnostics.safeMessage,
-    money,
-  );
-}
-
-function normalizeDiagnostics(
-  code: string | null,
-  message: string | null,
-): { ok: true; safeCode: string | null; safeMessage: string | null } | ResolveRefundAdapterResponseFailure {
-  const safeCode = normalizeBoundedOptionalEvidenceText(code, REFUND_EVIDENCE_SAFE_CODE_MAX_CODE_POINTS);
-  const safeMessage = normalizeBoundedOptionalEvidenceText(message, REFUND_EVIDENCE_SAFE_MESSAGE_MAX_CODE_POINTS);
-  if (!safeCode.ok || !safeMessage.ok) {
-    return resolutionFailure("INVALID_EVIDENCE", "Evidence text exceeds its normalized storage bound.");
-  }
-  if (!isRefundEvidenceSafeCode(safeCode.value) || !isRefundEvidencePrivacySafeMessage(safeMessage.value)) {
-    return resolutionFailure("INVALID_EVIDENCE", "Evidence diagnostics are not safe for persistence.");
-  }
-  return { ok: true, safeCode: safeCode.value, safeMessage: safeMessage.value };
-}
-
-function normalizedResult(
-  input: ResolveRefundAdapterResponseInput,
-  commandId: string,
-  sourceDedupKey: string,
-  providerRefundId: string | null,
-  safeCode: string | null,
-  safeMessage: string | null,
-  money: { ok: true; amount: number | null; currency: string | null },
-): { ok: true; input: NormalizedRefundAdapterResponse } {
-  return {
+  return Object.freeze({
     ok: true,
-    input: {
-      commandId,
-      dispatchAttempt: input.dispatchAttempt,
-      sourceDedupKey,
-      outcome: input.outcome,
-      observedProviderRefundId: providerRefundId,
-      reportedAmount: money.amount,
-      reportedCurrency: money.currency,
-      safeCode: safeCode ?? canonicalCode(input.outcome),
-      safeMessage,
-      observedAt: input.observedAt,
-      now: input.now,
-    },
-  };
+    input: Object.freeze({
+      ...common.input,
+      leaseGeneration: input.leaseGeneration,
+      leaseToken,
+    }),
+  });
 }
 
-function normalizeMoney(
-  amount: number | null,
-  currency: string | null,
-): { ok: true; amount: number | null; currency: string | null } | ResolveRefundAdapterResponseFailure {
-  if (amount === null && currency === null) return { ok: true, amount: null, currency: null };
-  if (amount === null || currency === null || !isPositiveSafeInteger(amount)) {
-    return resolutionFailure("INVALID_EVIDENCE", "Reported amount and currency must be a valid pair.");
+export function normalizeReplayRefundExecutionResultInput(
+  input: unknown,
+): { ok: true; input: NormalizedReplayRefundExecutionResultInput } | RefundExecutionResultFailure {
+  if (!hasExactEnumerableFields(input, REPLAY_INPUT_FIELDS)) return invalidObservationInput();
+  return normalizeCommonInput(input);
+}
+
+function normalizeCommonInput(
+  input: Record<string, unknown>,
+): { ok: true; input: NormalizedReplayRefundExecutionResultInput } | RefundExecutionResultFailure {
+  const commandId = normalizeRequiredText(input.commandId);
+  if (!commandId || Array.from(commandId).length > INTERNAL_ID_MAX_CODE_POINTS) {
+    return resultFailure("INVALID_COMMAND_ID", "Command id is invalid.");
   }
-  const normalizedCurrency = normalizeRefundEvidenceCurrency(currency);
-  if (!normalizedCurrency) {
-    return resolutionFailure("INVALID_EVIDENCE", "Reported currency must be a three-letter code.");
+  if (!isPositivePostgresInteger(input.dispatchAttempt)) {
+    return resultFailure("INVALID_DISPATCH_ATTEMPT", "Dispatch attempt is invalid.");
   }
-  return { ok: true, amount, currency: normalizedCurrency };
+  const normalizedObservation = normalizeRefundObservation(input.observation);
+  if (!normalizedObservation.ok) return invalidObservationInput();
+  const observation = withCanonicalSafeCode(normalizedObservation.observation);
+  return Object.freeze({
+    ok: true,
+    input: Object.freeze({ commandId, dispatchAttempt: input.dispatchAttempt, observation }),
+  });
 }
 
-export function normalizeBoundedOptionalEvidenceText(
-  value: string | null,
-  maximum: number,
-): { ok: true; value: string | null } | { ok: false } {
-  if (value === null) return { ok: true, value: null };
-  const normalized = value.trim();
-  if (!normalized) return { ok: true, value: null };
-  if (!withinBound(normalized, maximum)) return { ok: false };
-  return { ok: true, value: normalized };
-}
-
-export function isRefundEvidenceSafeCode(value: string | null): boolean {
-  return value === null || /^[A-Z0-9_.:-]+$/.test(value);
-}
-
-export function isRefundEvidencePrivacySafeMessage(value: string | null): boolean {
-  if (value === null) return true;
-  if (/[\r\n\t]/.test(value)) return false;
-  if (/https?:\/\/[^/\s@]+@/i.test(value)) return false;
-  if (/\b(?:authorization|password|secret|api[_-]?key|token)\b\s*[:=]/i.test(value)) return false;
-  return !/\b(?:payment|order|refund|command|attempt|request)_[A-Za-z0-9-]{4,}\b/i.test(value);
-}
-
-export function normalizeRefundEvidenceCurrency(value: string): string | null {
-  const normalized = value.trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(normalized) ? normalized : null;
+function withCanonicalSafeCode(observation: NormalizedRefundObservation): NormalizedRefundObservation {
+  const safeCode = observation.safeCode ?? canonicalCode(observation.outcome);
+  return Object.freeze({ ...observation, safeCode, observedAt: new Date(observation.observedAt.getTime()) });
 }
 
 function canonicalCode(outcome: RefundExecutionEvidenceOutcome): string | null {
-  if (outcome === RefundExecutionEvidenceOutcome.SUCCEEDED) return null;
-  return CANONICAL_SAFE_CODES[outcome];
-}
-
-function isEvidenceOutcome(value: RefundExecutionEvidenceOutcome): boolean {
-  return value === RefundExecutionEvidenceOutcome.SUCCEEDED
-    || value === RefundExecutionEvidenceOutcome.ACCEPTED_PENDING
-    || value === RefundExecutionEvidenceOutcome.NOT_EXECUTED_RETRYABLE
-    || value === RefundExecutionEvidenceOutcome.NOT_EXECUTED_TERMINAL
-    || value === RefundExecutionEvidenceOutcome.UNKNOWN;
+  return outcome === RefundExecutionEvidenceOutcome.SUCCEEDED ? null : CANONICAL_SAFE_CODES[outcome];
 }
 
 export function buildRefundResultDedupKey(commandId: string, dispatchAttempt: number): string {
@@ -238,67 +171,69 @@ export function buildRefundExecutionApplyOperationKey(evidenceId: string): strin
 
 export function sameRefundEvidenceObservation(
   evidence: RefundExecutionEvidence,
-  candidate: NormalizedRefundAdapterResponse,
+  candidate: NormalizedRefundObservation,
   safeCode: string | null = candidate.safeCode,
   safeMessage: string | null = candidate.safeMessage,
 ): boolean {
-  return sameEvidenceIdentity(evidence, candidate)
-    && sameEvidencePayload(evidence, candidate, safeCode, safeMessage);
+  return [
+    evidence.source === RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+    evidence.outcome === candidate.outcome,
+    evidence.observedProviderRefundId === candidate.observedProviderRefundId,
+    evidence.reportedAmount === candidate.reportedAmount,
+    evidence.reportedCurrency === candidate.reportedCurrency,
+    evidence.safeCode === safeCode,
+    evidence.safeMessage === safeMessage,
+    evidence.observedAt.getTime() === candidate.observedAt.getTime(),
+  ].every(Boolean);
 }
 
-function sameEvidenceIdentity(
-  evidence: RefundExecutionEvidence,
-  candidate: NormalizedRefundAdapterResponse,
-): boolean {
-  return evidence.commandId === candidate.commandId
-    && evidence.source === RefundExecutionEvidenceSource.ADAPTER_RESPONSE
-    && evidence.outcome === candidate.outcome
-    && evidence.observedProviderRefundId === candidate.observedProviderRefundId
-    && evidence.reportedAmount === candidate.reportedAmount
-    && evidence.reportedCurrency === candidate.reportedCurrency;
-}
-
-function sameEvidencePayload(
-  evidence: RefundExecutionEvidence,
-  candidate: NormalizedRefundAdapterResponse,
-  safeCode: string | null,
-  safeMessage: string | null,
-): boolean {
-  return evidence.safeCode === safeCode
-    && evidence.safeMessage === safeMessage
-    && evidence.observedAt.getTime() === candidate.observedAt.getTime();
-}
-
-export function resolutionSuccess(
+export function resultSuccess(
   evidence: RefundExecutionEvidence,
   refundAttemptId: string,
   replayed: boolean,
-): Extract<ResolveRefundAdapterResponseResult, { ok: true }> {
-  return {
+): RefundExecutionResultSuccess {
+  return Object.freeze({
     ok: true,
     evidenceId: evidence.id,
     commandId: evidence.commandId,
     refundAttemptId,
     application: evidence.application,
     replayed,
-  };
+  });
 }
 
-export function resolutionFailure(
-  code: ResolveRefundAdapterResponseFailureCode,
+export function resultFailure(
+  code: RefundExecutionResultFailureCode,
   message: string,
-): ResolveRefundAdapterResponseFailure {
-  return { ok: false, code, message };
+): RefundExecutionResultFailure {
+  return Object.freeze({ ok: false, code, message });
 }
 
-function withinBound(value: string, maximum: number): boolean {
-  return Array.from(value).length <= maximum;
+function invalidObservationInput(): RefundExecutionResultFailure {
+  return resultFailure("INVALID_OBSERVATION", "Refund observation input is invalid.");
 }
 
-function isPositiveSafeInteger(value: number): boolean {
-  return Number.isSafeInteger(value) && value > 0;
+function hasExactEnumerableFields(
+  value: unknown,
+  fields: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const keys = Reflect.ownKeys(value).filter((key) => (
+    Object.prototype.propertyIsEnumerable.call(value, key)
+  ));
+  return keys.length === fields.length
+    && keys.every((key) => typeof key === "string" && fields.includes(key));
 }
 
-function isValidDate(value: Date): boolean {
-  return value instanceof Date && Number.isFinite(value.getTime());
+function normalizeRequiredText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function isPositivePostgresInteger(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isInteger(value)
+    && value >= 1
+    && value <= POSTGRES_INT_MAX;
 }
