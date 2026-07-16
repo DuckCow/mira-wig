@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   CheckoutSessionStatus,
   OrderStatus,
@@ -19,6 +21,11 @@ import { db } from "@/lib/db";
 
 const MARKET_CODE = "KR";
 const NOW = new Date("2026-07-11T02:45:00.000Z");
+const VALID_TOKEN_HASH = "a".repeat(64);
+const MIGRATION_PATH = join(
+  process.cwd(),
+  "prisma/migrations/20260716090000_e2a_refund_execution_lease_fence/migration.sql",
+);
 
 interface TestContext {
   userId: string;
@@ -58,6 +65,19 @@ describe("refund execution schema", () => {
     );
   });
 
+  it("uses truthful READY lease-fence defaults", async () => {
+    const command = await db.refundExecutionCommand.create({ data: commandData(ctx.refundAttemptId) });
+
+    expect(command).toMatchObject({
+      status: RefundExecutionCommandStatus.READY,
+      leaseOwner: null,
+      leaseUntil: null,
+      leaseGeneration: 0,
+      leaseTokenHash: null,
+      dispatchAttempt: 0,
+    });
+  });
+
   it.each([
     {
       label: "negative dispatch ordinal",
@@ -69,7 +89,8 @@ describe("refund execution schema", () => {
       override: {
         status: RefundExecutionCommandStatus.LEASED,
         leaseUntil: NOW,
-        dispatchAttempt: 1,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
       },
       constraint: "RefundExecutionCommand_lease_status_coherence_check",
     },
@@ -78,26 +99,28 @@ describe("refund execution schema", () => {
       override: {
         status: RefundExecutionCommandStatus.LEASED,
         leaseOwner: "worker-1",
-        dispatchAttempt: 1,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
       },
       constraint: "RefundExecutionCommand_lease_status_coherence_check",
     },
     {
-      label: "LEASED with zero ordinal",
+      label: "LEASED without token hash",
       override: {
         status: RefundExecutionCommandStatus.LEASED,
         leaseOwner: "worker-1",
         leaseUntil: NOW,
-        dispatchAttempt: 0,
+        leaseGeneration: 1,
       },
-      constraint: "RefundExecutionCommand_leased_dispatch_attempt_check",
+      constraint: "RefundExecutionCommand_lease_status_coherence_check",
     },
     {
-      label: "non-LEASED with lease fields",
+      label: "LEASED with generation zero",
       override: {
-        status: RefundExecutionCommandStatus.READY,
+        status: RefundExecutionCommandStatus.LEASED,
         leaseOwner: "worker-1",
         leaseUntil: NOW,
+        leaseTokenHash: VALID_TOKEN_HASH,
       },
       constraint: "RefundExecutionCommand_lease_status_coherence_check",
     },
@@ -107,9 +130,63 @@ describe("refund execution schema", () => {
         status: RefundExecutionCommandStatus.LEASED,
         leaseOwner: "   ",
         leaseUntil: NOW,
-        dispatchAttempt: 1,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
       },
       constraint: "RefundExecutionCommand_lease_owner_nonblank_check",
+    },
+    {
+      label: "token hash with non-hex characters",
+      override: {
+        status: RefundExecutionCommandStatus.LEASED,
+        leaseOwner: "worker-1",
+        leaseUntil: NOW,
+        leaseGeneration: 1,
+        leaseTokenHash: `${"a".repeat(63)}g`,
+      },
+      constraint: "RefundExecutionCommand_lease_token_hash_format_check",
+    },
+    {
+      label: "uppercase token hash",
+      override: {
+        status: RefundExecutionCommandStatus.LEASED,
+        leaseOwner: "worker-1",
+        leaseUntil: NOW,
+        leaseGeneration: 1,
+        leaseTokenHash: "A".repeat(64),
+      },
+      constraint: "RefundExecutionCommand_lease_token_hash_format_check",
+    },
+    {
+      label: "wrong-length token hash",
+      override: {
+        status: RefundExecutionCommandStatus.LEASED,
+        leaseOwner: "worker-1",
+        leaseUntil: NOW,
+        leaseGeneration: 1,
+        leaseTokenHash: "a".repeat(63),
+      },
+      constraint: "RefundExecutionCommand_lease_token_hash_format_check",
+    },
+    {
+      label: "non-LEASED with owner",
+      override: { leaseOwner: "worker-1" },
+      constraint: "RefundExecutionCommand_lease_status_coherence_check",
+    },
+    {
+      label: "non-LEASED with deadline",
+      override: { leaseUntil: NOW },
+      constraint: "RefundExecutionCommand_lease_status_coherence_check",
+    },
+    {
+      label: "non-LEASED with token hash",
+      override: { leaseTokenHash: VALID_TOKEN_HASH },
+      constraint: "RefundExecutionCommand_lease_status_coherence_check",
+    },
+    {
+      label: "negative lease generation",
+      override: { leaseGeneration: -1 },
+      constraint: "RefundExecutionCommand_lease_generation_nonnegative_check",
     },
     {
       label: "blank safe error code",
@@ -128,13 +205,15 @@ describe("refund execution schema", () => {
     );
   });
 
-  it("accepts a coherent LEASED command with a positive persisted ordinal", async () => {
+  it("accepts a coherent LEASED command with dispatch ordinal zero", async () => {
     const command = await db.refundExecutionCommand.create({
       data: commandData(ctx.refundAttemptId, {
         status: RefundExecutionCommandStatus.LEASED,
         leaseOwner: "worker-1",
         leaseUntil: NOW,
-        dispatchAttempt: 1,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
+        dispatchAttempt: 0,
       }),
     });
 
@@ -142,8 +221,44 @@ describe("refund execution schema", () => {
       status: RefundExecutionCommandStatus.LEASED,
       leaseOwner: "worker-1",
       leaseUntil: NOW,
-      dispatchAttempt: 1,
+      leaseGeneration: 1,
+      leaseTokenHash: VALID_TOKEN_HASH,
+      dispatchAttempt: 0,
     });
+  });
+
+  it.each([
+    RefundExecutionCommandStatus.DONE,
+    RefundExecutionCommandStatus.WAITING_EVIDENCE,
+    RefundExecutionCommandStatus.PARKED,
+    RefundExecutionCommandStatus.READY,
+  ])("rejects token residue on non-LEASED status %s", async (status) => {
+    await expectConstraint(
+      db.refundExecutionCommand.create({
+        data: commandData(ctx.refundAttemptId, { status, leaseTokenHash: VALID_TOKEN_HASH }),
+      }),
+      "RefundExecutionCommand_lease_status_coherence_check",
+    );
+  });
+
+  it("executes the migration preflight and rejects a pre-existing LEASED row", async () => {
+    await db.refundExecutionCommand.create({
+      data: commandData(ctx.refundAttemptId, {
+        status: RefundExecutionCommandStatus.LEASED,
+        leaseOwner: "preflight-worker",
+        leaseUntil: NOW,
+        leaseGeneration: 1,
+        leaseTokenHash: VALID_TOKEN_HASH,
+      }),
+    });
+    const migration = readFileSync(MIGRATION_PATH, "utf8");
+    const preflight = migration.match(/DO \$\$[\s\S]*?\$\$;/)?.[0];
+    if (!preflight) throw new Error("E2A migration preflight block was not found.");
+
+    await expectConstraint(
+      db.$executeRawUnsafe(preflight),
+      "Refund execution lease fence migration requires zero pre-existing LEASED commands.",
+    );
   });
 
   it("stores evidence under its command, deduplicates globally, and restricts parent deletion", async () => {

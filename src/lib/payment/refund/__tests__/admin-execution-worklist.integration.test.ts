@@ -17,6 +17,8 @@ import {
   cleanupDispatchFixtures,
   createDispatchFixture,
   DISPATCH_NOW,
+  DISPATCH_TEST_LEASE_GENERATION,
+  DISPATCH_TEST_LEASE_TOKEN_HASH,
   type DispatchFixture,
 } from "./refund-dispatch-fixture";
 
@@ -247,6 +249,8 @@ async function setCommandState(
       leaseUntil: status === RefundExecutionCommandStatus.LEASED
         ? options.leaseUntil ?? new Date(READ_TIME.getTime() + 60_000)
         : null,
+      leaseGeneration: status === RefundExecutionCommandStatus.LEASED ? DISPATCH_TEST_LEASE_GENERATION : 0,
+      leaseTokenHash: status === RefundExecutionCommandStatus.LEASED ? DISPATCH_TEST_LEASE_TOKEN_HASH : null,
       dispatchAttempt: status === RefundExecutionCommandStatus.READY ? 0 : 1,
       createdAt: options.createdAt ?? DISPATCH_NOW,
       updatedAt: options.createdAt ?? DISPATCH_NOW,
@@ -286,6 +290,8 @@ async function createSiblingCommand(
       leaseUntil: status === RefundExecutionCommandStatus.LEASED
         ? options.leaseUntil ?? new Date(READ_TIME.getTime() + 60_000)
         : null,
+      leaseGeneration: status === RefundExecutionCommandStatus.LEASED ? DISPATCH_TEST_LEASE_GENERATION : 0,
+      leaseTokenHash: status === RefundExecutionCommandStatus.LEASED ? DISPATCH_TEST_LEASE_TOKEN_HASH : null,
       dispatchAttempt: status === RefundExecutionCommandStatus.READY ? 0 : 1,
       createdAt: options.createdAt ?? DISPATCH_NOW,
       updatedAt: options.createdAt ?? DISPATCH_NOW,

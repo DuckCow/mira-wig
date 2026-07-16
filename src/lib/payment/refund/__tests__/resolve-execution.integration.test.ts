@@ -30,6 +30,8 @@ import {
 const MARKET_CODE = "KR";
 const NOW = new Date("2026-07-11T05:00:00.000Z");
 const OBSERVED_AT = new Date("2026-07-11T04:59:59.000Z");
+const LEASE_GENERATION = 3;
+const LEASE_TOKEN_HASH = "d".repeat(64);
 
 interface TestContext {
   userIds: string[];
@@ -83,7 +85,14 @@ describe("resolveRefundAdapterResponse", () => {
       failureCode: null,
       safeFailureMessage: null,
     });
-    expect(state.command).toMatchObject({ status: RefundExecutionCommandStatus.DONE, leaseOwner: null, leaseUntil: null });
+    expect(state.command).toMatchObject({
+      status: RefundExecutionCommandStatus.DONE,
+      leaseOwner: null,
+      leaseUntil: null,
+      leaseTokenHash: null,
+      leaseGeneration: LEASE_GENERATION,
+      dispatchAttempt: 1,
+    });
     expect(state.evidence).toHaveLength(1);
     expect(state.evidence[0]).toMatchObject({
       application: RefundExecutionEvidenceApplication.APPLIED,
@@ -121,6 +130,9 @@ describe("resolveRefundAdapterResponse", () => {
       status: RefundExecutionCommandStatus.WAITING_EVIDENCE,
       leaseOwner: null,
       leaseUntil: null,
+      leaseTokenHash: null,
+      leaseGeneration: LEASE_GENERATION,
+      dispatchAttempt: 1,
       lastSafeErrorCode: null,
       lastSafeErrorMessage: null,
     });
@@ -173,6 +185,9 @@ describe("resolveRefundAdapterResponse", () => {
       status: scenario.commandStatus,
       leaseOwner: null,
       leaseUntil: null,
+      leaseTokenHash: null,
+      leaseGeneration: LEASE_GENERATION,
+      dispatchAttempt: 1,
       lastSafeErrorCode: scenario.safeCode,
     });
     expect(state.evidence[0]).toMatchObject({
@@ -302,7 +317,7 @@ describe("resolveRefundAdapterResponse", () => {
     const fixture = await createFixture(ctx);
     await db.refundExecutionCommand.update({
       where: { id: fixture.commandId },
-      data: { status, leaseOwner: null, leaseUntil: null },
+      data: { status, leaseOwner: null, leaseUntil: null, leaseTokenHash: null },
     });
     const before = await resolutionState(fixture);
 
@@ -624,6 +639,8 @@ async function createLeasedCommand(refundAttemptId: string): Promise<string> {
       availableAt: NOW,
       leaseOwner: "worker-1",
       leaseUntil: new Date(NOW.getTime() + 60_000),
+      leaseGeneration: LEASE_GENERATION,
+      leaseTokenHash: LEASE_TOKEN_HASH,
       dispatchAttempt: 1,
     },
   });

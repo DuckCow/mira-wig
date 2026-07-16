@@ -682,6 +682,8 @@ async function seedExecutionCommand(
       availableAt: NOW,
       leaseOwner: leased ? "close_test_worker" : null,
       leaseUntil: leased ? new Date(NOW.getTime() + 60_000) : null,
+      leaseGeneration: leased ? 1 : 0,
+      leaseTokenHash: leased ? "c".repeat(64) : null,
       dispatchAttempt: leased ? 1 : 0,
     },
   });

@@ -593,6 +593,8 @@ model RefundExecutionCommand {
   availableAt     DateTime                     @default(now())
   leaseOwner      String?                      @db.VarChar(255)
   leaseUntil      DateTime?
+  leaseGeneration Int                          @default(0)
+  leaseTokenHash  String?                      @db.VarChar(64)
   dispatchAttempt Int                          @default(0)
 
   lastSafeErrorCode    String? @db.VarChar(128)

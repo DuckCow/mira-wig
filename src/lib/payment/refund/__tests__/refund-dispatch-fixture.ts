@@ -14,6 +14,8 @@ import { claimRefundAttemptForExecution } from "../claim";
 
 export const DISPATCH_NOW = new Date("2026-07-11T07:00:00.000Z");
 export const LEASE_UNTIL = new Date("2026-07-11T07:05:00.000Z");
+export const DISPATCH_TEST_LEASE_GENERATION = 1;
+export const DISPATCH_TEST_LEASE_TOKEN_HASH = "b".repeat(64);
 const MARKET_CODE = "KR";
 
 export interface DispatchFixture {

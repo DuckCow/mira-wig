@@ -117,6 +117,7 @@ function commandData(plan: ResolutionPlan) {
     status: plan.commandStatus,
     leaseOwner: null,
     leaseUntil: null,
+    leaseTokenHash: null,
     lastSafeErrorCode: clearDiagnostic ? null : plan.diagnostic.safeCode,
     lastSafeErrorMessage: clearDiagnostic ? null : plan.diagnostic.safeMessage,
   };
