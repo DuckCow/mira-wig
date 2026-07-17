@@ -278,6 +278,16 @@ export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixt
     select: { id: true },
   });
   const commandIds = commands.map((command) => command.id);
+  const bindings = await db.refundExecutionProviderOperationBinding.findMany({
+    where: { refundAttemptId: { in: attemptIds } },
+    select: { id: true },
+  });
+  await db.refundExecutionProviderEligibilityProof.deleteMany({
+    where: { bindingId: { in: bindings.map((binding) => binding.id) } },
+  });
+  await db.refundExecutionProviderOperationBinding.deleteMany({
+    where: { id: { in: bindings.map((binding) => binding.id) } },
+  });
   await db.refundExecutionDispatchAttempt.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });

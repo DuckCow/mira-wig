@@ -5,6 +5,10 @@ export const REFUND_EXECUTION_LEASE_ENABLED = "REFUND_EXECUTION_LEASE_ENABLED";
 export const REFUND_EXECUTION_LEASE_RELEASE_ENABLED = "REFUND_EXECUTION_LEASE_RELEASE_ENABLED";
 export const REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED =
   "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED";
+export const REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED =
+  "REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED";
+export const REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED =
+  "REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED";
 export const REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED =
   "REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED";
 
@@ -47,6 +51,24 @@ export function isRefundExecutionObservationApplicationEnabled(
 ): boolean {
   return isRefundExecutionCapabilityEnabled(
     REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
+    env,
+  );
+}
+
+export function isRefundExecutionTossAuthorizationEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(
+    REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
+    env,
+  );
+}
+
+export function isRefundExecutionTossEligibilityLookupEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(
+    REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
     env,
   );
 }

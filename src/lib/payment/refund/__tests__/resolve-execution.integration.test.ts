@@ -19,6 +19,8 @@ import {
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
   REFUND_EXECUTION_LEASE_ENABLED,
   REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
+  REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
+  REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
 } from "../execution-activation";
 import { authorizeRefundExecutionDispatch } from "../dispatch-authorization";
 import {
@@ -40,10 +42,19 @@ import {
   disconnectSessions,
   queueBehindObservedOrderLock,
 } from "./refund-order-lock-barrier";
+import { createTossRefundExecutionAuthorizer } from "../providers/toss/authorize-refund-dispatch";
 
 const LEASE_ENV = { [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" };
 const AUTH_ENV = { [REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED]: "ENABLED" };
 const RESULT_ENV = { [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "ENABLED" };
+const TOSS_AUTH_ENV = {
+  [REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED]: "ENABLED",
+  [REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED]: "ENABLED",
+  [REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED]: "ENABLED",
+  TOSS_SANDBOX_SECRET_KEY: "synthetic_e4_pin_secret",
+  TOSS_SANDBOX_MERCHANT_ACCOUNT_BINDING: "merchant-e4-pin",
+  TOSS_SANDBOX_CREDENTIAL_GENERATION_BINDING: "generation-e4-pin",
+};
 const OBSERVED_AT = new Date("2026-07-15T02:00:00.000Z");
 
 type Prepared = {
@@ -149,6 +160,29 @@ describe("fenced refund execution observation persistence", () => {
       await persistFreshRefundExecutionObservation(db, freshInput(missing), RESULT_ENV),
       "CONTACT_NOT_AUTHORIZED",
     );
+  });
+
+  it("keeps a realistic Toss AUTHORIZED ordinal 1 dormant until contact is authorized", async () => {
+    const authorized = await prepareTossAuthorized(fixtures);
+    const before = await redactedDispatchAuthorizationState(authorized.fixture);
+
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(authorized), RESULT_ENV),
+      "CONTACT_NOT_AUTHORIZED",
+    );
+    expect(await redactedDispatchAuthorizationState(authorized.fixture)).toEqual(before);
+  });
+
+  it("fails current MOCK-style coherence for a test-contacted Toss-derived dispatch", async () => {
+    const contacted = await prepareTossAuthorized(fixtures);
+    await markDispatchContactForTest(contacted.fixture);
+    const before = await redactedDispatchAuthorizationState(contacted.fixture);
+
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(contacted), RESULT_ENV),
+      "REFUND_LEDGER_INCONSISTENT",
+    );
+    expect(await redactedDispatchAuthorizationState(contacted.fixture)).toEqual(before);
   });
 
   it("classifies stale contacted generation and authorized-request drift as ledger inconsistency", async () => {
@@ -660,6 +694,54 @@ async function prepareContacted(
   });
   expect(row.state).toBe(RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED);
   return prepared;
+}
+
+async function prepareTossAuthorized(fixtures: DispatchFixture[]): Promise<Prepared> {
+  const fixture = await trackedFixture(fixtures, { totalAmount: 85_000, targetAmount: 85_000 });
+  const lease = await acquireRefundExecutionLease(db, {
+    commandId: fixture.commandId,
+    leaseOwner: "e4-toss-pin-worker",
+  }, LEASE_ENV);
+  if (!lease.ok) throw new Error(`Expected lease success, received ${lease.code}.`);
+  await Promise.all([
+    db.payment.update({
+      where: { id: fixture.paymentId },
+      data: { provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX },
+    }),
+    db.refundAttempt.update({
+      where: { id: fixture.refundAttemptId },
+      data: { provider: PaymentProvider.TOSS, mode: PaymentMode.SANDBOX },
+    }),
+  ]);
+  const authorize = createTossRefundExecutionAuthorizer({
+    lookup: () => Promise.resolve({
+      kind: "response",
+      body: JSON.stringify({
+        paymentKey: fixture.providerPaymentKey,
+        method: "카드",
+        easyPay: null,
+        currency: "KRW",
+        status: "DONE",
+        totalAmount: fixture.totalAmount,
+        balanceAmount: fixture.targetAmount,
+        taxFreeAmount: 0,
+        taxExemptionAmount: 0,
+        cancels: null,
+      }),
+    }),
+  });
+  const authorization = await authorize(db, {
+    commandId: fixture.commandId,
+    leaseGeneration: lease.lease.leaseGeneration,
+    leaseToken: lease.lease.leaseToken,
+  }, TOSS_AUTH_ENV);
+  if (!authorization.ok) throw new Error(`Expected Toss authorization: ${authorization.code}.`);
+  return {
+    fixture,
+    leaseGeneration: lease.lease.leaseGeneration,
+    leaseToken: lease.lease.leaseToken,
+    dispatchAttempt: authorization.authorization.dispatchAttempt,
+  };
 }
 
 function freshInput(
