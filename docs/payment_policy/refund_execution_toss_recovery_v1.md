@@ -10,6 +10,9 @@ E3C implementation order is E3C-A3 pure/schema authority, E3C1 authoritative GET
 reconciliation, then E3C2 same-key recontact. Gates remain disabled through
 SANDBOX acceptance. Webhooks remain wake-up hints only.
 
+Finality requires exactly one coherent APPLIED/SUCCEEDED authority, not exactly one evidence row total.
+PARKED and DONE consume the recovery fence by clearing leaseOwner, leaseUntil, and leaseTokenHash atomically.
+
 ## 2. Recovery fence
 
 A contacted command never returns to `READY`. Recovery uses a new command lease
