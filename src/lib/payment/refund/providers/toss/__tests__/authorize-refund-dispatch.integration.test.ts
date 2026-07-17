@@ -26,7 +26,7 @@ import {
 import {
   createTossRefundExecutionAuthorizer,
   type TossRefundAuthorizerDependencies,
-} from "../authorize-refund-dispatch";
+} from "../refund-authorization-orchestrator";
 import type { TossRefundLookupPort } from "../refund-lookup-http";
 import { deriveTossRefundOperationKey, TOSS_REFUND_OPERATION_KEY_VERSION } from "../refund-operation-key";
 import { TOSS_REFUND_WIRE_VERSION } from "../refund-wire-fingerprint";

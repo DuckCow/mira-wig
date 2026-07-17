@@ -40,6 +40,16 @@ describe("Toss refund cancellation wire request", () => {
     expect(typeof body.cancelAmount).toBe("number");
   });
 
+  it("keeps tax, currency, refundable amount, and receive account off the wire body", () => {
+    const body = deriveTossRefundCancellationWireRequest(wireInput()).body;
+    const keys = Object.keys(body);
+
+    expect(keys.includes("taxFreeAmount")).toBe(false);
+    expect(keys.includes("currency")).toBe(false);
+    expect(keys.includes("refundableAmount")).toBe(false);
+    expect(keys.includes("refundReceiveAccount")).toBe(false);
+  });
+
   it("encodes the authoritative payment key only in the URL path", () => {
     const request = deriveTossRefundCancellationWireRequest(wireInput({
       paymentKey: "key/with space?and=query",

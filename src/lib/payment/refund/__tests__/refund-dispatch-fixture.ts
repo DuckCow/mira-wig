@@ -282,6 +282,9 @@ export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixt
     where: { refundAttemptId: { in: attemptIds } },
     select: { id: true },
   });
+  await db.refundExecutionProviderContactEligibilityProof.deleteMany({
+    where: { dispatchAttempt: { commandId: { in: commandIds } } },
+  });
   await db.refundExecutionProviderEligibilityProof.deleteMany({
     where: { bindingId: { in: bindings.map((binding) => binding.id) } },
   });

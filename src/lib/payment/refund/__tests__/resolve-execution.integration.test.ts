@@ -10,6 +10,7 @@ import {
   RefundExecutionDispatchAttemptState,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
+  RefundExecutionEvidenceSource,
 } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -42,7 +43,7 @@ import {
   disconnectSessions,
   queueBehindObservedOrderLock,
 } from "./refund-order-lock-barrier";
-import { createTossRefundExecutionAuthorizer } from "../providers/toss/authorize-refund-dispatch";
+import { createTossRefundExecutionAuthorizer } from "../providers/toss/refund-authorization-orchestrator";
 
 const LEASE_ENV = { [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" };
 const AUTH_ENV = { [REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED]: "ENABLED" };
@@ -162,24 +163,52 @@ describe("fenced refund execution observation persistence", () => {
     );
   });
 
-  it("keeps a realistic Toss AUTHORIZED ordinal 1 dormant until contact is authorized", async () => {
+  it("explicitly rejects public generic fresh E4 for a realistic Toss AUTHORIZED ordinal 1", async () => {
     const authorized = await prepareTossAuthorized(fixtures);
     const before = await redactedDispatchAuthorizationState(authorized.fixture);
 
     expectFailure(
       await persistFreshRefundExecutionObservation(db, freshInput(authorized), RESULT_ENV),
-      "CONTACT_NOT_AUTHORIZED",
+      "REFUND_LEDGER_INCONSISTENT",
     );
     expect(await redactedDispatchAuthorizationState(authorized.fixture)).toEqual(before);
   });
 
-  it("fails current MOCK-style coherence for a test-contacted Toss-derived dispatch", async () => {
+  it("explicitly rejects public generic fresh E4 for contacted Toss with zero writes", async () => {
     const contacted = await prepareTossAuthorized(fixtures);
     await markDispatchContactForTest(contacted.fixture);
     const before = await redactedDispatchAuthorizationState(contacted.fixture);
 
     expectFailure(
       await persistFreshRefundExecutionObservation(db, freshInput(contacted), RESULT_ENV),
+      "REFUND_LEDGER_INCONSISTENT",
+    );
+    expect(await redactedDispatchAuthorizationState(contacted.fixture)).toEqual(before);
+  });
+
+  it("explicitly rejects public generic replay for durable Toss artifacts with zero writes", async () => {
+    const contacted = await prepareTossAuthorized(fixtures);
+    await markDispatchContactForTest(contacted.fixture);
+    const input = freshInput(contacted);
+    await db.refundExecutionEvidence.create({
+      data: {
+        commandId: contacted.fixture.commandId,
+        source: RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+        sourceDedupKey: `refund-result:${contacted.fixture.commandId}:1`,
+        outcome: input.observation.outcome,
+        application: RefundExecutionEvidenceApplication.APPLIED,
+        observedProviderRefundId: input.observation.observedProviderRefundId,
+        reportedAmount: input.observation.reportedAmount,
+        reportedCurrency: input.observation.reportedCurrency,
+        safeCode: input.observation.safeCode,
+        safeMessage: input.observation.safeMessage,
+        observedAt: input.observation.observedAt,
+      },
+    });
+    const before = await redactedDispatchAuthorizationState(contacted.fixture);
+
+    expectFailure(
+      await replayRefundExecutionResult(db, replayInput(input)),
       "REFUND_LEDGER_INCONSISTENT",
     );
     expect(await redactedDispatchAuthorizationState(contacted.fixture)).toEqual(before);

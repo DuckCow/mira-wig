@@ -651,9 +651,32 @@ model RefundExecutionDispatchAttempt {
   contactMarkedAt      DateTime?                           @db.Timestamp(3)
   createdAt            DateTime                            @default(now()) @db.Timestamp(3)
 
-  command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  command                 RefundExecutionCommand                            @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  contactEligibilityProof RefundExecutionProviderContactEligibilityProof?
 
   @@unique([commandId, ordinal])
+}
+
+/// Immutable normalized Toss eligibility facts observed for one physical
+/// dispatch immediately before contact authorization. E3B2A adds no writer.
+model RefundExecutionProviderContactEligibilityProof {
+  id                     String   @id(map: "RefundContactProof_pkey") @default(cuid())
+  dispatchAttemptId      String   @unique(map: "RefundContactProof_dispatch_key")
+  paymentKey             String   @db.VarChar(200)
+  method                 String   @db.VarChar(64)
+  easyPayPresent         Boolean
+  currency               String   @db.VarChar(3)
+  providerStatus         String   @db.VarChar(32)
+  totalAmount            Int
+  balanceAmount          Int
+  taxFreeAmount          Int
+  taxExemptionAmount     Int
+  cancelsCount           Int
+  localReceivedAt        DateTime @db.Timestamp(3)
+  eligibilityFingerprint String   @db.VarChar(64)
+  createdAt              DateTime @default(now()) @db.Timestamp(3)
+
+  dispatchAttempt RefundExecutionDispatchAttempt @relation(fields: [dispatchAttemptId], references: [id], onDelete: Restrict, map: "RefundContactProof_dispatch_fkey")
 }
 
 /// Immutable Toss provider-operation identity. E3B1A deliberately has no

@@ -437,6 +437,9 @@ async function cleanup(context: TestContext): Promise<void> {
     select: { id: true },
   });
   const bindingIds = bindings.map((binding) => binding.id);
+  await db.refundExecutionProviderContactEligibilityProof.deleteMany({
+    where: { dispatchAttempt: { commandId: { in: commandIds } } },
+  });
   await db.refundExecutionProviderEligibilityProof.deleteMany({
     where: { bindingId: { in: bindingIds } },
   });
