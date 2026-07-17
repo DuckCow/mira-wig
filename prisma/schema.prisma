@@ -540,30 +540,31 @@ model CustomerRefundIntake {
 }
 
 model RefundAttempt {
-  id                           String                    @id @default(cuid())
+  id                           String                                   @id @default(cuid())
   orderId                      String
-  order                        Order                     @relation(fields: [orderId], references: [id])
+  order                        Order                                    @relation(fields: [orderId], references: [id])
   paymentId                    String
-  payment                      Payment                   @relation(fields: [paymentId], references: [id])
+  payment                      Payment                                  @relation(fields: [paymentId], references: [id])
   amount                       Int
   currency                     String
-  status                       RefundAttemptStatus       @default(REQUESTED)
+  status                       RefundAttemptStatus                      @default(REQUESTED)
   reason                       String
   actorType                    RefundAttemptActorType
   actorUserId                  String?
   provider                     PaymentProvider
   mode                         PaymentMode
   providerRefundId             String?
-  idempotencyKey               String                    @unique
-  requestedAt                  DateTime                  @default(now())
+  idempotencyKey               String                                   @unique
+  requestedAt                  DateTime                                 @default(now())
   processedAt                  DateTime?
   failedAt                     DateTime?
   failureCode                  String?
   safeFailureMessage           String?
-  createdAt                    DateTime                  @default(now())
-  updatedAt                    DateTime                  @updatedAt
+  createdAt                    DateTime                                 @default(now())
+  updatedAt                    DateTime                                 @updatedAt
   transitions                  RefundAttemptTransition[]
   executionCommand             RefundExecutionCommand?
+  providerOperationBinding     RefundExecutionProviderOperationBinding?
   approvedCustomerRefundIntake CustomerRefundIntake?
 
   @@unique([provider, providerRefundId])
@@ -613,8 +614,8 @@ model RefundExecutionCommand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  evidence RefundExecutionEvidence[]
-  events   RefundExecutionCommandEvent[]
+  evidence         RefundExecutionEvidence[]
+  events           RefundExecutionCommandEvent[]
   dispatchAttempts RefundExecutionDispatchAttempt[]
 
   @@index([status, availableAt, createdAt])
@@ -653,6 +654,47 @@ model RefundExecutionDispatchAttempt {
   command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
 
   @@unique([commandId, ordinal])
+}
+
+/// Immutable Toss provider-operation identity. E3B1A deliberately has no
+/// production writer; migration-owned CHECK constraints are verified against PostgreSQL.
+model RefundExecutionProviderOperationBinding {
+  id                            String          @id(map: "RefundProviderBinding_pkey") @default(cuid())
+  refundAttemptId               String          @unique(map: "RefundProviderBinding_refundAttempt_key")
+  provider                      PaymentProvider
+  mode                          PaymentMode
+  providerOperationKey          String          @unique(map: "RefundProviderBinding_operationKey_key") @db.VarChar(300)
+  operationKeyAlgorithmVersion  String          @db.VarChar(64)
+  wireContractVersion           String          @db.VarChar(64)
+  wireRequestFingerprint        String          @db.VarChar(64)
+  merchantAccountBindingId      String          @db.VarChar(64)
+  credentialGenerationBindingId String          @db.VarChar(64)
+  createdAt                     DateTime        @default(now()) @db.Timestamp(3)
+
+  refundAttempt    RefundAttempt                            @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict, map: "RefundProviderBinding_refundAttempt_fkey")
+  eligibilityProof RefundExecutionProviderEligibilityProof?
+}
+
+/// Immutable normalized pre-first-contact Toss eligibility facts. Raw Toss
+/// responses and credential material never belong in this table.
+model RefundExecutionProviderEligibilityProof {
+  id                     String   @id(map: "RefundEligibilityProof_pkey") @default(cuid())
+  bindingId              String   @unique(map: "RefundEligibilityProof_binding_key")
+  paymentKey             String   @db.VarChar(200)
+  method                 String   @db.VarChar(64)
+  easyPayPresent         Boolean
+  currency               String   @db.VarChar(3)
+  providerStatus         String   @db.VarChar(32)
+  totalAmount            Int
+  balanceAmount          Int
+  taxFreeAmount          Int
+  taxExemptionAmount     Int
+  cancelsCount           Int
+  localReceivedAt        DateTime @db.Timestamp(3)
+  eligibilityFingerprint String   @db.VarChar(64)
+  createdAt              DateTime @default(now()) @db.Timestamp(3)
+
+  binding RefundExecutionProviderOperationBinding @relation(fields: [bindingId], references: [id], onDelete: Restrict, map: "RefundEligibilityProof_binding_fkey")
 }
 
 model RefundExecutionEvidence {
