@@ -6,6 +6,7 @@ import {
   isRefundExecutionDispatchAuthorizationEnabled,
   isRefundExecutionObservationApplicationEnabled,
   isRefundExecutionTossAuthorizationEnabled,
+  isRefundExecutionTossContactEnabled,
   isRefundExecutionTossEligibilityLookupEnabled,
   REFUND_EXECUTION_CLAIM_ENABLED,
   REFUND_EXECUTION_LEASE_ENABLED,
@@ -13,12 +14,14 @@ import {
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
   REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
   REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
+  REFUND_EXECUTION_TOSS_CONTACT_ENABLED,
   REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
   RefundExecutionActivationConfigError,
 } from "../execution-activation";
 
 describe.each([
   [REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED, isRefundExecutionTossAuthorizationEnabled],
+  [REFUND_EXECUTION_TOSS_CONTACT_ENABLED, isRefundExecutionTossContactEnabled],
   [REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED, isRefundExecutionTossEligibilityLookupEnabled],
 ] as const)("%s", (key, enabled) => {
   it.each([undefined, "", "   "])("treats %j as disabled", (value) => {

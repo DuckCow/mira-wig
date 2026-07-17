@@ -10,6 +10,17 @@ const EXPECTATION = Object.freeze({ paymentKey: "toss-payment-1", fullAmount: 85
 const FAILURE_CODE = "INVALID_TOSS_REFUND_CANCELLATION_SUCCESS";
 
 describe("Toss cancellation success candidate", () => {
+  it.each([
+    ["Hangul", "가"],
+    ["emoji", "😀"],
+  ])("rejects a %s body below the code-unit bound but above the UTF-8 byte bound", (_label, value) => {
+    const body = JSON.stringify({ ...successBody(), ignored: value.repeat(22_000) });
+    expect(body.length).toBeLessThan(TOSS_REFUND_CANCELLATION_MAX_RESPONSE_BYTES);
+    expect(new TextEncoder().encode(body).byteLength)
+      .toBeGreaterThan(TOSS_REFUND_CANCELLATION_MAX_RESPONSE_BYTES);
+    expect(normalizeTossRefundCancellationSuccess(body, EXPECTATION).ok).toBe(false);
+  });
+
   it("normalizes coherent property-order-independent success to a minimal frozen shape", () => {
     const body = successBody();
     const raw = JSON.stringify({

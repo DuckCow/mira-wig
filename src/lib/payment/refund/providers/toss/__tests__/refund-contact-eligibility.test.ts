@@ -67,6 +67,14 @@ describe("Toss contact-time eligibility proof candidate", () => {
 });
 
 describe("Toss contact-time conservative no-later-than DB timestamp freshness", () => {
+  it("treats negative zero exactly as zero", () => {
+    expect(Object.is(-0, 0)).toBe(false);
+    expect(isTossRefundContactEligibilityFresh({
+      localReceivedAt: 50_000,
+      phaseDCapturedAt: 50_000 + -0,
+    })).toBe(true);
+  });
+
   it.each([
     [0, true],
     [TOSS_REFUND_CONTACT_MAX_LOOKUP_AGE_MS, true],
