@@ -34,6 +34,7 @@ export type TossRecoveryFenceHandle = Readonly<{
   historicalOrdinal: number;
   paymentKey: string;
   fullAmount: number;
+  fenceCapturedAtEpochMs: number;
 }>;
 
 export type AcquireTossRecoveryFenceResult =
@@ -178,6 +179,7 @@ function buildRecoveryFenceHandle(
     historicalOrdinal: candidate.dispatch.ordinal,
     paymentKey: candidate.paymentKey,
     fullAmount: locked.context.target.amount,
+    fenceCapturedAtEpochMs: locked.capturedAt.getTime(),
   });
 }
 

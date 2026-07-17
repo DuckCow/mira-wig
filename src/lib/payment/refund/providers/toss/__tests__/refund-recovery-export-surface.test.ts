@@ -15,6 +15,10 @@ describe("Toss recovery export and reachability boundary", () => {
     expect("acquireTossRecoveryFence" in publicRecovery).toBe(false);
     expect("applyTossRecoveryLookupSuccess" in publicRecovery).toBe(false);
     expect("parkTossRecoveryProviderConflict" in publicRecovery).toBe(false);
+    expect("admitTossRecoveryOrdinalTwo" in publicRecovery).toBe(false);
+    expect("continueTossRecoveryContact" in publicRecovery).toBe(false);
+    expect("applyTossRecoveryPostSuccess" in publicRecovery).toBe(false);
+    expect("parkTossRecoveryLocalExhaustion" in publicRecovery).toBe(false);
   });
 
   it("has no production route, action, admin, worker, reconciliation, or script caller", () => {
@@ -50,6 +54,22 @@ describe("Toss recovery export and reachability boundary", () => {
       "refund-recovery-conflict-parking.ts",
       "refund-recovery-orchestrator.ts",
     ]);
+    expect(ownerBasenames("admitTossRecoveryOrdinalTwo")).toEqual([
+      "refund-recovery-orchestrator.ts",
+      "refund-recovery-ordinal-admission.ts",
+    ]);
+    expect(ownerBasenames("continueTossRecoveryContact")).toEqual([
+      "refund-recovery-contact-continuation.ts",
+      "refund-recovery-orchestrator.ts",
+    ]);
+    expect(ownerBasenames("applyTossRecoveryPostSuccess")).toEqual([
+      "refund-recovery-contact-continuation.ts",
+      "refund-recovery-post-result-application.ts",
+    ]);
+    expect(ownerBasenames("parkTossRecoveryLocalExhaustion")).toEqual([
+      "refund-recovery-exhaustion-parking.ts",
+      "refund-recovery-ordinal-admission.ts",
+    ]);
   });
 
   it("retains zero public ordinal-admission or cancellation-POST bridge", () => {
@@ -58,7 +78,8 @@ describe("Toss recovery export and reachability boundary", () => {
       "utf8",
     );
     expect(publicSource).not.toContain("refund-recovery-ordinal-plan");
-    expect(publicSource).not.toContain("refund-cancellation-http");
+    expect(publicSource).not.toContain("admitTossRecoveryOrdinalTwo");
+    expect(publicSource).not.toContain("continueTossRecoveryContact");
     expect(publicSource).not.toContain("executeTossRefundContact");
   });
 });

@@ -37,10 +37,18 @@ export function classifyTossContactDurableState(
       : result(ledgerFailure());
   }
   if (locked.structure.kind === "contacted") {
-    return hasAtomicContactMarker(locked) ? result(recoveryFailure()) : result(ledgerFailure());
+    return hasAtomicContactMarker(locked) && isUnresolvedContactProjection(locked)
+      ? result(recoveryFailure())
+      : result(ledgerFailure());
   }
   const fresh = locked.structure.kind === "replay" && locked.contactProof === null;
   return fresh ? Object.freeze({ kind: "fresh" }) : result(ledgerFailure());
+}
+
+function isUnresolvedContactProjection(locked: LockedTossContactState): boolean {
+  return locked.context.aggregate.status === OrderStatus.REFUND_PENDING
+    && locked.context.target.status === RefundAttemptStatus.PROCESSING
+    && locked.context.command.status === RefundExecutionCommandStatus.LEASED;
 }
 
 export function coherentTossFinality(locked: LockedTossContactState): boolean {

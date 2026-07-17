@@ -111,25 +111,49 @@ describe("recoverTossRefundExecution integration", () => {
     expect(gets).toBe(0);
   });
 
-  it("returns recontact-required after one GET and retains the recovery fence", async () => {
+  it("returns interval-not-elapsed after one GET and retains the recovery fence", async () => {
     const contacted = await trackedFixture(fixtures);
+    const beforeCounts = await recoveryNonfinalCounts(contacted);
+    expect(beforeCounts).toMatchObject({ dispatches: 1, contactProofs: 1 });
     let gets = 0;
+    let posts = 0;
     const recover = createTossRefundRecoveryOperation({
       lookup: async (...args) => {
         gets += 1;
         return eligibleLookup(contacted.fixture)(...args);
       },
+      cancellation: () => {
+        posts += 1;
+        return Promise.resolve({ kind: "unknown" });
+      },
     });
     const result = await recover(db, recoveryInput(contacted), RECOVERY_ENV);
-    expect(failureCode(result)).toBe("RECOVERY_RECONTACT_REQUIRED");
+    expect(failureCode(result)).toBe("RECOVERY_INTERVAL_NOT_ELAPSED");
+    const retained = await recoveryState(contacted);
+    expect(retained.command).toMatchObject({
+      status: "LEASED",
+      leaseGeneration: 2,
+      leaseOwner: "recovery-test-owner",
+    });
+    expect(retained.command.leaseOwner).not.toBe("");
+    expect(retained.command.leaseTokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(retained.command.leaseUntil).not.toBeNull();
     const second = await recover(db, recoveryInput(contacted), RECOVERY_ENV);
     expect(failureCode(second)).toBe("RECOVERY_LEASE_CONFLICT");
     expect(gets).toBe(1);
+    expect(posts).toBe(0);
     const state = await recoveryState(contacted);
-    expect(state.command).toMatchObject({ status: "LEASED", leaseGeneration: 2 });
-    expect(state.command.leaseOwner).toBe("recovery-test-owner");
-    expect(state.command.leaseTokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(state.order.status).toBe("REFUND_PENDING");
+    expect(state.attempt.status).toBe("PROCESSING");
+    expect(state.command).toMatchObject({
+      status: "LEASED",
+      leaseGeneration: 2,
+      leaseOwner: retained.command.leaseOwner,
+      leaseTokenHash: retained.command.leaseTokenHash,
+      leaseUntil: retained.command.leaseUntil,
+    });
     expect(state.evidence).toHaveLength(0);
+    expect(await recoveryNonfinalCounts(contacted)).toEqual(beforeCounts);
   });
 
   it.each([
@@ -191,6 +215,81 @@ describe("recoverTossRefundExecution integration", () => {
     expect(failureCode(await recover(db, recoveryInput(contacted), {})))
       .toBe("RECOVERY_MANUAL_REVIEW_REQUIRED");
     expect(gets).toBe(1);
+  });
+
+  it("N2: lease expiry alone does not revoke a captured provider-conflict result", async () => {
+    const contacted = await trackedFixture(fixtures);
+    const conflict: TossRefundLookupPort = async () => {
+      await db.refundExecutionCommand.update({
+        where: { id: contacted.fixture.commandId },
+        data: { leaseUntil: new Date("2026-01-01T00:00:00.000Z") },
+      });
+      return { kind: "response", body: JSON.stringify({ status: "conflicting" }) };
+    };
+    const result = await createTossRefundRecoveryOperation({ lookup: conflict })(
+      db,
+      recoveryInput(contacted),
+      RECOVERY_ENV,
+    );
+    expect(failureCode(result)).toBe("RECOVERY_MANUAL_REVIEW_REQUIRED");
+    const state = await recoveryState(contacted);
+    expect(state.command.status).toBe("PARKED");
+    expect(state.evidence).toHaveLength(1);
+  });
+
+  it("N3: an old captured conflict cannot park after a newer recovery generation wins", async () => {
+    const contacted = await trackedFixture(fixtures);
+    const oldSession = createNamedDbSession("e3c2_old_conflict");
+    const newSession = createNamedDbSession("e3c2_new_generation");
+    let releaseLookup: (() => void) | undefined;
+    let notifyCaptured: (() => void) | undefined;
+    const captured = new Promise<void>((resolve) => { notifyCaptured = resolve; });
+    const released = new Promise<void>((resolve) => { releaseLookup = resolve; });
+    const lookup: TossRefundLookupPort = async () => {
+      notifyCaptured?.();
+      await released;
+      return { kind: "response", body: JSON.stringify({ status: "conflicting" }) };
+    };
+    try {
+      const oldResult = createTossRefundRecoveryOperation({ lookup })(
+        oldSession.client,
+        recoveryInput(contacted),
+        RECOVERY_ENV,
+      );
+      await captured;
+      const command = await newSession.client.refundExecutionCommand.findUniqueOrThrow({
+        where: { id: contacted.fixture.commandId },
+      });
+      await newSession.client.$transaction([
+        newSession.client.refundExecutionCommand.update({
+          where: { id: command.id },
+          data: {
+            leaseGeneration: command.leaseGeneration + 1,
+            leaseOwner: "new-generation-owner",
+            leaseUntil: new Date(Date.now() + 300_000),
+            leaseTokenHash: "e".repeat(64),
+          },
+        }),
+        newSession.client.refundExecutionCommandEvent.create({
+          data: {
+            commandId: command.id,
+            eventType: RefundExecutionCommandEventType.RECOVERY_LEASE_ACQUIRED,
+            leaseGeneration: command.leaseGeneration + 1,
+            dispatchAttempt: command.dispatchAttempt,
+            occurredAt: new Date(),
+          },
+        }),
+      ]);
+      releaseLookup?.();
+      expect(failureCode(await oldResult)).toBe("RECOVERY_LEASE_CONFLICT");
+      const state = await recoveryState(contacted);
+      expect(state.command.status).toBe("LEASED");
+      expect(state.attempt.status).toBe("PROCESSING");
+      expect(state.evidence).toHaveLength(0);
+    } finally {
+      releaseLookup?.();
+      await disconnectSessions(oldSession, newSession);
+    }
   });
 
   it("keeps the E3B contact classifier fail-closed for coherent E3C1 manual state", async () => {
@@ -530,6 +629,20 @@ async function recoveryState(contacted: ContactedRecoveryFixture) {
     db.refundExecutionEvidence.findMany({ where: { commandId } }),
   ]);
   return { order, attempt, command, dispatch, events, evidence };
+}
+
+async function recoveryNonfinalCounts(contacted: ContactedRecoveryFixture) {
+  const commandId = contacted.fixture.commandId;
+  const [dispatches, contactProofs, transitions] = await Promise.all([
+    db.refundExecutionDispatchAttempt.count({ where: { commandId } }),
+    db.refundExecutionProviderContactEligibilityProof.count({
+      where: { dispatchAttempt: { commandId } },
+    }),
+    db.refundAttemptTransition.count({
+      where: { refundAttemptId: contacted.fixture.refundAttemptId },
+    }),
+  ]);
+  return { dispatches, contactProofs, transitions };
 }
 
 function safeSqlId(value: string): string {

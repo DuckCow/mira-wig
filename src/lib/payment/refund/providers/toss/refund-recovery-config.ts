@@ -1,6 +1,7 @@
 import {
   isRefundExecutionObservationApplicationEnabled,
   isRefundExecutionTossRecoveryLookupEnabled,
+  isRefundExecutionTossRecoveryRecontactEnabled,
   RefundExecutionActivationConfigError,
 } from "../../execution-activation";
 import {
@@ -26,6 +27,41 @@ export function tossRecoveryPrerequisites(
     () => isRefundExecutionObservationApplicationEnabled(env),
   );
   if (applicationGate) return applicationGate;
+  const state = parseTossRefundCredentialConfig({
+    secretKey: env[TOSS_REFUND_SANDBOX_SECRET_KEY],
+    merchantAccountBinding: env[TOSS_REFUND_SANDBOX_MERCHANT_BINDING],
+    credentialGenerationBinding: env[TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING],
+  });
+  if (state.status === "CONFIGURED") return state.configuration;
+  return state.status === "ABSENT"
+    ? recoveryFailure(
+      "RECOVERY_CREDENTIAL_UNAVAILABLE",
+      "Toss refund recovery credential is unavailable.",
+    )
+    : recoveryFailure("CONFIG_INVALID", "Toss refund recovery configuration is invalid.");
+}
+
+export function tossRecoveryRecontactGate(
+  env: TossRecoveryEnv,
+): true | TossRefundRecoveryFailure {
+  try {
+    return isRefundExecutionTossRecoveryRecontactEnabled(env)
+      ? true
+      : recoveryFailure(
+        "RECOVERY_RECONTACT_REQUIRED",
+        "Toss refund recovery requires separately authorized recontact.",
+      );
+  } catch (error) {
+    if (error instanceof RefundExecutionActivationConfigError) {
+      return recoveryFailure("CONFIG_INVALID", "Toss refund recovery configuration is invalid.");
+    }
+    throw error;
+  }
+}
+
+export function currentRecoveryCredential(
+  env: TossRecoveryEnv,
+): ConfiguredTossRefundCredential | TossRefundRecoveryFailure {
   const state = parseTossRefundCredentialConfig({
     secretKey: env[TOSS_REFUND_SANDBOX_SECRET_KEY],
     merchantAccountBinding: env[TOSS_REFUND_SANDBOX_MERCHANT_BINDING],

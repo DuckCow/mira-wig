@@ -21,6 +21,7 @@ import {
 import {
   isTossRefundResultBaseIdentityCoherent,
 } from "./refund-result-identity-plan";
+import { coherentLocalManualProjection } from "./refund-recovery-local-manual-state";
 
 export const TOSS_RECOVERY_CONFLICT_SAFE_CODE =
   "TOSS_RECOVERY_PROVIDER_STATE_CONFLICT";
@@ -50,6 +51,17 @@ export function classifyTossRecoveryDurableState(
       ? classification("MANUAL_REVIEW")
       : classification("INCONSISTENT");
   }
+  return classifyRecoveryWithoutEvidence(locked);
+}
+
+function classifyRecoveryWithoutEvidence(
+  locked: LockedTossContactState,
+): TossRecoveryDurableClassification {
+  const localManual = coherentLocalManualProjection(
+    locked,
+    coherentRecoveryHistoryBase(locked, null),
+  );
+  if (localManual) return classification("MANUAL_REVIEW");
   if (hasTerminalOrManualProjection(locked)) return classification("INCONSISTENT");
   return coherentContactedWithoutEvidence(locked)
     ? classification("CONTACTED_WITHOUT_EVIDENCE")
@@ -61,6 +73,13 @@ export function coherentContactedRecoveryBase(
   credential: ConfiguredTossRefundCredential | null,
 ): boolean {
   if (!coherentContactedWithoutEvidenceShape(locked)) return false;
+  return coherentRecoveryHistoryBase(locked, credential);
+}
+
+function coherentRecoveryHistoryBase(
+  locked: LockedTossContactState,
+  credential: ConfiguredTossRefundCredential | null,
+): boolean {
   return locked.history.dispatchAttempts.every((dispatch) => {
     const snapshot = buildTossResultIdentitySnapshot(
       locked,

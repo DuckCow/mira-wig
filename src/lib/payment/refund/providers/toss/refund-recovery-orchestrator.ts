@@ -27,9 +27,13 @@ import {
   lockAndLoadTossContactState,
 } from "./refund-contact-state";
 import type { TossRefundLookupPort } from "./refund-lookup-http";
+import type { TossRefundCancellationPort } from "./refund-cancellation-http";
+import { admitTossRecoveryOrdinalTwo } from "./refund-recovery-ordinal-admission";
+import { continueTossRecoveryContact } from "./refund-recovery-contact-continuation";
 
 export type TossRefundRecoveryDependencies = Readonly<{
   lookup: TossRefundLookupPort;
+  cancellation?: TossRefundCancellationPort;
 }>;
 
 type StageZero =
@@ -74,17 +78,53 @@ async function runNormalizedRecovery(
     Object.freeze({
       paymentKey: fence.handle.paymentKey,
       fullAmount: fence.handle.fullAmount,
-      localReceivedAt: Date.now(),
+      localReceivedAt: fence.handle.fenceCapturedAtEpochMs,
     }),
   );
+  return resolveRecoveryLookup(
+    dependencies,
+    client,
+    fence.handle,
+    credential,
+    lookup,
+    env,
+  );
+}
+
+async function resolveRecoveryLookup(
+  dependencies: TossRefundRecoveryDependencies,
+  client: PrismaClient,
+  handle: Extract<Awaited<ReturnType<typeof acquireTossRecoveryFence>>, { kind: "ACQUIRED" }>["handle"],
+  credential: Extract<ReturnType<typeof tossRecoveryPrerequisites>, { readSecretKey(): string }>,
+  lookup: ReturnType<typeof normalizeTossRefundRecoveryLookup>,
+  env: TossRecoveryEnv,
+): Promise<RecoverTossRefundExecutionResult> {
   if (lookup.kind === "EXACT_SUCCESS") {
-    return applyTossRecoveryLookupSuccess(client, fence.handle, credential, lookup.success);
+    return applyTossRecoveryLookupSuccess(client, handle, credential, lookup.success);
   }
   if (lookup.kind === "CONFLICTING_PROVIDER_STATE") {
-    return parkTossRecoveryProviderConflict(client, fence.handle, credential);
+    return parkTossRecoveryProviderConflict(client, handle, credential);
+  }
+  if (lookup.kind === "STILL_ELIGIBLE_AND_UNCANCELLED") {
+    const admission = await admitTossRecoveryOrdinalTwo(
+      client,
+      handle,
+      credential,
+      lookup.eligibility,
+      env,
+    );
+    if (admission.kind === "RESULT") return admission.result;
+    return continueTossRecoveryContact(
+      dependencies.cancellation ?? unknownCancellation,
+      client,
+      admission.handle,
+      credential,
+    );
   }
   return staticLookupResult(lookup.kind);
 }
+
+const unknownCancellation: TossRefundCancellationPort = () => Promise.resolve({ kind: "unknown" });
 
 async function performRecoveryLookup(
   lookup: TossRefundLookupPort,
@@ -99,10 +139,8 @@ async function performRecoveryLookup(
 }
 
 function staticLookupResult(
-  kind: "STILL_ELIGIBLE_AND_UNCANCELLED" | "PROVIDER_PROCESSING"
-    | "LOOKUP_UNAVAILABLE" | "LOOKUP_REJECTED",
+  kind: "PROVIDER_PROCESSING" | "LOOKUP_UNAVAILABLE" | "LOOKUP_REJECTED",
 ): RecoverTossRefundExecutionResult {
-  if (kind === "STILL_ELIGIBLE_AND_UNCANCELLED") return recontactRequired();
   if (kind === "PROVIDER_PROCESSING") return providerProcessing();
   return kind === "LOOKUP_UNAVAILABLE" ? lookupUnavailable() : lookupRejected();
 }
@@ -144,10 +182,6 @@ const manualReview = () => recoveryFailure(
 const ledgerFailure = () => recoveryFailure(
   "REFUND_LEDGER_INCONSISTENT",
   "Refund execution aggregate is inconsistent.",
-);
-const recontactRequired = () => recoveryFailure(
-  "RECOVERY_RECONTACT_REQUIRED",
-  "Toss refund recovery requires separately authorized recontact.",
 );
 const providerProcessing = () => recoveryFailure(
   "RECOVERY_PROVIDER_PROCESSING",

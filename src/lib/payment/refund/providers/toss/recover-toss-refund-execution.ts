@@ -6,6 +6,7 @@ import type {
 } from "./refund-recovery-contract";
 import { createTossRefundRecoveryOperation } from "./refund-recovery-orchestrator";
 import { createTossRefundLookupPort } from "./refund-lookup-http";
+import { createTossRefundCancellationPort } from "./refund-cancellation-http";
 
 export async function recoverTossRefundExecution(
   client: PrismaClient,
@@ -14,6 +15,7 @@ export async function recoverTossRefundExecution(
 ): Promise<RecoverTossRefundExecutionResult> {
   return createTossRefundRecoveryOperation({
     lookup: createTossRefundLookupPort({ fetchFn: fetch }),
+    cancellation: createTossRefundCancellationPort({ fetchFn: fetch }),
   })(client, input, env);
 }
 

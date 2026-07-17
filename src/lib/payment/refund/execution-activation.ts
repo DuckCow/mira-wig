@@ -13,6 +13,8 @@ export const REFUND_EXECUTION_TOSS_CONTACT_ENABLED =
   "REFUND_EXECUTION_TOSS_CONTACT_ENABLED";
 export const REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED =
   "REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED";
+export const REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED =
+  "REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED";
 export const REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED =
   "REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED";
 
@@ -88,6 +90,15 @@ export function isRefundExecutionTossRecoveryLookupEnabled(
 ): boolean {
   return isRefundExecutionCapabilityEnabled(
     REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED,
+    env,
+  );
+}
+
+export function isRefundExecutionTossRecoveryRecontactEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(
+    REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED,
     env,
   );
 }
