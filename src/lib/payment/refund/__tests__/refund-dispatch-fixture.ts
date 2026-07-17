@@ -282,6 +282,7 @@ export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixt
     where: { refundAttemptId: { in: attemptIds } },
     select: { id: true },
   });
+  await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionProviderContactEligibilityProof.deleteMany({
     where: { dispatchAttempt: { commandId: { in: commandIds } } },
   });
@@ -293,7 +294,6 @@ export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixt
   });
   await db.refundExecutionDispatchAttempt.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
-  await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
   await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });
   await db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } });

@@ -1,9 +1,13 @@
 const ROOT_FIELDS = new Set([
   "paymentKey",
+  "method",
+  "easyPay",
   "currency",
   "status",
   "totalAmount",
   "balanceAmount",
+  "taxFreeAmount",
+  "taxExemptionAmount",
   "cancels",
 ]);
 const CANCEL_FIELDS = new Set([

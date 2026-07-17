@@ -2,6 +2,9 @@ import {
   PaymentMode,
   PaymentProvider,
   RefundExecutionDispatchAttemptState,
+  RefundExecutionEvidenceApplication,
+  RefundExecutionEvidenceOutcome,
+  RefundExecutionEvidenceSource,
 } from "@prisma/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
@@ -94,6 +97,9 @@ describe("executeTossRefundContact integration", () => {
     expect(state.dispatch.state).toBe(RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED);
     expect(state.dispatch.contactMarkedAt).not.toBeNull();
     expect(state.evidence).toHaveLength(1);
+    expect(state.evidence[0].dispatchAttemptId === state.dispatch.id).toBe(true);
+    expect(state.evidence[0].authorizingLeaseGeneration === authorized.lease.leaseGeneration)
+      .toBe(true);
     expect(state.attempt).toMatchObject({ status: "SUCCEEDED", providerRefundId: "transaction-1" });
     expect(state.order.status).toBe("REFUNDED");
     expect(state.command).toMatchObject({
@@ -119,6 +125,95 @@ describe("executeTossRefundContact integration", () => {
     expect(replay).toMatchObject({ ok: true, replayed: true, outcome: "REFUND_SUCCEEDED" });
     expect(calls).toEqual({ get: 0, post: 0 });
   });
+
+  it.each([
+    RefundExecutionEvidenceApplication.PARKED,
+    RefundExecutionEvidenceApplication.CONFLICT,
+  ])("allows an earlier nonterminal lookup observation with one terminal success: %s", async (application) => {
+    const authorized = await trackedAuthorizedFixture(fixtures);
+    await executor(
+      eligibleLookup(authorized.fixture, { get: 0, post: 0 }),
+      successfulCancellation(authorized.fixture, { get: 0, post: 0 }),
+    )(db, contactInput(authorized), CONTACT_ENV);
+    const state = await contactState(authorized.fixture);
+    await db.refundExecutionEvidence.create({
+      data: {
+        commandId: authorized.fixture.commandId,
+        source: RefundExecutionEvidenceSource.PROVIDER_LOOKUP,
+        sourceDedupKey: `refund-provider-lookup:${authorized.fixture.commandId}:2`,
+        outcome: RefundExecutionEvidenceOutcome.UNKNOWN,
+        application,
+        safeCode: "PROVIDER_OUTCOME_UNKNOWN",
+        safeMessage: "Provider lookup did not establish a terminal result.",
+        observedAt: state.evidence[0].observedAt,
+        dispatchAttemptId: state.dispatch.id,
+        authorizingLeaseGeneration: 2,
+      },
+    });
+    const calls = { get: 0, post: 0 };
+    const replay = await executor(
+      eligibleLookup(authorized.fixture, calls),
+      successfulCancellation(authorized.fixture, calls),
+    )(db, contactInput(authorized), {});
+    expect(replay).toMatchObject({ ok: true, replayed: true });
+    expect(calls).toEqual({ get: 0, post: 0 });
+  });
+
+  it("rejects two applied success authorities", async () => {
+    const authorized = await trackedAuthorizedFixture(fixtures);
+    await executor(
+      eligibleLookup(authorized.fixture, { get: 0, post: 0 }),
+      successfulCancellation(authorized.fixture, { get: 0, post: 0 }),
+    )(db, contactInput(authorized), CONTACT_ENV);
+    const state = await contactState(authorized.fixture);
+    await db.refundExecutionEvidence.create({
+      data: {
+        commandId: authorized.fixture.commandId,
+        source: RefundExecutionEvidenceSource.PROVIDER_LOOKUP,
+        sourceDedupKey: `synthetic-second-success-${authorized.fixture.commandId}`,
+        outcome: RefundExecutionEvidenceOutcome.SUCCEEDED,
+        application: RefundExecutionEvidenceApplication.APPLIED,
+        observedProviderRefundId: "transaction-1",
+        reportedAmount: authorized.fixture.targetAmount,
+        reportedCurrency: "KRW",
+        observedAt: state.evidence[0].observedAt,
+        dispatchAttemptId: state.dispatch.id,
+        authorizingLeaseGeneration: 2,
+      },
+    });
+    const result = await executor(
+      eligibleLookup(authorized.fixture, { get: 0, post: 0 }),
+      successfulCancellation(authorized.fixture, { get: 0, post: 0 }),
+    )(db, contactInput(authorized), {});
+    expect(failureCode(result)).toBe("REFUND_LEDGER_INCONSISTENT");
+  });
+
+  it.each(["missing-dispatch", "missing-generation", "wrong-generation"] as const)(
+    "rejects terminal Toss evidence provenance: %s",
+    async (variant) => {
+      const authorized = await trackedAuthorizedFixture(fixtures);
+      await executor(
+        eligibleLookup(authorized.fixture, { get: 0, post: 0 }),
+        successfulCancellation(authorized.fixture, { get: 0, post: 0 }),
+      )(db, contactInput(authorized), CONTACT_ENV);
+      const evidence = await db.refundExecutionEvidence.findFirstOrThrow({
+        where: { commandId: authorized.fixture.commandId },
+      });
+      await db.refundExecutionEvidence.update({
+        where: { id: evidence.id },
+        data: variant === "missing-dispatch"
+          ? { dispatchAttemptId: null }
+          : variant === "missing-generation"
+            ? { authorizingLeaseGeneration: null }
+            : { authorizingLeaseGeneration: authorized.lease.leaseGeneration + 1 },
+      });
+      const result = await executor(
+        eligibleLookup(authorized.fixture, { get: 0, post: 0 }),
+        successfulCancellation(authorized.fixture, { get: 0, post: 0 }),
+      )(db, contactInput(authorized), {});
+      expect(failureCode(result)).toBe("REFUND_LEDGER_INCONSISTENT");
+    },
+  );
 
   it.each([
     ["unknown", "TOSS_CONTACT_OUTCOME_UNKNOWN"],

@@ -7,7 +7,6 @@ import {
   RefundExecutionDispatchAttemptState,
   RefundExecutionEvidenceApplication,
   RefundExecutionEvidenceOutcome,
-  RefundExecutionEvidenceSource,
 } from "@prisma/client";
 import {
   fingerprintRefundRequest,
@@ -29,104 +28,21 @@ import {
   fingerprintTossRefundWireRequest,
   TOSS_REFUND_WIRE_VERSION,
 } from "./refund-wire-fingerprint";
+import {
+  matchesTossRefundResultProvenance,
+} from "./refund-result-provenance";
+import {
+  TOSS_RESULT_IDENTITY_FAILURE_CODE,
+  type EligibilityProofSnapshot,
+  type PlanTossRefundResultIdentity,
+  type TossRefundResultIdentitySnapshot,
+} from "./refund-result-identity-types";
 
-const FAILURE_CODE = "TOSS_RESULT_IDENTITY_MISMATCH";
-
-type EligibilityProofSnapshot = Readonly<{
-  paymentKey: string;
-  method: string;
-  easyPayPresent: boolean;
-  currency: string;
-  providerStatus: string;
-  totalAmount: number;
-  balanceAmount: number;
-  taxFreeAmount: number;
-  taxExemptionAmount: number;
-  cancelsCount: number;
-  localReceivedAt: number;
-  eligibilityFingerprint: string;
-}>;
-
-type CancellationSuccessSnapshot = Readonly<{
-  paymentKey: string;
-  currency: string;
-  paymentStatus: string;
-  totalAmount: number;
-  balanceAmount: number;
-  transactionKey: string;
-  cancelStatus: string;
-  cancelAmount: number;
-  cancelReason: string;
-}>;
-
-export type TossRefundResultIdentitySnapshot = Readonly<{
-  commandId: string;
-  refundAttempt: Readonly<{
-    id: string;
-    paymentId: string;
-    provider: PaymentProvider;
-    mode: PaymentMode;
-    amount: number;
-    currency: string;
-    idempotencyKey: string;
-  }>;
-  payment: Readonly<{
-    id: string;
-    provider: PaymentProvider;
-    mode: PaymentMode;
-    amount: number;
-    currency: string;
-    paymentKey: string;
-  }>;
-  binding: Readonly<{
-    id: string;
-    refundAttemptId: string;
-    provider: PaymentProvider;
-    mode: PaymentMode;
-    providerOperationKey: string;
-    operationKeyAlgorithmVersion: string;
-    wireContractVersion: string;
-    wireRequestFingerprint: string;
-    merchantAccountBindingId: string;
-    credentialGenerationBindingId: string;
-  }>;
-  expectedCredential: Readonly<{
-    merchantAccountBindingId: string;
-    credentialGenerationBindingId: string;
-  }>;
-  authorizationProof: EligibilityProofSnapshot & Readonly<{ bindingId: string }>;
-  contactProof: EligibilityProofSnapshot & Readonly<{ dispatchAttemptId: string }>;
-  dispatch: Readonly<{
-    id: string;
-    commandId: string;
-    ordinal: number;
-    leaseGeneration: number;
-    provider: PaymentProvider;
-    mode: PaymentMode;
-    providerOperationKey: string;
-    requestFingerprint: string;
-    state: RefundExecutionDispatchAttemptState;
-    contactMarkedAt: number | null;
-  }>;
-  success: CancellationSuccessSnapshot;
-}>;
-
-export type TossRefundResultProjectionPlan = Readonly<{
-  sourceDedupKey: string;
-  evidenceSource: RefundExecutionEvidenceSource;
-  evidenceOutcome: RefundExecutionEvidenceOutcome;
-  evidenceApplication: RefundExecutionEvidenceApplication;
-  observedProviderRefundId: string;
-  reportedAmount: number;
-  reportedCurrency: "KRW";
-  refundAttemptStatus: RefundAttemptStatus;
-  orderStatus: OrderStatus;
-  commandStatus: RefundExecutionCommandStatus;
-}>;
-
-export type PlanTossRefundResultIdentity =
-  | Readonly<{ ok: true; plan: TossRefundResultProjectionPlan }>
-  | Readonly<{ ok: false; code: typeof FAILURE_CODE }>;
+export type {
+  PlanTossRefundResultIdentity,
+  TossRefundResultIdentitySnapshot,
+  TossRefundResultProjectionPlan,
+} from "./refund-result-identity-types";
 
 /** Pure validation/planning only. This establishes no response provenance and performs no writes. */
 export function planTossRefundResultIdentity(
@@ -134,12 +50,16 @@ export function planTossRefundResultIdentity(
 ): PlanTossRefundResultIdentity {
   try {
     const expected = expectedRequestIdentity(snapshot);
-    if (!coreMatches(snapshot)
-      || !bindingMatches(snapshot, expected.providerOperationKey, expected.wireFingerprint)
-      || !proofMatches(snapshot.authorizationProof, snapshot.binding.id, snapshot, false)
-      || !proofMatches(snapshot.contactProof, snapshot.dispatch.id, snapshot, true)
-      || !dispatchMatches(snapshot, expected.providerOperationKey, expected.neutralFingerprint)
-      || !successMatches(snapshot)) return failure();
+    const coherent = [
+      coreMatches(snapshot),
+      bindingMatches(snapshot, expected.providerOperationKey, expected.wireFingerprint),
+      proofMatches(snapshot.authorizationProof, snapshot.binding.id, snapshot, false),
+      proofMatches(snapshot.contactProof, snapshot.dispatch.id, snapshot, true),
+      dispatchMatches(snapshot, expected.providerOperationKey, expected.neutralFingerprint),
+      matchesTossRefundResultProvenance(snapshot),
+      successMatches(snapshot),
+    ].every(Boolean);
+    if (!coherent) return failure();
     return planned(snapshot);
   } catch {
     return failure();
@@ -247,7 +167,8 @@ function dispatchMatches(
   const dispatch = snapshot.dispatch;
   return [
     dispatch.commandId === snapshot.commandId,
-    dispatch.ordinal === 1,
+    Number.isSafeInteger(dispatch.ordinal),
+    dispatch.ordinal >= 1,
     Number.isSafeInteger(dispatch.leaseGeneration),
     dispatch.leaseGeneration >= 1,
     dispatch.provider === PaymentProvider.TOSS,
@@ -286,8 +207,8 @@ function planned(snapshot: TossRefundResultIdentitySnapshot): PlanTossRefundResu
   return Object.freeze({
     ok: true,
     plan: Object.freeze({
-      sourceDedupKey: `refund-result:${snapshot.commandId}:1`,
-      evidenceSource: RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+      sourceDedupKey: `refund-result:${snapshot.commandId}:${snapshot.dispatch.ordinal}`,
+      evidenceSource: snapshot.evidenceProvenance.source,
       evidenceOutcome: RefundExecutionEvidenceOutcome.SUCCEEDED,
       evidenceApplication: RefundExecutionEvidenceApplication.APPLIED,
       observedProviderRefundId: snapshot.success.transactionKey,
@@ -296,10 +217,12 @@ function planned(snapshot: TossRefundResultIdentitySnapshot): PlanTossRefundResu
       refundAttemptStatus: RefundAttemptStatus.SUCCEEDED,
       orderStatus: OrderStatus.REFUNDED,
       commandStatus: RefundExecutionCommandStatus.DONE,
+      dispatchAttemptId: snapshot.dispatch.id,
+      authorizingLeaseGeneration: snapshot.evidenceProvenance.authorizingLeaseGeneration,
     }),
   });
 }
 
 function failure(): PlanTossRefundResultIdentity {
-  return Object.freeze({ ok: false, code: FAILURE_CODE });
+  return Object.freeze({ ok: false, code: TOSS_RESULT_IDENTITY_FAILURE_CODE });
 }

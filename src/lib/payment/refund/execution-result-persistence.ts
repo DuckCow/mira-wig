@@ -23,6 +23,16 @@ type PersistenceContext = {
   command: NonNullable<ResolutionTarget["executionCommand"]>;
 };
 
+export type RefundEvidencePersistenceProvenance = Readonly<{
+  dispatchAttemptId: string | null;
+  authorizingLeaseGeneration: number | null;
+}>;
+
+const NO_EVIDENCE_PROVENANCE: RefundEvidencePersistenceProvenance = Object.freeze({
+  dispatchAttemptId: null,
+  authorizingLeaseGeneration: null,
+});
+
 export class ResolutionRollbackError extends Error {}
 
 export async function lockRefundResultRows(
@@ -69,9 +79,10 @@ export async function persistResolution(
   input: NormalizedPersistFreshRefundExecutionObservationInput,
   plan: ResolutionPlan,
   capturedAt: Date,
+  provenance: RefundEvidencePersistenceProvenance = NO_EVIDENCE_PROVENANCE,
 ): Promise<RefundExecutionResult> {
   try {
-    return await persistResolutionWrites(tx, context, input, plan, capturedAt);
+    return await persistResolutionWrites(tx, context, input, plan, capturedAt, provenance);
   } catch (error) {
     if (error instanceof ResolutionRollbackError) throw error;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw error;
@@ -91,8 +102,11 @@ async function persistResolutionWrites(
   input: NormalizedPersistFreshRefundExecutionObservationInput,
   plan: ResolutionPlan,
   capturedAt: Date,
+  provenance: RefundEvidencePersistenceProvenance,
 ): Promise<RefundExecutionResult> {
-  const evidence = await tx.refundExecutionEvidence.create({ data: evidenceData(input, plan) });
+  const evidence = await tx.refundExecutionEvidence.create({
+    data: evidenceData(input, plan, provenance),
+  });
   await updateAttempt(tx, context, plan);
   await updateOrder(tx, context, plan);
   if (plan.attemptStatus !== RefundAttemptStatus.PROCESSING) {
@@ -107,6 +121,7 @@ async function persistResolutionWrites(
 function evidenceData(
   input: NormalizedPersistFreshRefundExecutionObservationInput,
   plan: ResolutionPlan,
+  provenance: RefundEvidencePersistenceProvenance,
 ) {
   return {
     commandId: input.commandId,
@@ -120,6 +135,8 @@ function evidenceData(
     safeCode: plan.diagnostic.safeCode,
     safeMessage: plan.diagnostic.safeMessage,
     observedAt: input.observation.observedAt,
+    dispatchAttemptId: provenance.dispatchAttemptId,
+    authorizingLeaseGeneration: provenance.authorizingLeaseGeneration,
   };
 }
 

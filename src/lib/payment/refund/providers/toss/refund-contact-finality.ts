@@ -2,7 +2,6 @@ import {
   OrderStatus,
   RefundAttemptActorType,
   RefundAttemptStatus,
-  RefundExecutionCommandEventType,
   RefundExecutionCommandStatus,
   RefundExecutionDispatchAttemptState,
   RefundExecutionEvidenceApplication,
@@ -15,7 +14,6 @@ import {
   buildRefundResultDedupKey,
 } from "../../execution-result-contract";
 import { EXECUTION_SUCCEEDED_TRANSITION_REASON } from "../../execution-result-plan";
-import type { ConfiguredTossRefundCredential } from "./refund-credential-config";
 import {
   contactFailure,
   contactSuccess,
@@ -23,10 +21,8 @@ import {
 } from "./refund-contact-contract";
 import { hasAtomicContactMarker, type LockedTossContactState } from "./refund-contact-state";
 import type { TossRefundCancellationSuccessCandidate } from "./refund-cancellation-response";
-import {
-  planTossRefundResultIdentity,
-  type TossRefundResultIdentitySnapshot,
-} from "./refund-result-identity-plan";
+import { buildTossResultIdentitySnapshot } from "./refund-contact-finality-snapshot";
+import { planTossRefundResultIdentity } from "./refund-result-identity-plan";
 
 export type ContactDurableClassification =
   | Readonly<{ kind: "fresh" }>
@@ -53,128 +49,23 @@ export function coherentTossFinality(locked: LockedTossContactState): boolean {
   const transactionKey = evidence.observedProviderRefundId;
   if (!transactionKey) return false;
   const success = successFromEvidence(locked, transactionKey);
-  const snapshot = buildTossResultIdentitySnapshot(locked, success, null);
+  const snapshot = buildTossResultIdentitySnapshot(locked, success, null, evidence);
   if (!snapshot || !planTossRefundResultIdentity(snapshot).ok) return false;
   const transition = appliedTransition(locked, evidence.id);
   return evidenceMatches(locked, transactionKey)
-    && projectionMatches(locked, transactionKey, transition)
-    && acquisitionMatches(locked);
+    && projectionMatches(locked, transactionKey, transition);
 }
 
 function soleFinalityEvidence(locked: LockedTossContactState) {
-  return locked.evidence.length === 1 && hasAtomicContactMarker(locked)
-    ? locked.evidence[0]
-    : null;
-}
-
-export function buildTossResultIdentitySnapshot(
-  locked: LockedTossContactState,
-  success: TossRefundCancellationSuccessCandidate,
-  credential: ConfiguredTossRefundCredential | null,
-): TossRefundResultIdentitySnapshot | null {
-  const binding = locked.binding;
-  const authorizationProof = binding?.eligibilityProof;
-  const contactProof = locked.contactProof;
-  const dispatch = locked.history.dispatchAttempts[0];
-  const paymentKey = locked.context.aggregate.payment.providerPaymentKey;
-  if (!binding) return null;
-  if (!authorizationProof) return null;
-  if (!contactProof) return null;
-  if (!dispatch) return null;
-  if (!paymentKey) return null;
-  return {
-    commandId: locked.context.command.id,
-    refundAttempt: refundAttemptSnapshot(locked),
-    payment: paymentSnapshot(locked, paymentKey),
-    binding: { ...binding },
-    expectedCredential: expectedCredentialSnapshot(binding, credential),
-    authorizationProof: {
-      ...proofFacts(authorizationProof),
-      bindingId: authorizationProof.bindingId,
-    },
-    contactProof: {
-      ...proofFacts(contactProof),
-      dispatchAttemptId: contactProof.dispatchAttemptId,
-    },
-    dispatch: dispatchSnapshot(dispatch),
-    success,
-  };
-}
-
-function expectedCredentialSnapshot(
-  binding: NonNullable<LockedTossContactState["binding"]>,
-  credential: ConfiguredTossRefundCredential | null,
-) {
-  return {
-    merchantAccountBindingId: credential?.merchantAccountBinding
-      ?? binding.merchantAccountBindingId,
-    credentialGenerationBindingId: credential?.credentialGenerationBinding
-      ?? binding.credentialGenerationBindingId,
-  };
-}
-
-function dispatchSnapshot(
-  dispatch: LockedTossContactState["history"]["dispatchAttempts"][number],
-) {
-  return {
-    ...dispatch,
-    contactMarkedAt: dispatch.contactMarkedAt?.getTime() ?? null,
-  };
-}
-
-function refundAttemptSnapshot(locked: LockedTossContactState) {
-  const target = locked.context.target;
-  return {
-    id: target.id,
-    paymentId: target.paymentId,
-    provider: target.provider,
-    mode: target.mode,
-    amount: target.amount,
-    currency: target.currency,
-    idempotencyKey: target.idempotencyKey,
-  };
-}
-
-function paymentSnapshot(locked: LockedTossContactState, paymentKey: string) {
-  const payment = locked.context.aggregate.payment;
-  return {
-    id: payment.id,
-    provider: payment.provider,
-    mode: payment.mode,
-    amount: payment.amount,
-    currency: payment.currency,
-    paymentKey,
-  };
-}
-
-function proofFacts(proof: Readonly<{
-  paymentKey: string;
-  method: string;
-  easyPayPresent: boolean;
-  currency: string;
-  providerStatus: string;
-  totalAmount: number;
-  balanceAmount: number;
-  taxFreeAmount: number;
-  taxExemptionAmount: number;
-  cancelsCount: number;
-  localReceivedAt: Date;
-  eligibilityFingerprint: string;
-}>) {
-  return {
-    paymentKey: proof.paymentKey,
-    method: proof.method,
-    easyPayPresent: proof.easyPayPresent,
-    currency: proof.currency,
-    providerStatus: proof.providerStatus,
-    totalAmount: proof.totalAmount,
-    balanceAmount: proof.balanceAmount,
-    taxFreeAmount: proof.taxFreeAmount,
-    taxExemptionAmount: proof.taxExemptionAmount,
-    cancelsCount: proof.cancelsCount,
-    localReceivedAt: proof.localReceivedAt.getTime(),
-    eligibilityFingerprint: proof.eligibilityFingerprint,
-  };
+  const appliedSuccess = locked.evidence.filter((row) => (
+    row.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED
+      && row.application === RefundExecutionEvidenceApplication.APPLIED
+  ));
+  if (appliedSuccess.length !== 1) return null;
+  const providerIds = new Set(locked.evidence
+    .map((row) => row.observedProviderRefundId)
+    .filter((value): value is string => value !== null));
+  return providerIds.size <= 1 ? appliedSuccess[0] : null;
 }
 
 function successFromEvidence(
@@ -197,11 +88,17 @@ function successFromEvidence(
 }
 
 function evidenceMatches(locked: LockedTossContactState, transactionKey: string): boolean {
-  const evidence = locked.evidence[0];
+  const evidence = soleFinalityEvidence(locked);
+  if (!evidence?.dispatchAttemptId || !evidence.authorizingLeaseGeneration) return false;
+  const dispatch = locked.history.dispatchAttempts.find((row) => row.id === evidence.dispatchAttemptId);
+  if (!dispatch || laterContactedOrdinalExists(locked, dispatch.ordinal)) return false;
   return [
     evidence.commandId === locked.context.command.id,
-    evidence.sourceDedupKey === buildRefundResultDedupKey(locked.context.command.id, 1),
-    evidence.source === RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+    evidence.sourceDedupKey === buildRefundResultDedupKey(
+      locked.context.command.id, dispatch.ordinal,
+    ),
+    evidence.source === RefundExecutionEvidenceSource.ADAPTER_RESPONSE
+      || evidence.source === RefundExecutionEvidenceSource.PROVIDER_LOOKUP,
     evidence.outcome === RefundExecutionEvidenceOutcome.SUCCEEDED,
     evidence.application === RefundExecutionEvidenceApplication.APPLIED,
     evidence.observedProviderRefundId === transactionKey,
@@ -211,6 +108,13 @@ function evidenceMatches(locked: LockedTossContactState, transactionKey: string)
     evidence.safeMessage === null,
     locked.context.target.processedAt?.getTime() === evidence.observedAt.getTime(),
   ].every(Boolean);
+}
+
+function laterContactedOrdinalExists(locked: LockedTossContactState, ordinal: number): boolean {
+  return locked.history.dispatchAttempts.some((dispatch) => (
+    dispatch.ordinal > ordinal
+      && dispatch.state === RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED
+  ));
 }
 
 function projectionMatches(
@@ -259,18 +163,6 @@ function transitionMatches(
     && transition.actorType === RefundAttemptActorType.SYSTEM
     && transition.actorUserId === null
     && transition.reason === EXECUTION_SUCCEEDED_TRANSITION_REASON;
-}
-
-function acquisitionMatches(locked: LockedTossContactState): boolean {
-  const dispatch = locked.history.dispatchAttempts[0];
-  const acquisitions = locked.history.events.filter((event) => (
-    event.eventType === RefundExecutionCommandEventType.LEASE_ACQUIRED
-  ));
-  return locked.history.events.length === 1 && acquisitions.length === 1
-    && acquisitions[0].commandId === locked.context.command.id
-    && acquisitions[0].leaseGeneration === dispatch.leaseGeneration
-    && acquisitions[0].dispatchAttempt === 0
-    && dispatch.state === RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED;
 }
 
 function result(value: ExecuteTossRefundContactResult): ContactDurableClassification {

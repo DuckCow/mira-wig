@@ -16,6 +16,7 @@ import {
 
 export type LockedTossContactState = LockedTossAuthorizationState & Readonly<{
   contactProof: RefundExecutionProviderContactEligibilityProof | null;
+  contactProofs: readonly RefundExecutionProviderContactEligibilityProof[];
   evidence: readonly RefundExecutionEvidence[];
 }>;
 
@@ -36,16 +37,20 @@ export async function lockAndLoadTossContactState(
   const dispatchId = locked.history.dispatchAttempts.length === 1
     ? locked.history.dispatchAttempts[0].id
     : null;
-  const [contactProof, evidence] = await Promise.all([
-    dispatchId ? tx.refundExecutionProviderContactEligibilityProof.findUnique({
-      where: { dispatchAttemptId: dispatchId },
-    }) : null,
+  const [contactProofs, evidence] = await Promise.all([
+    tx.refundExecutionProviderContactEligibilityProof.findMany({
+      where: { dispatchAttempt: { commandId } },
+      orderBy: { createdAt: "asc" },
+    }),
     tx.refundExecutionEvidence.findMany({
       where: { commandId },
       orderBy: { createdAt: "asc" },
     }),
   ]);
-  return { ...locked, contactProof, evidence };
+  const contactProof = dispatchId
+    ? contactProofs.find((proof) => proof.dispatchAttemptId === dispatchId) ?? null
+    : null;
+  return { ...locked, contactProof, contactProofs, evidence };
 }
 
 export function exactCurrentContactFence(

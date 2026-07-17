@@ -1,7 +1,9 @@
 import {
   PaymentMode,
   PaymentProvider,
+  RefundExecutionCommandEventType,
   RefundExecutionDispatchAttemptState,
+  RefundExecutionEvidenceSource,
 } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
@@ -121,6 +123,24 @@ describe("pure Toss binding-aware result identity plan", () => {
     ["dispatch generation", (value: TossRefundResultIdentitySnapshot) => ({
       ...value, dispatch: { ...value.dispatch, leaseGeneration: 0 },
     })],
+    ["evidence dispatch owner", (value: TossRefundResultIdentitySnapshot) => ({
+      ...value,
+      evidenceProvenance: { ...value.evidenceProvenance, dispatchAttemptId: "other-dispatch" },
+    })],
+    ["evidence generation", (value: TossRefundResultIdentitySnapshot) => ({
+      ...value,
+      evidenceProvenance: { ...value.evidenceProvenance, authorizingLeaseGeneration: 2 },
+    })],
+    ["acquisition event type", (value: TossRefundResultIdentitySnapshot) => ({
+      ...value,
+      acquisitionEvent: {
+        ...value.acquisitionEvent,
+        eventType: RefundExecutionCommandEventType.RECOVERY_LEASE_ACQUIRED,
+      },
+    })],
+    ["acquisition event ordinal", (value: TossRefundResultIdentitySnapshot) => ({
+      ...value, acquisitionEvent: { ...value.acquisitionEvent, dispatchAttempt: 1 },
+    })],
     ["neutral fingerprint", (value: TossRefundResultIdentitySnapshot) => ({
       ...value, dispatch: { ...value.dispatch, requestFingerprint: "0".repeat(64) },
     })],
@@ -171,6 +191,48 @@ describe("pure Toss binding-aware result identity plan", () => {
 
     expect(result.ok).toBe(false);
     expect(!result.ok && result.code === FAILURE_CODE).toBe(true);
+  });
+
+  it("accepts recovery GET provenance against the historical contacted ordinal", () => {
+    const value = coherentSnapshot();
+    const result = planTossRefundResultIdentity({
+      ...value,
+      evidenceProvenance: {
+        source: RefundExecutionEvidenceSource.PROVIDER_LOOKUP,
+        dispatchAttemptId: value.dispatch.id,
+        authorizingLeaseGeneration: 2,
+      },
+      acquisitionEvent: {
+        commandId: value.commandId,
+        eventType: RefundExecutionCommandEventType.RECOVERY_LEASE_ACQUIRED,
+        leaseGeneration: 2,
+        dispatchAttempt: 1,
+      },
+    });
+    expect(result.ok && result.plan.evidenceSource === RefundExecutionEvidenceSource.PROVIDER_LOOKUP)
+      .toBe(true);
+  });
+
+  it("accepts recovery POST provenance on the next contacted ordinal", () => {
+    const value = coherentSnapshot();
+    const dispatch = { ...value.dispatch, id: "dispatch-2", ordinal: 2, leaseGeneration: 2 };
+    const result = planTossRefundResultIdentity({
+      ...value,
+      dispatch,
+      contactProof: { ...value.contactProof, dispatchAttemptId: dispatch.id },
+      evidenceProvenance: {
+        source: RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+        dispatchAttemptId: dispatch.id,
+        authorizingLeaseGeneration: 2,
+      },
+      acquisitionEvent: {
+        commandId: value.commandId,
+        eventType: RefundExecutionCommandEventType.RECOVERY_LEASE_ACQUIRED,
+        leaseGeneration: 2,
+        dispatchAttempt: 1,
+      },
+    });
+    expect(result.ok && result.plan.sourceDedupKey.endsWith(":2")).toBe(true);
   });
 });
 
@@ -276,6 +338,17 @@ function coherentSnapshot(): TossRefundResultIdentitySnapshot {
       })),
       state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
       contactMarkedAt: Date.parse("2026-07-17T00:00:01.000Z"),
+    },
+    evidenceProvenance: {
+      source: RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+      dispatchAttemptId: "dispatch-1",
+      authorizingLeaseGeneration: 1,
+    },
+    acquisitionEvent: {
+      commandId: "command-1",
+      eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+      leaseGeneration: 1,
+      dispatchAttempt: 0,
     },
     success: normalizedSuccess.candidate,
   };

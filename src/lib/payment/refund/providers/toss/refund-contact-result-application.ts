@@ -26,9 +26,9 @@ import {
   type NormalizedExecuteTossRefundContactInput,
 } from "./refund-contact-contract";
 import {
-  buildTossResultIdentitySnapshot,
   classifyTossContactDurableState,
 } from "./refund-contact-finality";
+import { buildTossResultIdentitySnapshot } from "./refund-contact-finality-snapshot";
 import {
   discoverTossContactOwnership,
   exactPostContactFence,
@@ -81,8 +81,20 @@ async function applyInTransaction(
     resultPersistenceInput(input, observation),
     successPlan(success.transactionKey, locked.capturedAt),
     locked.capturedAt,
+    initialTossEvidenceProvenance(locked),
   );
   return persisted.ok ? contactSuccess(input.commandId, false) : ledgerFailure();
+}
+
+function initialTossEvidenceProvenance(
+  locked: NonNullable<Awaited<ReturnType<typeof lockAndLoadTossContactState>>>,
+) {
+  const dispatch = locked.history.dispatchAttempts[0];
+  if (!dispatch) throw new Error("Toss refund dispatch provenance is unavailable.");
+  return Object.freeze({
+    dispatchAttemptId: dispatch.id,
+    authorizingLeaseGeneration: locked.context.command.leaseGeneration,
+  });
 }
 
 function validateApplicationState(
