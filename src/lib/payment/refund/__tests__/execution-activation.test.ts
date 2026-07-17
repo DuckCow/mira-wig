@@ -8,6 +8,7 @@ import {
   isRefundExecutionTossAuthorizationEnabled,
   isRefundExecutionTossContactEnabled,
   isRefundExecutionTossEligibilityLookupEnabled,
+  isRefundExecutionTossRecoveryLookupEnabled,
   REFUND_EXECUTION_CLAIM_ENABLED,
   REFUND_EXECUTION_LEASE_ENABLED,
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
@@ -16,6 +17,7 @@ import {
   REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
   REFUND_EXECUTION_TOSS_CONTACT_ENABLED,
   REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
+  REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED,
   RefundExecutionActivationConfigError,
 } from "../execution-activation";
 
@@ -23,6 +25,7 @@ describe.each([
   [REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED, isRefundExecutionTossAuthorizationEnabled],
   [REFUND_EXECUTION_TOSS_CONTACT_ENABLED, isRefundExecutionTossContactEnabled],
   [REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED, isRefundExecutionTossEligibilityLookupEnabled],
+  [REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED, isRefundExecutionTossRecoveryLookupEnabled],
 ] as const)("%s", (key, enabled) => {
   it.each([undefined, "", "   "])("treats %j as disabled", (value) => {
     expect(enabled({ [key]: value })).toBe(false);

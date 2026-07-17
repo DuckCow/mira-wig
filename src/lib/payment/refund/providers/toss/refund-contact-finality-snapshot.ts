@@ -10,13 +10,20 @@ import type { TossRefundResultIdentitySnapshot } from "./refund-result-identity-
 type Evidence = LockedTossContactState["evidence"][number];
 type Dispatch = LockedTossContactState["history"]["dispatchAttempts"][number];
 
+export type FreshTossResultProvenance = Readonly<{
+  source: RefundExecutionEvidenceSource;
+  dispatchAttemptId: string;
+  authorizingLeaseGeneration: number;
+}>;
+
 export function buildTossResultIdentitySnapshot(
   locked: LockedTossContactState,
   success: TossRefundCancellationSuccessCandidate,
   credential: ConfiguredTossRefundCredential | null,
   evidence: Evidence | null = null,
+  freshProvenance: FreshTossResultProvenance | null = null,
 ): TossRefundResultIdentitySnapshot | null {
-  const parts = resolveSnapshotParts(locked, evidence);
+  const parts = resolveSnapshotParts(locked, evidence, freshProvenance);
   if (!parts) return null;
   const { binding, authorizationProof, contactProof, dispatch, paymentKey, provenance } = parts;
   return {
@@ -34,10 +41,14 @@ export function buildTossResultIdentitySnapshot(
   };
 }
 
-function resolveSnapshotParts(locked: LockedTossContactState, evidence: Evidence | null) {
+function resolveSnapshotParts(
+  locked: LockedTossContactState,
+  evidence: Evidence | null,
+  freshProvenance: FreshTossResultProvenance | null,
+) {
   const binding = locked.binding;
   const authorizationProof = binding?.eligibilityProof;
-  const dispatch = findDispatch(locked, evidence);
+  const dispatch = findDispatch(locked, evidence, freshProvenance);
   const contactProof = findContactProof(locked, dispatch);
   const paymentKey = locked.context.aggregate.payment.providerPaymentKey;
   if (!binding) return null;
@@ -45,7 +56,7 @@ function resolveSnapshotParts(locked: LockedTossContactState, evidence: Evidence
   if (!dispatch) return null;
   if (!contactProof) return null;
   if (!paymentKey) return null;
-  const provenance = resolveProvenance(locked, dispatch, evidence);
+  const provenance = resolveProvenance(locked, dispatch, evidence, freshProvenance);
   return provenance
     ? { binding, authorizationProof, dispatch, contactProof, paymentKey, provenance }
     : null;
@@ -56,9 +67,14 @@ function findContactProof(locked: LockedTossContactState, dispatch: Dispatch | u
   return locked.contactProofs.find((proof) => proof.dispatchAttemptId === dispatch.id) ?? null;
 }
 
-function findDispatch(locked: LockedTossContactState, evidence: Evidence | null): Dispatch | undefined {
-  return evidence?.dispatchAttemptId
-    ? locked.history.dispatchAttempts.find((row) => row.id === evidence.dispatchAttemptId)
+function findDispatch(
+  locked: LockedTossContactState,
+  evidence: Evidence | null,
+  freshProvenance: FreshTossResultProvenance | null,
+): Dispatch | undefined {
+  const dispatchAttemptId = evidence?.dispatchAttemptId ?? freshProvenance?.dispatchAttemptId;
+  return dispatchAttemptId
+    ? locked.history.dispatchAttempts.find((row) => row.id === dispatchAttemptId)
     : locked.history.dispatchAttempts[0];
 }
 
@@ -66,10 +82,12 @@ function resolveProvenance(
   locked: LockedTossContactState,
   dispatch: Dispatch,
   evidence: Evidence | null,
+  freshProvenance: FreshTossResultProvenance | null,
 ) {
-  if (!hasEvidenceDispatchLink(evidence)) return null;
-  const source = evidence?.source ?? RefundExecutionEvidenceSource.ADAPTER_RESPONSE;
-  const generation = evidenceGeneration(locked, evidence);
+  if (!hasEvidenceDispatchLink(evidence, freshProvenance)) return null;
+  const source = evidence?.source ?? freshProvenance?.source
+    ?? RefundExecutionEvidenceSource.ADAPTER_RESPONSE;
+  const generation = evidenceGeneration(locked, evidence, freshProvenance);
   if (!generation) return null;
   const eventType = expectedEventType(source, dispatch.ordinal);
   const events = matchingEvents(locked, eventType, generation);
@@ -89,12 +107,23 @@ function resolveProvenance(
   };
 }
 
-function hasEvidenceDispatchLink(evidence: Evidence | null): boolean {
-  return evidence === null || evidence.dispatchAttemptId !== null;
+function hasEvidenceDispatchLink(
+  evidence: Evidence | null,
+  freshProvenance: FreshTossResultProvenance | null,
+): boolean {
+  return evidence === null
+    ? freshProvenance === null || freshProvenance.dispatchAttemptId.length > 0
+    : evidence.dispatchAttemptId !== null;
 }
 
-function evidenceGeneration(locked: LockedTossContactState, evidence: Evidence | null) {
-  return evidence?.authorizingLeaseGeneration ?? locked.context.command.leaseGeneration;
+function evidenceGeneration(
+  locked: LockedTossContactState,
+  evidence: Evidence | null,
+  freshProvenance: FreshTossResultProvenance | null,
+) {
+  if (evidence !== null) return evidence.authorizingLeaseGeneration;
+  return freshProvenance?.authorizingLeaseGeneration
+    ?? locked.context.command.leaseGeneration;
 }
 
 function matchingEvents(

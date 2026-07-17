@@ -33,6 +33,22 @@ export type NormalizedTossRefundRecoveryInput = Readonly<{
   recoveryOwner: string;
 }>;
 
+export type RecoverTossRefundExecutionInput = Readonly<{
+  commandId: string;
+  recoveryOwner: string;
+}>;
+
+export type RecoverTossRefundExecutionSuccess = Readonly<{
+  ok: true;
+  replayed: boolean;
+  commandId: string;
+  outcome: "REFUND_SUCCEEDED";
+}>;
+
+export type RecoverTossRefundExecutionResult =
+  | RecoverTossRefundExecutionSuccess
+  | TossRefundRecoveryFailure;
+
 export type NormalizeTossRefundRecoveryInputResult =
   | Readonly<{ ok: true; input: NormalizedTossRefundRecoveryInput }>
   | TossRefundRecoveryFailure;
@@ -58,6 +74,18 @@ export function recoveryFailure(
   message: string,
 ): TossRefundRecoveryFailure {
   return Object.freeze({ ok: false, code, message });
+}
+
+export function recoverySuccess(
+  commandId: string,
+  replayed: boolean,
+): RecoverTossRefundExecutionSuccess {
+  return Object.freeze({
+    ok: true,
+    replayed,
+    commandId,
+    outcome: "REFUND_SUCCEEDED",
+  });
 }
 
 function invalidCommandId(): TossRefundRecoveryFailure {

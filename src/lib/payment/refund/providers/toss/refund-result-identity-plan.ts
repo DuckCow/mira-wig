@@ -66,6 +66,24 @@ export function planTossRefundResultIdentity(
   }
 }
 
+export function isTossRefundResultBaseIdentityCoherent(
+  snapshot: TossRefundResultIdentitySnapshot,
+): boolean {
+  try {
+    const expected = expectedRequestIdentity(snapshot);
+    return [
+      coreMatches(snapshot),
+      bindingMatches(snapshot, expected.providerOperationKey, expected.wireFingerprint),
+      proofMatches(snapshot.authorizationProof, snapshot.binding.id, snapshot, false),
+      proofMatches(snapshot.contactProof, snapshot.dispatch.id, snapshot, true),
+      dispatchMatches(snapshot, expected.providerOperationKey, expected.neutralFingerprint),
+      matchesTossRefundResultProvenance(snapshot),
+    ].every(Boolean);
+  } catch {
+    return false;
+  }
+}
+
 function expectedRequestIdentity(snapshot: TossRefundResultIdentitySnapshot): Readonly<{
   providerOperationKey: string;
   neutralFingerprint: string;

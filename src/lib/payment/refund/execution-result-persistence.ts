@@ -26,6 +26,8 @@ type PersistenceContext = {
 export type RefundEvidencePersistenceProvenance = Readonly<{
   dispatchAttemptId: string | null;
   authorizingLeaseGeneration: number | null;
+  source?: RefundExecutionEvidenceSource;
+  sourceDedupKey?: string;
 }>;
 
 const NO_EVIDENCE_PROVENANCE: RefundEvidencePersistenceProvenance = Object.freeze({
@@ -125,8 +127,9 @@ function evidenceData(
 ) {
   return {
     commandId: input.commandId,
-    source: RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
-    sourceDedupKey: buildRefundResultDedupKey(input.commandId, input.dispatchAttempt),
+    source: provenance.source ?? RefundExecutionEvidenceSource.ADAPTER_RESPONSE,
+    sourceDedupKey: provenance.sourceDedupKey
+      ?? buildRefundResultDedupKey(input.commandId, input.dispatchAttempt),
     outcome: input.observation.outcome,
     application: plan.application,
     observedProviderRefundId: input.observation.observedProviderRefundId,

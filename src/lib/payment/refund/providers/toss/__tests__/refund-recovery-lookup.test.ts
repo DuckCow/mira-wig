@@ -93,6 +93,21 @@ describe("pure bounded Toss recovery lookup normalization", () => {
     expect(normalizeTossRefundRecoveryLookup({ kind: "rejected" }, EXPECTED).kind)
       .toBe("LOOKUP_REJECTED");
   });
+
+  it("never emits the reserved provider-processing kind for committed vectors", () => {
+    const vectors = [
+      { kind: "unavailable" as const },
+      { kind: "rejected" as const },
+      response({ status: "IN_PROGRESS" }),
+      response({ status: "WAITING_FOR_DEPOSIT" }),
+      response({ cancels: [{ cancelStatus: "IN_PROGRESS" }] }),
+      response({}),
+    ];
+    const kinds = vectors.map((vector) => (
+      normalizeTossRefundRecoveryLookup(vector, EXPECTED).kind
+    ));
+    expect(kinds).not.toContain("PROVIDER_PROCESSING");
+  });
 });
 
 function response(value: unknown) {
