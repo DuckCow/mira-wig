@@ -3,6 +3,8 @@ type ActivationEnv = Readonly<Record<string, string | undefined>>;
 export const REFUND_EXECUTION_CLAIM_ENABLED = "REFUND_EXECUTION_CLAIM_ENABLED";
 export const REFUND_EXECUTION_LEASE_ENABLED = "REFUND_EXECUTION_LEASE_ENABLED";
 export const REFUND_EXECUTION_LEASE_RELEASE_ENABLED = "REFUND_EXECUTION_LEASE_RELEASE_ENABLED";
+export const REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED =
+  "REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED";
 export const REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED =
   "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED";
 export const REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED =
@@ -41,6 +43,15 @@ export function isRefundExecutionLeaseReleaseEnabled(
   env: ActivationEnv = process.env,
 ): boolean {
   return isRefundExecutionCapabilityEnabled(REFUND_EXECUTION_LEASE_RELEASE_ENABLED, env);
+}
+
+export function isRefundExecutionUncontactedRecoveryEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(
+    REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
+    env,
+  );
 }
 
 export function isRefundExecutionDispatchAuthorizationEnabled(

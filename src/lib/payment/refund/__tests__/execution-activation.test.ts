@@ -3,6 +3,7 @@ import {
   isRefundExecutionClaimEnabled,
   isRefundExecutionLeaseEnabled,
   isRefundExecutionLeaseReleaseEnabled,
+  isRefundExecutionUncontactedRecoveryEnabled,
   isRefundExecutionDispatchAuthorizationEnabled,
   isRefundExecutionObservationApplicationEnabled,
   isRefundExecutionTossAuthorizationEnabled,
@@ -13,6 +14,7 @@ import {
   REFUND_EXECUTION_CLAIM_ENABLED,
   REFUND_EXECUTION_LEASE_ENABLED,
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
+  REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
   REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
   REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
@@ -24,6 +26,7 @@ import {
 } from "../execution-activation";
 
 describe.each([
+  [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED, isRefundExecutionUncontactedRecoveryEnabled],
   [REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED, isRefundExecutionTossAuthorizationEnabled],
   [REFUND_EXECUTION_TOSS_CONTACT_ENABLED, isRefundExecutionTossContactEnabled],
   [REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED, isRefundExecutionTossEligibilityLookupEnabled],
@@ -46,6 +49,14 @@ describe.each([
     } catch (error) {
       expect(String(error)).not.toContain(malformed);
     }
+  });
+});
+
+describe(REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED, () => {
+  it("is independent of ordinary lease activation", () => {
+    expect(isRefundExecutionUncontactedRecoveryEnabled({
+      [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED",
+    })).toBe(false);
   });
 });
 
