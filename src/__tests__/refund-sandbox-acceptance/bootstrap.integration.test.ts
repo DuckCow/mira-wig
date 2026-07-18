@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { RefundAttemptActorType } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Prisma, RefundAttemptActorType } from "@prisma/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../lib/db";
 import {
   AcceptanceBootstrap,
@@ -14,9 +14,31 @@ import {
 import { requestRefundAttempt } from "../../lib/payment/refund/request";
 import { claimRefundAttemptForExecution } from "../../lib/payment/refund/claim";
 import { acquireRefundExecutionLease } from "../../lib/payment/refund/acquire-lease";
-import { verifyAcceptanceDatabase } from "../../../scripts/refund-sandbox-acceptance/database-verifier";
+import {
+  defaultDriftCheck,
+  repositoryMigrations,
+  verifyAcceptanceDatabase,
+  verifyMigrationRecords,
+  type MigrationRecord,
+} from "../../../scripts/refund-sandbox-acceptance/database-verifier";
+import {
+  DATABASE_CHECK_INVARIANTS_INVALID,
+  EXPECTED_CHECK_INVARIANT_COUNT,
+  readDatabaseInvariantCatalog,
+  verifyDatabaseInvariantCatalog,
+  verifyDatabaseInvariants,
+  type DatabaseInvariantQueryClient,
+} from "../../../scripts/refund-sandbox-acceptance/database-invariants";
 
 type Owned = Readonly<{ handle: AcceptanceBootstrapHandle; refund: RefundFixtureIds | null }>;
+type CatalogMutationOutcome =
+  | Readonly<{ kind: "EXPECTED_M3_REJECTION"; message: string }>
+  | Readonly<{ kind: "UNEXPECTED_M3_SUCCESS" }>
+  | Readonly<{ kind: "MUTATION_OR_VERIFIER_ERROR"; error: unknown }>;
+type CatalogMutation = (transaction: Prisma.TransactionClient) => Promise<void>;
+type CatalogVerifier = (client: DatabaseInvariantQueryClient) => Promise<void>;
+
+const FORCED_CATALOG_ROLLBACK = new Error("TEST_FORCED_CATALOG_ROLLBACK");
 const owned: Owned[] = [];
 const bootstrap = new AcceptanceBootstrap(db, "wig_platform_test");
 
@@ -44,16 +66,63 @@ describe("acceptance-only pre-refund bootstrap", () => {
   });
 
   it("makes the real CLI database verifier reject wig_platform_test before drift tooling", async () => {
-    let driftCalled = false;
+    const prismaCommandRunner = vi.fn();
     await expect(verifyAcceptanceDatabase(db, {
       configuredUrl: process.env.DATABASE_URL,
       migrationsDirectory: "prisma/migrations",
-      driftCheck: () => {
-        driftCalled = true;
-        return Promise.resolve();
-      },
+      prismaCommandRunner,
     })).rejects.toThrow("ACCEPTANCE_DATABASE_REQUIRED");
-    expect(driftCalled).toBe(false);
+    expect(prismaCommandRunner).not.toHaveBeenCalled();
+  });
+
+  it("composes exact M1, actual read-only M2, and PostgreSQL-18 M3 without residue", async () => {
+    const before = await validationSnapshot();
+    expect(before.advisoryLocks).toEqual([{ count: 0 }]);
+    const repository = await repositoryMigrations("prisma/migrations");
+    const applied = await appliedMigrations();
+
+    verifyMigrationRecords(repository, applied);
+    await defaultDriftCheck(testDatabaseUrl());
+    const catalog = await readDatabaseInvariantCatalog(db);
+    expect(Math.trunc(catalog.serverVersionNum / 10_000)).toBe(18);
+    expect(catalog.checks).toHaveLength(EXPECTED_CHECK_INVARIANT_COUNT);
+    expect(() => verifyDatabaseInvariantCatalog(catalog)).not.toThrow();
+
+    expect(await validationSnapshot()).toEqual(before);
+  });
+
+  it("rejects CHECK TRUE through the actual M3 verifier and rolls catalog DDL back", async () => {
+    const before = await readDatabaseInvariantCatalog(db);
+    const outcome = await runCatalogMutationWithForcedRollback(
+      replaceReasonCheckWithTrue,
+      verifyDatabaseInvariants,
+    );
+    await expectCatalogRestored(before);
+    expect(outcome.kind).toBe("EXPECTED_M3_REJECTION");
+    expect(() => requireExpectedM3Rejection(outcome)).not.toThrow();
+  });
+
+  it("rolls CHECK TRUE back and reports simulated unexpected M3 acceptance", async () => {
+    const before = await readDatabaseInvariantCatalog(db);
+    const outcome = await runCatalogMutationWithForcedRollback(
+      replaceReasonCheckWithTrue,
+      () => Promise.resolve(),
+    );
+    await expectCatalogRestored(before);
+    expect(outcome.kind).toBe("UNEXPECTED_M3_SUCCESS");
+    expect(() => requireExpectedM3Rejection(outcome))
+      .toThrow("DATABASE_INVARIANT_UNEXPECTED_SUCCESS");
+  });
+
+  it("rolls prior DDL back and reports a later ALTER failure", async () => {
+    const before = await readDatabaseInvariantCatalog(db);
+    const outcome = await runCatalogMutationWithForcedRollback(
+      failAfterDroppingReasonCheck,
+      verifyDatabaseInvariants,
+    );
+    await expectCatalogRestored(before);
+    expect(outcome.kind).toBe("MUTATION_OR_VERIFIER_ERROR");
+    expect(() => requireExpectedM3Rejection(outcome)).toThrow();
   });
 
   it("creates exactly the five-model pre-refund aggregate with a PAID order and no refund facts", async () => {
@@ -154,6 +223,87 @@ describe("acceptance-only pre-refund bootstrap", () => {
   });
 });
 
+function testDatabaseUrl(): string {
+  const configured = process.env.DATABASE_URL;
+  if (!configured || new URL(configured).pathname.replace(/^\//, "") !== "wig_platform_test") {
+    throw new Error("TEST_DATABASE_REQUIRED");
+  }
+  return configured;
+}
+
+async function runCatalogMutationWithForcedRollback(
+  mutate: CatalogMutation,
+  verifier: CatalogVerifier,
+): Promise<CatalogMutationOutcome> {
+  let outcome: CatalogMutationOutcome | undefined;
+  try {
+    await db.$transaction(async (transaction) => {
+      try {
+        await mutate(transaction);
+        try {
+          await verifier(transaction);
+          outcome = Object.freeze({ kind: "UNEXPECTED_M3_SUCCESS" });
+        } catch (error) {
+          outcome = error instanceof Error && error.message === DATABASE_CHECK_INVARIANTS_INVALID
+            ? Object.freeze({ kind: "EXPECTED_M3_REJECTION", message: error.message })
+            : Object.freeze({ kind: "MUTATION_OR_VERIFIER_ERROR", error });
+        }
+      } catch (error) {
+        outcome = Object.freeze({ kind: "MUTATION_OR_VERIFIER_ERROR", error });
+      }
+      throw FORCED_CATALOG_ROLLBACK;
+    });
+  } catch (error) {
+    if (error !== FORCED_CATALOG_ROLLBACK) throw error;
+  }
+  if (!outcome) throw new Error("CATALOG_MUTATION_OUTCOME_MISSING");
+  return outcome;
+}
+
+async function replaceReasonCheckWithTrue(transaction: Prisma.TransactionClient): Promise<void> {
+  await transaction.$executeRawUnsafe(`
+    ALTER TABLE "RefundAttemptTransition"
+    DROP CONSTRAINT "RefundAttemptTransition_reason_nonblank_check"
+  `);
+  await transaction.$executeRawUnsafe(`
+    ALTER TABLE "RefundAttemptTransition"
+    ADD CONSTRAINT "RefundAttemptTransition_reason_nonblank_check" CHECK (TRUE)
+  `);
+}
+
+async function failAfterDroppingReasonCheck(transaction: Prisma.TransactionClient): Promise<void> {
+  await transaction.$executeRawUnsafe(`
+    ALTER TABLE "RefundAttemptTransition"
+    DROP CONSTRAINT "RefundAttemptTransition_reason_nonblank_check"
+  `);
+  await transaction.$executeRawUnsafe(`
+    ALTER TABLE "RefundAttemptTransition"
+    ADD CONSTRAINT "RefundAttemptTransition_reason_nonblank_check"
+    CHECK ("syntheticMissingColumn" IS NULL)
+  `);
+}
+
+async function expectCatalogRestored(
+  before: Awaited<ReturnType<typeof readDatabaseInvariantCatalog>>,
+): Promise<void> {
+  const after = await readDatabaseInvariantCatalog(db);
+  expect(after).toEqual(before);
+  expect(() => verifyDatabaseInvariantCatalog(after)).not.toThrow();
+  await expect(verifyDatabaseInvariants(db)).resolves.toBeUndefined();
+}
+
+function requireExpectedM3Rejection(outcome: CatalogMutationOutcome): void {
+  if (outcome.kind === "EXPECTED_M3_REJECTION") {
+    expect(outcome.message).toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+    return;
+  }
+  if (outcome.kind === "UNEXPECTED_M3_SUCCESS") {
+    throw new Error("DATABASE_INVARIANT_UNEXPECTED_SUCCESS");
+  }
+  if (outcome.error instanceof Error) throw outcome.error;
+  throw new Error("DATABASE_INVARIANT_TEST_ERROR");
+}
+
 function bootstrapInput(scenarioId: "S1" | "S2" | "S3" | "S4" | "S5") {
   const suffix = randomBytes(8).toString("hex");
   const runId = `sbx-20260718T010203Z-${suffix}`;
@@ -181,6 +331,46 @@ async function h1AggregateCounts() {
     db.order.count({ where: { id: { startsWith: "h1_order_" } } }),
   ]);
   return Object.freeze({ users, sessions, payments, orders });
+}
+
+async function appliedMigrations(): Promise<readonly MigrationRecord[]> {
+  return db.$queryRaw<MigrationRecord[]>(Prisma.sql`
+    SELECT migration_name, checksum, finished_at, rolled_back_at, applied_steps_count
+    FROM "_prisma_migrations"
+    ORDER BY migration_name ASC
+  `);
+}
+
+async function validationSnapshot() {
+  const [databases, migrations, catalog, tableCounts, advisoryLocks] = await Promise.all([
+    db.$queryRaw<{ databaseName: string }[]>(Prisma.sql`
+      SELECT datname AS "databaseName" FROM pg_database ORDER BY datname
+    `),
+    appliedMigrations(),
+    readDatabaseInvariantCatalog(db),
+    db.$queryRaw<{ tableName: string; rowCount: number }[]>(Prisma.sql`
+      SELECT 'CustomerRefundIntake' AS "tableName", count(*)::int AS "rowCount"
+        FROM "CustomerRefundIntake"
+      UNION ALL SELECT 'RefundAttemptTransition', count(*)::int FROM "RefundAttemptTransition"
+      UNION ALL SELECT 'RefundExecutionCommand', count(*)::int FROM "RefundExecutionCommand"
+      UNION ALL SELECT 'RefundExecutionCommandEvent', count(*)::int FROM "RefundExecutionCommandEvent"
+      UNION ALL SELECT 'RefundExecutionDispatchAttempt', count(*)::int FROM "RefundExecutionDispatchAttempt"
+      UNION ALL SELECT 'RefundExecutionEvidence', count(*)::int FROM "RefundExecutionEvidence"
+      UNION ALL SELECT 'RefundExecutionProviderContactEligibilityProof', count(*)::int
+        FROM "RefundExecutionProviderContactEligibilityProof"
+      UNION ALL SELECT 'RefundExecutionProviderEligibilityProof', count(*)::int
+        FROM "RefundExecutionProviderEligibilityProof"
+      UNION ALL SELECT 'RefundExecutionProviderOperationBinding', count(*)::int
+        FROM "RefundExecutionProviderOperationBinding"
+      ORDER BY "tableName"
+    `),
+    db.$queryRaw<{ count: number }[]>(Prisma.sql`
+      SELECT count(*)::int AS count
+      FROM pg_locks
+      WHERE pid = pg_backend_pid() AND locktype = 'advisory'
+    `),
+  ]);
+  return Object.freeze({ databases, migrations, catalog, tableCounts, advisoryLocks });
 }
 
 async function rowTimestamps(handle: AcceptanceBootstrapHandle) {

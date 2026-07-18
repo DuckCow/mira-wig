@@ -3,12 +3,32 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  ACCEPTANCE_DATABASE_NAME,
   databaseNameFromUrl,
   defaultDriftCheck,
   migrationFingerprint,
   PRISMA_VERIFY_TIMEOUT_MS,
+  verifyAcceptanceDatabase,
   verifyMigrationRecords,
+  type PrismaCommandRunner,
 } from "../../../scripts/refund-sandbox-acceptance/database-verifier";
+import {
+  checkManifestHash,
+  DATABASE_CHECK_INVARIANTS_INVALID,
+  DATABASE_INVARIANT_MANIFEST_INVALID,
+  DATABASE_INVARIANT_POSTGRES_VERSION_UNSUPPORTED,
+  DATABASE_PARTIAL_INDEX_INVARIANT_INVALID,
+  EXPECTED_CHECK_COUNTS_BY_TABLE,
+  EXPECTED_CHECK_INVARIANT_COUNT,
+  EXPECTED_CHECK_INVARIANTS,
+  EXPECTED_CHECK_MANIFEST_SHA256,
+  EXPECTED_PARTIAL_INDEX,
+  verifyCheckInvariants,
+  verifyPartialIndexInvariant,
+  verifyPostgresVersion,
+  type CatalogCheckRow,
+  type CatalogPartialIndexRow,
+} from "../../../scripts/refund-sandbox-acceptance/database-invariants";
 import {
   buildBaseLedgerIntegrity,
   GIT_IDENTITY_TIMEOUT_MS,
@@ -20,6 +40,10 @@ import { appendRuntimeLedger } from "../../../scripts/refund-sandbox-acceptance/
 const OLD_COMMIT = "62ad6d709c0db767732e8cf2abd4ddbeeba08031";
 const SYNTHETIC_COMMIT = "a".repeat(40);
 const RUN_ID = "sbx-20260718T010203Z-0123456789abcdef";
+const CONFIGURED_ACCEPTANCE_URL =
+  "postgresql://configured-user@localhost:5432/wig_platform_acceptance?schema=public";
+const AMBIENT_WRONG_URL =
+  "postgresql://wrong-user@localhost:5432/wrong_database?schema=public";
 
 describe("refund SANDBOX acceptance database and migration verifier", () => {
   const repository = Object.freeze([
@@ -304,26 +328,105 @@ describe("runtime repository commit provenance", () => {
 });
 
 describe("bounded Prisma verification subprocess", () => {
-  it("pins timeout, hard kill, no shell, ignored output, and fixed argv for both commands", async () => {
+  it("pins the configured URL over ambient state and runs both fixed commands", async () => {
     const captured: string[][] = [];
-    const databaseUrl = process.env.DATABASE_URL;
-    await defaultDriftCheck((spec) => {
-      captured.push([...spec.arguments]);
-      expect(spec.executable).toBe("npx");
-      expect(spec.timeoutMs).toBe(PRISMA_VERIFY_TIMEOUT_MS);
-      expect(spec.killSignal).toBe("SIGKILL");
-      expect(spec.shell).toBe(false);
-      expect(spec.stdio).toBe("ignore");
-      expect(spec.arguments).not.toContain(databaseUrl);
-      return Promise.resolve(Object.freeze({ exitCode: 0, signal: null, timedOut: false }));
-    });
+    const originalDatabaseUrl = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = AMBIENT_WRONG_URL;
+    try {
+      await defaultDriftCheck(CONFIGURED_ACCEPTANCE_URL, (spec) => {
+        captured.push([...spec.arguments]);
+        expect(spec.executable).toBe("npx");
+        expect(spec.timeoutMs).toBe(PRISMA_VERIFY_TIMEOUT_MS);
+        expect(spec.killSignal).toBe("SIGKILL");
+        expect(spec.shell).toBe(false);
+        expect(spec.stdio).toBe("ignore");
+        expect(spec.environment.DATABASE_URL).toBe(CONFIGURED_ACCEPTANCE_URL);
+        expect(spec.arguments).not.toContain(CONFIGURED_ACCEPTANCE_URL);
+        expect(spec.arguments).not.toContain(AMBIENT_WRONG_URL);
+        expect(process.env.DATABASE_URL).toBe(AMBIENT_WRONG_URL);
+        return Promise.resolve(Object.freeze({ exitCode: 0, signal: null, timedOut: false }));
+      });
+      expect(process.env.DATABASE_URL).toBe(AMBIENT_WRONG_URL);
+    } finally {
+      if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = originalDatabaseUrl;
+    }
     expect(captured).toEqual([
       ["prisma", "validate"],
-      ["prisma", "migrate", "diff", "--exit-code", "--from-migrations", "prisma/migrations", "--to-config-datasource"],
+      [
+        "prisma", "migrate", "diff", "--exit-code", "--from-config-datasource",
+        "--to-schema", "prisma/schema.prisma",
+      ],
     ]);
+    expect(captured.flat()).not.toContain("--from-migrations");
+    expect(captured.flat()).not.toContain("--to-config-datasource");
+    expect(captured.flat().some((argument) => /shadow/i.test(argument))).toBe(false);
   });
 
-  it("fails closed on timeout, does not retry, and never treats drift as clean", async () => {
+  it("always runs mandatory M2 through only the bounded runner seam", async () => {
+    const migrationsDirectory = await mkdtemp(join(tmpdir(), "mira-mandatory-m2-"));
+    try {
+      const client = invariantClient();
+      const captured: string[][] = [];
+      let runnerCalls = 0;
+      const runner: PrismaCommandRunner = (spec) => {
+        runnerCalls += 1;
+        captured.push([...spec.arguments]);
+        return Promise.resolve(Object.freeze({ exitCode: 0, signal: null, timedOut: false }));
+      };
+      const verified = await verifyAcceptanceDatabase(client, {
+        configuredUrl: CONFIGURED_ACCEPTANCE_URL,
+        migrationsDirectory,
+        prismaCommandRunner: runner,
+      });
+      expect(verified.databaseName).toBe(ACCEPTANCE_DATABASE_NAME);
+      expect(runnerCalls).toBe(2);
+      expect(captured).toEqual([
+        ["prisma", "validate"],
+        [
+          "prisma", "migrate", "diff", "--exit-code", "--from-config-datasource",
+          "--to-schema", "prisma/schema.prisma",
+        ],
+      ]);
+    } finally {
+      await rm(migrationsDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("cannot replace M2 and cannot succeed when the mandatory runner fails", async () => {
+    const forbiddenOptions: Parameters<typeof verifyAcceptanceDatabase>[1] = {
+      configuredUrl: CONFIGURED_ACCEPTANCE_URL,
+      migrationsDirectory: "prisma/migrations",
+      // @ts-expect-error whole-M2 replacement is forbidden
+      driftCheck: () => Promise.resolve(),
+    };
+    expect(Reflect.has(forbiddenOptions, "driftCheck")).toBe(true);
+
+    const migrationsDirectory = await mkdtemp(join(tmpdir(), "mira-failed-m2-"));
+    try {
+      const runner = vi.fn().mockRejectedValue(new Error("synthetic raw failure"));
+      await expect(verifyAcceptanceDatabase(invariantClient(), {
+        configuredUrl: CONFIGURED_ACCEPTANCE_URL,
+        migrationsDirectory,
+        prismaCommandRunner: runner,
+      })).rejects.toThrow("PRISMA_VERIFICATION_FAILED");
+      expect(runner).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(migrationsDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on validate exit 1 without retry", async () => {
+    let calls = 0;
+    const message = await prismaFailureMessage(() => {
+      calls += 1;
+      return Promise.resolve(Object.freeze({ exitCode: 1, signal: null, timedOut: false }));
+    });
+    expect(calls).toBe(1);
+    expect(message).toBe("PRISMA_VERIFICATION_FAILED");
+  });
+
+  it("fails closed on validate timeout without retry", async () => {
     let calls = 0;
     const message = await prismaFailureMessage((spec) => {
       calls += 1;
@@ -347,7 +450,214 @@ describe("bounded Prisma verification subprocess", () => {
     expect(message).toBe("PRISMA_VERIFICATION_FAILED");
     expect(message).not.toContain(raw);
   });
+
+  it.each([1, 2])("fails closed on diff exit %s after exactly two calls", async (exitCode) => {
+    let calls = 0;
+    const message = await prismaFailureMessage(() => {
+      calls += 1;
+      return Promise.resolve(Object.freeze({
+        exitCode: calls === 1 ? 0 : exitCode,
+        signal: null,
+        timedOut: false,
+      }));
+    });
+    expect(calls).toBe(2);
+    expect(message).toBe("PRISMA_VERIFICATION_FAILED");
+  });
+
+  it("fails closed on diff timeout after exactly two calls", async () => {
+    let calls = 0;
+    const message = await prismaFailureMessage(() => {
+      calls += 1;
+      return Promise.resolve(calls === 1
+        ? Object.freeze({ exitCode: 0, signal: null, timedOut: false })
+        : Object.freeze({ exitCode: null, signal: "SIGKILL" as const, timedOut: true }));
+    });
+    expect(calls).toBe(2);
+    expect(message).toBe("PRISMA_VERIFICATION_FAILED");
+  });
 });
+
+describe("migration-owned refund database invariants", () => {
+  it("pins 65 unique CHECK identities, table counts, and the independent manifest hash", () => {
+    expect(EXPECTED_CHECK_INVARIANTS).toHaveLength(EXPECTED_CHECK_INVARIANT_COUNT);
+    const identities = EXPECTED_CHECK_INVARIANTS.map((entry) => (
+      `${entry.schemaName}:${entry.tableName}:${entry.constraintName}`
+    ));
+    expect(new Set(identities).size).toBe(EXPECTED_CHECK_INVARIANT_COUNT);
+    const counts: Record<string, number> = {};
+    for (const entry of EXPECTED_CHECK_INVARIANTS) {
+      counts[entry.tableName] = (counts[entry.tableName] ?? 0) + 1;
+    }
+    expect(counts).toEqual(EXPECTED_CHECK_COUNTS_BY_TABLE);
+    expect(checkManifestHash(EXPECTED_CHECK_INVARIANTS)).toBe(EXPECTED_CHECK_MANIFEST_SHA256);
+  });
+
+  it("accepts the exact CHECK manifest", () => {
+    expect(() => verifyCheckInvariants(EXPECTED_CHECK_INVARIANTS, actualChecks())).not.toThrow();
+  });
+
+  it("rejects a missing or extra CHECK with one static failure", () => {
+    expect(checkFailure(actualChecks().slice(1))).toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+    const extra = Object.freeze({
+      ...actualChecks()[0],
+      constraintName: "synthetic_extra_check",
+    });
+    expect(checkFailure([...actualChecks(), extra])).toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+  });
+
+  it("rejects a wrong table and a changed definition without catalog leakage", () => {
+    const raw = "synthetic-definition-must-not-leak";
+    expect(checkFailure(replaceCheck(0, { tableName: "WrongTable" })))
+      .toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+    const message = checkFailure(replaceCheck(0, { definition: raw }));
+    expect(message).toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+    expect(message).not.toContain(raw);
+  });
+
+  it("rejects same-name CHECK TRUE replacement", () => {
+    expect(checkFailure(replaceCheck(0, { definition: "CHECK (true)" })))
+      .toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+  });
+
+  it.each([
+    ["literal", "CHECK ((status = 'REJECTED'::\"CustomerRefundIntakeStatus\") = (\"approvedRefundAttemptId\" IS NOT NULL))"],
+    ["operator", "CHECK ((status <> 'APPROVED'::\"CustomerRefundIntakeStatus\") = (\"approvedRefundAttemptId\" IS NOT NULL))"],
+    ["cast", "CHECK ((status = 'APPROVED'::text) = (\"approvedRefundAttemptId\" IS NOT NULL))"],
+    ["column", "CHECK ((status = 'APPROVED'::\"CustomerRefundIntakeStatus\") = (\"reviewedAt\" IS NOT NULL))"],
+  ])("rejects a changed CHECK %s", (_case, definition) => {
+    expect(checkFailure(replaceCheck(0, { definition })))
+      .toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+  });
+
+  it("rejects NOT VALID, wrong type, and duplicate actual identities", () => {
+    expect(checkFailure(replaceCheck(0, { validated: false })))
+      .toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+    expect(checkFailure(replaceCheck(0, { constraintType: "f" })))
+      .toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+    expect(checkFailure([...actualChecks(), actualChecks()[0]]))
+      .toBe(DATABASE_CHECK_INVARIANTS_INVALID);
+  });
+
+  it("rejects duplicate expected identities as a static manifest failure", () => {
+    const duplicate = [...EXPECTED_CHECK_INVARIANTS, EXPECTED_CHECK_INVARIANTS[0]];
+    expect(expectedManifestFailure(duplicate)).toBe(DATABASE_INVARIANT_MANIFEST_INVALID);
+  });
+
+  it("accepts PostgreSQL 18 and rejects adjacent majors statically", () => {
+    expect(() => verifyPostgresVersion(180_000)).not.toThrow();
+    expect(() => verifyPostgresVersion(189_999)).not.toThrow();
+    expect(() => verifyPostgresVersion(170_000))
+      .toThrow(DATABASE_INVARIANT_POSTGRES_VERSION_UNSUPPORTED);
+    expect(() => verifyPostgresVersion(190_000))
+      .toThrow(DATABASE_INVARIANT_POSTGRES_VERSION_UNSUPPORTED);
+  });
+
+  it("accepts the exact partial-index semantic state", () => {
+    expect(() => verifyPartialIndexInvariant(EXPECTED_PARTIAL_INDEX, actualPartialIndex()))
+      .not.toThrow();
+  });
+
+  it("rejects a missing or duplicate partial-index identity", () => {
+    expect(partialIndexFailure([])).toBe(DATABASE_PARTIAL_INDEX_INVARIANT_INVALID);
+    expect(partialIndexFailure([...actualPartialIndex(), ...actualPartialIndex()]))
+      .toBe(DATABASE_PARTIAL_INDEX_INVARIANT_INVALID);
+  });
+
+  it.each([
+    ["changed predicate", { predicate: "status = 'APPROVED'" }],
+    ["removed predicate", { predicate: null }],
+    ["non-unique", { unique: false }],
+    ["invalid", { valid: false }],
+    ["not ready", { ready: false }],
+    ["changed columns", { orderedExpressions: ["status", `"orderId"`] }],
+    ["wrong table", { tableName: "RefundAttempt" }],
+    ["changed definition", { definition: "CREATE INDEX synthetic" }],
+  ] satisfies readonly [string, Partial<CatalogPartialIndexRow>][]) (
+    "rejects partial-index state: %s",
+    (_case, override) => {
+      expect(partialIndexFailure(actualPartialIndex(override)))
+        .toBe(DATABASE_PARTIAL_INDEX_INVARIANT_INVALID);
+    },
+  );
+});
+
+function actualChecks(): readonly CatalogCheckRow[] {
+  return EXPECTED_CHECK_INVARIANTS.map((entry) => Object.freeze({
+    schemaName: entry.schemaName,
+    tableName: entry.tableName,
+    constraintName: entry.constraintName,
+    constraintType: entry.constraintType,
+    definition: entry.canonicalDefinition,
+    validated: entry.validated,
+  }));
+}
+
+function replaceCheck(
+  index: number,
+  override: Partial<CatalogCheckRow>,
+): readonly CatalogCheckRow[] {
+  return actualChecks().map((entry, position) => (
+    position === index ? Object.freeze({ ...entry, ...override }) : entry
+  ));
+}
+
+function checkFailure(actual: readonly CatalogCheckRow[]): string {
+  try {
+    verifyCheckInvariants(EXPECTED_CHECK_INVARIANTS, actual);
+    return "UNEXPECTED_SUCCESS";
+  } catch (error) {
+    return error instanceof Error ? error.message : "NON_ERROR_FAILURE";
+  }
+}
+
+function expectedManifestFailure(
+  expected: Parameters<typeof verifyCheckInvariants>[0],
+): string {
+  try {
+    verifyCheckInvariants(expected, actualChecks());
+    return "UNEXPECTED_SUCCESS";
+  } catch (error) {
+    return error instanceof Error ? error.message : "NON_ERROR_FAILURE";
+  }
+}
+
+function actualPartialIndex(
+  override: Partial<CatalogPartialIndexRow> = {},
+): readonly CatalogPartialIndexRow[] {
+  return [Object.freeze({
+    schemaName: EXPECTED_PARTIAL_INDEX.schemaName,
+    tableName: EXPECTED_PARTIAL_INDEX.tableName,
+    indexName: EXPECTED_PARTIAL_INDEX.indexName,
+    unique: EXPECTED_PARTIAL_INDEX.unique,
+    valid: EXPECTED_PARTIAL_INDEX.valid,
+    ready: EXPECTED_PARTIAL_INDEX.ready,
+    orderedExpressions: [...EXPECTED_PARTIAL_INDEX.orderedExpressions],
+    predicate: EXPECTED_PARTIAL_INDEX.canonicalPredicate,
+    definition: EXPECTED_PARTIAL_INDEX.canonicalDefinition,
+    ...override,
+  })];
+}
+
+function invariantClient() {
+  const queryRaw = vi.fn();
+  queryRaw
+    .mockResolvedValueOnce([{ databaseName: ACCEPTANCE_DATABASE_NAME }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ serverVersionNum: 180_000 }])
+    .mockResolvedValueOnce(actualChecks())
+    .mockResolvedValueOnce(actualPartialIndex());
+  return Object.freeze({ $queryRaw: queryRaw });
+}
+
+function partialIndexFailure(actual: readonly CatalogPartialIndexRow[]): string {
+  try {
+    verifyPartialIndexInvariant(EXPECTED_PARTIAL_INDEX, actual);
+    return "UNEXPECTED_SUCCESS";
+  } catch (error) {
+    return error instanceof Error ? error.message : "NON_ERROR_FAILURE";
+  }
+}
 
 async function sourceFiles(directory: string): Promise<readonly string[]> {
   const files: string[] = [];
@@ -383,10 +693,10 @@ async function gitFailureMessage(
 }
 
 async function prismaFailureMessage(
-  runner: Parameters<typeof defaultDriftCheck>[0],
+  runner: Parameters<typeof defaultDriftCheck>[1],
 ): Promise<string> {
   try {
-    await defaultDriftCheck(runner);
+    await defaultDriftCheck(CONFIGURED_ACCEPTANCE_URL, runner);
     return "UNEXPECTED_SUCCESS";
   } catch (error) {
     return error instanceof Error ? error.message : "NON_ERROR_FAILURE";

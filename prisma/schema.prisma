@@ -634,7 +634,7 @@ model RefundExecutionCommandEvent {
 
   command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
 
-  @@unique([commandId, leaseGeneration, eventType])
+  @@unique([commandId, leaseGeneration, eventType], map: "RefundExecutionCommandEvent_commandId_leaseGeneration_eventType")
   @@index([commandId, occurredAt])
 }
 

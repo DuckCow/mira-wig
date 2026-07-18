@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import type { PrismaClient } from "@prisma/client";
 import { canonicalJson } from "./canonical-json";
+import {
+  verifyDatabaseInvariants,
+  type DatabaseInvariantQueryClient,
+} from "./database-invariants";
 
 export const ACCEPTANCE_DATABASE_NAME = "wig_platform_acceptance";
 export const PRISMA_VERIFY_TIMEOUT_MS = 120_000;
@@ -15,7 +18,7 @@ const PRISMA_COMMAND = Object.freeze({
   stdio: "ignore" as const,
 });
 
-type PrismaCommandSpec = typeof PRISMA_COMMAND & Readonly<{
+export type PrismaCommandSpec = typeof PRISMA_COMMAND & Readonly<{
   arguments: readonly string[];
   environment: NodeJS.ProcessEnv;
 }>;
@@ -24,7 +27,7 @@ type PrismaCommandResult = Readonly<{
   signal: NodeJS.Signals | null;
   timedOut: boolean;
 }>;
-type PrismaCommandRunner = (spec: PrismaCommandSpec) => Promise<PrismaCommandResult>;
+export type PrismaCommandRunner = (spec: PrismaCommandSpec) => Promise<PrismaCommandResult>;
 
 export type MigrationRecord = Readonly<{
   migration_name: string;
@@ -55,14 +58,16 @@ export function databaseNameFromUrl(raw: string | undefined): string {
 }
 
 export async function verifyAcceptanceDatabase(
-  client: PrismaClient,
+  client: DatabaseInvariantQueryClient,
   options: Readonly<{
     configuredUrl: string | undefined;
     migrationsDirectory: string;
-    driftCheck?: () => Promise<void>;
+    prismaCommandRunner?: PrismaCommandRunner;
   }>,
 ): Promise<VerifiedAcceptanceDatabase> {
-  const configuredName = databaseNameFromUrl(options.configuredUrl);
+  const configuredUrl = options.configuredUrl;
+  if (!configuredUrl) throw new Error("DATABASE_URL_REQUIRED");
+  const configuredName = databaseNameFromUrl(configuredUrl);
   if (configuredName !== ACCEPTANCE_DATABASE_NAME) throw new Error("ACCEPTANCE_DATABASE_REQUIRED");
   const database = await client.$queryRaw<{ databaseName: string }[]>`
     SELECT current_database() AS "databaseName"
@@ -76,7 +81,8 @@ export async function verifyAcceptanceDatabase(
     FROM "_prisma_migrations" ORDER BY migration_name ASC
   `;
   verifyMigrationRecords(repository, applied);
-  await (options.driftCheck ?? defaultDriftCheck)();
+  await defaultDriftCheck(configuredUrl, options.prismaCommandRunner);
+  await verifyDatabaseInvariants(client);
   return Object.freeze({
     databaseName: ACCEPTANCE_DATABASE_NAME,
     migrationFingerprint: migrationFingerprint(repository),
@@ -119,22 +125,27 @@ export function migrationFingerprint(migrations: readonly RepositoryMigration[])
 }
 
 export async function defaultDriftCheck(
+  configuredUrl: string,
   runner: PrismaCommandRunner = runPrismaCommand,
 ): Promise<void> {
-  await runPrisma(["validate"], runner);
+  await runPrisma(["validate"], configuredUrl, runner);
   await runPrisma([
-    "migrate", "diff", "--exit-code", "--from-migrations", "prisma/migrations",
-    "--to-config-datasource",
-  ], runner);
+    "migrate", "diff", "--exit-code", "--from-config-datasource",
+    "--to-schema", "prisma/schema.prisma",
+  ], configuredUrl, runner);
 }
 
-async function runPrisma(args: readonly string[], runner: PrismaCommandRunner): Promise<void> {
+async function runPrisma(
+  args: readonly string[],
+  configuredUrl: string,
+  runner: PrismaCommandRunner,
+): Promise<void> {
   let result: PrismaCommandResult;
   try {
     result = await runner(Object.freeze({
       ...PRISMA_COMMAND,
       arguments: Object.freeze(["prisma", ...args]),
-      environment: process.env,
+      environment: Object.freeze({ ...process.env, DATABASE_URL: configuredUrl }),
     }));
   } catch {
     throw prismaVerificationFailure();
