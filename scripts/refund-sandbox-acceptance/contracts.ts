@@ -31,7 +31,8 @@ export class H1ContractError extends Error {
 
 export function generateRunId(now = new Date(), random = randomBytes): string {
   if (Number.isNaN(now.getTime())) throw contractError("INVALID_CLOCK", "Run clock is invalid.");
-  const timestamp = now.toISOString().replace(/[-:]/g, "").replace(".000", "");
+  const iso = now.toISOString();
+  const timestamp = `${iso.slice(0, 19).replace(/[-:]/g, "")}Z`;
   return `sbx-${timestamp}-${random(8).toString("hex")}`;
 }
 

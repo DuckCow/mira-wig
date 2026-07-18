@@ -1,9 +1,28 @@
-import { mkdtemp, rm, writeFile, chmod, stat, symlink } from "node:fs/promises";
+import {
+  chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { isAbsolute, join, relative, sep } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const planTest = vi.hoisted(() => Object.freeze({
+  home: `${process.env.TMPDIR ?? "/private/tmp"}/mira-xp2-plan-${process.pid}`,
+  runDatabaseCommand: vi.fn(),
+}));
+
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => planTest.home };
+});
+
+vi.mock("../../../scripts/refund-sandbox-acceptance/cli-runtime", () => ({
+  runDatabaseCommand: planTest.runDatabaseCommand,
+}));
+
 import { db } from "../../lib/db";
-import { H1ArtifactStore } from "../../../scripts/refund-sandbox-acceptance/artifact-store";
+import {
+  H1_ARTIFACT_PARENT, H1ArtifactStore,
+} from "../../../scripts/refund-sandbox-acceptance/artifact-store";
 import {
   atomicCreateJson, readPrivateText,
 } from "../../../scripts/refund-sandbox-acceptance/atomic-files";
@@ -11,6 +30,8 @@ import {
   ProviderCallBudget, type BudgetRecord,
 } from "../../../scripts/refund-sandbox-acceptance/call-budget";
 import { canonicalJson } from "../../../scripts/refund-sandbox-acceptance/canonical-json";
+import { runCli } from "../../../scripts/refund-sandbox-acceptance/cli";
+import { parseRunId } from "../../../scripts/refund-sandbox-acceptance/contracts";
 import {
   assertSanitizedEvidence, RunRedactor,
 } from "../../../scripts/refund-sandbox-acceptance/redaction";
@@ -32,6 +53,43 @@ describe("refund SANDBOX acceptance protected artifacts", () => {
     await store.assertModes();
     await store.writeRaw("bounded.json", { kind: "fake" });
     await store.assertModes();
+  });
+
+  it("plans with the real CLI only inside an isolated temporary HOME", async () => {
+    const actualOs = await vi.importActual<typeof import("node:os")>("node:os");
+    const operatorParent = join(actualOs.homedir(), ".mira", "refund-sandbox-acceptance");
+    const operatorBefore = await safeMetadata(operatorParent);
+    const originalFetch = fetch;
+    const network = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", network);
+    planTest.runDatabaseCommand.mockClear();
+    await rm(planTest.home, { recursive: true, force: true });
+    await mkdir(planTest.home, { recursive: true, mode: 0o700 });
+    try {
+      const result = await runCli(["plan"], {});
+      expect(result.code).toBe("RUN_PLANNED");
+      expect(typeof result.runId).toBe("string");
+      if (!result.runId) throw new Error("PLAN_RUN_ID_MISSING");
+      expect(parseRunId(result.runId)).toBe(result.runId);
+      const runDirectory = join(H1_ARTIFACT_PARENT, result.runId);
+      expect(isWithin(runDirectory, planTest.home)).toBe(true);
+      expect(isWithin(runDirectory, process.cwd())).toBe(false);
+      expect((await stat(runDirectory)).mode & 0o777).toBe(0o700);
+      expect((await stat(join(runDirectory, "fixtures.json"))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(runDirectory, "raw", "hmac.key"))).mode & 0o777).toBe(0o600);
+      for (const directory of ["ledger", "raw", "sealed", "sanitized", "locks"]) {
+        const metadata = await stat(join(runDirectory, directory));
+        expect(metadata.isDirectory()).toBe(true);
+        expect(metadata.mode & 0o777).toBe(0o700);
+      }
+      expect((await readdir(H1_ARTIFACT_PARENT)).sort()).toEqual([result.runId]);
+      expect(planTest.runDatabaseCommand).not.toHaveBeenCalled();
+      expect(network).not.toHaveBeenCalled();
+      expect(await safeMetadata(operatorParent)).toEqual(operatorBefore);
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+      await rm(planTest.home, { recursive: true, force: true });
+    }
   });
 
   it("rejects symbolic links anywhere in the protected artifact tree", async () => {
@@ -232,4 +290,27 @@ function policyHashes(): Readonly<Record<string, string>> {
     "docs/payment_policy/refund_execution_toss_v1.md": "4".repeat(64),
     "docs/payment_policy/refund_execution_toss_recovery_v1.md": "5".repeat(64),
   });
+}
+
+async function safeMetadata(path: string) {
+  try {
+    const metadata = await stat(path);
+    return Object.freeze({
+      exists: true,
+      mode: metadata.mode & 0o777,
+      modifiedMs: metadata.mtimeMs,
+    });
+  } catch (error) {
+    if (isMissing(error)) return Object.freeze({ exists: false });
+    throw error;
+  }
+}
+
+function isWithin(candidate: string, parent: string): boolean {
+  const path = relative(parent, candidate);
+  return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

@@ -16,16 +16,39 @@ import { requireSandboxCredential } from "../../../scripts/refund-sandbox-accept
 import { planResume } from "../../../scripts/refund-sandbox-acceptance/resume-planner";
 
 const RUN_ID = "sbx-20260718T010203Z-0123456789abcdef";
+const DETERMINISTIC_BYTES = Buffer.from("0123456789abcdef", "hex");
 
 describe("refund SANDBOX acceptance command contracts", () => {
-  it("generates and strictly parses the pinned run id format", () => {
-    const generated = generateRunId(
-      new Date("2026-07-18T01:02:03.000Z"),
-      () => Buffer.from("0123456789abcdef", "hex"),
-    );
+  it.each([
+    "2026-07-18T01:02:03.000Z",
+    "2026-07-18T01:02:03.001Z",
+    "2026-07-18T01:02:03.123Z",
+    "2026-07-18T01:02:03.999Z",
+  ])("generates and parses the seconds-precision run id for %s", (iso) => {
+    const generated = generateRunId(new Date(iso), () => DETERMINISTIC_BYTES);
     expect(generated).toBe(RUN_ID);
     expect(parseRunId(generated)).toBe(generated);
     expect(() => parseRunId(`${generated} `)).toThrow("Run id is invalid");
+  });
+
+  it("generates a parseable default-time run id without fractional seconds or path syntax", () => {
+    const generated = generateRunId();
+    expect(parseRunId(generated)).toBe(generated);
+    expect(generated).toMatch(/^sbx-\d{8}T\d{6}Z-[0-9a-f]{16}$/);
+    expect(generated.includes(".")).toBe(false);
+    expect(/[\s/\\]/u.test(generated)).toBe(false);
+  });
+
+  it("preserves invalid-clock rejection and uses exactly eight random bytes", () => {
+    const date = new Date("2026-07-18T01:02:03.123Z");
+    const first = generateRunId(date, () => Buffer.alloc(8, 0));
+    const second = generateRunId(date, () => Buffer.alloc(8, 255));
+    expect(parseRunId(first)).toBe(first);
+    expect(parseRunId(second)).toBe(second);
+    expect(first).not.toBe(second);
+    expect(first).toMatch(/-[0-9a-f]{16}$/);
+    expect(second).toMatch(/-[0-9a-f]{16}$/);
+    expect(() => generateRunId(new Date(Number.NaN))).toThrow("Run clock is invalid");
   });
 
   it("accepts only bounded command arguments", () => {
