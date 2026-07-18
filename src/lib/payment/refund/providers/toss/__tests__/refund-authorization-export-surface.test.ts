@@ -28,14 +28,14 @@ describe("Toss refund authorization export and reachability boundary", () => {
     expect(/export\s+type\s+TossRefundAuthorizerDependencies/.test(source)).toBe(false);
   });
 
-  it("has no production import of the internal orchestrator outside the Toss feature", () => {
+  it("allows only the dormant worker router to import the internal orchestrator", () => {
     const outsideFeature = productionTypeScriptFiles(path.join(PROJECT_ROOT, "src"))
       .filter((file) => !file.startsWith(`${TOSS_FEATURE_ROOT}${path.sep}`));
     const importingFiles = outsideFeature.filter((file) => (
       readFileSync(file, "utf8").includes("refund-authorization-orchestrator")
     ));
 
-    expect(importingFiles.length).toBe(0);
+    expect(importingFiles.map((file) => path.basename(file))).toEqual(["worker-router.ts"]);
   });
 
   it("limits the internal factory to its definition and the public authority owner", () => {

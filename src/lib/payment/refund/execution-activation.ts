@@ -5,6 +5,7 @@ export const REFUND_EXECUTION_LEASE_ENABLED = "REFUND_EXECUTION_LEASE_ENABLED";
 export const REFUND_EXECUTION_LEASE_RELEASE_ENABLED = "REFUND_EXECUTION_LEASE_RELEASE_ENABLED";
 export const REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED =
   "REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED";
+export const REFUND_EXECUTION_WORKER_ENABLED = "REFUND_EXECUTION_WORKER_ENABLED";
 export const REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED =
   "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED";
 export const REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED =
@@ -52,6 +53,12 @@ export function isRefundExecutionUncontactedRecoveryEnabled(
     REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
     env,
   );
+}
+
+export function isRefundExecutionWorkerEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return isRefundExecutionCapabilityEnabled(REFUND_EXECUTION_WORKER_ENABLED, env);
 }
 
 export function isRefundExecutionDispatchAuthorizationEnabled(

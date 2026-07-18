@@ -16,13 +16,13 @@ describe("uncontacted recovery export and reachability boundary", () => {
     expect("classifyUncontactedRefundExecutionState" in publicRecovery).toBe(false);
   });
 
-  it("has no production, worker, route, action, admin, script, or package caller", () => {
+  it("allows only the dormant worker router as a production caller", () => {
     const production = productionTypeScriptFiles(path.join(PROJECT_ROOT, "src"));
     const callers = production.filter((file) => (
       !file.endsWith("reclaim-uncontacted-execution.ts")
         && readFileSync(file, "utf8").includes("reclaimUncontactedRefundExecution")
     ));
-    expect(callers).toEqual([]);
+    expect(callers.map((file) => path.basename(file))).toEqual(["worker-router.ts"]);
     const packageAndScripts = [
       path.join(PROJECT_ROOT, "package.json"),
       ...optionalTypeScriptFiles(path.join(PROJECT_ROOT, "scripts")),

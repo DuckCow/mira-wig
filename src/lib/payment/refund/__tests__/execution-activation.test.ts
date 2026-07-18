@@ -4,6 +4,7 @@ import {
   isRefundExecutionLeaseEnabled,
   isRefundExecutionLeaseReleaseEnabled,
   isRefundExecutionUncontactedRecoveryEnabled,
+  isRefundExecutionWorkerEnabled,
   isRefundExecutionDispatchAuthorizationEnabled,
   isRefundExecutionObservationApplicationEnabled,
   isRefundExecutionTossAuthorizationEnabled,
@@ -15,6 +16,7 @@ import {
   REFUND_EXECUTION_LEASE_ENABLED,
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
   REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
+  REFUND_EXECUTION_WORKER_ENABLED,
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
   REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
   REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
@@ -26,6 +28,7 @@ import {
 } from "../execution-activation";
 
 describe.each([
+  [REFUND_EXECUTION_WORKER_ENABLED, isRefundExecutionWorkerEnabled],
   [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED, isRefundExecutionUncontactedRecoveryEnabled],
   [REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED, isRefundExecutionTossAuthorizationEnabled],
   [REFUND_EXECUTION_TOSS_CONTACT_ENABLED, isRefundExecutionTossContactEnabled],
