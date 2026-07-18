@@ -5,10 +5,17 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const planTest = vi.hoisted(() => Object.freeze({
-  home: `${process.env.TMPDIR ?? "/private/tmp"}/mira-xp2-plan-${process.pid}`,
-  runDatabaseCommand: vi.fn(),
-}));
+const planTest = vi.hoisted(() => {
+  const portableTemporaryRoot = process.env.RUNNER_TEMP
+    ?? process.env.TMPDIR
+    ?? "/tmp";
+
+  return Object.freeze({
+    home: `${portableTemporaryRoot}/mira-xp2-plan-${process.pid}`,
+    portableTemporaryRoot,
+    runDatabaseCommand: vi.fn(),
+  });
+});
 
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();
@@ -59,6 +66,10 @@ describe("refund SANDBOX acceptance protected artifacts", () => {
     const actualOs = await vi.importActual<typeof import("node:os")>("node:os");
     const operatorParent = join(actualOs.homedir(), ".mira", "refund-sandbox-acceptance");
     const operatorBefore = await safeMetadata(operatorParent);
+    expect(planTest.portableTemporaryRoot).toBe(
+      process.env.RUNNER_TEMP ?? process.env.TMPDIR ?? "/tmp",
+    );
+    expect(isWithin(planTest.home, planTest.portableTemporaryRoot)).toBe(true);
     const originalFetch = fetch;
     const network = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", network);
