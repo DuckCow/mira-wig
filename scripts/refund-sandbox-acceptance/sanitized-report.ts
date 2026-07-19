@@ -1,12 +1,47 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import type { PrismaClient } from "@prisma/client";
+import { atomicCreateJson, atomicWriteJson } from "./atomic-files";
+import type { H1ArtifactStore } from "./artifact-store";
+import type { ParsedH1Command } from "./contracts";
+import type { DatabaseContext } from "./database-context";
 import { RunRedactor, assertSanitizedEvidence } from "./redaction";
 import type { H1Ledger } from "./run-ledger";
 import type { H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
+import type { FixtureManifest } from "./fixture-manifest";
 import type { RefundFixtureIds } from "./cleanup";
 import { budgetRecordsFromPayload } from "./call-budget";
+import { classifyS3History, createS3HistoryExpectation } from "./resume-planner";
+import { appendRuntimeLedger, protectedOwnershipOrNull } from "./runtime-ledger";
+
+export async function sealScenarioEvidence(
+  parsed: ParsedH1Command,
+  store: H1ArtifactStore,
+  manifest: FixtureManifest,
+  context: DatabaseContext,
+): Promise<Readonly<{ code: string; runId: string }>> {
+  if (!parsed.runId || !parsed.scenarioId) throw new Error("SEAL_INPUT_REQUIRED");
+  const latest = await context.ledger.loadLatest();
+  const fixture = manifest.fixtures[parsed.scenarioId];
+  if (!latest || !fixture) throw new Error("SEAL_LEDGER_REQUIRED");
+  if (latest.phase !== "LOCAL_COMMIT_COMPLETE" && latest.phase !== "REVIEW_REQUIRED") {
+    throw new Error("SEAL_PHASE_INVALID");
+  }
+  const ownership = protectedOwnershipOrNull(latest);
+  const hmacHex = (await readFile(store.path("raw", "hmac.key"), "utf8")).trim();
+  const report = await buildSanitizedReport({
+    client: context.prisma, ledger: latest, scenarioId: parsed.scenarioId, fixture,
+    hmacKey: Buffer.from(hmacHex, "hex"), rawDirectory: store.path("raw"),
+    refund: ownership?.refund ?? null,
+  });
+  await atomicCreateJson(store.path("sealed", `${parsed.scenarioId}.json`), report);
+  await atomicWriteJson(store.path("sanitized", `${parsed.scenarioId}.json`), report);
+  await appendRuntimeLedger(context.ledger, latest, "SEALED", {
+    ...latest.payload, completionMarker: "SEALED",
+  });
+  return Object.freeze({ code: "SCENARIO_SEALED", runId: parsed.runId });
+}
 
 export async function buildSanitizedReport(input: Readonly<{
   client: PrismaClient;
@@ -92,19 +127,56 @@ function evidenceBooleans(
   input: Parameters<typeof buildSanitizedReport>[0],
   posts: readonly Readonly<{ operationKey: string | null; canonicalBody: string | null }>[],
 ) {
-  const operationKeys = posts.flatMap((post) => post.operationKey ? [post.operationKey] : []);
-  const bodies = posts.flatMap((post) => post.canonicalBody ? [post.canonicalBody] : []);
+  const operationKeys = posts.map((post) => post.operationKey);
+  const bodies = posts.map((post) => post.canonicalBody);
   const resultCodes = Array.isArray(input.ledger.payload.resultCode)
     ? input.ledger.payload.resultCode : [];
+  const budgets = budgetCounts(input.ledger.payload.budgets);
+  const validatedS3Replay = provesValidatedS3Replay(
+    input, resultCodes, posts, operationKeys, bodies, budgets,
+  );
+  const replayAssertion = validatedS3Replay || null;
   return Object.freeze({
-    sameOperationKey: posts.length > 1 ? new Set(operationKeys).size === 1 : null,
-    sameBody: posts.length > 1 ? new Set(bodies).size === 1 : null,
-    sameTransactionKey: null,
-    singleCancellation: null,
+    sameOperationKey: repeatedValuesMatch(operationKeys),
+    sameBody: repeatedValuesMatch(bodies),
+    sameTransactionKey: replayAssertion,
+    singleCancellation: replayAssertion,
     noSecondPost: input.scenarioId === "S2" ? posts.length === 1 : null,
     recoveredByLookup: input.scenarioId === "S2" ? resultCodes.includes("RECOVERED") : null,
     cleanupComplete: false,
   });
+}
+
+function provesValidatedS3Replay(
+  input: Parameters<typeof buildSanitizedReport>[0],
+  resultCodes: readonly unknown[],
+  posts: readonly unknown[],
+  operationKeys: readonly (string | null)[],
+  bodies: readonly (string | null)[],
+  budgets: Readonly<{ GET: number; POST: number }>,
+): boolean {
+  if (input.scenarioId !== "S3") return false;
+  const durableHistory = classifyS3History(
+    input.ledger.payload.callRecords ?? [],
+    createS3HistoryExpectation(input.ledger.runId, input.fixture),
+  );
+  return [
+    durableHistory.kind === "COMPLETE_SUCCESS",
+    resultCodes.length === 1,
+    resultCodes[0] === "REPLAY_OBSERVED",
+    posts.length === 2,
+    repeatedValuesMatch(operationKeys) === true,
+    repeatedValuesMatch(bodies) === true,
+    budgets.GET === 2,
+    budgets.POST === 2,
+  ].every(Boolean);
+}
+
+function repeatedValuesMatch(values: readonly (string | null)[]): boolean | null {
+  if (values.length !== 2) return null;
+  const [first, second] = values;
+  if (!first || !second) return null;
+  return first === second;
 }
 
 async function loadProjection(client: PrismaClient, refund: RefundFixtureIds) {

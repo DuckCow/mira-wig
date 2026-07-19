@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Prisma, RefundAttemptActorType } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../lib/db";
@@ -29,6 +32,10 @@ import {
   verifyDatabaseInvariants,
   type DatabaseInvariantQueryClient,
 } from "../../../scripts/refund-sandbox-acceptance/database-invariants";
+import { H1ArtifactStore } from "../../../scripts/refund-sandbox-acceptance/artifact-store";
+import { atomicWriteJson, ordinaryDelete } from "../../../scripts/refund-sandbox-acceptance/atomic-files";
+import { cleanupCommand } from "../../../scripts/refund-sandbox-acceptance/cli-runtime";
+import { RunLedgerStore, type H1Ledger } from "../../../scripts/refund-sandbox-acceptance/run-ledger";
 
 type Owned = Readonly<{ handle: AcceptanceBootstrapHandle; refund: RefundFixtureIds | null }>;
 type CatalogMutationOutcome =
@@ -223,6 +230,166 @@ describe("acceptance-only pre-refund bootstrap", () => {
   });
 });
 
+describe("provider-only acceptance run retirement", () => {
+  it.each([
+    ["S3", "sbx-20260719T010203Z-aaaaaaaaaaaaaaaa"],
+    ["S4", "sbx-20260719T010204Z-bbbbbbbbbbbbbbbb"],
+  ] as const)("retires sealed %s with one ledger append and zero database changes", async (
+    scenarioId,
+    runId,
+  ) => {
+    const run = await createProviderOnlyRun(runId, scenarioId, "SEALED");
+    try {
+      const beforeDatabase = await providerCleanupSnapshot();
+      const beforeSealed = await readFile(run.store.path("sealed", `${scenarioId}.json`));
+      const beforeSanitized = await readFile(run.store.path("sanitized", `${scenarioId}.json`));
+      const result = await cleanupCommand(runId, cleanupEnv(runId), {
+        prisma: db,
+        bootstrap,
+        ledger: run.ledger,
+      });
+      expect(result).toEqual({ code: "DATABASE_CLEANED", runId });
+      expect(await providerCleanupSnapshot()).toEqual(beforeDatabase);
+      const latest = await run.ledger.loadLatest();
+      expect(latest).toMatchObject({ revision: 2, phase: "DB_CLEANED" });
+      expect(latest?.payload.cleanupComplete).toBe(true);
+      expect((await stat(run.store.path("raw"))).isDirectory()).toBe(true);
+      expect(await readFile(run.store.path("sealed", `${scenarioId}.json`))).toEqual(beforeSealed);
+      expect(await readFile(run.store.path("sanitized", `${scenarioId}.json`))).toEqual(beforeSanitized);
+
+      await ordinaryDelete(run.store.path("raw"));
+      await expect(access(run.store.path("raw"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(run.store.path("sealed", `${scenarioId}.json`))).toEqual(beforeSealed);
+      expect(await readFile(run.store.path("sanitized", `${scenarioId}.json`))).toEqual(beforeSanitized);
+    } finally {
+      await rm(run.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["S1", "S2", "S5", "S6"] as const)(
+    "keeps sealed %s cleanup ownership-bound",
+    async (scenarioId) => {
+      const runId = "sbx-20260719T020203Z-cccccccccccccccc";
+      const run = await createProviderOnlyRun(runId, scenarioId, "SEALED");
+      try {
+        await expect(cleanupCommand(runId, cleanupEnv(runId), {
+          prisma: db, bootstrap, ledger: run.ledger,
+        })).rejects.toThrow("CLEANUP_LEDGER_INVALID");
+        expect((await run.ledger.loadLatest())?.revision).toBe(1);
+      } finally {
+        await rm(run.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    ["PLANNED", "ddddddddddddddd1"],
+    ["LOCAL_COMMIT_COMPLETE", "ddddddddddddddd2"],
+    ["REVIEW_REQUIRED", "ddddddddddddddd3"],
+    ["DB_CLEANED", "ddddddddddddddd4"],
+  ] as const)("rejects provider-only cleanup in %s", async (phase, suffix) => {
+    const runId = `sbx-20260719T020204Z-${suffix}`;
+    const run = await createProviderOnlyRun(runId, "S3", phase);
+    try {
+      await expect(cleanupCommand(runId, cleanupEnv(runId), {
+        prisma: db, bootstrap, ledger: run.ledger,
+      })).rejects.toThrow("SEALED_EVIDENCE_REQUIRED");
+      expect((await run.ledger.loadLatest())?.revision).toBe(1);
+    } finally {
+      await rm(run.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a second provider-only cleanup after reaching DB_CLEANED", async () => {
+    const runId = "sbx-20260719T020205Z-2222222222222222";
+    const run = await createProviderOnlyRun(runId, "S3", "SEALED");
+    try {
+      await expect(cleanupCommand(runId, cleanupEnv(runId), {
+        prisma: db, bootstrap, ledger: run.ledger,
+      })).resolves.toEqual({ code: "DATABASE_CLEANED", runId });
+      await expect(cleanupCommand(runId, cleanupEnv(runId), {
+        prisma: db, bootstrap, ledger: run.ledger,
+      })).rejects.toThrow("SEALED_EVIDENCE_REQUIRED");
+      expect((await run.ledger.loadLatest())?.revision).toBe(2);
+    } finally {
+      await rm(run.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["bootstrapHandle", "refundFixture"] as const)(
+    "rejects provider-only cleanup with unexpected %s ownership",
+    async (ownershipKey) => {
+      const runId = "sbx-20260719T020205Z-eeeeeeeeeeeeeeee";
+      const run = await createProviderOnlyRun(runId, "S4", "SEALED", {
+        [ownershipKey]: Object.freeze({ synthetic: true }),
+      });
+      try {
+        await expect(cleanupCommand(runId, cleanupEnv(runId), {
+          prisma: db, bootstrap, ledger: run.ledger,
+        })).rejects.toThrow("PROVIDER_ONLY_OWNERSHIP_INVALID");
+        expect((await run.ledger.loadLatest())?.revision).toBe(1);
+      } finally {
+        await rm(run.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    ["malformed ownership", {
+      bootstrapHandle: "malformed",
+      refundFixture: Object.freeze(["malformed"]),
+    }, "3333333333333333"],
+    ["bootstrap-only ownership", {
+      bootstrapHandle: Object.freeze({ synthetic: true }),
+    }, "4444444444444444"],
+    ["refund-only ownership", {
+      refundFixture: Object.freeze({ synthetic: true }),
+    }, "5555555555555555"],
+    ["valid unexpected ownership", {
+      bootstrapHandle: Object.freeze({
+        runId: "sbx-20260719T020205Z-6666666666666666",
+        scenarioId: "S3",
+        marketCode: "KR",
+        marketCreatedByRun: false,
+        userId: "h1_user_synthetic",
+        checkoutSessionId: "h1_session_synthetic",
+        paymentId: "h1_payment_synthetic",
+        orderId: "h1_order_synthetic",
+        amount: 1_000,
+      }),
+      refundFixture: Object.freeze({
+        refundAttemptId: "h1_refund_synthetic",
+        commandId: "h1_command_synthetic",
+      }),
+    }, "6666666666666666"],
+  ] as const)("rejects sealed S3 with %s", async (_case, payload, suffix) => {
+    const runId = `sbx-20260719T020205Z-${suffix}`;
+    const run = await createProviderOnlyRun(runId, "S3", "SEALED", payload);
+    try {
+      await expect(cleanupCommand(runId, cleanupEnv(runId), {
+        prisma: db, bootstrap, ledger: run.ledger,
+      })).rejects.toThrow("PROVIDER_ONLY_OWNERSHIP_INVALID");
+      expect((await run.ledger.loadLatest())?.revision).toBe(1);
+    } finally {
+      await rm(run.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a provider-only ledger whose run identity differs from the command", async () => {
+    const runId = "sbx-20260719T020206Z-ffffffffffffffff";
+    const ledgerRunId = "sbx-20260719T020207Z-1111111111111111";
+    const run = await createProviderOnlyRun(runId, "S3", "SEALED", {}, ledgerRunId);
+    try {
+      await expect(cleanupCommand(runId, cleanupEnv(runId), {
+        prisma: db, bootstrap, ledger: run.ledger,
+      })).rejects.toThrow("CLEANUP_LEDGER_INVALID");
+      expect((await run.ledger.loadLatest())?.revision).toBe(1);
+    } finally {
+      await rm(run.root, { recursive: true, force: true });
+    }
+  });
+});
+
 function testDatabaseUrl(): string {
   const configured = process.env.DATABASE_URL;
   if (!configured || new URL(configured).pathname.replace(/^\//, "") !== "wig_platform_test") {
@@ -302,6 +469,69 @@ function requireExpectedM3Rejection(outcome: CatalogMutationOutcome): void {
   }
   if (outcome.error instanceof Error) throw outcome.error;
   throw new Error("DATABASE_INVARIANT_TEST_ERROR");
+}
+
+async function createProviderOnlyRun(
+  runId: string,
+  scenarioId: H1Ledger["scenarioId"],
+  phase: H1Ledger["phase"],
+  payload: Readonly<Record<string, unknown>> = {},
+  ledgerRunId = runId,
+) {
+  const root = await mkdtemp(join(tmpdir(), "mira-xp5-provider-cleanup-"));
+  const store = new H1ArtifactStore(root, runId);
+  await store.initialize();
+  await Promise.all([
+    atomicWriteJson(store.path("sealed", `${scenarioId}.json`), { evidence: "sealed" }),
+    atomicWriteJson(store.path("sanitized", `${scenarioId}.json`), { evidence: "sanitized" }),
+  ]);
+  const ledger = new RunLedgerStore(store.path("ledger"));
+  await ledger.append({
+    runId: ledgerRunId,
+    scenarioId,
+    phase,
+    repositoryCommit: "a".repeat(40),
+    runnerSourceHash: "b".repeat(64),
+    policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+    migrationFingerprint: "d".repeat(64),
+    scenarioInputHash: "e".repeat(64),
+    payload: Object.freeze({ scenarioId, ...payload }),
+  });
+  return Object.freeze({ root, store, ledger });
+}
+
+function cleanupEnv(runId: string): Readonly<Record<string, string>> {
+  return Object.freeze({ MIRA_TOSS_SANDBOX_ACCEPTANCE_CLEANUP_CONFIRM: runId });
+}
+
+async function providerCleanupSnapshot() {
+  const databases = await db.$queryRaw<{ databaseName: string }[]>(Prisma.sql`
+    SELECT datname AS "databaseName" FROM pg_database ORDER BY datname
+  `);
+  const migrations = await appliedMigrations();
+  const catalog = await readDatabaseInvariantCatalog(db);
+  const applicationTables = await applicationTableCounts();
+  return Object.freeze({ databases, migrations, catalog, applicationTables });
+}
+
+async function applicationTableCounts() {
+  const tables = await db.$queryRaw<{ tableName: string }[]>(Prisma.sql`
+    SELECT tablename AS "tableName"
+    FROM pg_tables
+    WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
+    ORDER BY tablename
+  `);
+  const counts: Array<Readonly<{ tableName: string; rowCount: number }>> = [];
+  for (const { tableName } of tables) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName)) {
+      throw new Error("TEST_TABLE_IDENTITY_INVALID");
+    }
+    const rows = await db.$queryRawUnsafe<{ rowCount: number }[]>(
+      `SELECT count(*)::int AS "rowCount" FROM "${tableName}"`,
+    );
+    counts.push(Object.freeze({ tableName, rowCount: rows[0]?.rowCount ?? -1 }));
+  }
+  return Object.freeze(counts);
 }
 
 function bootstrapInput(scenarioId: "S1" | "S2" | "S3" | "S4" | "S5") {

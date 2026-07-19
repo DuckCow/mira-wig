@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { db } from "../../lib/db";
 import {
   ACCEPTANCE_DATABASE_NAME,
   databaseNameFromUrl,
@@ -34,8 +35,18 @@ import {
   GIT_IDENTITY_TIMEOUT_MS,
 } from "../../../scripts/refund-sandbox-acceptance/integrity";
 import { assertSanitizedEvidence, SANITIZED_REPORT_KEYS } from "../../../scripts/refund-sandbox-acceptance/redaction";
-import { RunLedgerStore } from "../../../scripts/refund-sandbox-acceptance/run-ledger";
+import { RunLedgerStore, type H1Ledger } from "../../../scripts/refund-sandbox-acceptance/run-ledger";
 import { appendRuntimeLedger } from "../../../scripts/refund-sandbox-acceptance/runtime-ledger";
+import { buildSanitizedReport } from "../../../scripts/refund-sandbox-acceptance/sanitized-report";
+import { AcceptanceBootstrap } from "../../../scripts/refund-sandbox-acceptance/bootstrap";
+import { cleanupCommand } from "../../../scripts/refund-sandbox-acceptance/cli-runtime";
+import {
+  protectedGetRequest,
+  protectedPostRequest,
+  type BudgetRecord,
+} from "../../../scripts/refund-sandbox-acceptance/call-budget";
+import { createS3HistoryExpectation } from "../../../scripts/refund-sandbox-acceptance/resume-planner";
+import { deriveTossRefundCancellationWireRequest } from "../../lib/payment/refund/providers/toss/refund-wire-request";
 
 const OLD_COMMIT = "62ad6d709c0db767732e8cf2abd4ddbeeba08031";
 const SYNTHETIC_COMMIT = "a".repeat(40);
@@ -258,6 +269,194 @@ describe("refund SANDBOX acceptance reachability and evidence privacy", () => {
     expect(invalid).toBe("SANITIZED_EVIDENCE_SCHEMA_INVALID");
     expect(forbidden.includes(rawIdentifier)).toBe(false);
     expect(invalid.includes(rawIdentifier)).toBe(false);
+  });
+
+  it("derives S3 replay assertions only from a complete validated replay result", async () => {
+    const rawDirectory = await mkdtemp(join(tmpdir(), "mira-xp5-sanitized-"));
+    try {
+      const validated = await buildProviderReport(rawDirectory, "S3", ["REPLAY_OBSERVED"]);
+      expect(validated.booleans).toEqual({
+        sameOperationKey: true,
+        sameBody: true,
+        sameTransactionKey: true,
+        singleCancellation: true,
+        noSecondPost: null,
+        recoveredByLookup: null,
+        cleanupComplete: false,
+      });
+      expect(validated.transactionKeyHmac).toBeNull();
+
+      const incomplete = await buildProviderReport(
+        rawDirectory,
+        "S3",
+        ["S3_REPLAY_PROBE_FAILED"],
+      );
+      expect(incomplete.booleans).toEqual({
+        sameOperationKey: true,
+        sameBody: true,
+        sameTransactionKey: null,
+        singleCancellation: null,
+        noSecondPost: null,
+        recoveredByLookup: null,
+        cleanupComplete: false,
+      });
+
+      const scenarioOnly = await buildProviderReport(
+        rawDirectory, "S3", [], { posts: [], budgets: { GET: 0, POST: 0 } },
+      );
+      expect(scenarioOnly.booleans).toMatchObject({
+        sameTransactionKey: null, singleCancellation: null,
+      });
+
+      const wrongCounts = await buildProviderReport(
+        rawDirectory, "S3", ["REPLAY_OBSERVED"], { budgets: { GET: 3, POST: 2 } },
+      );
+      expect(wrongCounts.booleans).toMatchObject({
+        sameTransactionKey: null, singleCancellation: null,
+      });
+    } finally {
+      await rm(rawDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(identityCardinalityCases())(
+    "requires exactly two positional operation keys: %s",
+    async (_case, values, expected) => {
+      const rawDirectory = await mkdtemp(join(tmpdir(), "mira-xp5-operation-cardinality-"));
+      try {
+        const report = await buildProviderReport(rawDirectory, "S3", ["REPLAY_OBSERVED"], {
+          posts: values.map((operationKey) => Object.freeze({
+            operationKey, canonicalBody: "{\"cancelAmount\":1000}",
+          })),
+          budgets: { GET: 2, POST: values.length },
+        });
+        expect(report.booleans).toMatchObject({ sameOperationKey: expected });
+      } finally {
+        await rm(rawDirectory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    ["extra non-POST calls surrounding exactly two POSTs", ["GET", "POST", "POST", "GET"], true],
+    ["reordered mixed GET/POST records", ["POST", "GET", "POST", "GET"], true],
+    ["three POSTs plus extra GET records", ["GET", "POST", "GET", "POST", "POST", "GET"], null],
+  ] as const)("preserves POST-only sanitized cardinality with %s", async (_case, kinds, expected) => {
+    const rawDirectory = await mkdtemp(join(tmpdir(), "mira-xp5-mixed-cardinality-"));
+    try {
+      const report = await buildProviderReport(rawDirectory, "S3", ["REPLAY_OBSERVED"], {
+        callRecords: mixedCardinalityRecords(kinds),
+        budgets: { GET: kinds.filter((kind) => kind === "GET").length, POST: kinds.filter((kind) => kind === "POST").length },
+      });
+      expect(report.booleans).toMatchObject({
+        sameOperationKey: expected,
+        sameBody: expected,
+      });
+    } finally {
+      await rm(rawDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(identityCardinalityCases())(
+    "requires exactly two positional canonical bodies: %s",
+    async (_case, values, expected) => {
+      const rawDirectory = await mkdtemp(join(tmpdir(), "mira-xp5-body-cardinality-"));
+      try {
+        const report = await buildProviderReport(rawDirectory, "S3", ["REPLAY_OBSERVED"], {
+          posts: values.map((canonicalBody) => Object.freeze({
+            operationKey: "synthetic-operation", canonicalBody,
+          })),
+          budgets: { GET: 2, POST: values.length },
+        });
+        expect(report.booleans).toMatchObject({ sameBody: expected });
+      } finally {
+        await rm(rawDirectory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("preserves S1 and S2 sanitized assertion semantics", async () => {
+    const rawDirectory = await mkdtemp(join(tmpdir(), "mira-xp5-sanitized-regression-"));
+    try {
+      const s1 = await buildProviderReport(rawDirectory, "S1", ["SUCCEEDED"]);
+      expect(s1.booleans).toEqual({
+        sameOperationKey: null,
+        sameBody: null,
+        sameTransactionKey: null,
+        singleCancellation: null,
+        noSecondPost: null,
+        recoveredByLookup: null,
+        cleanupComplete: false,
+      });
+      const s2 = await buildProviderReport(rawDirectory, "S2", ["RECOVERED"]);
+      expect(s2.booleans).toEqual({
+        sameOperationKey: null,
+        sameBody: null,
+        sameTransactionKey: null,
+        singleCancellation: null,
+        noSecondPost: true,
+        recoveredByLookup: true,
+        cleanupComplete: false,
+      });
+    } finally {
+      await rm(rawDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the existing purge-raw command after provider-only DB cleanup", async () => {
+    const isolatedHome = await mkdtemp(join(tmpdir(), "mira-xp5-purge-home-"));
+    vi.resetModules();
+    vi.doMock("node:os", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:os")>();
+      return { ...actual, homedir: () => isolatedHome };
+    });
+    try {
+      const [{ H1_ARTIFACT_PARENT, H1ArtifactStore }, { atomicWriteJson },
+        { runCli }, { RunLedgerStore: IsolatedLedgerStore }] = await Promise.all([
+        import("../../../scripts/refund-sandbox-acceptance/artifact-store"),
+        import("../../../scripts/refund-sandbox-acceptance/atomic-files"),
+        import("../../../scripts/refund-sandbox-acceptance/cli"),
+        import("../../../scripts/refund-sandbox-acceptance/run-ledger"),
+      ]);
+      const store = new H1ArtifactStore(H1_ARTIFACT_PARENT, RUN_ID);
+      await store.initialize();
+      await Promise.all([
+        atomicWriteJson(store.path("sealed", "S3.json"), { evidence: "sealed" }),
+        atomicWriteJson(store.path("sanitized", "S3.json"), { evidence: "sanitized" }),
+      ]);
+      const ledger = new IsolatedLedgerStore(store.path("ledger"));
+      await ledger.append({
+        runId: RUN_ID,
+        scenarioId: "S3",
+        phase: "SEALED",
+        repositoryCommit: "a".repeat(40),
+        runnerSourceHash: "b".repeat(64),
+        policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+        migrationFingerprint: "d".repeat(64),
+        scenarioInputHash: "e".repeat(64),
+        payload: Object.freeze({ scenarioId: "S3" }),
+      });
+      const sealedBefore = await readFile(store.path("sealed", "S3.json"));
+      const sanitizedBefore = await readFile(store.path("sanitized", "S3.json"));
+      await expect(cleanupCommand(RUN_ID, {
+        MIRA_TOSS_SANDBOX_ACCEPTANCE_CLEANUP_CONFIRM: RUN_ID,
+      }, {
+        prisma: db,
+        bootstrap: new AcceptanceBootstrap(db, "wig_platform_test"),
+        ledger,
+      })).resolves.toEqual({ code: "DATABASE_CLEANED", runId: RUN_ID });
+      expect((await ledger.loadLatest())?.phase).toBe("DB_CLEANED");
+      await expect(runCli(["purge-raw", "--run", RUN_ID], {
+        MIRA_TOSS_SANDBOX_ACCEPTANCE_PURGE_CONFIRM: RUN_ID,
+      })).resolves.toEqual({ code: "RAW_PURGED", runId: RUN_ID });
+      await expect(access(store.path("raw"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(store.path("sealed", "S3.json"))).toEqual(sealedBefore);
+      expect(await readFile(store.path("sanitized", "S3.json"))).toEqual(sanitizedBefore);
+    } finally {
+      vi.doUnmock("node:os");
+      vi.resetModules();
+      await rm(isolatedHome, { recursive: true, force: true });
+    }
   });
 });
 
@@ -722,6 +921,165 @@ function sanitizedFailure(value: unknown): string {
   } catch (error) {
     return error instanceof Error ? error.message : "NON_ERROR_FAILURE";
   }
+}
+
+async function buildProviderReport(
+  rawDirectory: string,
+  scenarioId: "S1" | "S2" | "S3",
+  resultCode: readonly string[],
+  options: Readonly<{
+    posts?: readonly Readonly<{
+      operationKey: string | null;
+      canonicalBody: string | null;
+    }>[];
+    budgets?: Readonly<{ GET: number; POST: number }>;
+    callRecords?: readonly BudgetRecord[];
+  }> = {},
+) {
+  const defaultPostCount = scenarioId === "S3" ? 2 : 1;
+  const posts = options.posts ?? Array.from({ length: defaultPostCount }, () => Object.freeze({
+    canonicalBody: "{\"cancelAmount\":1000}",
+    operationKey: "synthetic-operation",
+  }));
+  const fixture = Object.freeze({
+    scenarioId,
+    paymentKey: `synthetic-payment-${scenarioId}`,
+    providerOrderId: `synthetic-order-${scenarioId}`,
+    amount: 1_000,
+    currency: "KRW" as const,
+    reference: `synthetic-reference-${scenarioId}`,
+  });
+  const callRecords = options.callRecords ?? (scenarioId === "S3" && options.posts === undefined
+    ? completeSanitizedS3History(Object.freeze({ ...fixture, scenarioId: "S3" }))
+    : posts.map((post, index) => Object.freeze({
+      scenarioId,
+      kind: "POST" as const,
+      phase: "INTENT" as const,
+      sequence: index + 1,
+      request: Object.freeze({
+        path: "/v1/payments/synthetic/cancel",
+        canonicalBody: post.canonicalBody,
+        operationKey: post.operationKey,
+        wireFingerprint: "e".repeat(64),
+      }),
+    })));
+  const ledger: H1Ledger = Object.freeze({
+    formatVersion: "mira-toss-sbx-ledger/v1",
+    revision: 1,
+    previousLedgerHash: null,
+    runId: RUN_ID,
+    scenarioId,
+    phase: "LOCAL_COMMIT_COMPLETE",
+    repositoryCommit: "a".repeat(40),
+    runnerSourceHash: "b".repeat(64),
+    policyHashes: validEvidence().policyHashes,
+    migrationFingerprint: "c".repeat(64),
+    scenarioInputHash: "d".repeat(64),
+    payload: Object.freeze({
+      scenarioId,
+      resultCode: Object.freeze([...resultCode]),
+      callRecords: Object.freeze(callRecords),
+      budgets: Object.freeze(options.budgets ?? {
+        GET: scenarioId === "S3" ? 2 : 0,
+        POST: posts.length,
+      }),
+    }),
+  });
+  return buildSanitizedReport({
+    client: db,
+    ledger,
+    scenarioId,
+    fixture,
+    hmacKey: Buffer.alloc(32, 7),
+    rawDirectory,
+    refund: null,
+    now: new Date("2026-07-18T03:00:00.000Z"),
+  });
+}
+
+function identityCardinalityCases(): readonly Readonly<[
+  string,
+  readonly (string | null)[],
+  boolean | null,
+]>[] {
+  return [
+    ["zero values", [], null],
+    ["one value", ["identity-A"], null],
+    ["two matching values", ["identity-A", "identity-A"], true],
+    ["two differing values", ["identity-A", "identity-B"], false],
+    ["missing first value", [null, "identity-A"], null],
+    ["missing second value", ["identity-A", null], null],
+    ["both values missing", [null, null], null],
+    ["three identical values", ["identity-A", "identity-A", "identity-A"], null],
+    ["three mixed values", ["identity-A", "identity-B", "identity-A"], null],
+  ];
+}
+
+function completeSanitizedS3History(
+  fixture: Readonly<{
+    scenarioId: "S3";
+    paymentKey: string;
+    providerOrderId: string;
+    amount: number;
+    currency: "KRW";
+    reference: string;
+  }>,
+): readonly BudgetRecord[] {
+  const expectation = createS3HistoryExpectation(RUN_ID, fixture);
+  const wire = deriveTossRefundCancellationWireRequest({
+    paymentKey: expectation.paymentKey,
+    providerOperationKey: expectation.providerOperationKey,
+    cancelAmount: expectation.cancelAmount,
+  });
+  const requests = [
+    protectedGetRequest(fixture.paymentKey),
+    protectedPostRequest(wire, JSON.stringify(wire.body)),
+    protectedPostRequest(wire, JSON.stringify(wire.body)),
+    protectedGetRequest(fixture.paymentKey),
+  ] as const;
+  const kinds = ["GET", "POST", "POST", "GET"] as const;
+  const classifications = [
+    "INITIAL_GET_ELIGIBLE", "POST_ACCEPTED", "POST_ACCEPTED", "FINAL_GET_EXACT_SUCCESS",
+  ] as const;
+  return Object.freeze(kinds.flatMap((kind, index) => {
+    const request = requests[index];
+    const classification = classifications[index];
+    if (!request || !classification) throw new Error("TEST_S3_HISTORY_INVALID");
+    const sequence = index + 1;
+    const identity = classification === "POST_ACCEPTED"
+      || classification === "FINAL_GET_EXACT_SUCCESS" ? "9".repeat(64) : null;
+    return [
+      Object.freeze({ scenarioId: "S3" as const, kind, phase: "INTENT" as const, sequence, request }),
+      Object.freeze({
+        scenarioId: "S3" as const,
+        kind,
+        phase: "COMPLETED" as const,
+        sequence,
+        request,
+        completionEvidence: Object.freeze({
+          classification,
+          transactionIdentityHmac: identity,
+        }),
+      }),
+    ];
+  }));
+}
+
+function mixedCardinalityRecords(kinds: readonly ("GET" | "POST")[]): readonly BudgetRecord[] {
+  const get = protectedGetRequest("synthetic-payment-S3");
+  const post = Object.freeze({
+    path: "/v1/payments/synthetic-payment-S3/cancel",
+    canonicalBody: "synthetic-canonical-body",
+    operationKey: "synthetic-operation",
+    wireFingerprint: "e".repeat(64),
+  });
+  return Object.freeze(kinds.map((kind, index) => Object.freeze({
+    scenarioId: "S3" as const,
+    kind,
+    phase: "INTENT" as const,
+    sequence: index + 1,
+    request: kind === "GET" ? get : post,
+  })));
 }
 
 function validEvidence() {
