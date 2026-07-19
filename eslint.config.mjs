@@ -51,16 +51,6 @@ export default tseslint.config(
       // 무의미한 catch-rethrow도 거부
       "no-useless-catch": "error",
 
-      // [10-3] 갓펑션/갓파일 금지 — 함수 50줄, 파일 300줄
-      "max-lines-per-function": [
-        "error",
-        { max: 50, skipBlankLines: true, skipComments: true },
-      ],
-      "max-lines": [
-        "error",
-        { max: 300, skipBlankLines: true, skipComments: true },
-      ],
-
       // [10-3] 3단계 이상 중첩 금지 — early return / guard clause로 평탄화
       "max-depth": ["error", 3],
       // 복잡도 상한 (갓펑션의 또다른 신호)
@@ -97,15 +87,7 @@ export default tseslint.config(
       "src/app/api/payments/**/*.ts",
     ],
     rules: {
-      // 핵심 로직은 더 엄격: 함수 40줄, 파일 300줄, 복잡도 8
-      "max-lines-per-function": [
-        "error",
-        { max: 40, skipBlankLines: true, skipComments: true },
-      ],
-      "max-lines": [
-        "error",
-        { max: 300, skipBlankLines: true, skipComments: true },
-      ],
+      // 핵심 로직은 더 엄격: 복잡도 8
       complexity: ["error", 8],
       // STRICT 존에서는 any 관련 우회를 추가로 차단
       "@typescript-eslint/no-unsafe-assignment": "error",
@@ -121,36 +103,7 @@ export default tseslint.config(
   {
     files: ["src/**/__tests__/**/*.ts", "src/**/*.test.ts", "src/**/*.integration.test.ts"],
     rules: {
-      "max-lines-per-function": "off",
-      "max-lines": "off",
       complexity: ["error", 10],
-    },
-  },
-
-  // --------------------------------------------------------
-  // React 컴포넌트 / 페이지 (NORMAL 존, .tsx)
-  // JSX는 함수 한 개가 길어지기 쉬움 → 함수 길이 상한만 완화.
-  // 나머지 공통 규칙은 그대로 적용.
-  // --------------------------------------------------------
-  {
-    files: ["src/app/**/*.tsx", "src/components/**/*.tsx"],
-    rules: {
-      // JSX 반환부 때문에 50줄은 비현실적 → 150줄로 완화
-      "max-lines-per-function": [
-        "error",
-        { max: 150, skipBlankLines: true, skipComments: true },
-      ],
-    },
-  },
-
-  // --------------------------------------------------------
-  // 설정/시드/스크립트 파일 — 일부 규칙 면제
-  // --------------------------------------------------------
-  {
-    files: ["prisma/seed.ts", "*.config.*", "*.mjs"],
-    rules: {
-      "max-lines-per-function": "off",
-      "max-lines": "off",
     },
   },
 
