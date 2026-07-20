@@ -12,6 +12,7 @@ import {
 } from "@prisma/client";
 import { db } from "@/lib/db";
 import { claimRefundAttemptForExecution } from "../claim";
+import { requestRefundAttempt } from "../request";
 
 export const DISPATCH_NOW = new Date("2026-07-11T07:00:00.000Z");
 export const LEASE_UNTIL = new Date("2026-07-11T07:05:00.000Z");
@@ -34,12 +35,21 @@ export interface DispatchFixture {
 }
 
 export async function createDispatchFixture(
-  options: { totalAmount?: number; targetAmount?: number; availableAt?: Date } = {},
+  options: {
+    totalAmount?: number;
+    targetAmount?: number;
+    availableAt?: Date;
+    provider?: PaymentProvider;
+    mode?: PaymentMode;
+    requestThroughProduction?: boolean;
+  } = {},
 ): Promise<DispatchFixture> {
   await ensureMarket();
   const identity = randomUUID();
   const totalAmount = options.totalAmount ?? 1_000;
   const targetAmount = options.targetAmount ?? 400;
+  const provider = options.provider ?? PaymentProvider.MOCK;
+  const mode = options.mode ?? PaymentMode.SANDBOX;
   const userId = `dispatch_user_${identity}`;
   await db.user.create({ data: { id: userId, email: `${userId}@example.test`, name: "Dispatch test" } });
   const session = await db.checkoutSession.create({
@@ -60,8 +70,8 @@ export async function createDispatchFixture(
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: session.id,
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
+      provider,
+      mode,
       status: PaymentAttemptStatus.SUCCEEDED,
       amount: totalAmount,
       currency: "KRW",
@@ -80,43 +90,23 @@ export async function createDispatchFixture(
       subtotalAmount: totalAmount,
       shippingAmount: 0,
       totalAmount,
-      status: OrderStatus.REFUND_PENDING,
+      status: options.requestThroughProduction ? OrderStatus.PAID : OrderStatus.REFUND_PENDING,
       paidAt: DISPATCH_NOW,
     },
   });
   const refundAttemptId = `refund_${identity}`;
   const operationKey = `refund:${payment.id}:${refundAttemptId}`;
   const reason = "Dispatch fixture refund request";
-  await db.refundAttempt.create({
-    data: {
-      id: refundAttemptId,
-      orderId: order.id,
-      paymentId: payment.id,
-      amount: targetAmount,
-      currency: "KRW",
-      status: RefundAttemptStatus.REQUESTED,
-      reason,
-      actorType: RefundAttemptActorType.ADMIN,
-      actorUserId: "dispatch_admin",
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
-      idempotencyKey: operationKey,
-      requestedAt: DISPATCH_NOW,
-    },
-  });
-  await db.refundAttemptTransition.create({
-    data: {
-      refundAttemptId,
-      fromStatus: null,
-      toStatus: RefundAttemptStatus.REQUESTED,
-      orderStatusBefore: OrderStatus.PAID,
-      orderStatusAfter: OrderStatus.REFUND_PENDING,
-      actorType: RefundAttemptActorType.ADMIN,
-      actorUserId: "dispatch_admin",
-      reason,
-      operationKey: `refund-request:${refundAttemptId}`,
-      createdAt: DISPATCH_NOW,
-    },
+  await createRequestedAttempt({
+    requestThroughProduction: options.requestThroughProduction === true,
+    refundAttemptId,
+    orderId: order.id,
+    paymentId: payment.id,
+    targetAmount,
+    reason,
+    provider,
+    mode,
+    operationKey,
   });
   const claim = await claimRefundAttemptForExecution(db, {
     orderId: order.id,
@@ -139,6 +129,63 @@ export async function createDispatchFixture(
     providerPaymentKey,
     operationKey,
   };
+}
+
+async function createRequestedAttempt(input: Readonly<{
+  requestThroughProduction: boolean;
+  refundAttemptId: string;
+  orderId: string;
+  paymentId: string;
+  targetAmount: number;
+  reason: string;
+  provider: PaymentProvider;
+  mode: PaymentMode;
+  operationKey: string;
+}>): Promise<void> {
+  if (input.requestThroughProduction) {
+    const requested = await requestRefundAttempt(db, {
+      refundAttemptId: input.refundAttemptId,
+      orderId: input.orderId,
+      amount: input.targetAmount,
+      reason: input.reason,
+      actorType: RefundAttemptActorType.ADMIN,
+      actorUserId: "dispatch_admin",
+      now: DISPATCH_NOW,
+    });
+    if (!requested.ok) throw new Error(`Dispatch fixture request failed: ${requested.code}`);
+  } else {
+    await db.refundAttempt.create({
+      data: {
+        id: input.refundAttemptId,
+        orderId: input.orderId,
+        paymentId: input.paymentId,
+        amount: input.targetAmount,
+        currency: "KRW",
+        status: RefundAttemptStatus.REQUESTED,
+        reason: input.reason,
+        actorType: RefundAttemptActorType.ADMIN,
+        actorUserId: "dispatch_admin",
+        provider: input.provider,
+        mode: input.mode,
+        idempotencyKey: input.operationKey,
+        requestedAt: DISPATCH_NOW,
+      },
+    });
+    await db.refundAttemptTransition.create({
+      data: {
+        refundAttemptId: input.refundAttemptId,
+        fromStatus: null,
+        toStatus: RefundAttemptStatus.REQUESTED,
+        orderStatusBefore: OrderStatus.PAID,
+        orderStatusAfter: OrderStatus.REFUND_PENDING,
+        actorType: RefundAttemptActorType.ADMIN,
+        actorUserId: "dispatch_admin",
+        reason: input.reason,
+        operationKey: `refund-request:${input.refundAttemptId}`,
+        createdAt: DISPATCH_NOW,
+      },
+    });
+  }
 }
 
 export async function dispatchState(fixture: DispatchFixture) {

@@ -13,6 +13,7 @@ import {
   REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED,
 } from "../../../execution-activation";
 import { createTossRefundContactExecutor } from "../refund-contact-orchestrator";
+import { deriveTossRefundOperationKey } from "../refund-operation-key";
 import type {
   TossRefundCancellationContact,
   TossRefundCancellationPort,
@@ -90,6 +91,85 @@ describe("recoverTossRefundExecution ordinal-2 recontact", () => {
     expect(state.dispatches[1].contactMarkedAt!.getTime()
       - state.proofs[1].localReceivedAt.getTime() <= 10_000).toBe(true);
     expect(state.evidence).toHaveLength(0);
+  });
+
+  it.each([
+    ["payment target", "COMMAND_NOT_FOUND_OR_INELIGIBLE", async (entry: ContactedRecoveryFixture) => {
+      await db.payment.update({
+        where: { id: entry.fixture.paymentId },
+        data: { providerPaymentKey: `${entry.fixture.providerPaymentKey}_drift` },
+      });
+    }],
+    ["amount", "COMMAND_NOT_FOUND_OR_INELIGIBLE", async (entry: ContactedRecoveryFixture) => {
+      await db.refundAttempt.update({
+        where: { id: entry.fixture.refundAttemptId },
+        data: { amount: entry.fixture.targetAmount - 1 },
+      });
+    }],
+    ["operation key", "COMMAND_NOT_FOUND_OR_INELIGIBLE", async (entry: ContactedRecoveryFixture) => {
+      await db.refundExecutionProviderOperationBinding.update({
+        where: { refundAttemptId: entry.fixture.refundAttemptId },
+        data: {
+          providerOperationKey: deriveTossRefundOperationKey(`${entry.fixture.operationKey}:drift`),
+        },
+      });
+    }],
+    ["wire fingerprint", "COMMAND_NOT_FOUND_OR_INELIGIBLE", async (entry: ContactedRecoveryFixture) => {
+      await db.refundExecutionProviderOperationBinding.update({
+        where: { refundAttemptId: entry.fixture.refundAttemptId },
+        data: { wireRequestFingerprint: "f".repeat(64) },
+      });
+    }],
+    ["credential generation", "RECOVERY_CREDENTIAL_UNAVAILABLE", async (
+      entry: ContactedRecoveryFixture,
+    ) => {
+      await db.refundExecutionProviderOperationBinding.update({
+        where: { refundAttemptId: entry.fixture.refundAttemptId },
+        data: { credentialGenerationBindingId: "generation-drifted" },
+      });
+    }],
+    ["merchant binding", "RECOVERY_CREDENTIAL_UNAVAILABLE", async (
+      entry: ContactedRecoveryFixture,
+    ) => {
+      await db.refundExecutionProviderOperationBinding.update({
+        where: { refundAttemptId: entry.fixture.refundAttemptId },
+        data: { merchantAccountBindingId: "merchant-drifted" },
+      });
+    }],
+  ] as const)("rejects persisted %s drift before recovery lookup or contact", async (
+    label,
+    expectedCode,
+    drift,
+  ) => {
+    const contacted = await trackedFixture(fixtures);
+    await backdateContact(contacted, TOSS_REFUND_RECOVERY_MIN_RECONTACT_INTERVAL_MS);
+    await drift(contacted);
+    const before = await loadRecoveryPreservationSnapshot(contacted);
+    expectExpectedNonterminalRecoverySnapshot(before, contacted);
+    expectIntentionalRecoveryDrift(before, contacted, label);
+    let gets = 0;
+    let cancellationInvocations = 0;
+    const operation = createTossRefundRecoveryOperation({
+      lookup: () => {
+        gets += 1;
+        throw new Error("Persisted recovery drift must not reach lookup.");
+      },
+      cancellation: () => {
+        cancellationInvocations += 1;
+        throw new Error("Persisted recovery drift must not reach cancellation.");
+      },
+    });
+
+    expect(code(await operation(
+      db,
+      recoveryInput(contacted),
+      RECOVERY_RECONTACT_ENV,
+    ))).toBe(expectedCode);
+    expect(gets).toBe(0);
+    expect(cancellationInvocations).toBe(0);
+    const after = await loadRecoveryPreservationSnapshot(contacted);
+    expect(after).toEqual(before);
+    expectIntentionalRecoveryDrift(after, contacted, label);
   });
 
   it("serializes two eligible continuations to one ordinal-2 winner and one POST", async () => {
@@ -862,6 +942,358 @@ async function loadState(contacted: ContactedRecoveryFixture) {
     event.eventType === RefundExecutionCommandEventType.RECOVERY_LEASE_ACQUIRED
   )).length >= 1).toBe(true);
   return { order, attempt, command, dispatches, proofs, events, evidence, transitions };
+}
+
+async function loadRecoveryPreservationSnapshot(contacted: ContactedRecoveryFixture) {
+  const fixture = contacted.fixture;
+  const [
+    order,
+    payment,
+    attempt,
+    command,
+    transitions,
+    paymentEvents,
+    dispatches,
+    proofs,
+    evidence,
+    events,
+    binding,
+  ] = await Promise.all([
+    db.order.findUniqueOrThrow({
+      where: { id: fixture.orderId },
+      select: {
+        id: true,
+        checkoutSessionId: true,
+        paymentId: true,
+        currency: true,
+        subtotalAmount: true,
+        shippingAmount: true,
+        totalAmount: true,
+        status: true,
+        disputeStatus: true,
+        paidAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    db.payment.findUniqueOrThrow({
+      where: { id: fixture.paymentId },
+      select: {
+        id: true,
+        checkoutSessionId: true,
+        provider: true,
+        mode: true,
+        status: true,
+        amount: true,
+        currency: true,
+        providerRef: true,
+        providerConfirmIdempotencyKey: true,
+        providerPaymentKey: true,
+        idempotencyKey: true,
+        errorCode: true,
+        errorMessage: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    db.refundAttempt.findUniqueOrThrow({
+      where: { id: fixture.refundAttemptId },
+      select: {
+        id: true,
+        orderId: true,
+        paymentId: true,
+        amount: true,
+        currency: true,
+        status: true,
+        reason: true,
+        actorType: true,
+        actorUserId: true,
+        provider: true,
+        mode: true,
+        providerRefundId: true,
+        idempotencyKey: true,
+        requestedAt: true,
+        processedAt: true,
+        failedAt: true,
+        failureCode: true,
+        safeFailureMessage: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    db.refundExecutionCommand.findUniqueOrThrow({
+      where: { id: fixture.commandId },
+      select: {
+        id: true,
+        refundAttemptId: true,
+        status: true,
+        availableAt: true,
+        leaseOwner: true,
+        leaseUntil: true,
+        leaseGeneration: true,
+        leaseTokenHash: true,
+        dispatchAttempt: true,
+        lastSafeErrorCode: true,
+        lastSafeErrorMessage: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    db.refundAttemptTransition.findMany({
+      where: { refundAttemptId: fixture.refundAttemptId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        refundAttemptId: true,
+        fromStatus: true,
+        toStatus: true,
+        orderStatusBefore: true,
+        orderStatusAfter: true,
+        actorType: true,
+        actorUserId: true,
+        reason: true,
+        operationKey: true,
+        createdAt: true,
+      },
+    }),
+    db.paymentEvent.findMany({
+      where: { checkoutSessionId: fixture.sessionId },
+      orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        provider: true,
+        source: true,
+        transmissionId: true,
+        eventType: true,
+        verifiedMode: true,
+        verifiedCredentialBinding: true,
+        checkoutSessionId: true,
+        providerPaymentKey: true,
+        status: true,
+        receivedAt: true,
+        processedAt: true,
+        attemptCount: true,
+        lastAttemptAt: true,
+        failureStage: true,
+        failureCode: true,
+        lastError: true,
+      },
+    }),
+    db.refundExecutionDispatchAttempt.findMany({
+      where: { commandId: fixture.commandId },
+      orderBy: [{ ordinal: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        commandId: true,
+        ordinal: true,
+        leaseGeneration: true,
+        provider: true,
+        mode: true,
+        providerOperationKey: true,
+        requestFingerprint: true,
+        state: true,
+        authorizedAt: true,
+        contactMarkedAt: true,
+        createdAt: true,
+      },
+    }),
+    db.refundExecutionProviderContactEligibilityProof.findMany({
+      where: { dispatchAttempt: { commandId: fixture.commandId } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        dispatchAttemptId: true,
+        paymentKey: true,
+        method: true,
+        easyPayPresent: true,
+        currency: true,
+        providerStatus: true,
+        totalAmount: true,
+        balanceAmount: true,
+        taxFreeAmount: true,
+        taxExemptionAmount: true,
+        cancelsCount: true,
+        localReceivedAt: true,
+        eligibilityFingerprint: true,
+        createdAt: true,
+      },
+    }),
+    db.refundExecutionEvidence.findMany({
+      where: { commandId: fixture.commandId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        commandId: true,
+        source: true,
+        sourceDedupKey: true,
+        outcome: true,
+        application: true,
+        observedProviderRefundId: true,
+        reportedAmount: true,
+        reportedCurrency: true,
+        safeCode: true,
+        safeMessage: true,
+        observedAt: true,
+        createdAt: true,
+        dispatchAttemptId: true,
+        authorizingLeaseGeneration: true,
+      },
+    }),
+    db.refundExecutionCommandEvent.findMany({
+      where: { commandId: fixture.commandId },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        commandId: true,
+        eventType: true,
+        leaseGeneration: true,
+        dispatchAttempt: true,
+        occurredAt: true,
+        createdAt: true,
+      },
+    }),
+    db.refundExecutionProviderOperationBinding.findUniqueOrThrow({
+      where: { refundAttemptId: fixture.refundAttemptId },
+      select: {
+        id: true,
+        refundAttemptId: true,
+        provider: true,
+        mode: true,
+        providerOperationKey: true,
+        operationKeyAlgorithmVersion: true,
+        wireContractVersion: true,
+        wireRequestFingerprint: true,
+        merchantAccountBindingId: true,
+        credentialGenerationBindingId: true,
+        createdAt: true,
+        eligibilityProof: {
+          select: {
+            id: true,
+            bindingId: true,
+            paymentKey: true,
+            method: true,
+            easyPayPresent: true,
+            currency: true,
+            providerStatus: true,
+            totalAmount: true,
+            balanceAmount: true,
+            taxFreeAmount: true,
+            taxExemptionAmount: true,
+            cancelsCount: true,
+            localReceivedAt: true,
+            eligibilityFingerprint: true,
+            createdAt: true,
+          },
+        },
+      },
+    }),
+  ]);
+  return {
+    order,
+    payment,
+    attempt,
+    command,
+    transitions,
+    paymentEvents,
+    dispatches,
+    proofs,
+    evidence,
+    events,
+    binding,
+  };
+}
+
+type RecoveryPreservationSnapshot = Awaited<ReturnType<typeof loadRecoveryPreservationSnapshot>>;
+type RecoveryDriftLabel = "payment target" | "amount" | "operation key" | "wire fingerprint"
+  | "credential generation" | "merchant binding";
+
+function expectExpectedNonterminalRecoverySnapshot(
+  snapshot: RecoveryPreservationSnapshot,
+  contacted: ContactedRecoveryFixture,
+): void {
+  expect(snapshot.order).toMatchObject({
+    status: "REFUND_PENDING",
+    disputeStatus: null,
+    totalAmount: contacted.fixture.totalAmount,
+  });
+  expect(snapshot.payment).toMatchObject({
+    status: "SUCCEEDED",
+    amount: contacted.fixture.totalAmount,
+    currency: "KRW",
+    provider: "TOSS",
+    mode: "SANDBOX",
+    errorCode: null,
+    errorMessage: null,
+  });
+  expect(snapshot.attempt).toMatchObject({
+    status: "PROCESSING",
+    provider: "TOSS",
+    mode: "SANDBOX",
+    providerRefundId: null,
+    processedAt: null,
+    failedAt: null,
+    failureCode: null,
+    safeFailureMessage: null,
+  });
+  expect(snapshot.command).toMatchObject({
+    status: "LEASED",
+    dispatchAttempt: 1,
+    leaseOwner: "recovery-fixture-initial-owner",
+    leaseGeneration: 1,
+    lastSafeErrorCode: null,
+    lastSafeErrorMessage: null,
+  });
+  expect(snapshot.command.leaseUntil?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  expect(snapshot.command.leaseTokenHash).toMatch(/^[0-9a-f]{64}$/);
+  expect(snapshot.transitions.map((row) => row.toStatus)).toEqual(["REQUESTED", "PROCESSING"]);
+  expect(snapshot.paymentEvents).toEqual([]);
+  expect(snapshot.dispatches).toHaveLength(1);
+  expect(snapshot.dispatches[0]).toMatchObject({
+    ordinal: 1,
+    leaseGeneration: 1,
+    state: "CONTACT_MAY_HAVE_OCCURRED",
+  });
+  expect(snapshot.proofs).toHaveLength(1);
+  expect(snapshot.evidence).toEqual([]);
+  expect(snapshot.events.map((row) => row.eventType)).toEqual([
+    RefundExecutionCommandEventType.LEASE_ACQUIRED,
+  ]);
+  expect(snapshot.binding).toMatchObject({
+    refundAttemptId: contacted.fixture.refundAttemptId,
+    provider: "TOSS",
+    mode: "SANDBOX",
+  });
+  expect(snapshot.binding.eligibilityProof).not.toBeNull();
+}
+
+function expectIntentionalRecoveryDrift(
+  snapshot: RecoveryPreservationSnapshot,
+  contacted: ContactedRecoveryFixture,
+  label: RecoveryDriftLabel,
+): void {
+  if (label === "payment target") {
+    expect(snapshot.payment.providerPaymentKey)
+      .toBe(`${contacted.fixture.providerPaymentKey}_drift`);
+    return;
+  }
+  if (label === "amount") {
+    expect(snapshot.attempt.amount).toBe(contacted.fixture.targetAmount - 1);
+    return;
+  }
+  if (label === "operation key") {
+    expect(snapshot.binding.providerOperationKey)
+      .toBe(deriveTossRefundOperationKey(`${contacted.fixture.operationKey}:drift`));
+    return;
+  }
+  if (label === "wire fingerprint") {
+    expect(snapshot.binding.wireRequestFingerprint).toBe("f".repeat(64));
+    return;
+  }
+  if (label === "credential generation") {
+    expect(snapshot.binding.credentialGenerationBindingId).toBe("generation-drifted");
+    return;
+  }
+  expect(snapshot.binding.merchantAccountBindingId).toBe("merchant-drifted");
 }
 
 function safeSqlId(value: string): string {
