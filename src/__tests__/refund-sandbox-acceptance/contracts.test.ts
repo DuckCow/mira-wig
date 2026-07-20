@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  assertActiveAcceptanceLifecycle,
   generateRunId,
+  H1_ACTIVE_ACCEPTANCE_SCENARIOS,
+  H1_SCENARIOS,
   parseH1Command,
   parseRunId,
   requireCleanupAcknowledgement,
@@ -84,6 +87,20 @@ describe("refund SANDBOX acceptance command contracts", () => {
       "populate-fixtures", "--run", RUN_ID, "--source-run", sourceRunId,
       "--witness-run", witnessRunId, "--scenario", "S2",
     ])).toThrow("FIXTURE_POPULATION_SCENARIO_UNSUPPORTED");
+  });
+
+  it("keeps the historical S1-S6 domain separate from S1-S3 execution authority", () => {
+    expect(H1_SCENARIOS).toEqual(["S1", "S2", "S3", "S4", "S5", "S6"]);
+    expect(H1_ACTIVE_ACCEPTANCE_SCENARIOS).toEqual(["S1", "S2", "S3"]);
+    expect(parseH1Command(["inspect", "--run", RUN_ID])).toEqual({
+      command: "inspect", runId: RUN_ID, scenarioId: null,
+    });
+    expect(() => assertActiveAcceptanceLifecycle(
+      parseH1Command(["execute", "--run", RUN_ID, "--scenario", "S5"]),
+    )).toThrow("S5_ACCEPTANCE_SCENARIO_RETIRED");
+    expect(() => assertActiveAcceptanceLifecycle(
+      parseH1Command(["seal", "--run", RUN_ID, "--scenario", "S6"]),
+    )).toThrow("S6_ACCEPTANCE_SCENARIO_RETIRED");
   });
 
   it("requires separate exact acknowledgements", () => {

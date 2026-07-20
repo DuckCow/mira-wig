@@ -1,7 +1,9 @@
 # Dormant manual Toss SANDBOX acceptance harness
 
-This standalone local CLI prepares and records one bounded Toss SANDBOX acceptance scenario at a
-time. It is not registered in the application, a package script, a worker, or a scheduler.
+This standalone local CLI retains the historical S1-S6 v1 evidence lifecycle while active
+execution authority is limited to S1-S3. S4 keeps its changed-body retirement fence; S5 and S6 are
+retired from `execute`, `resume`, `resume-post`, and `seal`. It is not registered in the
+application, a package script, a worker, or a scheduler.
 
 ```bash
 npx tsx scripts/refund-sandbox-acceptance/cli.ts plan
@@ -102,8 +104,16 @@ claim, lease, authorization, contact, and recovery operations exclusively own re
 S2 simulates a provider response received by the process but lost before durable application. It
 is not a TCP-level response-loss simulation.
 
-S5 proves the application ordinal-2 recontact path. The provider observes only one cancellation
-POST in S5. Provider duplicate-POST behavior is tested by S3.
+S3 is the completed provider evidence for same-key/same-body replay and is terminal; it must not be
+rerun. S5's ordinal-2 application recovery is instead proven by the committed provider-free
+production integration test. S5 makes no unique provider claim and has no active acceptance
+lifecycle. S6 is retired and replaced by
+`docs/payment_policy/toss_refund_capability_matrix_v1.md`, which is documentation only.
+
+S5 and S6 must receive no new fixture-population authority or provider contact. Existing valid v1
+manifests, ledgers, reports, cleanup, and purge remain readable and operable under their original
+ownership, phase, confirmation, and evidence checks. This retirement authorizes neither SANDBOX
+worker activation nor LIVE use.
 
 Artifacts live only under `~/.mira/refund-sandbox-acceptance/<runId>/` with directory mode 0700
 and file mode 0600. Raw artifacts are never placed in Git and never contain Authorization.

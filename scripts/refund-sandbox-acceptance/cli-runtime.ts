@@ -19,7 +19,7 @@ import {
   terminalizeS3History,
 } from "./cleanup";
 import {
-  assertS4ProviderCommandActive, commandCanContactProvider, requireRunAcknowledgement,
+  assertActiveAcceptanceLifecycle, commandCanContactProvider, requireRunAcknowledgement,
   type ParsedH1Command,
 } from "./contracts";
 import { requireSandboxCredential } from "./credential-guard";
@@ -75,7 +75,7 @@ export async function runDatabaseCommand(
   worktree: string,
 ): Promise<Result> {
   if (!parsed.runId) throw new Error("RUN_ID_REQUIRED");
-  assertS4ProviderCommandActive(parsed);
+  assertActiveAcceptanceLifecycle(parsed);
   if (commandCanContactProvider(parsed.command)) requireRunAcknowledgement(env, parsed.runId);
   return withAcceptanceDatabase(env, store, worktree, (context) => handleLockedCommand(
     parsed, env, store, authority, context,
@@ -138,7 +138,7 @@ export async function providerCommand(
   fixture: ProviderFixture,
   adapterFactories: ProviderAdapterFactories = DEFAULT_PROVIDER_ADAPTER_FACTORIES,
 ): Promise<Result> {
-  assertS4ProviderCommandActive(parsed);
+  assertActiveAcceptanceLifecycle(parsed);
   if (parsed.scenarioId === "S3") {
     const latest = await initialLedger(context, parsed.scenarioId, fixture);
     return s3ProviderCommand(parsed, env, store, manifest, context, fixture, latest, adapterFactories);

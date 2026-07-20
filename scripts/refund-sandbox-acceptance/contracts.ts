@@ -8,10 +8,17 @@ export type H1Command = (typeof H1_COMMANDS)[number];
 
 export const H1_SCENARIOS = ["S1", "S2", "S3", "S4", "S5", "S6"] as const;
 export type H1Scenario = (typeof H1_SCENARIOS)[number];
+export const H1_ACTIVE_ACCEPTANCE_SCENARIOS = ["S1", "S2", "S3"] as const;
+export type H1ActiveAcceptanceScenario = (typeof H1_ACTIVE_ACCEPTANCE_SCENARIOS)[number];
 
 const RUN_ID = /^sbx-\d{8}T\d{6}Z-[0-9a-f]{16}$/;
 const PROVIDER_COMMANDS: readonly H1Command[] = ["execute", "resume", "resume-post"];
 export const S4_PROVIDER_PROBE_RETIRED = "S4_CHANGED_BODY_PROVIDER_PROBE_RETIRED";
+export const S5_ACCEPTANCE_SCENARIO_RETIRED = "S5_ACCEPTANCE_SCENARIO_RETIRED";
+export const S6_ACCEPTANCE_SCENARIO_RETIRED = "S6_ACCEPTANCE_SCENARIO_RETIRED";
+const ACTIVE_LIFECYCLE_COMMANDS: readonly H1Command[] = [
+  "execute", "resume", "resume-post", "seal",
+];
 const SCENARIO_COMMANDS: readonly H1Command[] = [
   "populate-fixtures", "execute", "resume", "resume-post", "seal",
 ];
@@ -128,12 +135,19 @@ export function commandCanContactProvider(command: H1Command): boolean {
   return PROVIDER_COMMANDS.includes(command);
 }
 
-export function assertS4ProviderCommandActive(
+export function assertActiveAcceptanceLifecycle(
   parsed: Readonly<Pick<ParsedH1Command, "command" | "scenarioId">>,
 ): void {
-  if (parsed.scenarioId === "S4" && commandCanContactProvider(parsed.command)) {
-    throw new Error(S4_PROVIDER_PROBE_RETIRED);
-  }
+  if (!ACTIVE_LIFECYCLE_COMMANDS.includes(parsed.command) || !parsed.scenarioId) return;
+  assertAcceptanceScenarioExecutable(parsed.scenarioId);
+}
+
+export function assertAcceptanceScenarioExecutable(
+  scenarioId: H1Scenario,
+): asserts scenarioId is H1ActiveAcceptanceScenario {
+  if (scenarioId === "S4") throw new Error(S4_PROVIDER_PROBE_RETIRED);
+  if (scenarioId === "S5") throw new Error(S5_ACCEPTANCE_SCENARIO_RETIRED);
+  if (scenarioId === "S6") throw new Error(S6_ACCEPTANCE_SCENARIO_RETIRED);
 }
 
 export function requireRunAcknowledgement(

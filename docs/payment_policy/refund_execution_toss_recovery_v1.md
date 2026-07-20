@@ -74,3 +74,15 @@ POST/replay/GET, and provider processing behavior remain SANDBOX activation bloc
 requires separate authority. No recovery gate, caller, worker, scheduler, route, action,
 admin control, webhook authority, migration deployment, or provider request is introduced
 by this contract.
+
+## 7. Acceptance disposition (2026-07-20)
+
+Completed S3 evidence remains the provider observation for same-key/same-body replay and S3 is
+terminal. The former S5 ordinal-2 claim is now owned by the committed provider-free production
+integration test; it makes no unique provider claim and has no active acceptance lifecycle. S6 is
+retired and replaced by `toss_refund_capability_matrix_v1.md`.
+
+S5 and S6 receive no new fixture authority, credential authority, or provider-contact authority.
+Historical v1 evidence remains readable and cleanable under its existing contracts. This
+disposition does not authorize SANDBOX worker activation or LIVE use; LIVE still requires a
+separate activation decision and canary.

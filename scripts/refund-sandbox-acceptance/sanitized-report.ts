@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import type { PrismaClient } from "@prisma/client";
 import { atomicCreateJson, atomicWriteJson } from "./atomic-files";
 import type { H1ArtifactStore } from "./artifact-store";
-import type { ParsedH1Command } from "./contracts";
+import { assertActiveAcceptanceLifecycle, type ParsedH1Command } from "./contracts";
 import type { DatabaseContext } from "./database-context";
 import { RunRedactor, assertSanitizedEvidence } from "./redaction";
 import type { H1Ledger } from "./run-ledger";
@@ -22,6 +22,7 @@ export async function sealScenarioEvidence(
   context: DatabaseContext,
 ): Promise<Readonly<{ code: string; runId: string }>> {
   if (!parsed.runId || !parsed.scenarioId) throw new Error("SEAL_INPUT_REQUIRED");
+  assertActiveAcceptanceLifecycle(parsed);
   const latest = await context.ledger.loadLatest();
   const fixture = manifest.fixtures[parsed.scenarioId];
   if (!latest || !fixture) throw new Error("SEAL_LEDGER_REQUIRED");
@@ -108,9 +109,16 @@ function assembleReport(
     booleans: evidenceBooleans(input, postRequests),
     rawArtifacts,
     scenarioLimitations: limitations(input.scenarioId),
-    s6Executed: input.scenarioId === "S6" && input.ledger.payload.resultCode !== "SKIPPED_NOT_AVAILABLE",
+    s6Executed: isHistoricalS6Prepared(input.scenarioId, input.ledger.payload.resultCode),
     completionMarker: "SEALED",
   });
+}
+
+function isHistoricalS6Prepared(scenarioId: H1Scenario, resultCodes: unknown): boolean {
+  return scenarioId === "S6"
+    && Array.isArray(resultCodes)
+    && resultCodes.length === 1
+    && resultCodes[0] === "S6_PREPARED";
 }
 
 function reportIdentity(

@@ -34,7 +34,11 @@ import {
   buildBaseLedgerIntegrity,
   GIT_IDENTITY_TIMEOUT_MS,
 } from "../../../scripts/refund-sandbox-acceptance/integrity";
-import { assertSanitizedEvidence, SANITIZED_REPORT_KEYS } from "../../../scripts/refund-sandbox-acceptance/redaction";
+import {
+  assertSanitizedEvidence,
+  parseSanitizedEvidence,
+  SANITIZED_REPORT_KEYS,
+} from "../../../scripts/refund-sandbox-acceptance/redaction";
 import { RunLedgerStore, type H1Ledger } from "../../../scripts/refund-sandbox-acceptance/run-ledger";
 import { appendRuntimeLedger } from "../../../scripts/refund-sandbox-acceptance/runtime-ledger";
 import { buildSanitizedReport } from "../../../scripts/refund-sandbox-acceptance/sanitized-report";
@@ -117,6 +121,32 @@ describe("refund SANDBOX acceptance reachability and evidence privacy", () => {
       if (originalSecret === undefined) delete process.env.TOSS_SANDBOX_SECRET_KEY;
       else process.env.TOSS_SANDBOX_SECRET_KEY = originalSecret;
     }
+  });
+
+  it("keeps the S6 replacement matrix non-sensitive, complete, and outside runtime authority", async () => {
+    const root = process.cwd();
+    const matrixPath = join(
+      root, "docs", "payment_policy", "toss_refund_capability_matrix_v1.md",
+    );
+    const matrix = await readFile(matrixPath, "utf8");
+    for (const heading of [
+      "Environment", "Payment-method / product scope", "Test-payment provisionability",
+      "Lookup visibility", "Cancellation support", "Evidence type",
+      "Evidence source / reference", "Observed or reviewed", "Confidence / status",
+      "Provider contact currently authorized", "Operational consequence or blocker",
+    ]) expect(matrix).toContain(heading);
+    for (const status of [
+      "CONFIRMED", "OBSERVED", "PARTIAL", "UNDOCUMENTED", "UNKNOWN", "NOT_AUTHORIZED",
+    ]) expect(matrix).toContain(status);
+    expect(matrix).toContain("grants no provider-contact");
+    expect(matrix).toContain("LIVE requires a separate activation decision");
+    expect(matrix).not.toMatch(/(?:test|live)_(?:sk|gsk)_[A-Za-z0-9]/u);
+    expect(matrix).not.toMatch(/sbx-\d{8}T\d{6}Z-[0-9a-f]{16}/u);
+    const runtimeBodies = await Promise.all((await sourceFiles(join(
+      root, "scripts", "refund-sandbox-acceptance",
+    ))).map((path) => readFile(path, "utf8")));
+    expect(runtimeBodies.some((body) => body.includes("toss_refund_capability_matrix_v1")))
+      .toBe(false);
   });
 
   it("accepts only the exact report schema with safe assertion and HMAC representations", () => {
@@ -398,6 +428,51 @@ describe("refund SANDBOX acceptance reachability and evidence privacy", () => {
         recoveredByLookup: true,
         cleanupComplete: false,
       });
+    } finally {
+      await rm(rawDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves historical S5 reports", async () => {
+    const rawDirectory = await mkdtemp(join(tmpdir(), "mira-p2-historical-reports-"));
+    try {
+      const s5 = await buildProviderReport(rawDirectory, "S5", ["ORDINAL_2_SUCCEEDED"]);
+      expect(parseSanitizedEvidence(s5)).toMatchObject({
+        scenarioId: "S5",
+        staticLocalResultCodes: ["ORDINAL_2_SUCCEEDED"],
+        scenarioLimitations: [
+          "Ordinal-2 application path; provider duplicate POST is covered by S3.",
+        ],
+      });
+    } finally {
+      await rm(rawDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["prepared", "S6", ["S6_PREPARED"], true],
+    ["skipped", "S6", ["SKIPPED_NOT_AVAILABLE"], false],
+    ["absent", "S6", undefined, false],
+    ["null", "S6", null, false],
+    ["empty", "S6", [], false],
+    ["unrelated failure", "S6", ["S6_FAILED"], false],
+    ["prepared plus another code", "S6", ["S6_PREPARED", "OTHER"], false],
+    ["prepared on a non-S6 report", "S1", ["S6_PREPARED"], false],
+  ] as const)("classifies historical S6 result codes exactly: %s", async (
+    _case,
+    scenarioId,
+    resultCode,
+    expected,
+  ) => {
+    const rawDirectory = await mkdtemp(join(tmpdir(), "mira-p2-s6-report-matrix-"));
+    try {
+      const report = await buildProviderReport(
+        rawDirectory,
+        scenarioId,
+        resultCode,
+        scenarioId === "S6" ? { posts: [], budgets: { GET: 0, POST: 0 } } : undefined,
+      );
+      expect(parseSanitizedEvidence(report)).toMatchObject({ scenarioId, s6Executed: expected });
     } finally {
       await rm(rawDirectory, { recursive: true, force: true });
     }
@@ -925,8 +1000,8 @@ function sanitizedFailure(value: unknown): string {
 
 async function buildProviderReport(
   rawDirectory: string,
-  scenarioId: "S1" | "S2" | "S3",
-  resultCode: readonly string[],
+  scenarioId: "S1" | "S2" | "S3" | "S5" | "S6",
+  resultCode: readonly string[] | null | undefined,
   options: Readonly<{
     posts?: readonly Readonly<{
       operationKey: string | null;
@@ -963,6 +1038,7 @@ async function buildProviderReport(
         wireFingerprint: "e".repeat(64),
       }),
     })));
+  const resultCodePayload = historicalResultCodePayload(resultCode);
   const ledger: H1Ledger = Object.freeze({
     formatVersion: "mira-toss-sbx-ledger/v1",
     revision: 1,
@@ -977,7 +1053,7 @@ async function buildProviderReport(
     scenarioInputHash: "d".repeat(64),
     payload: Object.freeze({
       scenarioId,
-      resultCode: Object.freeze([...resultCode]),
+      ...resultCodePayload,
       callRecords: Object.freeze(callRecords),
       budgets: Object.freeze(options.budgets ?? {
         GET: scenarioId === "S3" ? 2 : 0,
@@ -995,6 +1071,14 @@ async function buildProviderReport(
     refund: null,
     now: new Date("2026-07-18T03:00:00.000Z"),
   });
+}
+
+function historicalResultCodePayload(
+  resultCode: readonly string[] | null | undefined,
+): Readonly<{ resultCode?: readonly string[] | null }> {
+  if (resultCode === undefined) return Object.freeze({});
+  if (resultCode === null) return Object.freeze({ resultCode: null });
+  return Object.freeze({ resultCode: Object.freeze(resultCode.slice()) });
 }
 
 function identityCardinalityCases(): readonly Readonly<[

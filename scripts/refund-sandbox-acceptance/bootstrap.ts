@@ -9,7 +9,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import type { H1LedgerPhase } from "./run-ledger";
-import type { H1Scenario } from "./contracts";
+import { assertAcceptanceScenarioExecutable, type H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
 import { marketReferenceCount, requireBootstrapProjection } from "./bootstrap-projection";
 
@@ -66,6 +66,7 @@ export class AcceptanceBootstrap {
     priorHandle?: AcceptanceBootstrapHandle;
     now?: Date;
   }>): Promise<Readonly<{ handle: AcceptanceBootstrapHandle; projection: BootstrapProjection }>> {
+    assertAcceptanceScenarioExecutable(input.scenarioId);
     if (hasPossibleContact(input.ledgerPhase)) throw new Error("BOOTSTRAP_SEALED_AFTER_CONTACT");
     await this.assertDatabase();
     return this.client.$transaction((tx) => bootstrapInTransaction(tx, input));

@@ -1,8 +1,16 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Prisma, RefundAttemptActorType } from "@prisma/client";
+import {
+  CheckoutSessionStatus,
+  OrderStatus,
+  PaymentAttemptStatus,
+  PaymentMode,
+  PaymentProvider,
+  Prisma,
+  RefundAttemptActorType,
+} from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../lib/db";
 import {
@@ -212,14 +220,14 @@ describe("acceptance-only pre-refund bootstrap", () => {
   });
 
   it("permanently refuses bootstrap after any possible provider-contact phase", async () => {
-    const input = bootstrapInput("S4");
+    const input = bootstrapInput("S2");
     await expect(bootstrap.createOrLoad({ ...input, ledgerPhase: "POST_INTENT_RECORDED" }))
       .rejects.toThrow("BOOTSTRAP_SEALED_AFTER_CONTACT");
   });
 
   it("keeps another run and a pre-existing KR market when exact owned cleanup runs", async () => {
-    const first = await bootstrap.createOrLoad(bootstrapInput("S5"));
-    const second = await bootstrap.createOrLoad(bootstrapInput("S5"));
+    const first = await bootstrap.createOrLoad(bootstrapInput("S2"));
+    const second = await bootstrap.createOrLoad(bootstrapInput("S2"));
     owned.push({ handle: first.handle, refund: null }, { handle: second.handle, refund: null });
     const removed = owned.shift();
     if (!removed) throw new Error("TEST_OWNERSHIP_MISSING");
@@ -228,9 +236,72 @@ describe("acceptance-only pre-refund bootstrap", () => {
     expect(await db.order.count({ where: { id: second.handle.orderId } })).toBe(1);
     expect(await db.market.count({ where: { code: "KR" } })).toBe(1);
   });
+
+  it.each([
+    ["S5", "S5_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["S6", "S6_ACCEPTANCE_SCENARIO_RETIRED"],
+  ] as const)("retires direct %s bootstrap before database access", async (scenarioId, error) => {
+    const databaseAccess = vi.fn(() => {
+      throw new Error("RETIRED_BOOTSTRAP_DATABASE_ACCESS");
+    });
+    const guardedBootstrap = new AcceptanceBootstrap(new Proxy(db, {
+      get: databaseAccess,
+    }), "wig_platform_test");
+    const input = bootstrapInput("S2");
+    await expect(guardedBootstrap.createOrLoad({
+      ...input,
+      scenarioId,
+      fixture: Object.freeze({ ...input.fixture, scenarioId }),
+    })).rejects.toThrow(error);
+    expect(databaseAccess).not.toHaveBeenCalled();
+  });
 });
 
 describe("provider-only acceptance run retirement", () => {
+  it.each(["S5", "S6"] as const)(
+    "cleans a valid synthetic historical %s ownership ledger without provider contact",
+    async (scenarioId) => {
+      const seed = await bootstrap.createOrLoad(bootstrapInput("S1"));
+      owned.push({ handle: seed.handle, refund: null });
+      const historical = await createHistoricalOwnership(scenarioId);
+      owned.push(historical);
+      const root = await mkdtemp(join(tmpdir(), "mira-p2-historical-cleanup-"));
+      const ledger = new RunLedgerStore(join(root, "ledger"));
+      await ledger.append({
+        runId: historical.handle.runId,
+        scenarioId,
+        phase: "SEALED",
+        repositoryCommit: "a".repeat(40),
+        runnerSourceHash: "b".repeat(64),
+        policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+        migrationFingerprint: "d".repeat(64),
+        scenarioInputHash: "e".repeat(64),
+        payload: Object.freeze({
+          scenarioId,
+          bootstrapHandle: historical.handle,
+          refundFixture: historical.refund,
+          completionMarker: "SEALED",
+        }),
+      });
+
+      try {
+        await expect(cleanupCommand(
+          historical.handle.runId,
+          cleanupEnv(historical.handle.runId),
+          { prisma: db, bootstrap, ledger },
+        )).resolves.toEqual({
+          code: "DATABASE_CLEANED",
+          runId: historical.handle.runId,
+        });
+        owned.splice(owned.indexOf(historical), 1);
+        await assertRunResidueZero(db, historical.handle, historical.refund);
+        expect((await ledger.loadLatest())?.phase).toBe("DB_CLEANED");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each([
     ["S3", "sbx-20260719T010203Z-aaaaaaaaaaaaaaaa"],
     ["S4", "sbx-20260719T010204Z-bbbbbbbbbbbbbbbb"],
@@ -504,6 +575,94 @@ function cleanupEnv(runId: string): Readonly<Record<string, string>> {
   return Object.freeze({ MIRA_TOSS_SANDBOX_ACCEPTANCE_CLEANUP_CONFIRM: runId });
 }
 
+async function createHistoricalOwnership(
+  scenarioId: "S5" | "S6",
+): Promise<Owned & Readonly<{
+  refund: RefundFixtureIds;
+}>> {
+  const runId = `sbx-20260720T040000Z-${randomBytes(8).toString("hex")}`;
+  const digest = createHash("sha256").update(`${runId}:${scenarioId}`).digest("hex").slice(0, 24);
+  const amount = scenarioId === "S5" ? 1_005 : 1_006;
+  const now = new Date("2026-07-18T02:00:00.000Z");
+  const handle: AcceptanceBootstrapHandle = Object.freeze({
+    runId,
+    scenarioId,
+    marketCode: "KR",
+    marketCreatedByRun: false,
+    userId: `h1_user_${digest}`,
+    checkoutSessionId: `h1_session_${digest}`,
+    paymentId: `h1_payment_${digest}`,
+    orderId: `h1_order_${digest}`,
+    amount,
+  });
+  await db.$transaction(async (tx) => {
+    await tx.user.create({
+      data: { id: handle.userId, email: `h1+${digest}@example.test`, name: `H1 ${scenarioId}` },
+    });
+    await tx.checkoutSession.create({ data: {
+      id: handle.checkoutSessionId,
+      userId: handle.userId,
+      marketCode: "KR",
+      currency: "KRW",
+      status: CheckoutSessionStatus.COMPLETED,
+      subtotalAmount: amount,
+      shippingAmount: 0,
+      totalAmount: amount,
+      expiresAt: new Date(now.getTime() + 60 * 60_000),
+      submittedAt: now,
+      completedAt: now,
+    } });
+    await tx.payment.create({ data: {
+      id: handle.paymentId,
+      checkoutSessionId: handle.checkoutSessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      amount,
+      currency: "KRW",
+      providerRef: `h1-ref-${digest}`,
+      providerPaymentKey: `historical-s5-payment-${digest}`,
+      idempotencyKey: `h1-payment-${digest}`,
+    } });
+    await tx.order.create({ data: {
+      id: handle.orderId,
+      checkoutSessionId: handle.checkoutSessionId,
+      paymentId: handle.paymentId,
+      userId: handle.userId,
+      marketCode: "KR",
+      currency: "KRW",
+      subtotalAmount: amount,
+      shippingAmount: 0,
+      totalAmount: amount,
+      status: OrderStatus.PAID,
+      paidAt: now,
+    } });
+  });
+  const refundAttemptId = `h1_refund_${digest}`;
+  const requested = await requestRefundAttempt(db, {
+    refundAttemptId,
+    orderId: handle.orderId,
+    amount,
+    reason: `Historical synthetic ${scenarioId} cleanup fixture`,
+    actorType: RefundAttemptActorType.ADMIN,
+    actorUserId: `h1_actor_${digest}`,
+    now,
+  });
+  if (!requested.ok) throw new Error(`HISTORICAL_REQUEST_${requested.code}`);
+  const claimed = await claimRefundAttemptForExecution(db, {
+    orderId: handle.orderId,
+    refundAttemptId,
+    actorType: RefundAttemptActorType.ADMIN,
+    actorUserId: `h1_actor_${digest}`,
+    now: new Date(now.getTime() + 1_000),
+  });
+  if (!claimed.ok) throw new Error(`HISTORICAL_CLAIM_${claimed.code}`);
+  return Object.freeze({
+    handle,
+    refund: Object.freeze({ refundAttemptId, commandId: claimed.commandId }),
+  });
+}
+
 async function providerCleanupSnapshot() {
   const databases = await db.$queryRaw<{ databaseName: string }[]>(Prisma.sql`
     SELECT datname AS "databaseName" FROM pg_database ORDER BY datname
@@ -534,7 +693,7 @@ async function applicationTableCounts() {
   return Object.freeze(counts);
 }
 
-function bootstrapInput(scenarioId: "S1" | "S2" | "S3" | "S4" | "S5") {
+function bootstrapInput(scenarioId: "S1" | "S2" | "S3" | "S4") {
   const suffix = randomBytes(8).toString("hex");
   const runId = `sbx-20260718T010203Z-${suffix}`;
   return Object.freeze({

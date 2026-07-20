@@ -25,7 +25,11 @@ import {
   type ProviderAdapterFactories,
 } from "../../../scripts/refund-sandbox-acceptance/cli-runtime";
 import { runCliAtRoot } from "../../../scripts/refund-sandbox-acceptance/cli";
-import { S4_PROVIDER_PROBE_RETIRED } from "../../../scripts/refund-sandbox-acceptance/contracts";
+import {
+  S4_PROVIDER_PROBE_RETIRED,
+  S5_ACCEPTANCE_SCENARIO_RETIRED,
+  S6_ACCEPTANCE_SCENARIO_RETIRED,
+} from "../../../scripts/refund-sandbox-acceptance/contracts";
 import {
   assertExactS3ReplayCallHistory,
   classifyS3History,
@@ -49,10 +53,13 @@ import type {
 import {
   RunLedgerStore,
   H1_LEDGER_FORMAT_VERSION,
+  type H1Ledger,
   type H1LedgerPhase,
 } from "../../../scripts/refund-sandbox-acceptance/run-ledger";
+import { executeResumeGet } from "../../../scripts/refund-sandbox-acceptance/resume-get";
 import { executeExplicitResumePost } from "../../../scripts/refund-sandbox-acceptance/resume-post";
 import { executeScenario } from "../../../scripts/refund-sandbox-acceptance/scenario-orchestrator";
+import { sealScenarioEvidence } from "../../../scripts/refund-sandbox-acceptance/sanitized-report";
 import type {
   TossRefundCancellationContact,
   TossRefundCancellationTransportResult,
@@ -193,35 +200,200 @@ describe("refund SANDBOX provider-only probes", () => {
     expect(classifyS3History(records, expectation).kind).toBe("FAILED");
   });
 
-  it("keeps S6 dormant with a zero-call budget until the optional diagnostic is prepared", async () => {
+  it.each([
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED],
+  ] as const)("retires direct %s orchestration before bootstrap or provider calls", async (scenarioId, error) => {
     const bootstrap = new AcceptanceBootstrap(db, "wig_platform_test");
     const bootstrapSpy = vi.spyOn(bootstrap, "createOrLoad");
     const budget = new ProviderCallBudget();
-    const fixture = Object.freeze({
-      scenarioId: "S6" as const,
-      paymentKey: "payment-S6",
-      providerOrderId: "provider-order-S6",
-      amount: 1_000,
-      currency: "KRW" as const,
-      reference: "reference-S6",
-    });
-    const result = await executeScenario({
+    const fixture = fixtureFor(scenarioId);
+    const lookup = vi.fn(() => Promise.reject(new Error(`${scenarioId} must not GET`)));
+    const cancellation = vi.fn(() => Promise.reject(new Error(`${scenarioId} must not POST`)));
+    await expect(executeScenario({
       client: db,
       bootstrap,
       budget,
       env: Object.freeze({}),
       probeAuthorization: "unused",
-      lookup: () => Promise.reject(new Error("S6 must not GET")),
-      cancellation: () => Promise.reject(new Error("S6 must not POST")),
-    }, { runId: RUN_ID, scenarioId: "S6", fixture, ledgerPhase: "PLANNED" });
-    expect(result.staticCodes).toEqual(["SKIPPED_NOT_AVAILABLE"]);
-    expect(budget.counts("S6")).toEqual({ GET: 0, POST: 0 });
+      lookup,
+      cancellation,
+    }, { runId: RUN_ID, scenarioId, fixture, ledgerPhase: "PLANNED" }))
+      .rejects.toThrow(error);
     expect(bootstrapSpy).not.toHaveBeenCalled();
+    expect(lookup).not.toHaveBeenCalled();
+    expect(cancellation).not.toHaveBeenCalled();
+    expect(budget.intentCounts(scenarioId)).toEqual({ GET: 0, POST: 0 });
   });
 });
 
+describe("S5 and S6 active lifecycle retirement", () => {
+  it.each([
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED, "execute"],
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED, "resume"],
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED, "resume-post"],
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED, "seal"],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED, "execute"],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED, "resume"],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED, "resume-post"],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED, "seal"],
+  ] as const)("rejects public %s %s before an inaccessible artifact root", async (
+    scenarioId, error, command,
+  ) => {
+    const temporary = await mkdtemp(join(tmpdir(), `mira-${scenarioId.toLowerCase()}-retired-cli-`));
+    const inaccessibleRoot = join(temporary, "must-not-be-created", "artifact-root");
+    const environmentAccess = vi.fn(() => {
+      throw new Error("RETIRED_ENVIRONMENT_MUST_NOT_BE_INSPECTED");
+    });
+    const authorityAccess = vi.fn(() => {
+      throw new Error("RETIRED_AUTHORITY_MUST_NOT_BE_INSPECTED");
+    });
+    const env = new Proxy<Readonly<Record<string, string | undefined>>>({}, {
+      get: environmentAccess,
+    });
+    const registry = new Proxy<FixturePopulationApprovalRegistry>(Object.freeze({
+      scope: "TEST_ONLY",
+      approvals: Object.freeze([]),
+    }), { get: authorityAccess });
+
+    try {
+      await expect(runCliAtRoot([
+        command, "--run", RUN_ID, "--scenario", scenarioId,
+      ], env, inaccessibleRoot, process.cwd(), {
+        fixtureAuthority: { approvalRegistry: registry },
+      })).rejects.toEqual(new Error(error));
+
+      expect(environmentAccess).not.toHaveBeenCalled();
+      expect(authorityAccess).not.toHaveBeenCalled();
+      await expect(access(inaccessibleRoot)).rejects.toThrow();
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED],
+  ] as const)("blocks direct %s resume helpers before lookup, cancellation, or ledger access", async (
+    scenarioId, error,
+  ) => {
+    const fixture = fixtureFor(scenarioId);
+    const budget = new ProviderCallBudget();
+    const lookup = vi.fn(() => Promise.reject(new Error("RETIRED_LOOKUP_CALLED")));
+    const cancellation = vi.fn(() => Promise.reject(new Error("RETIRED_CANCELLATION_CALLED")));
+    const ledgerStore = new RunLedgerStore(`/unreachable-${scenarioId.toLowerCase()}-ledger`);
+    const ledger = retiredLedger(scenarioId);
+
+    await expect(executeResumeGet({
+      runId: RUN_ID, scenarioId, fixture, authorization: "unused", lookup, budget,
+      prisma: db, ledgerStore, ledger, env: Object.freeze({}),
+    })).rejects.toThrow(error);
+    await expect(executeExplicitResumePost({
+      prisma: db, scenarioId, runId: RUN_ID, fixture, authorization: "unused",
+      lookup, cancellation, budget, env: Object.freeze({}), ledger,
+    })).rejects.toThrow(error);
+
+    expect(lookup).not.toHaveBeenCalled();
+    expect(cancellation).not.toHaveBeenCalled();
+    expect(budget.intentCounts(scenarioId)).toEqual({ GET: 0, POST: 0 });
+  });
+
+  it.each([
+    ["S5", S5_ACCEPTANCE_SCENARIO_RETIRED],
+    ["S6", S6_ACCEPTANCE_SCENARIO_RETIRED],
+  ] as const)("keeps direct %s runtime and sealing fences before every dependency", async (
+    scenarioId, error,
+  ) => {
+    const dependencyAccess = vi.fn(() => {
+      throw new Error("RETIRED_RUNTIME_DEPENDENCY_ACCESSED");
+    });
+    const adapterFactories = inertAdapterFactories();
+    const env = new Proxy<Readonly<Record<string, string | undefined>>>({}, {
+      get: dependencyAccess,
+    });
+    const store = new Proxy(new H1ArtifactStore(`/unreachable-${scenarioId}-artifact`, RUN_ID), {
+      get: dependencyAccess,
+    });
+    const manifest = new Proxy(s4Manifest(), { get: dependencyAccess });
+    const fixture = new Proxy(fixtureFor(scenarioId), { get: dependencyAccess });
+    const context = new Proxy(Object.freeze({
+      prisma: db,
+      bootstrap: new AcceptanceBootstrap(db, "wig_platform_test"),
+      ledger: new RunLedgerStore(`/unreachable-${scenarioId}-ledger`),
+      integrity: Object.freeze({
+        repositoryCommit: "a".repeat(40),
+        runnerSourceHash: "b".repeat(64),
+        policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+        migrationFingerprint: "d".repeat(64),
+      }),
+      staleLockRecovered: false,
+      runProviderContact: <T>(contact: () => Promise<T>) => contact(),
+    }), { get: dependencyAccess });
+    const execute = Object.freeze({ command: "execute" as const, runId: RUN_ID, scenarioId });
+    const seal = Object.freeze({ command: "seal" as const, runId: RUN_ID, scenarioId });
+
+    await expect(runDatabaseCommand(execute, env, store, null, "/unreachable-worktree"))
+      .rejects.toThrow(error);
+    await expect(providerCommand(
+      execute, env, store, manifest, context, fixture, adapterFactories.factories,
+    )).rejects.toThrow(error);
+    await expect(sealScenarioEvidence(seal, store, manifest, context))
+      .rejects.toThrow(error);
+
+    expect(dependencyAccess).not.toHaveBeenCalled();
+    expect(adapterFactories.createLookup).not.toHaveBeenCalled();
+    expect(adapterFactories.createCancellation).not.toHaveBeenCalled();
+  });
+
+  it.each(["S5", "S6"] as const)(
+    "gives direct and wrapped %s calls zero GET or POST authority",
+    async (scenarioId) => {
+      const fixture = fixtureFor(scenarioId);
+      const records: BudgetRecord[] = [];
+      let providerContacts = 0;
+      const providerContact = <T>(contact: () => Promise<T>): Promise<T> => {
+        providerContacts += 1;
+        return contact();
+      };
+      const budget = new ProviderCallBudget(
+        (entry) => { records.push(entry); return Promise.resolve(); },
+        [], undefined, undefined, providerContact,
+      );
+      const lookup = vi.fn((_paymentKey: string, _authorization: string) => (
+        Promise.resolve(eligibleLookup(fixture))
+      ));
+      const cancellation = vi.fn(() => Promise.resolve(successfulPost(fixture, TRANSACTION_KEY)));
+      const completion = vi.fn(() => evidence("INITIAL_GET_ELIGIBLE"));
+      const wire = deriveTossRefundCancellationWireRequest({
+        paymentKey: fixture.paymentKey,
+        providerOperationKey: deriveTossRefundOperationKey(`retired-${scenarioId}-budget`),
+        cancelAmount: fixture.amount,
+      });
+
+      await expect(budget.invokeProtected(
+        scenarioId, "GET", protectedGetRequest(fixture.paymentKey),
+        () => lookup(fixture.paymentKey, "unused"), completion,
+      )).rejects.toThrow("PROVIDER_BUDGET_EXCEEDED");
+      await expect(new ProviderCallBudget(
+        (entry) => { records.push(entry); return Promise.resolve(); },
+        [], undefined, undefined, providerContact,
+      ).wrapCancellation(scenarioId, cancellation)(Object.freeze({
+        authorization: "unused", wire,
+      }))).rejects.toThrow("PROVIDER_BUDGET_EXCEEDED");
+
+      expect(lookup).not.toHaveBeenCalled();
+      expect(cancellation).not.toHaveBeenCalled();
+      expect(providerContacts).toBe(0);
+      expect(completion).not.toHaveBeenCalled();
+      expect(records).toEqual([]);
+      expect(budget.intentCounts(scenarioId)).toEqual({ GET: 0, POST: 0 });
+      expect(budget.counts(scenarioId)).toEqual({ GET: 0, POST: 0 });
+    },
+  );
+});
+
 describe("S4 retirement provider boundaries", () => {
-  it.each(["execute", "resume", "resume-post"] as const)(
+  it.each(["execute", "resume", "resume-post", "seal"] as const)(
     "rejects public CLI %s immediately after parsing",
     async (command) => {
       const temporary = await mkdtemp(join(tmpdir(), "mira-s4-retired-cli-"));
@@ -316,7 +488,7 @@ describe("S4 retirement provider boundaries", () => {
     expect(cancellationBudget.counts("S4")).toEqual({ GET: 0, POST: 0 });
   });
 
-  it.each(["execute", "resume", "resume-post"] as const)(
+  it.each(["execute", "resume", "resume-post", "seal"] as const)(
     "keeps lower S4 %s guards before credentials, database, adapters, artifacts, or contact",
     async (command) => {
       const environmentAccess = vi.fn(() => {
@@ -1473,7 +1645,7 @@ function fakeCredentialEnv(): Readonly<Record<string, string>> {
   });
 }
 
-function fixtureFor(scenarioId: "S3" | "S4"): ProviderFixture {
+function fixtureFor(scenarioId: "S3" | "S4" | "S5" | "S6"): ProviderFixture {
   return Object.freeze({
     scenarioId,
     paymentKey: `payment-${scenarioId}`,
@@ -1481,6 +1653,23 @@ function fixtureFor(scenarioId: "S3" | "S4"): ProviderFixture {
     amount: 1_000,
     currency: "KRW",
     reference: `reference-${scenarioId}`,
+  });
+}
+
+function retiredLedger(scenarioId: "S5" | "S6"): H1Ledger {
+  return Object.freeze({
+    formatVersion: H1_LEDGER_FORMAT_VERSION,
+    revision: 1,
+    previousLedgerHash: null,
+    runId: RUN_ID,
+    scenarioId,
+    phase: "PLANNED",
+    repositoryCommit: "a".repeat(40),
+    runnerSourceHash: "b".repeat(64),
+    policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+    migrationFingerprint: "d".repeat(64),
+    scenarioInputHash: "e".repeat(64),
+    payload: Object.freeze({ scenarioId }),
   });
 }
 

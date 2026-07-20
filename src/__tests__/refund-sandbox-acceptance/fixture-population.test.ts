@@ -328,6 +328,28 @@ describe("mira-s3-preflight-target/v1", () => {
 });
 
 describe("append-only fixture population authority", () => {
+  it.each([
+    ["S5", "S5_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["S6", "S6_ACCEPTANCE_SCENARIO_RETIRED"],
+  ] as const)("prints the exact bounded %s retirement code from the CLI process", async (
+    scenarioId, error,
+  ) => {
+    const output = capturedOutput();
+    const environmentAccess = vi.fn(() => {
+      throw new Error("RETIRED_PROCESS_ENVIRONMENT_ACCESS");
+    });
+    const exitCode = await runCliProcess([
+      "execute", "--run", TARGET, "--scenario", scenarioId,
+    ], new Proxy<Readonly<Record<string, string | undefined>>>({}, {
+      get: environmentAccess,
+    }), output);
+
+    expect(exitCode).toBe(1);
+    expect(output.stdout()).toBe("");
+    expect(output.stderr()).toBe(`${error}\n`);
+    expect(environmentAccess).not.toHaveBeenCalled();
+  });
+
   it.each(["S1", "S2", "S3", "S5", "S6"] as const)(
     "does not treat null population authority as a wildcard for %s",
     (scenario) => {
@@ -340,14 +362,26 @@ describe("append-only fixture population authority", () => {
   );
 
   it.each([
-    ["execute", "S1"], ["resume", "S1"], ["resume-post", "S1"],
-    ["execute", "S2"], ["resume", "S2"], ["resume-post", "S2"],
-    ["execute", "S3"], ["resume", "S3"], ["resume-post", "S3"],
-    ["execute", "S5"], ["resume", "S5"], ["resume-post", "S5"],
-    ["execute", "S6"], ["resume", "S6"], ["resume-post", "S6"],
+    ["execute", "S1", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["resume", "S1", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["resume-post", "S1", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["execute", "S2", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["resume", "S2", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["resume-post", "S2", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["execute", "S3", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["resume", "S3", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["resume-post", "S3", "FIXTURE_POPULATION_AUTHORITY_REQUIRED"],
+    ["execute", "S5", "S5_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["resume", "S5", "S5_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["resume-post", "S5", "S5_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["seal", "S5", "S5_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["execute", "S6", "S6_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["resume", "S6", "S6_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["resume-post", "S6", "S6_ACCEPTANCE_SCENARIO_RETIRED"],
+    ["seal", "S6", "S6_ACCEPTANCE_SCENARIO_RETIRED"],
   ] as const)(
     "denies unpopulated %s %s before every sensitive execution boundary",
-    async (command, scenario) => {
+    async (command, scenario, expectedError) => {
       const root = await temporaryRoot();
       const store = new H1ArtifactStore(root, TARGET);
       await store.initialize();
@@ -369,7 +403,7 @@ describe("append-only fixture population authority", () => {
       await expect(runCliAtRoot([
         command, "--run", TARGET, "--scenario", scenario,
       ], env, root, process.cwd(), cliDependencies()))
-        .rejects.toThrow("FIXTURE_POPULATION_AUTHORITY_REQUIRED");
+        .rejects.toThrow(expectedError);
 
       expect(environmentAccess).not.toHaveBeenCalled();
       expect(sensitiveBoundaryAudit).toEqual(zeroSensitiveBoundaryAudit());
@@ -401,6 +435,30 @@ describe("append-only fixture population authority", () => {
       runId: TARGET,
     });
     expect(await pathExists(store.path(H1_FIXTURE_POPULATION_FILE))).toBe(false);
+  });
+
+  it.each([
+    ["S5", "sbx-20260720T030101Z-5555555555555555"],
+    ["S6", "sbx-20260720T030102Z-6666666666666666"],
+  ] as const)("keeps historical %s report and purge available without active authority", async (
+    scenarioId, runId,
+  ) => {
+    const root = await temporaryRoot();
+    const store = await createRetiredRun(root, runId, scenarioId, true);
+
+    await expect(runCliAtRoot([
+      "report", "--run", runId,
+    ], Object.freeze({}), root)).resolves.toEqual({ code: "REPORT_AVAILABLE", runId });
+    await expect(runCliAtRoot([
+      "purge-raw", "--run", runId,
+    ], Object.freeze({
+      MIRA_TOSS_SANDBOX_ACCEPTANCE_PURGE_CONFIRM: runId,
+    }), root)).resolves.toEqual({ code: "RAW_PURGED", runId });
+
+    expect(await pathExists(store.path("raw"))).toBe(false);
+    expect(parseSanitizedEvidence(
+      await readJson(store.path("sanitized", `${scenarioId}.json`)),
+    ).scenarioId).toBe(scenarioId);
   });
 
   it("parses a recomputed envelope and rejects an injected digest", () => {
@@ -1625,7 +1683,7 @@ function fullManifest(runId: string): FixtureManifest {
 }
 
 function fixture(
-  scenarioId: "S1" | "S2" | "S4" | "S5",
+  scenarioId: "S1" | "S2" | "S4" | "S5" | "S6",
   amount: number,
 ): ProviderFixture {
   return Object.freeze({
@@ -1681,13 +1739,20 @@ function fingerprintEnvelopeS3(envelope: Record<string, unknown>): string {
 async function createRetiredRun(
   root: string,
   runId: string,
-  scenarioId: "S1" | "S2",
+  scenarioId: "S1" | "S2" | "S5" | "S6",
+  retainRaw = false,
 ): Promise<H1ArtifactStore> {
   const store = new H1ArtifactStore(root, runId);
   await store.initialize();
-  const manifest = fullManifest(runId);
+  const baseManifest = fullManifest(runId);
+  const manifest: FixtureManifest = scenarioId === "S6"
+    ? Object.freeze({
+      ...baseManifest,
+      fixtures: Object.freeze({ ...baseManifest.fixtures, S6: fixture("S6", 1_006) }),
+    })
+    : baseManifest;
   await atomicWriteJson(store.path("fixtures.json"), manifest);
-  await rm(store.path("raw"), { recursive: true });
+  if (!retainRaw) await rm(store.path("raw"), { recursive: true });
   const fixtureForScenario = manifest.fixtures[scenarioId];
   if (!fixtureForScenario) throw new Error("TEST_FIXTURE_REQUIRED");
   const ledger = new RunLedgerStore(store.path("ledger"));
@@ -1698,7 +1763,10 @@ async function createRetiredRun(
   });
   const complete = await ledger.append({
     ...identity, runId, scenarioId, phase: "LOCAL_COMMIT_COMPLETE",
-    payload: Object.freeze({ ...planned.payload, resultCode: Object.freeze([]) }),
+    payload: Object.freeze({
+      ...planned.payload,
+      resultCode: historicalResultCodes(scenarioId),
+    }),
   });
   const sealed = await ledger.append({
     ...identity, runId, scenarioId, phase: "SEALED",
@@ -1737,10 +1805,11 @@ function ledgerIdentity(fixtureForScenario: ProviderFixture) {
 
 function validReport(
   runId: string,
-  scenarioId: "S1" | "S2",
+  scenarioId: "S1" | "S2" | "S5" | "S6",
   fixtureForScenario: ProviderFixture,
   identity: ReturnType<typeof ledgerIdentity>,
 ) {
+  const resultCodes = historicalResultCodes(scenarioId);
   return Object.freeze({
     formatVersion: "mira-toss-sbx-sanitized/v1",
     runId,
@@ -1762,9 +1831,9 @@ function validReport(
     transactionKeyHmac: null,
     getCount: 0,
     postCount: 0,
-    normalizedProviderOutcome: null,
+    normalizedProviderOutcome: resultCodes.length > 0 ? resultCodes : null,
     httpStatusClass: null,
-    staticLocalResultCodes: Object.freeze([]),
+    staticLocalResultCodes: resultCodes,
     localProjection: Object.freeze({
       commandStatus: null, attemptStatus: null, orderStatus: null, dispatchCount: 0,
       latestOrdinal: 0, contactProofCount: 0, evidenceCount: 0,
@@ -1778,10 +1847,20 @@ function validReport(
     rawArtifacts: Object.freeze([]),
     scenarioLimitations: scenarioId === "S2"
       ? Object.freeze(["Process-level response discard; not TCP-level loss."])
-      : Object.freeze([]),
+      : scenarioId === "S5"
+        ? Object.freeze(["Ordinal-2 application path; provider duplicate POST is covered by S3."])
+        : Object.freeze([]),
     s6Executed: false,
     completionMarker: "SEALED",
   });
+}
+
+function historicalResultCodes(
+  scenarioId: "S1" | "S2" | "S5" | "S6",
+): readonly string[] {
+  if (scenarioId === "S5") return Object.freeze(["ORDINAL_2_SUCCEEDED"]);
+  if (scenarioId === "S6") return Object.freeze(["SKIPPED_NOT_AVAILABLE"]);
+  return Object.freeze([]);
 }
 
 function policyHashes(): Readonly<Record<string, string>> {

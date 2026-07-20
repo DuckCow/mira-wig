@@ -3,7 +3,7 @@ import { createTossRefundRecoveryOperation } from "../../src/lib/payment/refund/
 import { extractTossRefundEligibilityResponse } from "../../src/lib/payment/refund/providers/toss/refund-lookup-response";
 import type { TossRefundLookupPort } from "../../src/lib/payment/refund/providers/toss/refund-lookup-http";
 import type { ProviderCallBudget } from "./call-budget";
-import type { H1Scenario } from "./contracts";
+import { assertAcceptanceScenarioExecutable, type H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
 import type { H1Ledger, RunLedgerStore } from "./run-ledger";
 import {
@@ -24,6 +24,7 @@ export async function executeResumeGet(input: Readonly<{
   ledger: H1Ledger;
   env: Env;
 }>): Promise<Readonly<{ code: string; runId: string }>> {
+  assertAcceptanceScenarioExecutable(input.scenarioId);
   const response = await input.budget.wrapLookup(input.scenarioId, input.lookup)(
     input.fixture.paymentKey,
     input.authorization,

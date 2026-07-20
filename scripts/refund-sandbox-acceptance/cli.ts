@@ -8,8 +8,9 @@ import {
 } from "./atomic-files";
 import { H1_ARTIFACT_PARENT, H1ArtifactStore } from "./artifact-store";
 import {
-  assertS4ProviderCommandActive, generateRunId, H1ContractError, parseH1Command,
-  requirePurgeAcknowledgement,
+  assertActiveAcceptanceLifecycle, generateRunId, H1ContractError, parseH1Command,
+  requirePurgeAcknowledgement, S4_PROVIDER_PROBE_RETIRED,
+  S5_ACCEPTANCE_SCENARIO_RETIRED, S6_ACCEPTANCE_SCENARIO_RETIRED,
 } from "./contracts";
 import {
   assertLedgerMatchesFixtureAuthority,
@@ -49,7 +50,7 @@ export async function runCli(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<Readonly<{ code: string; runId?: string }> | FixturePopulationResult> {
   const parsed = parseH1Command(argv);
-  assertS4ProviderCommandActive(parsed);
+  assertActiveAcceptanceLifecycle(parsed);
   if (parsed.command === "populate-fixtures") {
     let root: string;
     try {
@@ -71,7 +72,7 @@ export async function runCliAtRoot(
   dependencies: CliDependencies = Object.freeze({}),
 ): Promise<Readonly<{ code: string; runId?: string }> | FixturePopulationResult> {
   const parsed = parseH1Command(argv);
-  assertS4ProviderCommandActive(parsed);
+  assertActiveAcceptanceLifecycle(parsed);
   if (dependencies.fixturePopulation?.approvalRegistry) {
     await assertApprovalRegistryRootSafe(dependencies.fixturePopulation.approvalRegistry, root);
   }
@@ -106,7 +107,7 @@ async function runParsedCli(
   worktree: string,
   dependencies: CliDependencies,
 ): Promise<Readonly<{ code: string; runId?: string }> | FixturePopulationResult> {
-  assertS4ProviderCommandActive(parsed);
+  assertActiveAcceptanceLifecycle(parsed);
   if (parsed.command === "populate-fixtures") {
     return populateFixtures(root, parsed, env, dependencies.fixturePopulation);
   }
@@ -213,6 +214,11 @@ function isMainModule(): boolean {
 }
 
 function safeCliFailureCode(error: unknown): string {
+  if (error instanceof Error && [
+    S4_PROVIDER_PROBE_RETIRED,
+    S5_ACCEPTANCE_SCENARIO_RETIRED,
+    S6_ACCEPTANCE_SCENARIO_RETIRED,
+  ].includes(error.message)) return error.message;
   return isFixturePopulationError(error)
     || (error instanceof H1ContractError && error.code.startsWith("FIXTURE_POPULATION_"))
     ? error.code

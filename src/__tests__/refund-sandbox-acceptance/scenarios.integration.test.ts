@@ -11,7 +11,7 @@ import { acceptanceOperationEnv } from "../../../scripts/refund-sandbox-acceptan
 import { executeScenario } from "../../../scripts/refund-sandbox-acceptance/scenario-orchestrator";
 import type { TossRefundLookupPort } from "../../lib/payment/refund/providers/toss/refund-lookup-http";
 
-type ScenarioId = "S1" | "S2" | "S5";
+type ScenarioId = "S1" | "S2";
 type Owned = Readonly<{ handle: AcceptanceBootstrapHandle; refund: RefundFixtureIds }>;
 const owned: Owned[] = [];
 const bootstrap = new AcceptanceBootstrap(db, "wig_platform_test");
@@ -46,14 +46,6 @@ describe("refund SANDBOX fake-only application scenarios", () => {
     expect(result.budget.counts("S2")).toEqual({ GET: 3, POST: 1 });
     expect(await localProjection(result.ownership.refund.commandId, result.ownership.refund.refundAttemptId))
       .toMatchObject({ orderStatus: "REFUNDED", attemptStatus: "SUCCEEDED", dispatches: 1, evidence: 1 });
-  });
-
-  it("S5 proves ordinal-2 recontact with exactly three GETs and one POST", async () => {
-    const result = await executeFakeScenario("S5");
-    expect(result.result.ok).toBe(true);
-    expect(result.budget.counts("S5")).toEqual({ GET: 3, POST: 1 });
-    expect(await localProjection(result.ownership.refund.commandId, result.ownership.refund.refundAttemptId))
-      .toMatchObject({ orderStatus: "REFUNDED", attemptStatus: "SUCCEEDED", dispatches: 2, proofs: 2, evidence: 1 });
   });
 
   it("aborts an eligibility identity mismatch before any cancellation POST", async () => {

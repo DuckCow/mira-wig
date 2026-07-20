@@ -62,8 +62,8 @@ const LIMITS: Readonly<Record<H1Scenario, Readonly<{ GET: number; POST: number }
   S2: Object.freeze({ GET: 4, POST: 1 }),
   S3: Object.freeze({ GET: 2, POST: 2 }),
   S4: Object.freeze({ GET: 0, POST: 0 }),
-  S5: Object.freeze({ GET: 4, POST: 1 }),
-  S6: Object.freeze({ GET: 3, POST: 0 }),
+  S5: Object.freeze({ GET: 0, POST: 0 }),
+  S6: Object.freeze({ GET: 0, POST: 0 }),
 });
 const RUN_LIMIT = Object.freeze({ GET: 20, POST: 7 });
 const HEX_64 = /^[0-9a-f]{64}$/;

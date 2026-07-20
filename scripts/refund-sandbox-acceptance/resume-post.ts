@@ -8,7 +8,7 @@ import type { TossRefundLookupPort } from "../../src/lib/payment/refund/provider
 import type { TossRefundCancellationPort } from "../../src/lib/payment/refund/providers/toss/refund-cancellation-http";
 import type { ProviderCallBudget } from "./call-budget";
 import { budgetRecordsFromPayload, protectedPostRequest } from "./call-budget";
-import { S4_PROVIDER_PROBE_RETIRED, type H1Scenario } from "./contracts";
+import { assertAcceptanceScenarioExecutable, type H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
 import type { H1Ledger } from "./run-ledger";
 import { parseProtectedOwnership } from "./runtime-ledger";
@@ -25,7 +25,7 @@ export async function executeExplicitResumePost(input: Readonly<{
   env: Readonly<Record<string, string | undefined>>;
   ledger: H1Ledger;
 }>): Promise<string> {
-  if (input.scenarioId === "S4") throw new Error(S4_PROVIDER_PROBE_RETIRED);
+  assertAcceptanceScenarioExecutable(input.scenarioId);
   const lookup = input.budget.wrapLookup(input.scenarioId, input.lookup);
   if (input.scenarioId === "S3") {
     return resumeS3Probe(input, lookup, input.cancellation);
