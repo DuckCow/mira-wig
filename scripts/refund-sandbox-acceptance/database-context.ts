@@ -18,6 +18,7 @@ export type DatabaseContext = Readonly<{
   ledger: RunLedgerStore;
   integrity: BaseLedgerIntegrity;
   staleLockRecovered: boolean;
+  runProviderContact?: <T>(contact: () => Promise<T>) => Promise<T>;
 }>;
 
 export async function withAcceptanceDatabase<T>(
@@ -53,6 +54,7 @@ export async function withAcceptanceDatabase<T>(
         ledger,
         integrity,
         staleLockRecovered: lock.staleLockRecovered && !previous,
+        runProviderContact: lock.runProviderContact,
       });
     } finally {
       await lock.release();

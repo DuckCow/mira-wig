@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import type { H1Scenario } from "./contracts";
 
 export class RunRedactor {
   readonly #key: Buffer;
@@ -64,7 +65,21 @@ const MAX_RAW_ARTIFACT_BYTES = 1_048_576;
 
 class EvidenceValidationError extends Error {}
 
-export function assertSanitizedEvidence(value: unknown): void {
+export type SanitizedEvidence = Readonly<{
+  formatVersion: "mira-toss-sbx-sanitized/v1";
+  runId: string;
+  scenarioId: H1Scenario;
+  repositoryCommit: string;
+  policyHashes: Readonly<Record<string, string>>;
+  runnerSourceHash: string;
+  migrationFingerprint: string;
+  scenarioInputHash: string;
+  amount: number;
+  currency: "KRW";
+  completionMarker: "SEALED";
+}> & Readonly<Record<string, unknown>>;
+
+export function assertSanitizedEvidence(value: unknown): asserts value is SanitizedEvidence {
   try {
     assertNoRawSensitiveKeys(value, new WeakSet<object>());
     validateReport(value);
@@ -72,6 +87,11 @@ export function assertSanitizedEvidence(value: unknown): void {
     if (error instanceof EvidenceValidationError) throw error;
     throw schemaFailure();
   }
+}
+
+export function parseSanitizedEvidence(value: unknown): SanitizedEvidence {
+  assertSanitizedEvidence(value);
+  return value;
 }
 
 function validateReport(value: unknown): void {

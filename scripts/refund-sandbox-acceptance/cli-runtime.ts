@@ -24,6 +24,10 @@ import {
 } from "./contracts";
 import { requireSandboxCredential } from "./credential-guard";
 import type { FixtureManifest, ProviderFixture } from "./fixture-manifest";
+import {
+  assertScenarioAuthorized,
+  type EffectiveFixtureAuthority,
+} from "./fixture-population";
 import { scenarioInputHash } from "./integrity";
 import type { H1Ledger } from "./run-ledger";
 import { executeScenario } from "./scenario-orchestrator";
@@ -67,13 +71,13 @@ export async function runDatabaseCommand(
   parsed: ParsedH1Command,
   env: Env,
   store: H1ArtifactStore,
-  manifest: FixtureManifest | null,
+  authority: EffectiveFixtureAuthority | null,
   worktree: string,
 ): Promise<Result> {
   if (!parsed.runId) throw new Error("RUN_ID_REQUIRED");
   if (commandCanContactProvider(parsed.command)) requireRunAcknowledgement(env, parsed.runId);
   return withAcceptanceDatabase(env, store, worktree, (context) => handleLockedCommand(
-    parsed, env, store, manifest, context,
+    parsed, env, store, authority, context,
   ));
 }
 
@@ -81,25 +85,43 @@ async function handleLockedCommand(
   parsed: ParsedH1Command,
   env: Env,
   store: H1ArtifactStore,
-  manifest: FixtureManifest | null,
+  authority: EffectiveFixtureAuthority | null,
   context: DatabaseContext,
 ): Promise<Result> {
   if (!parsed.runId) throw new Error("RUN_ID_REQUIRED");
-  if (parsed.command === "validate-db") return Object.freeze({ code: "DATABASE_VALID", runId: parsed.runId });
-  if (parsed.command === "cleanup-db") return cleanupCommand(parsed.runId, env, context);
-  if (parsed.command === "seal") {
-    if (!manifest) throw new Error("FIXTURE_MANIFEST_REQUIRED");
-    return sealScenarioEvidence(parsed, store, manifest, context);
-  }
+  const local = await handleNonProviderDatabaseCommand(parsed, env, store, authority, context);
+  if (local) return local;
   if (!parsed.scenarioId) throw new Error("SCENARIO_REQUIRED");
-  if (!manifest) throw new Error("FIXTURE_MANIFEST_REQUIRED");
-  const fixture = manifest.fixtures[parsed.scenarioId];
+  if (!authority) throw new Error("FIXTURE_AUTHORITY_REQUIRED");
+  assertScenarioAuthorized(authority, parsed.scenarioId);
+  const fixture = authority.manifest.fixtures[parsed.scenarioId];
   if (!fixture) throw new Error("SCENARIO_FIXTURE_REQUIRED");
   return providerCommand(Object.freeze({
     command: parsed.command,
     runId: parsed.runId,
     scenarioId: parsed.scenarioId,
-  }), env, store, manifest, context, fixture);
+  }), env, store, authority.manifest, context, fixture);
+}
+
+async function handleNonProviderDatabaseCommand(
+  parsed: ParsedH1Command,
+  env: Env,
+  store: H1ArtifactStore,
+  authority: EffectiveFixtureAuthority | null,
+  context: DatabaseContext,
+): Promise<Result | null> {
+  if (!parsed.runId) throw new Error("RUN_ID_REQUIRED");
+  if (parsed.command === "validate-db") {
+    return Object.freeze({ code: "DATABASE_VALID", runId: parsed.runId });
+  }
+  if (parsed.command === "cleanup-db") {
+    return cleanupCommand(parsed.runId, env, context, authority?.authorizedScenario ?? null);
+  }
+  if (parsed.command !== "seal") return null;
+  if (!authority) throw new Error("FIXTURE_AUTHORITY_REQUIRED");
+  if (!parsed.scenarioId) throw new Error("SCENARIO_REQUIRED");
+  assertScenarioAuthorized(authority, parsed.scenarioId);
+  return sealScenarioEvidence(parsed, store, authority.manifest, context);
 }
 
 export async function providerCommand(
@@ -135,7 +157,9 @@ async function nonS3ProviderCommand(
 ): Promise<Result> {
   const provider = createProviderRuntime(env, manifest, adapterFactories);
   const latest = await initialLedger(context, parsed.scenarioId, fixture);
-  const budget = await createLedgerBudget(context.ledger, latest, store);
+  const budget = await createLedgerBudget(
+    context.ledger, latest, store, context.runProviderContact,
+  );
   if (parsed.command === "resume") {
     const action = planResume(latest.phase);
     if (action === "RESUME_SETUP") {
@@ -210,7 +234,9 @@ async function s3ProviderCommand(
     }
     case "CONTINUE_WITH_PROVIDER_CALLS": {
       const provider = createProviderRuntime(env, manifest, adapterFactories);
-      const budget = await createLedgerBudget(context.ledger, latest, store);
+      const budget = await createLedgerBudget(
+        context.ledger, latest, store, context.runProviderContact,
+      );
       return executeFresh(
         parsed, fixture, provider.authorization, provider.lookup, provider.cancellation,
         budget, context, store, env, latest, expectation,

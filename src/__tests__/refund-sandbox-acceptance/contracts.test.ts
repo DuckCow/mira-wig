@@ -4,6 +4,7 @@ import {
   parseH1Command,
   parseRunId,
   requireCleanupAcknowledgement,
+  requireFixturePopulationAcknowledgement,
   requirePurgeAcknowledgement,
   requireRunAcknowledgement,
 } from "../../../scripts/refund-sandbox-acceptance/contracts";
@@ -39,6 +40,14 @@ describe("refund SANDBOX acceptance command contracts", () => {
     expect(/[\s/\\]/u.test(generated)).toBe(false);
   });
 
+  it.each([
+    "sbx-20260231T010203Z-0123456789abcdef",
+    "sbx-20261301T010203Z-0123456789abcdef",
+    "sbx-20260718T246060Z-0123456789abcdef",
+  ])("rejects calendar-impossible canonical-looking run id %s", (runId) => {
+    expect(() => parseRunId(runId)).toThrow("Run id is invalid");
+  });
+
   it("preserves invalid-clock rejection and uses exactly eight random bytes", () => {
     const date = new Date("2026-07-18T01:02:03.123Z");
     const first = generateRunId(date, () => Buffer.alloc(8, 0));
@@ -59,12 +68,33 @@ describe("refund SANDBOX acceptance command contracts", () => {
     expect(() => parseH1Command(["execute", "--run", RUN_ID, "--secret", "x"]))
       .toThrow("Command arguments are invalid");
     expect(() => parseH1Command(["plan", "--run", RUN_ID])).toThrow("Command arguments are invalid");
+    const sourceRunId = "sbx-20260717T010203Z-0123456789abcdef";
+    const witnessRunId = "sbx-20260716T010203Z-0123456789abcdef";
+    expect(parseH1Command([
+      "populate-fixtures", "--run", RUN_ID, "--source-run", sourceRunId,
+      "--witness-run", witnessRunId, "--scenario", "S3",
+    ])).toEqual({
+      command: "populate-fixtures",
+      runId: RUN_ID,
+      sourceRunId,
+      witnessRunId,
+      scenarioId: "S3",
+    });
+    expect(() => parseH1Command([
+      "populate-fixtures", "--run", RUN_ID, "--source-run", sourceRunId,
+      "--witness-run", witnessRunId, "--scenario", "S2",
+    ])).toThrow("FIXTURE_POPULATION_SCENARIO_UNSUPPORTED");
   });
 
   it("requires separate exact acknowledgements", () => {
     expect(() => requireRunAcknowledgement({}, RUN_ID)).toThrow("Run confirmation is required");
     expect(() => requireCleanupAcknowledgement({}, RUN_ID)).toThrow("Cleanup confirmation is required");
     expect(() => requirePurgeAcknowledgement({}, RUN_ID)).toThrow("Raw purge confirmation is required");
+    expect(() => requireFixturePopulationAcknowledgement({}, RUN_ID))
+      .toThrow("FIXTURE_POPULATION_CONFIRMATION_REQUIRED");
+    expect(() => requireFixturePopulationAcknowledgement({
+      MIRA_TOSS_SANDBOX_ACCEPTANCE_POPULATE_CONFIRM: RUN_ID,
+    }, RUN_ID)).not.toThrow();
     expect(() => requireRunAcknowledgement({ MIRA_TOSS_SANDBOX_ACCEPTANCE_CONFIRM: `${RUN_ID} ` }, RUN_ID))
       .toThrow("Run confirmation is required");
   });

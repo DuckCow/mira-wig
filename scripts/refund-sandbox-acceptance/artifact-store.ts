@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { chmod, mkdir, readdir, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir } from "node:fs/promises";
 import { atomicWriteJson, atomicWriteText, ensurePrivateDirectory, safeChild } from "./atomic-files";
 import { fixtureManifestTemplate } from "./fixture-manifest";
 import { parseRunId } from "./contracts";
@@ -51,12 +51,21 @@ export class H1ArtifactStore {
 }
 
 async function assertTreeModes(path: string, directory: boolean): Promise<void> {
-  const metadata = await stat(path);
+  const metadata = await lstat(path);
   const expected = directory ? 0o700 : 0o600;
-  if ((metadata.mode & 0o777) !== expected) throw new Error("ARTIFACT_MODE_INVALID");
+  if (metadata.isSymbolicLink() || (metadata.mode & 0o777) !== expected
+    || metadata.uid !== expectedOwner() || (!directory && metadata.nlink !== 1)) {
+    throw new Error("ARTIFACT_MODE_INVALID");
+  }
   if (!directory) return;
   for (const child of await readdir(path, { withFileTypes: true })) {
     if (child.isSymbolicLink()) throw new Error("ARTIFACT_SYMLINK_FORBIDDEN");
     await assertTreeModes(join(path, child.name), child.isDirectory());
   }
+}
+
+function expectedOwner(): number {
+  const owner = process.geteuid?.();
+  if (owner === undefined) throw new Error("ARTIFACT_OWNER_UNAVAILABLE");
+  return owner;
 }

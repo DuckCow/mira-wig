@@ -27,10 +27,14 @@ export async function cleanupCommand(
   runId: string,
   env: Readonly<Record<string, string | undefined>>,
   context: CleanupContext,
+  authorizedScenario: "S3" | null = null,
 ): Promise<Readonly<{ code: string; runId: string }>> {
   requireCleanupAcknowledgement(env, runId);
   const latest = await context.ledger.loadLatest();
   assertCleanupLedgerIdentity(latest, runId);
+  if (authorizedScenario && latest.scenarioId !== authorizedScenario) {
+    throw new Error("FIXTURE_SCENARIO_NOT_AUTHORIZED");
+  }
   if (isProviderOnlyScenario(latest.scenarioId)) {
     await cleanupProviderOnlyRun(context.ledger, latest);
   } else {

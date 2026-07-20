@@ -91,6 +91,7 @@ export class ProviderCallBudget {
   readonly #transactionIdentityHmac: ((value: string) => string) | undefined;
   readonly #loadS3State: (() => Promise<S3DurableState>) | undefined;
   readonly #s3BudgetContext = Object.freeze({});
+  readonly #runProviderContact: <T>(contact: () => Promise<T>) => Promise<T>;
   #blocked = false;
   #serialization = Promise.resolve();
 
@@ -99,10 +100,12 @@ export class ProviderCallBudget {
     initialRecords: readonly BudgetRecord[] = [],
     transactionIdentityHmac?: (value: string) => string,
     loadS3State?: () => Promise<S3DurableState>,
+    runProviderContact: <T>(contact: () => Promise<T>) => Promise<T> = (contact) => contact(),
   ) {
     this.#records.push(...initialRecords);
     this.#transactionIdentityHmac = transactionIdentityHmac;
     this.#loadS3State = loadS3State;
+    this.#runProviderContact = runProviderContact;
   }
 
   counts(scenarioId?: H1Scenario): Readonly<{ GET: number; POST: number }> {
@@ -165,7 +168,7 @@ export class ProviderCallBudget {
       throw new Error("S3_METHOD_SPECIFIC_BOUNDARY_REQUIRED");
     }
     const reservation = await this.reserveIntent(scenarioId, kind, request);
-    const result = await call();
+    const result = await this.#runProviderContact(call);
     const evidence = completionEvidence?.(result);
     const completed = Object.freeze({
       scenarioId, kind, phase: "COMPLETED" as const, sequence: reservation.intent.sequence, request,
@@ -186,7 +189,10 @@ export class ProviderCallBudget {
   ): Promise<TossRefundLookupHttpResult> {
     const reservation = await this.reserveS3Intent("GET", capability);
     if (reservation.invocation.kind !== "GET") throw invalidS3Invocation();
-    const result = await port(reservation.invocation.paymentKey, authorization);
+    const paymentKey = reservation.invocation.paymentKey;
+    const result = await this.#runProviderContact(
+      () => port(paymentKey, authorization),
+    );
     await this.completeS3Intent(reservation, result, completionEvidence(result));
     return result;
   }
@@ -200,7 +206,7 @@ export class ProviderCallBudget {
     const reservation = await this.reserveS3Intent("POST", capability);
     if (reservation.invocation.kind !== "POST") throw invalidS3Invocation();
     const contact = Object.freeze({ authorization, wire: reservation.invocation.wire });
-    const result = await port(contact);
+    const result = await this.#runProviderContact(() => port(contact));
     await this.completeS3Intent(reservation, result, completionEvidence(result));
     return result;
   }
@@ -375,6 +381,7 @@ export async function createLedgerBudget(
   store: RunLedgerStore,
   initial: H1Ledger,
   artifacts: H1ArtifactStore,
+  runProviderContact?: <T>(contact: () => Promise<T>) => Promise<T>,
 ): Promise<ProviderCallBudget> {
   const configuration = await createLedgerBudgetConfiguration(store, initial, artifacts);
   return new ProviderCallBudget(
@@ -382,6 +389,7 @@ export async function createLedgerBudget(
     configuration.initialRecords,
     configuration.transactionIdentityHmac,
     configuration.loadS3State,
+    runProviderContact,
   );
 }
 
