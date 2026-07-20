@@ -12,7 +12,9 @@
     "test:setup": "createdb -U $USER wig_platform_test 2>/dev/null || true && node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "make-admin": "tsx scripts/make-admin.ts",
-    "payment:reconcile": "node --import tsx scripts/payment-reconcile.ts"
+    "payment:reconcile": "node --import tsx scripts/payment-reconcile.ts",
+    "refund:worker:check": "node --import tsx scripts/refund-execution-worker.ts check",
+    "refund:worker:once": "node --import tsx scripts/refund-execution-worker.ts run-once"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  REFUND_EXECUTION_ACTIVATION_KEYS,
   isRefundExecutionClaimEnabled,
+  inspectRefundExecutionActivationInventory,
   isRefundExecutionLeaseEnabled,
   isRefundExecutionLeaseReleaseEnabled,
   isRefundExecutionUncontactedRecoveryEnabled,
@@ -26,6 +28,72 @@ import {
   REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED,
   RefundExecutionActivationConfigError,
 } from "../execution-activation";
+
+describe("refund execution activation inventory", () => {
+  it("validates every committed capability and returns only the aggregate master state", () => {
+    const inventory = inspectRefundExecutionActivationInventory({
+      [REFUND_EXECUTION_WORKER_ENABLED]: " ENABLED ",
+      [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED",
+    });
+
+    expect(inventory).toEqual({ workerEnabled: true });
+    expect(Object.keys(inventory)).toEqual(["workerEnabled"]);
+    expect(Object.isFrozen(inventory)).toBe(true);
+  });
+
+  it.each([
+    REFUND_EXECUTION_CLAIM_ENABLED,
+    REFUND_EXECUTION_LEASE_ENABLED,
+    REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
+    REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
+    REFUND_EXECUTION_WORKER_ENABLED,
+    REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
+    REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
+    REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
+    REFUND_EXECUTION_TOSS_CONTACT_ENABLED,
+    REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
+    REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED,
+    REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED,
+  ])("rejects malformed %s even when the worker master is disabled", (key) => {
+    expect(() => inspectRefundExecutionActivationInventory({ [key]: "invalid" }))
+      .toThrow(RefundExecutionActivationConfigError);
+  });
+
+  it("reads every committed activation key exactly once without omitting the worker key", () => {
+    const reads = new Map<PropertyKey, number>();
+    const env = new Proxy<Record<string, string | undefined>>({}, {
+      get: (_target, key) => {
+        reads.set(key, (reads.get(key) ?? 0) + 1);
+        return key === REFUND_EXECUTION_WORKER_ENABLED ? "ENABLED" : undefined;
+      },
+    });
+
+    expect(inspectRefundExecutionActivationInventory(env)).toEqual({ workerEnabled: true });
+    expect([...reads.keys()]).toEqual(REFUND_EXECUTION_ACTIVATION_KEYS);
+    expect([...reads.values()]).toEqual(REFUND_EXECUTION_ACTIVATION_KEYS.map(() => 1));
+  });
+
+  it("captures accessor-backed values once so side effects cannot change the worker result", () => {
+    const env: Record<string, string | undefined> = {};
+    const reads = new Map<string, number>();
+    for (const key of REFUND_EXECUTION_ACTIVATION_KEYS) {
+      Object.defineProperty(env, key, {
+        enumerable: true,
+        get: () => {
+          const count = (reads.get(key) ?? 0) + 1;
+          reads.set(key, count);
+          if (key === REFUND_EXECUTION_WORKER_ENABLED) return count === 1 ? "ENABLED" : "invalid";
+          return undefined;
+        },
+      });
+    }
+
+    expect(inspectRefundExecutionActivationInventory(env)).toEqual({ workerEnabled: true });
+    expect(Object.fromEntries(reads)).toEqual(Object.fromEntries(
+      REFUND_EXECUTION_ACTIVATION_KEYS.map((key) => [key, 1]),
+    ));
+  });
+});
 
 describe.each([
   [REFUND_EXECUTION_WORKER_ENABLED, isRefundExecutionWorkerEnabled],
