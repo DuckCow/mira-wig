@@ -20,6 +20,34 @@ const rootBoundaryAudit = vi.hoisted(() => ({
   ledgerOrLockAccesses: 0,
   mutationCalls: 0,
 }));
+const sensitiveBoundaryAudit = vi.hoisted(() => ({
+  bootstrap: 0,
+  bootstrapProjection: 0,
+  cancellationAdapter: 0,
+  credentialGuard: 0,
+  databaseContext: 0,
+  databaseSingleton: 0,
+  lookupAdapter: 0,
+  prisma: 0,
+  prismaAdapter: 0,
+  providerOrchestration: 0,
+  refundWorkerCycle: 0,
+  refundWorkerRouter: 0,
+}));
+const SENSITIVE_BOUNDARIES = [
+  "bootstrap",
+  "bootstrapProjection",
+  "cancellationAdapter",
+  "credentialGuard",
+  "databaseContext",
+  "databaseSingleton",
+  "lookupAdapter",
+  "prisma",
+  "prismaAdapter",
+  "providerOrchestration",
+  "refundWorkerCycle",
+  "refundWorkerRouter",
+] as const;
 const rootIsolation = vi.hoisted(() => {
   const temporaryParent = process.env.RUNNER_TEMP ?? process.env.TMPDIR ?? "/tmp";
   return Object.freeze({ home: `${temporaryParent}/mira-p3b-c3-home-${process.pid}` });
@@ -134,50 +162,53 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const poisonedImport = (name: string): never => {
+type SensitiveBoundary = (typeof SENSITIVE_BOUNDARIES)[number];
+
+const poisonedImport = (name: string, boundary?: SensitiveBoundary): never => {
+  if (boundary) sensitiveBoundaryAudit[boundary] += 1;
   throw new Error(`TEST_FORBIDDEN_IMPORT_${name}`);
 };
 
 vi.mock("dotenv/config", () => poisonedImport("DOTENV"));
-vi.mock("@prisma/client", () => poisonedImport("PRISMA"));
-vi.mock("@prisma/adapter-pg", () => poisonedImport("PRISMA_ADAPTER"));
+vi.mock("@prisma/client", () => poisonedImport("PRISMA", "prisma"));
+vi.mock("@prisma/adapter-pg", () => poisonedImport("PRISMA_ADAPTER", "prismaAdapter"));
 vi.mock("pg", () => poisonedImport("PG"));
-vi.mock("../../lib/db", () => poisonedImport("DATABASE_SINGLETON"));
+vi.mock("../../lib/db", () => poisonedImport("DATABASE_SINGLETON", "databaseSingleton"));
 vi.mock(
   "../../../scripts/refund-sandbox-acceptance/database-context",
-  () => poisonedImport("DATABASE_CONTEXT"),
+  () => poisonedImport("DATABASE_CONTEXT", "databaseContext"),
 );
 vi.mock(
   "../../../scripts/refund-sandbox-acceptance/credential-guard",
-  () => poisonedImport("CREDENTIAL_GUARD"),
+  () => poisonedImport("CREDENTIAL_GUARD", "credentialGuard"),
 );
 vi.mock(
   "../../lib/payment/refund/providers/toss/refund-cancellation-http",
-  () => poisonedImport("CANCELLATION_ADAPTER"),
+  () => poisonedImport("CANCELLATION_ADAPTER", "cancellationAdapter"),
 );
 vi.mock(
   "../../lib/payment/refund/providers/toss/refund-lookup-http",
-  () => poisonedImport("LOOKUP_ADAPTER"),
+  () => poisonedImport("LOOKUP_ADAPTER", "lookupAdapter"),
 );
 vi.mock(
   "../../../scripts/refund-sandbox-acceptance/scenario-orchestrator",
-  () => poisonedImport("SCENARIO_ORCHESTRATION"),
+  () => poisonedImport("SCENARIO_ORCHESTRATION", "providerOrchestration"),
 );
 vi.mock(
   "../../../scripts/refund-sandbox-acceptance/bootstrap",
-  () => poisonedImport("BOOTSTRAP"),
+  () => poisonedImport("BOOTSTRAP", "bootstrap"),
 );
 vi.mock(
   "../../../scripts/refund-sandbox-acceptance/bootstrap-projection",
-  () => poisonedImport("BOOTSTRAP_PROJECTION"),
+  () => poisonedImport("BOOTSTRAP_PROJECTION", "bootstrapProjection"),
 );
 vi.mock(
   "../../lib/payment/refund/run-refund-execution-worker-cycle",
-  () => poisonedImport("REFUND_WORKER_CYCLE"),
+  () => poisonedImport("REFUND_WORKER_CYCLE", "refundWorkerCycle"),
 );
 vi.mock(
   "../../lib/payment/refund/worker-router",
-  () => poisonedImport("REFUND_WORKER_ROUTER"),
+  () => poisonedImport("REFUND_WORKER_ROUTER", "refundWorkerRouter"),
 );
 import {
   H1_ARTIFACT_PARENT,
@@ -256,6 +287,7 @@ afterEach(async () => {
   resetHmacContentAudit();
   rootBoundaryAudit.active = false;
   resetRootBoundaryAudit();
+  resetSensitiveBoundaryAudit();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   for (const entry of await readdir(H1_ARTIFACT_PARENT)) {
     await rm(join(H1_ARTIFACT_PARENT, entry), { recursive: true, force: true });
@@ -296,6 +328,81 @@ describe("mira-s3-preflight-target/v1", () => {
 });
 
 describe("append-only fixture population authority", () => {
+  it.each(["S1", "S2", "S3", "S5", "S6"] as const)(
+    "does not treat null population authority as a wildcard for %s",
+    (scenario) => {
+      expect(() => assertScenarioAuthorized(Object.freeze({
+        manifest: fullManifest(TARGET),
+        authorizedScenario: null,
+        population: null,
+      }), scenario)).toThrow("FIXTURE_POPULATION_AUTHORITY_REQUIRED");
+    },
+  );
+
+  it.each([
+    ["execute", "S1"], ["resume", "S1"], ["resume-post", "S1"],
+    ["execute", "S2"], ["resume", "S2"], ["resume-post", "S2"],
+    ["execute", "S3"], ["resume", "S3"], ["resume-post", "S3"],
+    ["execute", "S5"], ["resume", "S5"], ["resume-post", "S5"],
+    ["execute", "S6"], ["resume", "S6"], ["resume-post", "S6"],
+  ] as const)(
+    "denies unpopulated %s %s before every sensitive execution boundary",
+    async (command, scenario) => {
+      const root = await temporaryRoot();
+      const store = new H1ArtifactStore(root, TARGET);
+      await store.initialize();
+      const manifest = fullManifest(TARGET);
+      await atomicWriteJson(store.path("fixtures.json"), manifest);
+      const fixtureBefore = await readFile(store.path("fixtures.json"));
+      const environmentAccess = vi.fn(() => {
+        throw new Error("TEST_SENSITIVE_ENVIRONMENT_ACCESS");
+      });
+      const env = new Proxy<Readonly<Record<string, string | undefined>>>({}, {
+        get: environmentAccess,
+      });
+      const providerContact = vi.fn<typeof fetch>(() => (
+        Promise.reject(new Error("TEST_PROVIDER_CONTACT"))
+      ));
+      vi.stubGlobal("fetch", providerContact);
+      resetSensitiveBoundaryAudit();
+
+      await expect(runCliAtRoot([
+        command, "--run", TARGET, "--scenario", scenario,
+      ], env, root, process.cwd(), cliDependencies()))
+        .rejects.toThrow("FIXTURE_POPULATION_AUTHORITY_REQUIRED");
+
+      expect(environmentAccess).not.toHaveBeenCalled();
+      expect(sensitiveBoundaryAudit).toEqual(zeroSensitiveBoundaryAudit());
+      expect(providerContact).not.toHaveBeenCalled();
+      expect(await readFile(store.path("fixtures.json"))).toEqual(fixtureBefore);
+      expect(await pathExists(store.path(H1_FIXTURE_POPULATION_FILE))).toBe(false);
+      expect(await readdir(store.path("ledger"))).toEqual([]);
+      expect(await readdir(store.path("locks"))).toEqual([]);
+      expect(await readdir(store.path("sealed"))).toEqual([]);
+      expect(await readdir(store.path("sanitized"))).toEqual([]);
+      expect(await readdir(store.path("raw"))).toEqual(["hmac.key"]);
+    },
+  );
+
+  it("keeps unpopulated historical fixtures readable without granting execution authority", async () => {
+    const root = await temporaryRoot();
+    const store = new H1ArtifactStore(root, TARGET);
+    await store.initialize();
+    const manifest = fullManifest(TARGET);
+    await atomicWriteJson(store.path("fixtures.json"), manifest);
+
+    await expect(readEffectiveFixtureAuthority(
+      store.runDirectory, TARGET, authorityDependencies(),
+    )).resolves.toEqual({ manifest, authorizedScenario: null, population: null });
+    await expect(runCliAtRoot([
+      "validate-fixtures", "--run", TARGET,
+    ], Object.freeze({}), root, process.cwd(), cliDependencies())).resolves.toEqual({
+      code: "FIXTURES_VALID",
+      runId: TARGET,
+    });
+    expect(await pathExists(store.path(H1_FIXTURE_POPULATION_FILE))).toBe(false);
+  });
+
   it("parses a recomputed envelope and rejects an injected digest", () => {
     const envelope = syntheticEnvelope(TARGET);
     expect(parseFixturePopulation(envelope, TARGET).stableTargetFingerprint).toBe(GOLDEN_DIGEST);
@@ -335,10 +442,20 @@ describe("append-only fixture population authority", () => {
     expect(authority.authorizedScenario).toBe("S3");
     expect(authority.manifest.fixtures.S1).not.toBeNull();
     expect(() => assertScenarioAuthorized(authority, "S3")).not.toThrow();
-    for (const scenario of ["S1", "S2", "S4", "S5"] as const) {
+    for (const scenario of ["S1", "S2", "S4", "S5", "S6"] as const) {
       expect(() => assertScenarioAuthorized(authority, scenario))
         .toThrow("FIXTURE_SCENARIO_NOT_AUTHORIZED");
     }
+  });
+
+  it("rejects populated authority when the exact target approval entry is absent", async () => {
+    const root = await temporaryRoot();
+    const store = await createValidPopulation(root);
+    const emptyRegistry = createTestFixturePopulationApprovalRegistry([]);
+
+    await expect(readEffectiveFixtureAuthority(
+      store.runDirectory, TARGET, authorityDependencies(emptyRegistry),
+    )).rejects.toThrow("FIXTURE_POPULATION_APPROVAL_REQUIRED");
   });
 
   const authorityTamperCases: readonly [
@@ -990,6 +1107,7 @@ describe("fixture-population CLI privacy", () => {
 
   it.each([
     "FIXTURE_POPULATION_APPROVAL_REQUIRED",
+    "FIXTURE_POPULATION_AUTHORITY_REQUIRED",
     "FIXTURE_POPULATION_APPROVAL_MISMATCH",
     "FIXTURE_POPULATION_CONFIRMATION_REQUIRED",
     "FIXTURE_POPULATION_DATABASE_CAPABILITY_PRESENT",
@@ -1745,6 +1863,29 @@ function resetRootBoundaryAudit(): void {
   rootBoundaryAudit.artifactContentReads = 0;
   rootBoundaryAudit.ledgerOrLockAccesses = 0;
   rootBoundaryAudit.mutationCalls = 0;
+}
+
+function resetSensitiveBoundaryAudit(): void {
+  for (const boundary of SENSITIVE_BOUNDARIES) {
+    sensitiveBoundaryAudit[boundary] = 0;
+  }
+}
+
+function zeroSensitiveBoundaryAudit(): typeof sensitiveBoundaryAudit {
+  return Object.freeze({
+    bootstrap: 0,
+    bootstrapProjection: 0,
+    cancellationAdapter: 0,
+    credentialGuard: 0,
+    databaseContext: 0,
+    databaseSingleton: 0,
+    lookupAdapter: 0,
+    prisma: 0,
+    prismaAdapter: 0,
+    providerOrchestration: 0,
+    refundWorkerCycle: 0,
+    refundWorkerRouter: 0,
+  });
 }
 
 function resetHmacContentAudit(): void {

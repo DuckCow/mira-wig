@@ -229,7 +229,10 @@ export function assertScenarioAuthorized(
   authority: EffectiveFixtureAuthority,
   scenarioId: H1Scenario,
 ): void {
-  if (authority.authorizedScenario && authority.authorizedScenario !== scenarioId) {
+  if (authority.authorizedScenario === null) {
+    throw failure("FIXTURE_POPULATION_AUTHORITY_REQUIRED");
+  }
+  if (authority.authorizedScenario !== scenarioId) {
     throw new Error("FIXTURE_SCENARIO_NOT_AUTHORIZED");
   }
 }
