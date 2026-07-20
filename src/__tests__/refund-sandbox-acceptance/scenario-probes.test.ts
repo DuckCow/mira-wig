@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -10,8 +10,6 @@ import {
   budgetRecordsFromPayload,
   protectedGetRequest,
   protectedPostRequest,
-  H1_CHANGED_CANCEL_REASON,
-  changedReasonDiffersOnlyByReason,
   type BudgetRecord,
   type S3CompletionClassification,
   type S3CompletionEvidence,
@@ -23,8 +21,11 @@ import {
 import { H1ArtifactStore } from "../../../scripts/refund-sandbox-acceptance/artifact-store";
 import {
   providerCommand,
+  runDatabaseCommand,
   type ProviderAdapterFactories,
 } from "../../../scripts/refund-sandbox-acceptance/cli-runtime";
+import { runCliAtRoot } from "../../../scripts/refund-sandbox-acceptance/cli";
+import { S4_PROVIDER_PROBE_RETIRED } from "../../../scripts/refund-sandbox-acceptance/contracts";
 import {
   assertExactS3ReplayCallHistory,
   classifyS3History,
@@ -42,10 +43,15 @@ import {
   type FixtureManifest,
   type ProviderFixture,
 } from "../../../scripts/refund-sandbox-acceptance/fixture-manifest";
+import type {
+  FixturePopulationApprovalRegistry,
+} from "../../../scripts/refund-sandbox-acceptance/fixture-population-approval";
 import {
   RunLedgerStore,
+  H1_LEDGER_FORMAT_VERSION,
   type H1LedgerPhase,
 } from "../../../scripts/refund-sandbox-acceptance/run-ledger";
+import { executeExplicitResumePost } from "../../../scripts/refund-sandbox-acceptance/resume-post";
 import { executeScenario } from "../../../scripts/refund-sandbox-acceptance/scenario-orchestrator";
 import type {
   TossRefundCancellationContact,
@@ -83,7 +89,6 @@ describe("refund SANDBOX provider-only probes", () => {
         posts.push(JSON.stringify(contact.wire.body));
         return Promise.resolve(successfulPost(fixture, TRANSACTION_KEY, contact.wire.path));
       },
-      probePost: () => Promise.reject(new Error("S3_PROBE_POST_FORBIDDEN")),
       s3Authority: plan.authority,
       s3Continuation: plan.continuation,
     }, { runId: RUN_ID, scenarioId: "S3", fixture });
@@ -102,32 +107,66 @@ describe("refund SANDBOX provider-only probes", () => {
     });
   });
 
-  it("preserves S4's existing two-GET/two-POST changed-reason behavior", async () => {
+  it("retires S4 changed-body contact before every provider dependency", async () => {
     const scenarioId = "S4";
-    const bootstrap = new AcceptanceBootstrap(db, "wig_platform_test");
-    const bootstrapSpy = vi.spyOn(bootstrap, "createOrLoad");
-    const requests: Array<Readonly<{ body: string; path: string }>> = [];
     const budget = new ProviderCallBudget();
     const fixture = fixtureFor(scenarioId);
-    const result = await executeScenario({
-      client: db,
-      bootstrap,
+    const lookup = vi.fn(() => Promise.reject(new Error("S4 must not GET")));
+    const cancellation = vi.fn(() => Promise.reject(new Error("S4 must not POST")));
+
+    await expect(executeProviderProbe({
+      budget,
+      probeAuthorization: "Basic redacted-test-only",
+      lookup,
+      cancellation,
+    }, { runId: RUN_ID, scenarioId, fixture }))
+      .rejects.toThrow("S4_CHANGED_BODY_PROVIDER_PROBE_RETIRED");
+
+    expect(lookup).not.toHaveBeenCalled();
+    expect(cancellation).not.toHaveBeenCalled();
+    expect(budget.counts(scenarioId)).toEqual({ GET: 0, POST: 0 });
+  });
+
+  it("retires S4 resume-post before lookup, cancellation, or ledger body replay", async () => {
+    const budget = new ProviderCallBudget();
+    const lookup = vi.fn(() => Promise.reject(new Error("S4 resume must not GET")));
+    const cancellation = vi.fn(() => Promise.reject(new Error("S4 resume must not POST")));
+    const fixture = fixtureFor("S4");
+
+    await expect(executeExplicitResumePost({
+      prisma: db,
+      scenarioId: "S4",
+      runId: RUN_ID,
+      fixture,
+      authorization: "unused",
+      lookup,
+      cancellation,
       budget,
       env: Object.freeze({}),
-      probeAuthorization: "Basic redacted-test-only",
-      lookup: () => Promise.resolve(eligibleLookup(fixture)),
-      cancellation: () => Promise.resolve(Object.freeze({ kind: "unknown" })),
-      probePost: (wire, body) => {
-        requests.push(Object.freeze({ body, path: wire.path }));
-        return Promise.resolve(Object.freeze({ kind: "success", body: "{}" }));
-      },
-    }, { runId: RUN_ID, scenarioId, fixture, ledgerPhase: "PLANNED" });
-    expect(result.ok).toBe(true);
-    expect(bootstrapSpy).not.toHaveBeenCalled();
-    expect(budget.counts(scenarioId)).toEqual({ GET: 2, POST: 2 });
-    expect(requests).toHaveLength(2);
-    expect(requests[0]?.path).toBe(requests[1]?.path);
-    assertChangedReasonOnly(requests);
+      ledger: Object.freeze({
+        formatVersion: H1_LEDGER_FORMAT_VERSION,
+        revision: 1,
+        previousLedgerHash: null,
+        runId: RUN_ID,
+        scenarioId: "S4",
+        phase: "HUMAN_POST_DECISION_REQUIRED",
+        repositoryCommit: "a".repeat(40),
+        runnerSourceHash: "b".repeat(64),
+        policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+        migrationFingerprint: "d".repeat(64),
+        scenarioInputHash: "e".repeat(64),
+        payload: Object.freeze({
+          canonicalBody: JSON.stringify({
+            cancelReason: "forged changed reason",
+            cancelAmount: fixture.amount,
+          }),
+        }),
+      }),
+    })).rejects.toThrow("S4_CHANGED_BODY_PROVIDER_PROBE_RETIRED");
+
+    expect(lookup).not.toHaveBeenCalled();
+    expect(cancellation).not.toHaveBeenCalled();
+    expect(budget.counts("S4")).toEqual({ GET: 0, POST: 0 });
   });
 
   it.each([
@@ -146,22 +185,12 @@ describe("refund SANDBOX provider-only probes", () => {
       probeAuthorization: "Basic redacted-test-only",
       lookup: () => Promise.resolve(eligibleLookup(fixture)),
       cancellation: post,
-      probePost: () => Promise.reject(new Error("S3_PROBE_POST_FORBIDDEN")),
       s3Authority: plan.authority,
       s3Continuation: plan.continuation,
     }, { runId: RUN_ID, scenarioId: "S3", fixture })).rejects.toThrow("S3_REPLAY_PROBE_FAILED");
     expect(post).toHaveBeenCalledTimes(1);
     expect(budget.intentCounts("S3")).toEqual({ GET: 1, POST: 1 });
     expect(classifyS3History(records, expectation).kind).toBe("FAILED");
-  });
-
-  it("pins the changed-reason probe to exactly the reason field", () => {
-    const wire = deriveTossRefundCancellationWireRequest({
-      paymentKey: "probe-payment",
-      providerOperationKey: deriveTossRefundOperationKey("mira-refund-probe-operation"),
-      cancelAmount: 1_000,
-    });
-    expect(changedReasonDiffersOnlyByReason(wire)).toBe(true);
   });
 
   it("keeps S6 dormant with a zero-call budget until the optional diagnostic is prepared", async () => {
@@ -184,12 +213,172 @@ describe("refund SANDBOX provider-only probes", () => {
       probeAuthorization: "unused",
       lookup: () => Promise.reject(new Error("S6 must not GET")),
       cancellation: () => Promise.reject(new Error("S6 must not POST")),
-      probePost: () => Promise.reject(new Error("S6 must not probe")),
     }, { runId: RUN_ID, scenarioId: "S6", fixture, ledgerPhase: "PLANNED" });
     expect(result.staticCodes).toEqual(["SKIPPED_NOT_AVAILABLE"]);
     expect(budget.counts("S6")).toEqual({ GET: 0, POST: 0 });
     expect(bootstrapSpy).not.toHaveBeenCalled();
   });
+});
+
+describe("S4 retirement provider boundaries", () => {
+  it.each(["execute", "resume", "resume-post"] as const)(
+    "rejects public CLI %s immediately after parsing",
+    async (command) => {
+      const temporary = await mkdtemp(join(tmpdir(), "mira-s4-retired-cli-"));
+      const inaccessibleRoot = join(temporary, "must-not-be-created", "artifact-root");
+      const environmentAccess = vi.fn(() => {
+        throw new Error("S4_ENVIRONMENT_MUST_NOT_BE_INSPECTED");
+      });
+      const authorityAccess = vi.fn(() => {
+        throw new Error("S4_FIXTURE_AUTHORITY_MUST_NOT_BE_INSPECTED");
+      });
+      const env = new Proxy<Readonly<Record<string, string | undefined>>>({}, {
+        get: environmentAccess,
+      });
+      const registry = new Proxy<FixturePopulationApprovalRegistry>(Object.freeze({
+        scope: "TEST_ONLY",
+        approvals: Object.freeze([]),
+      }), { get: authorityAccess });
+
+      try {
+        await expect(runCliAtRoot([
+          command, "--run", RUN_ID, "--scenario", "S4",
+        ], env, inaccessibleRoot, process.cwd(), {
+          fixtureAuthority: { approvalRegistry: registry },
+        })).rejects.toEqual(new Error(S4_PROVIDER_PROBE_RETIRED));
+
+        expect(environmentAccess).not.toHaveBeenCalled();
+        expect(authorityAccess).not.toHaveBeenCalled();
+        await expect(access(inaccessibleRoot)).rejects.toThrow();
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("gives direct and wrapped S4 calls zero GET or POST authority", async () => {
+    const fixture = fixtureFor("S4");
+    const lookup = vi.fn((_paymentKey: string, _authorization: string) => (
+      Promise.resolve(eligibleLookup(fixture))
+    ));
+    const cancellation = vi.fn((_contact: TossRefundCancellationContact) => (
+      Promise.resolve(successfulPost(fixture, TRANSACTION_KEY))
+    ));
+    let lookupContacts = 0;
+    let cancellationContacts = 0;
+    const lookupContact = <T>(contact: () => Promise<T>): Promise<T> => {
+      lookupContacts += 1;
+      return contact();
+    };
+    const cancellationContact = <T>(contact: () => Promise<T>): Promise<T> => {
+      cancellationContacts += 1;
+      return contact();
+    };
+    const lookupRecords: BudgetRecord[] = [];
+    const cancellationRecords: BudgetRecord[] = [];
+    const completion = vi.fn(() => evidence("INITIAL_GET_ELIGIBLE"));
+    const lookupBudget = new ProviderCallBudget(
+      (entry) => { lookupRecords.push(entry); return Promise.resolve(); },
+      [], undefined, undefined, lookupContact,
+    );
+    const cancellationBudget = new ProviderCallBudget(
+      (entry) => { cancellationRecords.push(entry); return Promise.resolve(); },
+      [], undefined, undefined, cancellationContact,
+    );
+    const wire = deriveTossRefundCancellationWireRequest({
+      paymentKey: fixture.paymentKey,
+      providerOperationKey: deriveTossRefundOperationKey("retired-s4-budget"),
+      cancelAmount: fixture.amount,
+    });
+
+    await expect(lookupBudget.invokeProtected(
+      "S4",
+      "GET",
+      protectedGetRequest(fixture.paymentKey),
+      () => lookup(fixture.paymentKey, "unused"),
+      completion,
+    )).rejects.toThrow("PROVIDER_BUDGET_EXCEEDED");
+    await expect(cancellationBudget.wrapCancellation("S4", cancellation)(Object.freeze({
+      authorization: "unused",
+      wire,
+    }))).rejects.toThrow("PROVIDER_BUDGET_EXCEEDED");
+
+    expect(lookup).not.toHaveBeenCalled();
+    expect(cancellation).not.toHaveBeenCalled();
+    expect(lookupContacts).toBe(0);
+    expect(cancellationContacts).toBe(0);
+    expect(completion).not.toHaveBeenCalled();
+    expect(lookupRecords).toEqual([]);
+    expect(cancellationRecords).toEqual([]);
+    expect(lookupBudget.intentCounts("S4")).toEqual({ GET: 0, POST: 0 });
+    expect(lookupBudget.counts("S4")).toEqual({ GET: 0, POST: 0 });
+    expect(cancellationBudget.intentCounts("S4")).toEqual({ GET: 0, POST: 0 });
+    expect(cancellationBudget.counts("S4")).toEqual({ GET: 0, POST: 0 });
+  });
+
+  it.each(["execute", "resume", "resume-post"] as const)(
+    "keeps lower S4 %s guards before credentials, database, adapters, artifacts, or contact",
+    async (command) => {
+      const environmentAccess = vi.fn(() => {
+        throw new Error("S4_ENVIRONMENT_MUST_NOT_BE_INSPECTED");
+      });
+      const artifactAccess = vi.fn(() => {
+        throw new Error("S4_ARTIFACT_MUST_NOT_BE_ACCESSED");
+      });
+      const contextAccess = vi.fn(() => {
+        throw new Error("S4_DATABASE_CONTEXT_MUST_NOT_BE_ACCESSED");
+      });
+      const manifestAccess = vi.fn(() => {
+        throw new Error("S4_MANIFEST_MUST_NOT_BE_ACCESSED");
+      });
+      const fixtureAccess = vi.fn(() => {
+        throw new Error("S4_FIXTURE_MUST_NOT_BE_ACCESSED");
+      });
+      let providerContacts = 0;
+      const providerContact = <T>(contact: () => Promise<T>): Promise<T> => {
+        providerContacts += 1;
+        return contact();
+      };
+      const adapterFactories = inertAdapterFactories();
+      const env = new Proxy<Readonly<Record<string, string | undefined>>>({}, {
+        get: environmentAccess,
+      });
+      const store = new Proxy(new H1ArtifactStore("/unreachable-s4-artifact", RUN_ID), {
+        get: artifactAccess,
+      });
+      const manifest = new Proxy(s4Manifest(), { get: manifestAccess });
+      const fixture = new Proxy(fixtureFor("S4"), { get: fixtureAccess });
+      const context = new Proxy(Object.freeze({
+        prisma: db,
+        bootstrap: new AcceptanceBootstrap(db, "wig_platform_test"),
+        ledger: new RunLedgerStore("/unreachable-s4-ledger"),
+        integrity: Object.freeze({
+          repositoryCommit: "a".repeat(40),
+          runnerSourceHash: "b".repeat(64),
+          policyHashes: Object.freeze({ policy: "c".repeat(64) }),
+          migrationFingerprint: "d".repeat(64),
+        }),
+        staleLockRecovered: false,
+        runProviderContact: providerContact,
+      }), { get: contextAccess });
+      const parsed = Object.freeze({ command, runId: RUN_ID, scenarioId: "S4" as const });
+
+      await expect(runDatabaseCommand(parsed, env, store, null, "/unreachable-s4-worktree"))
+        .rejects.toThrow("S4_CHANGED_BODY_PROVIDER_PROBE_RETIRED");
+      await expect(providerCommand(
+        parsed, env, store, manifest, context, fixture, adapterFactories.factories,
+      )).rejects.toThrow("S4_CHANGED_BODY_PROVIDER_PROBE_RETIRED");
+
+      expect(environmentAccess).not.toHaveBeenCalled();
+      expect(artifactAccess).not.toHaveBeenCalled();
+      expect(contextAccess).not.toHaveBeenCalled();
+      expect(manifestAccess).not.toHaveBeenCalled();
+      expect(fixtureAccess).not.toHaveBeenCalled();
+      expect(adapterFactories.createLookup).not.toHaveBeenCalled();
+      expect(adapterFactories.createCancellation).not.toHaveBeenCalled();
+      expect(providerContacts).toBe(0);
+    },
+  );
 });
 
 describe("S3 successful-prefix production continuation", () => {
@@ -708,29 +897,6 @@ describe("S3 deepest provider boundary", () => {
     await assertGenericS3InvocationRejected(harness, fixture, capability, request);
   });
 
-  it.each([
-    ["modified POST body", (request: BudgetRecord["request"]) => Object.freeze({
-      ...request,
-      canonicalBody: JSON.stringify({ cancelReason: "changed", cancelAmount: 1_000 }),
-    })],
-    ["changed operation key", (request: BudgetRecord["request"]) => Object.freeze({
-      ...request,
-      operationKey: deriveTossRefundOperationKey("different-operation"),
-    })],
-    ["changed fingerprint", (request: BudgetRecord["request"]) => Object.freeze({
-      ...request,
-      wireFingerprint: "f".repeat(64),
-    })],
-  ])("rejects the right POST capability with %s", async (_case, mutate) => {
-    const fixture = fixtureFor("S3");
-    const history = historyFor(RUN_ID, fixture, ["INITIAL_GET_ELIGIBLE"], hmacIdentity);
-    const harness = createBudgetHarness(history);
-    const capability = await nextCapability(harness, fixture);
-    await assertGenericS3InvocationRejected(
-      harness, fixture, capability, mutate(canonicalPostRequestFor(RUN_ID, fixture)), "POST",
-    );
-  });
-
   it("rejects a consumed capability when it is reused", async () => {
     const fixture = fixtureFor("S3");
     const harness = createBudgetHarness();
@@ -1083,16 +1249,6 @@ async function nextCapability(
   return harness.budget.authorizeS3Continuation(plan.authority);
 }
 
-function canonicalPostRequestFor(runId: string, fixture: ProviderFixture): BudgetRecord["request"] {
-  const expectation = createS3HistoryExpectation(runId, fixture);
-  const wire = deriveTossRefundCancellationWireRequest({
-    paymentKey: expectation.paymentKey,
-    providerOperationKey: expectation.providerOperationKey,
-    cancelAmount: expectation.cancelAmount,
-  });
-  return protectedPostRequest(wire, JSON.stringify(wire.body));
-}
-
 function evidence(
   classification: S3CompletionClassification,
   transactionIdentityHmac: string | null = null,
@@ -1328,6 +1484,20 @@ function fixtureFor(scenarioId: "S3" | "S4"): ProviderFixture {
   });
 }
 
+function s4Manifest(): FixtureManifest {
+  const fixture = fixtureFor("S4");
+  return Object.freeze({
+    formatVersion: H1_FIXTURE_FORMAT_VERSION,
+    runId: RUN_ID,
+    expectedMerchantAccountBinding: "unreachable-merchant",
+    expectedCredentialGenerationBinding: "unreachable-generation",
+    providerTruthNote: H1_PROVIDER_TRUTH_NOTE,
+    fixtures: Object.freeze({
+      S1: null, S2: null, S3: null, S4: fixture, S5: null, S6: null,
+    }),
+  });
+}
+
 function eligibleLookup(fixture: ProviderFixture): Extract<TossRefundLookupHttpResult, { kind: "response" }> {
   return Object.freeze({
     kind: "response",
@@ -1382,13 +1552,6 @@ function successfulBody(fixture: ProviderFixture, transactionKey: string) {
       cancelReason: "Mira merchant refund",
     }],
   };
-}
-
-function assertChangedReasonOnly(requests: readonly Readonly<{ body: string; path: string }>[]): void {
-  const first: unknown = JSON.parse(requests[0]?.body ?? "null");
-  const second: unknown = JSON.parse(requests[1]?.body ?? "null");
-  expect(first).toEqual({ cancelReason: "Mira merchant refund", cancelAmount: 1_000 });
-  expect(second).toEqual({ cancelReason: H1_CHANGED_CANCEL_REASON, cancelAmount: 1_000 });
 }
 
 function replaceRecord(

@@ -11,6 +11,7 @@ export type H1Scenario = (typeof H1_SCENARIOS)[number];
 
 const RUN_ID = /^sbx-\d{8}T\d{6}Z-[0-9a-f]{16}$/;
 const PROVIDER_COMMANDS: readonly H1Command[] = ["execute", "resume", "resume-post"];
+export const S4_PROVIDER_PROBE_RETIRED = "S4_CHANGED_BODY_PROVIDER_PROBE_RETIRED";
 const SCENARIO_COMMANDS: readonly H1Command[] = [
   "populate-fixtures", "execute", "resume", "resume-post", "seal",
 ];
@@ -125,6 +126,14 @@ function isH1Command(value: string | undefined): value is H1Command {
 
 export function commandCanContactProvider(command: H1Command): boolean {
   return PROVIDER_COMMANDS.includes(command);
+}
+
+export function assertS4ProviderCommandActive(
+  parsed: Readonly<Pick<ParsedH1Command, "command" | "scenarioId">>,
+): void {
+  if (parsed.scenarioId === "S4" && commandCanContactProvider(parsed.command)) {
+    throw new Error(S4_PROVIDER_PROBE_RETIRED);
+  }
 }
 
 export function requireRunAcknowledgement(

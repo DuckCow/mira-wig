@@ -7,7 +7,6 @@ import {
 } from "../../src/lib/payment/refund/providers/toss/refund-cancellation-response";
 import type {
   TossRefundLookupHttpResult,
-  TossRefundLookupPort,
 } from "../../src/lib/payment/refund/providers/toss/refund-lookup-http";
 import { extractTossRefundEligibilityResponse } from "../../src/lib/payment/refund/providers/toss/refund-lookup-response";
 import { normalizeTossRefundRecoveryLookup } from "../../src/lib/payment/refund/providers/toss/refund-recovery-lookup";
@@ -15,11 +14,8 @@ import { deriveTossRefundOperationKey } from "../../src/lib/payment/refund/provi
 import { fingerprintTossRefundWireRequest } from "../../src/lib/payment/refund/providers/toss/refund-wire-fingerprint";
 import {
   deriveTossRefundCancellationWireRequest,
-  type TossRefundCancellationWireRequest,
 } from "../../src/lib/payment/refund/providers/toss/refund-wire-request";
 import {
-  H1_CHANGED_CANCEL_REASON,
-  protectedPostRequest,
   type ProviderCallBudget,
   type S3CompletionEvidence,
   type S3Continuation,
@@ -34,15 +30,11 @@ import {
   type S3CommandAuthority,
 } from "./resume-planner";
 import type { ScenarioDependencies, ScenarioResult } from "./scenario-orchestrator";
-
-export type ProbePost = (
-  wire: TossRefundCancellationWireRequest,
-  canonicalBody: string,
-) => Promise<TossRefundCancellationTransportResult>;
+import { S4_PROVIDER_PROBE_RETIRED } from "./contracts";
 
 type ProbeDependencies = Pick<
   ScenarioDependencies,
-  "budget" | "lookup" | "cancellation" | "probePost" | "probeAuthorization"
+  "budget" | "lookup" | "cancellation" | "probeAuthorization"
 > & Readonly<{
   s3Authority?: S3CommandAuthority;
   s3Continuation?: S3Continuation;
@@ -53,7 +45,7 @@ export async function executeProviderProbe(
   input: Readonly<{ runId: string; scenarioId: "S3" | "S4"; fixture: ProviderFixture }>,
 ): Promise<ScenarioResult> {
   if (input.scenarioId === "S4") {
-    return executeS4Probe(dependencies, Object.freeze({ ...input, scenarioId: "S4" }));
+    throw s4ProviderProbeRetired();
   }
   return executeS3Probe(dependencies, Object.freeze({ ...input, scenarioId: "S3" }));
 }
@@ -137,20 +129,6 @@ async function executeFinalS3Lookup(
     (result) => finalLookupEvidence(result, fixture, dependencies.budget),
   );
   assertS3CompletedSteps(dependencies.budget, expectation, 4);
-}
-
-async function executeS4Probe(
-  dependencies: ProbeDependencies,
-  input: Readonly<{ runId: string; scenarioId: "S4"; fixture: ProviderFixture }>,
-): Promise<ScenarioResult> {
-  const lookup = dependencies.budget.wrapLookup("S4", dependencies.lookup);
-  const firstLookup = await lookup(input.fixture.paymentKey, dependencies.probeAuthorization);
-  assertProbeEligibility(firstLookup, input.fixture);
-  const request = probeRequest(input.runId, "S4", input.fixture);
-  await postS4Probe(dependencies.budget, dependencies.probePost, request.wire, request.firstBody);
-  await postS4Probe(dependencies.budget, dependencies.probePost, request.wire, request.secondBody);
-  await lookup(input.fixture.paymentKey, dependencies.probeAuthorization);
-  return s4ProbeResult(request);
 }
 
 function assertS3CompletedSteps(
@@ -247,19 +225,12 @@ function s3ReplayResult(request: ReturnType<typeof probeRequest>): ScenarioResul
   });
 }
 
-function s4ProbeResult(request: ReturnType<typeof probeRequest>): ScenarioResult {
-  return Object.freeze({
-    scenarioId: "S4",
-    ok: true,
-    staticCodes: Object.freeze(["CHANGED_REASON_OBSERVED"]),
-    operationKey: request.operationKey,
-    wireFingerprint: request.wireFingerprint,
-    limitations: Object.freeze([]),
-  });
-}
-
 function s3ProbeFailure(): Error {
   return new Error("S3_REPLAY_PROBE_FAILED");
+}
+
+function s4ProviderProbeRetired(): Error {
+  return new Error(S4_PROVIDER_PROBE_RETIRED);
 }
 
 function requireS3Authority(value: S3CommandAuthority | undefined): S3CommandAuthority {
@@ -279,7 +250,7 @@ function requireS3Cancellation(
   return value;
 }
 
-function probeRequest(runId: string, scenarioId: "S3" | "S4", fixture: ProviderFixture) {
+function probeRequest(runId: string, scenarioId: "S3", fixture: ProviderFixture) {
   const operationKey = deriveTossRefundOperationKey(`h1:${runId}:${scenarioId}`);
   const input = {
     paymentKey: fixture.paymentKey,
@@ -287,58 +258,11 @@ function probeRequest(runId: string, scenarioId: "S3" | "S4", fixture: ProviderF
     cancelAmount: fixture.amount,
   };
   const wire = deriveTossRefundCancellationWireRequest(input);
-  const { firstBody, secondBody } = probeCanonicalBodies(scenarioId, fixture.amount, wire);
   return Object.freeze({
     operationKey,
     wire,
-    firstBody,
-    secondBody,
     wireFingerprint: fingerprintTossRefundWireRequest(input),
   });
-}
-
-export function probeCanonicalBodies(
-  scenarioId: "S3" | "S4",
-  amount: number,
-  wire: TossRefundCancellationWireRequest,
-) {
-  const firstBody = JSON.stringify(wire.body);
-  const secondBody = scenarioId === "S4"
-    ? JSON.stringify({ cancelReason: H1_CHANGED_CANCEL_REASON, cancelAmount: amount })
-    : firstBody;
-  return Object.freeze({ firstBody, secondBody });
-}
-
-function postS4Probe(
-  budget: ProviderCallBudget,
-  port: ProbePost,
-  wire: TossRefundCancellationWireRequest,
-  body: string,
-): Promise<TossRefundCancellationTransportResult> {
-  return budget.invokeProtected(
-    "S4",
-    "POST",
-    protectedPostRequest(wire, body),
-    () => port(wire, body),
-  );
-}
-
-function assertProbeEligibility(
-  result: Awaited<ReturnType<TossRefundLookupPort>>,
-  fixture: ProviderFixture,
-): void {
-  if (result.kind !== "response") throw new Error("PROBE_ELIGIBILITY_UNAVAILABLE");
-  const parsed = extractTossRefundEligibilityResponse(result.body, {
-    paymentKey: fixture.paymentKey,
-    conservativeNoLaterThanLookupTimestamp: Date.now(),
-  });
-  if (parsed.kind !== "eligible" || parsed.facts.totalAmount !== fixture.amount) {
-    throw new Error("PROBE_ELIGIBILITY_MISMATCH");
-  }
-  const body = parseBody(result.body);
-  if (!isRecord(body) || body.orderId !== fixture.providerOrderId) {
-    throw new Error("PROBE_ORDER_IDENTITY_MISMATCH");
-  }
 }
 
 function parseBody(body: string): unknown {

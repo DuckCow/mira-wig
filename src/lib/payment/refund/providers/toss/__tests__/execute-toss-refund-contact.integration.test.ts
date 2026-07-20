@@ -6,8 +6,9 @@ import {
   RefundExecutionEvidenceOutcome,
   RefundExecutionEvidenceSource,
 } from "@prisma/client";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
+import { tossBasicAuthorization } from "@/lib/payment/providers/toss/auth";
 import { acquireRefundExecutionLease, type RefundExecutionLeaseHandle } from "../../../acquire-lease";
 import {
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
@@ -31,6 +32,8 @@ import { createTossRefundExecutionAuthorizer } from "../refund-authorization-orc
 import { createTossRefundContactExecutor } from "../refund-contact-orchestrator";
 import type { TossRefundCancellationPort } from "../refund-cancellation-http";
 import type { TossRefundLookupPort } from "../refund-lookup-http";
+import { deriveTossRefundOperationKey } from "../refund-operation-key";
+import { fingerprintTossRefundWireRequest } from "../refund-wire-fingerprint";
 
 const LEASE_ENV = { [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" };
 const CREDENTIALS = {
@@ -78,9 +81,18 @@ describe("executeTossRefundContact integration", () => {
   it("atomically marks contact, performs one POST, and applies coherent success", async () => {
     const authorized = await trackedAuthorizedFixture(fixtures);
     const calls = { get: 0, post: 0 };
+    const contacts: Parameters<TossRefundCancellationPort>[0][] = [];
+    const cancellation: TossRefundCancellationPort = (contact) => {
+      calls.post += 1;
+      contacts.push(contact);
+      return Promise.resolve({
+        kind: "success",
+        body: JSON.stringify(successBody(authorized.fixture)),
+      });
+    };
     const execute = executor(
       eligibleLookup(authorized.fixture, calls),
-      successfulCancellation(authorized.fixture, calls),
+      cancellation,
     );
     const result = await execute(db, contactInput(authorized), CONTACT_ENV);
 
@@ -92,6 +104,32 @@ describe("executeTossRefundContact integration", () => {
       outcome: "REFUND_SUCCEEDED",
     });
     expect(calls).toEqual({ get: 1, post: 1 });
+    const binding = await db.refundExecutionProviderOperationBinding.findUniqueOrThrow({
+      where: { refundAttemptId: authorized.fixture.refundAttemptId },
+    });
+    const operationKey = deriveTossRefundOperationKey(authorized.fixture.operationKey);
+    const expectedWire = {
+      method: "POST",
+      path: `/v1/payments/${encodeURIComponent(authorized.fixture.providerPaymentKey)}/cancel`,
+      contentType: "application/json",
+      idempotencyKey: operationKey,
+      body: {
+        cancelReason: "Mira merchant refund",
+        cancelAmount: authorized.fixture.targetAmount,
+      },
+    };
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0]?.authorization).toBe(tossBasicAuthorization(
+      CREDENTIALS.TOSS_SANDBOX_SECRET_KEY,
+    ));
+    expect(contacts[0]?.wire).toEqual(expectedWire);
+    expect(binding.providerOperationKey).toBe(operationKey);
+    expect(binding.wireRequestFingerprint).toBe(fingerprintTossRefundWireRequest({
+      paymentKey: authorized.fixture.providerPaymentKey,
+      providerOperationKey: operationKey,
+      cancelAmount: authorized.fixture.targetAmount,
+    }));
+    expect(JSON.stringify(contacts[0]?.wire.body)).toBe(JSON.stringify(expectedWire.body));
     const state = await contactState(authorized.fixture);
     expect(state.proofs).toHaveLength(1);
     expect(state.dispatch.state).toBe(RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED);
@@ -105,6 +143,50 @@ describe("executeTossRefundContact integration", () => {
     expect(state.command).toMatchObject({
       status: "DONE", leaseOwner: null, leaseUntil: null, leaseTokenHash: null,
     });
+  });
+
+  it.each([
+    ["payment target", async (fixture: DispatchFixture) => {
+      await db.payment.update({
+        where: { id: fixture.paymentId },
+        data: { providerPaymentKey: `${fixture.providerPaymentKey}_drift` },
+      });
+    }],
+    ["amount", async (fixture: DispatchFixture) => {
+      await db.refundAttempt.update({
+        where: { id: fixture.refundAttemptId },
+        data: { amount: fixture.targetAmount - 1 },
+      });
+    }],
+    ["operation key", async (fixture: DispatchFixture) => {
+      await db.refundExecutionProviderOperationBinding.update({
+        where: { refundAttemptId: fixture.refundAttemptId },
+        data: { providerOperationKey: deriveTossRefundOperationKey(`${fixture.operationKey}:drift`) },
+      });
+    }],
+    ["wire fingerprint", async (fixture: DispatchFixture) => {
+      await db.refundExecutionProviderOperationBinding.update({
+        where: { refundAttemptId: fixture.refundAttemptId },
+        data: { wireRequestFingerprint: "f".repeat(64) },
+      });
+    }],
+  ] as const)("rejects persisted %s drift before GET or POST", async (_label, drift) => {
+    const authorized = await trackedAuthorizedFixture(fixtures);
+    await drift(authorized.fixture);
+    const lookup = vi.fn<TossRefundLookupPort>(() => {
+      throw new Error("Persisted binding drift must not reach GET.");
+    });
+    const cancellation = vi.fn<TossRefundCancellationPort>(() => {
+      throw new Error("Persisted binding drift must not reach POST.");
+    });
+
+    const result = await executor(lookup, cancellation)(
+      db, contactInput(authorized), CONTACT_ENV,
+    );
+
+    expect(failureCode(result)).toBe("REFUND_LEDGER_INCONSISTENT");
+    expect(lookup).not.toHaveBeenCalled();
+    expect(cancellation).not.toHaveBeenCalled();
   });
 
   it("replays coherent finality before disabled gates, credentials, fences, GET, or POST", async () => {

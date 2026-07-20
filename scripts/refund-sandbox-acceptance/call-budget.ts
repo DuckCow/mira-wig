@@ -61,13 +61,12 @@ const LIMITS: Readonly<Record<H1Scenario, Readonly<{ GET: number; POST: number }
   S1: Object.freeze({ GET: 3, POST: 1 }),
   S2: Object.freeze({ GET: 4, POST: 1 }),
   S3: Object.freeze({ GET: 2, POST: 2 }),
-  S4: Object.freeze({ GET: 3, POST: 2 }),
+  S4: Object.freeze({ GET: 0, POST: 0 }),
   S5: Object.freeze({ GET: 4, POST: 1 }),
   S6: Object.freeze({ GET: 3, POST: 0 }),
 });
 const RUN_LIMIT = Object.freeze({ GET: 20, POST: 7 });
 const HEX_64 = /^[0-9a-f]{64}$/;
-export const H1_CHANGED_CANCEL_REASON = "Mira merchant refund H1 changed-reason probe";
 
 type AuthorizedS3Lookup = Readonly<{
   kind: "GET";
@@ -391,13 +390,6 @@ export async function createLedgerBudget(
     configuration.loadS3State,
     runProviderContact,
   );
-}
-
-export function changedReasonDiffersOnlyByReason(wire: TossRefundCancellationWireRequest): boolean {
-  const first = wire.body;
-  const second = { cancelReason: H1_CHANGED_CANCEL_REASON, cancelAmount: first.cancelAmount };
-  return first.cancelReason === TOSS_REFUND_CANCEL_REASON
-    && first.cancelAmount === second.cancelAmount && first.cancelReason !== second.cancelReason;
 }
 
 function countsFor(

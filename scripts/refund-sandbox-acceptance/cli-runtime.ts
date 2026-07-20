@@ -19,7 +19,7 @@ import {
   terminalizeS3History,
 } from "./cleanup";
 import {
-  commandCanContactProvider, requireRunAcknowledgement,
+  assertS4ProviderCommandActive, commandCanContactProvider, requireRunAcknowledgement,
   type ParsedH1Command,
 } from "./contracts";
 import { requireSandboxCredential } from "./credential-guard";
@@ -75,6 +75,7 @@ export async function runDatabaseCommand(
   worktree: string,
 ): Promise<Result> {
   if (!parsed.runId) throw new Error("RUN_ID_REQUIRED");
+  assertS4ProviderCommandActive(parsed);
   if (commandCanContactProvider(parsed.command)) requireRunAcknowledgement(env, parsed.runId);
   return withAcceptanceDatabase(env, store, worktree, (context) => handleLockedCommand(
     parsed, env, store, authority, context,
@@ -137,6 +138,7 @@ export async function providerCommand(
   fixture: ProviderFixture,
   adapterFactories: ProviderAdapterFactories = DEFAULT_PROVIDER_ADAPTER_FACTORIES,
 ): Promise<Result> {
+  assertS4ProviderCommandActive(parsed);
   if (parsed.scenarioId === "S3") {
     const latest = await initialLedger(context, parsed.scenarioId, fixture);
     return s3ProviderCommand(parsed, env, store, manifest, context, fixture, latest, adapterFactories);
@@ -323,12 +325,6 @@ async function resumePost(
   const code = await executeExplicitResumePost({
     prisma: context.prisma, scenarioId: parsed.scenarioId, runId: parsed.runId,
     fixture, authorization, lookup, cancellation, budget,
-    probePost: async (wire, canonicalBody) => {
-      const port = createTossRefundCancellationPort({
-        fetchFn: (request, init) => fetch(request, { ...init, body: canonicalBody }),
-      });
-      return port(Object.freeze({ authorization, wire }));
-    },
     env: acceptanceOperationEnv(env), ledger: latest,
   });
   await appendRuntimeLedger(context.ledger, await context.ledger.loadLatest(), "POST_RESPONSE_RECORDED", {
@@ -409,10 +405,6 @@ function scenarioDependencies(
       s3Continuation: s3Plan.continuation,
     } : {}),
     priorBootstrapHandle: protectedOwnershipOrNull(latest)?.handle,
-    probePost: async (wire: Parameters<ReturnType<typeof createTossRefundCancellationPort>>[0]["wire"], canonicalBody: string) => {
-      const port = createTossRefundCancellationPort({ fetchFn: (input, init) => fetch(input, { ...init, body: canonicalBody }) });
-      return port(Object.freeze({ authorization, wire }));
-    },
     recordDiscardedResponse: (response: unknown) => store.writeRaw(`${parsed.scenarioId}-discarded-response.json`, response).then(() => undefined),
     recordCrashAdjustment: (projection: unknown) => store.writeRaw(`${parsed.scenarioId}-crash-adjustment.json`, projection).then(() => undefined),
     recordLocalOwnership: async (ownership: Readonly<Record<string, unknown>>) => {

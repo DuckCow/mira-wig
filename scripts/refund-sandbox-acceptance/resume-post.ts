@@ -8,11 +8,10 @@ import type { TossRefundLookupPort } from "../../src/lib/payment/refund/provider
 import type { TossRefundCancellationPort } from "../../src/lib/payment/refund/providers/toss/refund-cancellation-http";
 import type { ProviderCallBudget } from "./call-budget";
 import { budgetRecordsFromPayload, protectedPostRequest } from "./call-budget";
-import type { H1Scenario } from "./contracts";
+import { S4_PROVIDER_PROBE_RETIRED, type H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
 import type { H1Ledger } from "./run-ledger";
 import { parseProtectedOwnership } from "./runtime-ledger";
-import { probeCanonicalBodies, type ProbePost } from "./scenario-probes";
 
 export async function executeExplicitResumePost(input: Readonly<{
   prisma: PrismaClient;
@@ -22,16 +21,16 @@ export async function executeExplicitResumePost(input: Readonly<{
   authorization: string;
   lookup: TossRefundLookupPort;
   cancellation: TossRefundCancellationPort;
-  probePost: ProbePost;
   budget: ProviderCallBudget;
   env: Readonly<Record<string, string | undefined>>;
   ledger: H1Ledger;
 }>): Promise<string> {
+  if (input.scenarioId === "S4") throw new Error(S4_PROVIDER_PROBE_RETIRED);
   const lookup = input.budget.wrapLookup(input.scenarioId, input.lookup);
-  const cancellation = input.budget.wrapCancellation(input.scenarioId, input.cancellation);
-  if (input.scenarioId === "S3" || input.scenarioId === "S4") {
-    return resumeProbe(input, input.scenarioId, lookup);
+  if (input.scenarioId === "S3") {
+    return resumeS3Probe(input, lookup, input.cancellation);
   }
+  const cancellation = input.budget.wrapCancellation(input.scenarioId, input.cancellation);
   const ownership = parseProtectedOwnership(input.ledger);
   if (!ownership.refund) throw new Error("RESUME_POST_LEDGER_INVALID");
   await assertLocalResumeIdentity(input, ownership.refund.refundAttemptId);
@@ -64,19 +63,19 @@ async function assertLocalResumeIdentity(
   }
 }
 
-async function resumeProbe(
+async function resumeS3Probe(
   input: Parameters<typeof executeExplicitResumePost>[0],
-  scenarioId: "S3" | "S4",
   lookup: TossRefundLookupPort,
+  cancellation: TossRefundCancellationPort,
 ): Promise<string> {
-  const operationKey = deriveTossRefundOperationKey(`h1:${input.runId}:${scenarioId}`);
+  const operationKey = deriveTossRefundOperationKey(`h1:${input.runId}:S3`);
   const wireInput = {
     paymentKey: input.fixture.paymentKey,
     providerOperationKey: operationKey,
     cancelAmount: input.fixture.amount,
   };
   const wire = deriveTossRefundCancellationWireRequest(wireInput);
-  const expectedBody = probeCanonicalBodies(scenarioId, input.fixture.amount, wire).secondBody;
+  const expectedBody = JSON.stringify(wire.body);
   if (!matchesLastPost(input.ledger, protectedPostRequest(wire, expectedBody))) {
     throw new Error("RESUME_POST_IDENTITY_MISMATCH");
   }
@@ -86,10 +85,10 @@ async function resumeProbe(
     conservativeNoLaterThanLookupTimestamp: Date.now(),
   }).kind !== "eligible") throw new Error("RESUME_POST_ELIGIBILITY_REQUIRED");
   await input.budget.invokeProtected(
-    input.scenarioId,
+    "S3",
     "POST",
     protectedPostRequest(wire, expectedBody),
-    () => input.probePost(wire, expectedBody),
+    () => cancellation(Object.freeze({ authorization: input.authorization, wire })),
   );
   return "RESUME_POST_COMPLETE";
 }

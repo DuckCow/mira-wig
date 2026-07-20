@@ -8,7 +8,8 @@ import {
 } from "./atomic-files";
 import { H1_ARTIFACT_PARENT, H1ArtifactStore } from "./artifact-store";
 import {
-  generateRunId, H1ContractError, parseH1Command, requirePurgeAcknowledgement,
+  assertS4ProviderCommandActive, generateRunId, H1ContractError, parseH1Command,
+  requirePurgeAcknowledgement,
 } from "./contracts";
 import {
   assertLedgerMatchesFixtureAuthority,
@@ -48,6 +49,7 @@ export async function runCli(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<Readonly<{ code: string; runId?: string }> | FixturePopulationResult> {
   const parsed = parseH1Command(argv);
+  assertS4ProviderCommandActive(parsed);
   if (parsed.command === "populate-fixtures") {
     let root: string;
     try {
@@ -68,13 +70,15 @@ export async function runCliAtRoot(
   worktree = WORKTREE,
   dependencies: CliDependencies = Object.freeze({}),
 ): Promise<Readonly<{ code: string; runId?: string }> | FixturePopulationResult> {
+  const parsed = parseH1Command(argv);
+  assertS4ProviderCommandActive(parsed);
   if (dependencies.fixturePopulation?.approvalRegistry) {
     await assertApprovalRegistryRootSafe(dependencies.fixturePopulation.approvalRegistry, root);
   }
   if (dependencies.fixtureAuthority?.approvalRegistry) {
     await assertApprovalRegistryRootSafe(dependencies.fixtureAuthority.approvalRegistry, root);
   }
-  return runParsedCli(parseH1Command(argv), env, root, worktree, dependencies);
+  return runParsedCli(parsed, env, root, worktree, dependencies);
 }
 
 export async function runCliProcess(
@@ -102,6 +106,7 @@ async function runParsedCli(
   worktree: string,
   dependencies: CliDependencies,
 ): Promise<Readonly<{ code: string; runId?: string }> | FixturePopulationResult> {
+  assertS4ProviderCommandActive(parsed);
   if (parsed.command === "populate-fixtures") {
     return populateFixtures(root, parsed, env, dependencies.fixturePopulation);
   }

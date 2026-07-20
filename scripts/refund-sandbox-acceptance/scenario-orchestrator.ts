@@ -19,7 +19,7 @@ import { ProviderCallBudget } from "./call-budget";
 import type { H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
 import type { H1LedgerPhase } from "./run-ledger";
-import { executeProviderProbe, type ProbePost } from "./scenario-probes";
+import { executeProviderProbe } from "./scenario-probes";
 
 export const S2_LIMITATION = "This simulates a provider response received by the process but lost before durable application. It is not a TCP-level response-loss simulation.";
 export const S5_LIMITATION = "This proves the application ordinal-2 recontact path. The provider observes only one cancellation POST in S5. Provider duplicate-POST behavior is tested by S3.";
@@ -29,7 +29,6 @@ export type ScenarioDependencies = Readonly<{
   bootstrap: AcceptanceBootstrap;
   lookup: TossRefundLookupPort;
   cancellation: TossRefundCancellationPort;
-  probePost: ProbePost;
   budget: ProviderCallBudget;
   env: Readonly<Record<string, string | undefined>>;
   probeAuthorization: string;

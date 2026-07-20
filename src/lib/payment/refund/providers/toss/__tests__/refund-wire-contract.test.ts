@@ -40,6 +40,22 @@ describe("Toss refund cancellation wire request", () => {
     expect(typeof body.cancelAmount).toBe("number");
   });
 
+  it("re-derives an unchanged retry byte-identically from differently ordered input fields", () => {
+    const firstInput = wireInput();
+    const retryInput = {
+      cancelAmount: firstInput.cancelAmount,
+      providerOperationKey: firstInput.providerOperationKey,
+      paymentKey: firstInput.paymentKey,
+    };
+    const first = deriveTossRefundCancellationWireRequest(firstInput);
+    const retry = deriveTossRefundCancellationWireRequest(retryInput);
+
+    expect(retry).toEqual(first);
+    expect(JSON.stringify(retry.body)).toBe(JSON.stringify(first.body));
+    expect(fingerprintTossRefundWireRequest(retryInput))
+      .toBe(fingerprintTossRefundWireRequest(firstInput));
+  });
+
   it("keeps tax, currency, refundable amount, and receive account off the wire body", () => {
     const body = deriveTossRefundCancellationWireRequest(wireInput()).body;
     const keys = Object.keys(body);
@@ -62,6 +78,8 @@ describe("Toss refund cancellation wire request", () => {
     null,
     [],
     { ...wireInput(), extra: "field" },
+    { ...wireInput(), cancelReason: "changed" },
+    { ...wireInput(), canonicalBody: '{"cancelReason":"changed","cancelAmount":85000}' },
     { paymentKey: "toss-payment-1", providerOperationKey: OPERATION_KEY },
     wireInput({ paymentKey: "key\nvalue" }),
     wireInput({ providerOperationKey: "refund:local:key" }),
@@ -104,6 +122,18 @@ describe("Toss refund wire fingerprint", () => {
     const fingerprint = fingerprintTossRefundWireRequest(wireInput({ cancelAmount: 1 }));
 
     expect(/^[0-9a-f]{64}$/.test(fingerprint)).toBe(true);
+  });
+
+  it.each([
+    ["amount", wireInput({ cancelAmount: 84_999 })],
+    ["payment target", wireInput({ paymentKey: "toss-payment-2" })],
+  ])("changes the wire identity when the same operation key is rebound to a different %s", (
+    _field,
+    changed,
+  ) => {
+    expect(changed.providerOperationKey).toBe(OPERATION_KEY);
+    expect(fingerprintTossRefundWireRequest(changed)).not
+      .toBe(fingerprintTossRefundWireRequest(wireInput()));
   });
 });
 

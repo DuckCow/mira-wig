@@ -371,6 +371,10 @@ key, a changed body, or a different credential generation is forbidden. Contact 
 immediate single Toss invocation MUST remain inseparable: after the V3 contact transaction commits,
 only that winner continuation may invoke Toss once for that physical ordinal.
 
+Changed-body behavior under the same provider operation identity is undocumented and deliberately
+not probed. Mira rejects any reason, amount, payment target, canonical body, or fingerprint drift
+locally before transport; exact unchanged replay is the only permitted same-key provider retry.
+
 For `IDEMPOTENT_REQUEST_PROCESSING`, E3C SHALL own a bounded wait, supplementary payment lookup,
 and later exact same-key replay. It MUST NOT tight-loop. This policy grants recovery authority but
 does not implement it.
@@ -449,7 +453,7 @@ or dispatch/contact history. LIVE requires a separate policy/activation act and 
 | Explicit full `cancelAmount` | Full untouched balance | Amount accepted as full cancel | Full-only, never partial policy | Exact fingerprint/body | Required pass |
 | Same-key response-loss replay | Controlled response loss after contact | Same response for same scoped request | Same attempt, new ordinal, no duplicate money effect | Two contact histories, one binding/evidence identity | Required pass |
 | Concurrent same-key processing | First request in flight | Documented 409 may occur | `UNKNOWN`, bounded later recovery | Safe code only, contact history | Required pass or reproducible provider evidence |
-| Same key, changed body | Local attempt to change amount/reason | Provider behavior is `UNDOCUMENTED` | Reject locally before contact | No new contact row | Mandatory deterministic test and SANDBOX protection test |
+| Same key, changed body | Local attempt to change amount/reason | Provider behavior is `UNDOCUMENTED` and deliberately not probed | Reject locally before contact | No new contact row | Mandatory provider-free deterministic contract test |
 | Lookup before cancel | Fresh eligible Payment | `DONE`, full balance, no cancels | Eligibility gate passes | Minimal normalized eligibility facts | Required pass |
 | Lookup after cancel | Successfully canceled Payment | `CANCELED`, zero balance, one cancel | Conflict detector and attribution input | Normalized observation only | Required pass |
 | Sole `transactionKey` stability | Compare initial response, same-key replay, lookup | Stability is `UNDOCUMENTED` | Values MUST agree for activation | Redacted evidence record; no raw bodies | SANDBOX activation blocker |
@@ -470,7 +474,7 @@ Testing layers SHALL remain distinct:
 4. a future LIVE canary requires separate authority.
 
 Changed-payload behavior for one idempotency key is officially `UNDOCUMENTED`; local fingerprint
-rejection is mandatory and SANDBOX changed-body protection MUST be tested. `transactionKey`
+rejection is mandatory and MUST be tested without provider contact. `transactionKey`
 stability across response, replay, and lookup is also `UNDOCUMENTED`; captured SANDBOX evidence is
 required before contact activation.
 
@@ -514,7 +518,7 @@ recovery, and audit. Tests MUST use safe booleans, redacted sentinels, and bound
 | Same-key recovery absent | No | No | No | Yes | Yes | Yes |
 | Numerical recovery safety margin absent | No | No | No | Yes | Yes | Yes |
 | `transactionKey` SANDBOX stability unverified | No | No | No | No | Yes | Yes |
-| Changed-body provider behavior undocumented | No | No, local fence required | No, local fence required | No, local fence required | Yes, protection test required | Yes |
+| Changed-body provider behavior undocumented | No | No, local fence required | No, local fence required | No, local fence required | No, provider-free local rejection required | No, provider-free local rejection required |
 | Production refund migrations undeployed | No | No for dormant design | No for dormant design | No for dormant design | Yes | Yes |
 
 Undeployed production refund migrations block activation, but do not block this policy document or

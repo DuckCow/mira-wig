@@ -72,7 +72,6 @@ describe("refund SANDBOX fake-only application scenarios", () => {
         posts += 1;
         return Promise.resolve(Object.freeze({ kind: "unknown" }));
       },
-      probePost: () => Promise.resolve(Object.freeze({ kind: "unknown" })),
       budget,
       env: acceptanceOperationEnv(credentialEnv()),
       probeAuthorization: "unused",
@@ -113,7 +112,6 @@ async function executeFakeScenario(scenarioId: ScenarioId, onDiscard = () => und
       kind: "success",
       body: JSON.stringify(successBody(fixture, suffix)),
     })),
-    probePost: () => Promise.resolve(Object.freeze({ kind: "unknown" })),
     budget,
     env: acceptanceOperationEnv(credentialEnv()),
     probeAuthorization: "unused-fake-authorization",
