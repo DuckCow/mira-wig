@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS,
   normalizeRefundExecutionWorkerCycleInput,
+  workerCycleStopped,
   workerCycleSuccess,
   workerFailure,
   type RefundExecutionWorkerCycleCounters,
@@ -64,10 +66,16 @@ describe("refund execution worker contract", () => {
 
   it("returns exact frozen, non-sensitive public success and failure shapes", () => {
     const success = workerCycleSuccess(ZERO_COUNTERS);
+    const stopped = workerCycleStopped(ZERO_COUNTERS);
     const failure = workerFailure("SYSTEMIC_FAILURE");
     expect(Object.keys(success.cycle)).toEqual(Object.keys(ZERO_COUNTERS));
     expect(Object.isFrozen(success)).toBe(true);
     expect(Object.isFrozen(success.cycle)).toBe(true);
+    expect(stopped).toEqual({ ok: true, stopped: true, cycle: ZERO_COUNTERS });
+    expect(Object.isFrozen(stopped)).toBe(true);
+    expect(Object.isFrozen(stopped.cycle)).toBe(true);
+    expect(EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS).toEqual(ZERO_COUNTERS);
+    expect(Object.isFrozen(EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS)).toBe(true);
     expect(Object.isFrozen(failure)).toBe(true);
     expect(JSON.stringify({ success, failure })).not.toMatch(
       /commandId|leaseToken|leaseGeneration|paymentKey|providerRefundId|rawError/,

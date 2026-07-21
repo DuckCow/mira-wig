@@ -1,13 +1,18 @@
 import { pathToFileURL } from "node:url";
 import { defaultRefundExecutionWorkerHostDependencies } from "../src/lib/payment/refund/run-refund-execution-worker-host";
+import { createProcessRefundExecutionWorkerHostLifecycle } from "../src/lib/payment/refund/worker-host-lifecycle";
 import { runRefundExecutionWorkerProcess } from "../src/lib/payment/refund/worker-host-process";
 
 export async function main(): Promise<number> {
+  const dependencies = Object.freeze({
+    ...defaultRefundExecutionWorkerHostDependencies,
+    createLifecycle: createProcessRefundExecutionWorkerHostLifecycle,
+  });
   const exitCode = await runRefundExecutionWorkerProcess(
     process.argv.slice(2),
     process.env,
     { stdout: process.stdout, stderr: process.stderr },
-    defaultRefundExecutionWorkerHostDependencies,
+    dependencies,
   );
   process.exitCode = exitCode;
   return exitCode;

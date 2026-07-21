@@ -17,6 +17,13 @@ import {
   runRefundExecutionWorkerHost,
 } from "../run-refund-execution-worker-host";
 import {
+  createRefundExecutionWorkerHostLifecycle,
+  REFUND_EXECUTION_WORKER_COOPERATIVE_BUDGET_MS,
+  type RefundExecutionWorkerDrainReason,
+  type RefundExecutionWorkerHostSignal,
+  type RefundExecutionWorkerLifecycleRuntime,
+} from "../worker-host-lifecycle";
+import {
   cleanupDispatchFixtures,
   createDispatchFixture,
   type DispatchFixture,
@@ -119,10 +126,147 @@ describe("refund execution one-shot host integration", () => {
       select: { status: true },
     })).toEqual({ status: "DONE" });
   });
+
+  it.each(["SIGNAL", "BUDGET"] as const)(
+    "drains for %s during an in-flight candidate and safely processes the untouched candidate later",
+    async (reason) => {
+      const first = await createTossFixture(new Date("2020-01-01T00:00:00.000Z"));
+      const second = await createTossFixture(new Date("2020-01-02T00:00:00.000Z"));
+      const calls = { get: 0, post: 0 };
+      const started = deferred();
+      const release = deferred();
+      const lifecycle = integrationLifecycle(reason);
+      const ports = inFlightPorts([first, second], calls, started.resolve, release.promise);
+      const fetchPoison = vi.fn(() => { throw new Error("GLOBAL_NETWORK_FORBIDDEN"); });
+      vi.stubGlobal("fetch", fetchPoison);
+      let disconnects = 0;
+
+      const operation = runRefundExecutionWorkerHost(RUN_ONCE, enabledEnv(), {
+        ...defaultRefundExecutionWorkerHostDependencies,
+        createLifecycle: () => lifecycle.lifecycle,
+        createWorkerDependencies: () => ports,
+        disconnectDatabase: async (database) => {
+          disconnects += 1;
+          await defaultRefundExecutionWorkerHostDependencies.disconnectDatabase(database);
+        },
+      });
+      await started.promise;
+      expect(calls).toEqual({ get: 2, post: 1 });
+      lifecycle.requestDrain();
+      release.resolve();
+
+      expect(await operation).toEqual({
+        ok: true,
+        code: "LIFECYCLE_DRAINED",
+        reason,
+        cycle: {
+          ...emptyCounters(),
+          selectedCount: 1,
+          attemptedCount: 1,
+          succeededCount: 1,
+          readySelected: 1,
+        },
+      });
+      expect(calls).toEqual({ get: 2, post: 1 });
+      expect(disconnects).toBe(1);
+      expect(lifecycle.cleanup).toEqual(lifecycleCleanupCounts());
+      expect(fetchPoison).not.toHaveBeenCalled();
+      await expectCommandStatus(first, "DONE");
+      await expectCommandStatus(second, "READY");
+
+      const laterCalls = { get: 0, post: 0 };
+      const later = await runRefundExecutionWorkerHost(RUN_ONCE, enabledEnv(), {
+        ...defaultRefundExecutionWorkerHostDependencies,
+        createWorkerDependencies: () => fakePortsForFixtures([first, second], laterCalls),
+      });
+
+      expect(later).toEqual({
+        ok: true,
+        code: "CYCLE_COMPLETE",
+        cycle: {
+          ...emptyCounters(),
+          selectedCount: 1,
+          attemptedCount: 1,
+          succeededCount: 1,
+          readySelected: 1,
+        },
+      });
+      expect(laterCalls).toEqual({ get: 2, post: 1 });
+      await expectCommandStatus(second, "DONE");
+      expect(fetchPoison).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps an in-flight systemic cycle failure ahead of a pending signal drain", async () => {
+    const fixture = await createTossFixture();
+    const started = deferred();
+    const release = deferred();
+    const lifecycle = integrationLifecycle("SIGNAL");
+    const lookup: TossRefundLookupPort = async () => {
+      started.resolve();
+      await release.promise;
+      throw new Error("IN_FLIGHT_PROVIDER_FAKE_SECRET");
+    };
+    const cancellation: TossRefundCancellationPort = () => {
+      throw new Error("CANCELLATION_MUST_NOT_RUN");
+    };
+
+    const operation = runRefundExecutionWorkerHost(RUN_ONCE, enabledEnv(), {
+      ...defaultRefundExecutionWorkerHostDependencies,
+      createLifecycle: () => lifecycle.lifecycle,
+      createWorkerDependencies: () => Object.freeze({ lookup, cancellation }),
+    });
+    await started.promise;
+    lifecycle.requestDrain();
+    release.resolve();
+
+    const result = await operation;
+    expect(result).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(JSON.stringify(result)).not.toContain("IN_FLIGHT_PROVIDER_FAKE_SECRET");
+    expect(lifecycle.cleanup).toEqual(lifecycleCleanupCounts());
+    await expectCommandStatus(fixture, "LEASED");
+  });
+
+  it("lets disconnect failure override an in-flight drained cycle and still cleans lifecycle", async () => {
+    const first = await createTossFixture(new Date("2020-03-01T00:00:00.000Z"));
+    const second = await createTossFixture(new Date("2020-03-02T00:00:00.000Z"));
+    const calls = { get: 0, post: 0 };
+    const started = deferred();
+    const release = deferred();
+    const lifecycle = integrationLifecycle("SIGNAL");
+    let disconnects = 0;
+
+    const operation = runRefundExecutionWorkerHost(RUN_ONCE, enabledEnv(), {
+      ...defaultRefundExecutionWorkerHostDependencies,
+      createLifecycle: () => lifecycle.lifecycle,
+      createWorkerDependencies: () => inFlightPorts(
+        [first, second], calls, started.resolve, release.promise,
+      ),
+      disconnectDatabase: async (database) => {
+        disconnects += 1;
+        await defaultRefundExecutionWorkerHostDependencies.disconnectDatabase(database);
+        throw new Error("DISCONNECT_SECRET");
+      },
+    });
+    await started.promise;
+    lifecycle.requestDrain();
+    release.resolve();
+
+    expect(await operation).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(disconnects).toBe(1);
+    expect(calls).toEqual({ get: 2, post: 1 });
+    expect(lifecycle.cleanup).toEqual(lifecycleCleanupCounts());
+    await expectCommandStatus(first, "DONE");
+    await expectCommandStatus(second, "READY");
+  });
 });
 
-async function createTossFixture(): Promise<DispatchFixture> {
-  const fixture = await createDispatchFixture({ totalAmount: 85_000, targetAmount: 85_000 });
+async function createTossFixture(availableAt?: Date): Promise<DispatchFixture> {
+  const fixture = await createDispatchFixture({
+    totalAmount: 85_000,
+    targetAmount: 85_000,
+    availableAt,
+  });
   fixtures.push(fixture);
   await Promise.all([
     db.payment.update({
@@ -149,6 +293,70 @@ function fakePorts(fixture: DispatchFixture | null, calls: { get: number; post: 
     return Promise.resolve({ kind: "success", body: JSON.stringify(successBody(fixture)) });
   };
   return { dependencies: Object.freeze({ lookup, cancellation }) };
+}
+
+function fakePortsForFixtures(
+  candidates: readonly DispatchFixture[],
+  calls: { get: number; post: number },
+) {
+  const cancelled = new Set<string>();
+  const lookup: TossRefundLookupPort = (paymentKey) => {
+    calls.get += 1;
+    const fixture = fixtureForPaymentKey(candidates, paymentKey);
+    const body = cancelled.has(paymentKey) ? successBody(fixture) : eligibleBody(fixture);
+    return Promise.resolve({ kind: "response", body: JSON.stringify(body) });
+  };
+  const cancellation: TossRefundCancellationPort = (contact) => {
+    calls.post += 1;
+    const fixture = fixtureForContact(candidates, contact.wire.path);
+    cancelled.add(fixture.providerPaymentKey);
+    return Promise.resolve({ kind: "success", body: JSON.stringify(successBody(fixture)) });
+  };
+  return Object.freeze({ lookup, cancellation });
+}
+
+function inFlightPorts(
+  candidates: readonly DispatchFixture[],
+  calls: { get: number; post: number },
+  markStarted: () => void,
+  release: Promise<void>,
+) {
+  const cancelled = new Set<string>();
+  const lookup: TossRefundLookupPort = (paymentKey) => {
+    calls.get += 1;
+    const fixture = fixtureForPaymentKey(candidates, paymentKey);
+    const body = cancelled.has(paymentKey) ? successBody(fixture) : eligibleBody(fixture);
+    return Promise.resolve({ kind: "response", body: JSON.stringify(body) });
+  };
+  const cancellation: TossRefundCancellationPort = async (contact) => {
+    calls.post += 1;
+    const fixture = fixtureForContact(candidates, contact.wire.path);
+    markStarted();
+    await release;
+    cancelled.add(fixture.providerPaymentKey);
+    return Object.freeze({ kind: "success", body: JSON.stringify(successBody(fixture)) });
+  };
+  return Object.freeze({ lookup, cancellation });
+}
+
+function fixtureForPaymentKey(
+  fixturesToSearch: readonly DispatchFixture[],
+  paymentKey: string,
+): DispatchFixture {
+  const fixture = fixturesToSearch.find((candidate) => candidate.providerPaymentKey === paymentKey);
+  if (!fixture) throw new Error("UNKNOWN_FAKE_PAYMENT_KEY");
+  return fixture;
+}
+
+function fixtureForContact(
+  fixturesToSearch: readonly DispatchFixture[],
+  path: string,
+): DispatchFixture {
+  const fixture = fixturesToSearch.find((candidate) => (
+    path.includes(encodeURIComponent(candidate.providerPaymentKey))
+  ));
+  if (!fixture) throw new Error("UNKNOWN_FAKE_CONTACT_PATH");
+  return fixture;
 }
 
 function enabledEnv(): Readonly<Record<string, string | undefined>> {
@@ -228,6 +436,91 @@ async function readRefundMutationSnapshot() {
     db.refundExecutionProviderEligibilityProof.count(),
     db.refundExecutionEvidence.count(),
   ]);
+}
+
+type LifecycleTimer = Readonly<{ id: "integration-lifecycle-budget" }>;
+
+function integrationLifecycle(reason: RefundExecutionWorkerDrainReason) {
+  const listeners = new Map<RefundExecutionWorkerHostSignal, Set<() => void>>();
+  const cleanup = emptyLifecycleCleanupCounts();
+  let timerListener: (() => void) | null = null;
+  const runtime: RefundExecutionWorkerLifecycleRuntime<LifecycleTimer> = Object.freeze({
+    addSignalListener: (signal, listener) => {
+      if (signal === "SIGTERM") cleanup.sigtermRegistered += 1;
+      if (signal === "SIGINT") cleanup.sigintRegistered += 1;
+      const registered = listeners.get(signal) ?? new Set<() => void>();
+      registered.add(listener);
+      listeners.set(signal, registered);
+    },
+    removeSignalListener: (signal, listener) => {
+      if (signal === "SIGTERM") cleanup.sigtermRemoved += 1;
+      if (signal === "SIGINT") cleanup.sigintRemoved += 1;
+      listeners.get(signal)?.delete(listener);
+    },
+    setTimer: (listener, delayMs) => {
+      expect(delayMs).toBe(REFUND_EXECUTION_WORKER_COOPERATIVE_BUDGET_MS);
+      cleanup.timerRegistered += 1;
+      timerListener = listener;
+      return Object.freeze({ id: "integration-lifecycle-budget" as const });
+    },
+    clearTimer: () => {
+      cleanup.timerCleared += 1;
+      timerListener = null;
+    },
+  });
+  const lifecycle = createRefundExecutionWorkerHostLifecycle(runtime);
+  return {
+    lifecycle,
+    cleanup,
+    requestDrain: () => {
+      if (reason === "BUDGET") {
+        timerListener?.();
+        return;
+      }
+      for (const listener of listeners.get("SIGTERM") ?? []) listener();
+    },
+  };
+}
+
+function lifecycleCleanupCounts() {
+  return {
+    timerRegistered: 1,
+    timerCleared: 1,
+    sigtermRegistered: 1,
+    sigtermRemoved: 1,
+    sigintRegistered: 1,
+    sigintRemoved: 1,
+  };
+}
+
+function emptyLifecycleCleanupCounts() {
+  return {
+    timerRegistered: 0,
+    timerCleared: 0,
+    sigtermRegistered: 0,
+    sigtermRemoved: 0,
+    sigintRegistered: 0,
+    sigintRemoved: 0,
+  };
+}
+
+function deferred() {
+  let resolvePromise: (() => void) | null = null;
+  const promise = new Promise<void>((resolve) => { resolvePromise = resolve; });
+  return Object.freeze({
+    promise,
+    resolve: () => resolvePromise?.(),
+  });
+}
+
+async function expectCommandStatus(
+  fixture: DispatchFixture,
+  status: "READY" | "LEASED" | "DONE",
+): Promise<void> {
+  await expect(db.refundExecutionCommand.findUniqueOrThrow({
+    where: { id: fixture.commandId },
+    select: { status: true },
+  })).resolves.toEqual({ status });
 }
 
 function requireDisposableDatabaseUrl(value: string | undefined): string {

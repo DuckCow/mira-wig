@@ -8,6 +8,8 @@ const ROOT = process.cwd();
 const REFUND_ROOT = join(ROOT, "src", "lib", "payment", "refund");
 const CYCLE = join(REFUND_ROOT, "run-refund-execution-worker-cycle.ts");
 const HOST = join(REFUND_ROOT, "run-refund-execution-worker-host.ts");
+const HOST_CONTRACT = join(REFUND_ROOT, "worker-host-contract.ts");
+const LIFECYCLE = join(REFUND_ROOT, "worker-host-lifecycle.ts");
 const PROCESS = join(REFUND_ROOT, "worker-host-process.ts");
 const SCRIPT = join(ROOT, "scripts", "refund-execution-worker.ts");
 const SOURCE_EXTENSIONS = Object.freeze([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] as const);
@@ -20,6 +22,9 @@ const EXCLUDED_PRODUCTION_DIRECTORIES = Object.freeze([
 ] as const);
 const TEST_ONLY_DIRECTORIES = Object.freeze(["__tests__"] as const);
 const APPROVED_REACHABILITY = [CYCLE, HOST, PROCESS, SCRIPT].map(repositoryPath).sort();
+const APPROVED_LIFECYCLE_REACHABILITY = [LIFECYCLE, HOST_CONTRACT, HOST, PROCESS, SCRIPT]
+  .map(repositoryPath)
+  .sort();
 const WORKER_FILES = [
   CYCLE,
   "worker-allocation.ts",
@@ -40,6 +45,15 @@ describe("refund execution worker reachability", () => {
     expect(reachable.some((path) => path.includes("middleware"))).toBe(false);
   });
 
+  it("permits lifecycle ownership only through the approved one-shot host chain", () => {
+    const files = productionSourceFiles();
+    const reachable = reverseReachableFiles(LIFECYCLE, files).map(repositoryPath).sort();
+
+    expect(reachable).toEqual(APPROVED_LIFECYCLE_REACHABILITY);
+    expect(reachable.some((path) => path.startsWith("src/app/"))).toBe(false);
+    expect(reachable).not.toContain(repositoryPath(CYCLE));
+  });
+
   it("keeps selector, allocation, and provider routing inside the existing cycle core", () => {
     const source = WORKER_FILES.map((file) => readFileSync(file, "utf8")).join("\n");
     expect(source).toContain("createTossRefundExecutionAuthorizer");
@@ -50,7 +64,7 @@ describe("refund execution worker reachability", () => {
     expect(source).not.toMatch(/\bfetch\s*\(|console\.|setInterval|setTimeout|cron|scheduler|signal/iu);
   });
 
-  it("exposes only the two approved one-shot package commands and no lifecycle mechanism", () => {
+  it("exposes only the two approved one-shot commands and one cooperative lifecycle budget", () => {
     const packageJson: unknown = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
     const scripts = packageScripts(packageJson);
     const workerScripts = Object.fromEntries(
@@ -59,13 +73,23 @@ describe("refund execution worker reachability", () => {
     const hostSource = [HOST, PROCESS, SCRIPT]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
+    const lifecycleSource = readFileSync(LIFECYCLE, "utf8");
 
     expect(workerScripts).toEqual({
       "refund:worker:check": "node --import tsx scripts/refund-execution-worker.ts check",
       "refund:worker:once": "node --import tsx scripts/refund-execution-worker.ts run-once",
     });
     expect(hostSource).not.toMatch(
-      /setInterval|setTimeout|setImmediate|queueMicrotask|process\.on|SIGTERM|SIGINT|cron|scheduler|daemon|heartbeat|while\s*\(/iu,
+      /setInterval|setTimeout|setImmediate|queueMicrotask|process\.on|cron|scheduler|daemon|heartbeat|while\s*\(/iu,
+    );
+    expect(lifecycleSource.match(/\bsetTimeout\s*\(/gu)).toHaveLength(1);
+    expect(lifecycleSource).toContain("REFUND_EXECUTION_WORKER_COOPERATIVE_BUDGET_MS = 120_000");
+    expect(lifecycleSource).toContain('process.on(signal, listener)');
+    expect(lifecycleSource).toContain('process.off(signal, listener)');
+    expect(lifecycleSource).toContain('"SIGTERM"');
+    expect(lifecycleSource).toContain('"SIGINT"');
+    expect(lifecycleSource).not.toMatch(
+      /setInterval|setImmediate|queueMicrotask|cron|scheduler|daemon|heartbeat|while\s*\(/iu,
     );
     expect(hostSource).not.toContain("refund-sandbox-acceptance");
     expect(hostSource).not.toContain("readSecretKey");

@@ -10,6 +10,10 @@ import {
   type RefundExecutionWorkerHostDependencies,
 } from "../run-refund-execution-worker-host";
 import type { RefundExecutionWorkerCycleResult } from "../worker-contract";
+import type {
+  RefundExecutionWorkerDrainReason,
+  RefundExecutionWorkerHostLifecycle,
+} from "../worker-host-lifecycle";
 import { compareRefundWorkerMigrations } from "../worker-migration-readiness";
 import { ConfiguredTossRefundCredential } from "../providers/toss/refund-credential-config";
 
@@ -148,6 +152,192 @@ describe("runRefundExecutionWorkerHost check", () => {
 });
 
 describe("runRefundExecutionWorkerHost run-once", () => {
+  it.each([
+    ["before database construction", "beforeDatabase"],
+    ["after database construction", "createDatabase"],
+    ["after connectivity", "connectivity"],
+    ["after local migration inventory", "repository"],
+    ["after migration ledger", "ledger"],
+    ["after migration comparison", "comparison"],
+    ["after adapter construction", "adapters"],
+  ] as const)("drains with zero counters %s and admits no later boundary", async (_name, stage) => {
+    const fixture = hostFixture();
+    const dispose = vi.fn();
+    const lifecycle = controlledLifecycle(
+      () => stage === "beforeDatabase" || fixture.calls[stage] > 0,
+      "SIGNAL",
+      dispose,
+    );
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => lifecycle,
+    })).toEqual(drainedResult("SIGNAL"));
+    expect(fixture.calls.cycle).toBe(0);
+    expect(fixture.calls.createDatabase).toBe(stage === "beforeDatabase" ? 0 : 1);
+    expect(fixture.calls.connectivity).toBe(
+      stage === "beforeDatabase" || stage === "createDatabase" ? 0 : 1,
+    );
+    expect(fixture.calls.disconnect).toBe(stage === "beforeDatabase" ? 0 : 1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a cooperatively stopped cycle with only performed counters", async () => {
+    const fixture = hostFixture({
+      cycleResult: cycleStopped({ selectedCount: 1, attemptedCount: 1, readySelected: 1 }),
+    });
+    const dispose = vi.fn();
+    const lifecycle = controlledLifecycle(
+      () => fixture.calls.cycle > 0,
+      "BUDGET",
+      dispose,
+    );
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => lifecycle,
+    })).toEqual({
+      ok: true,
+      code: "LIFECYCLE_DRAINED",
+      reason: "BUDGET",
+      cycle: { ...emptyCounters(), selectedCount: 1, attemptedCount: 1, readySelected: 1 },
+    });
+    expect(fixture.calls.cycle).toBe(1);
+    expect(fixture.calls.disconnect).toBe(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a cycle failure win over a concurrent drain and bounds both diagnostics", async () => {
+    const fixture = hostFixture({ cycleResult: workerFailure("SYSTEMIC_FAILURE") });
+    const lifecycle = controlledLifecycle(
+      () => fixture.calls.cycle > 0,
+      "SIGNAL",
+      vi.fn(),
+    );
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => lifecycle,
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+  });
+
+  it("does not rewrite a fully completed cycle when drain is first observable afterward", async () => {
+    const fixture = hostFixture({ cycleResult: cycleSuccess() });
+    const dispose = vi.fn();
+    const lifecycle = controlledLifecycle(
+      () => fixture.calls.cycle > 0,
+      "SIGNAL",
+      dispose,
+    );
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => lifecycle,
+    })).toEqual({ ok: true, code: "CYCLE_COMPLETE", cycle: emptyCounters() });
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a non-drained configuration failure and still disposes lifecycle", async () => {
+    const fixture = hostFixture({ credential: "CONFIG_INVALID" });
+    const dispose = vi.fn();
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => controlledLifecycle(() => false, "SIGNAL", dispose),
+    })).toEqual({ ok: false, code: "CONFIG_INVALID" });
+    expect(fixture.calls.createDatabase).toBe(0);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets database disconnect failure prevent a drained success and still disposes lifecycle", async () => {
+    const fixture = hostFixture({ disconnectFailure: true });
+    const dispose = vi.fn();
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => controlledLifecycle(
+        () => fixture.calls.connectivity > 0,
+        "SIGNAL",
+        dispose,
+      ),
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(fixture.calls.disconnect).toBe(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds lifecycle observation and disposal failures without escaping diagnostics", async () => {
+    const observation = hostFixture();
+    const disposal = hostFixture();
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...observation.dependencies,
+      createLifecycle: () => Object.freeze({
+        shouldStop: (): boolean => { throw new Error("OBSERVATION_SECRET"); },
+        drainReason: () => null,
+        dispose: () => undefined,
+      }),
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(observation.calls.createDatabase).toBe(0);
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...disposal.dependencies,
+      createLifecycle: () => controlledLifecycle(
+        () => true,
+        "SIGNAL",
+        () => { throw new Error("DISPOSAL_SECRET"); },
+      ),
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+  });
+
+  it("bounds an inconsistent drain reason before constructing a database", async () => {
+    const fixture = hostFixture();
+    const lifecycle = new Proxy(controlledLifecycle(() => true, "SIGNAL", vi.fn()), {
+      get: (target, property) => {
+        if (property === "drainReason") return () => "OTHER";
+        if (property === "shouldStop") return target.shouldStop;
+        if (property === "dispose") return target.dispose;
+        return undefined;
+      },
+    });
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => lifecycle,
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(fixture.calls.createDatabase).toBe(0);
+  });
+
+  it("bounds a non-boolean lifecycle stop state before constructing a database", async () => {
+    const fixture = hostFixture();
+    const lifecycle = new Proxy(controlledLifecycle(() => false, "SIGNAL", vi.fn()), {
+      get: (target, property) => {
+        if (property === "shouldStop") return () => "MALFORMED_STOP_STATE";
+        if (property === "drainReason") return target.drainReason;
+        if (property === "dispose") return target.dispose;
+        return undefined;
+      },
+    });
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
+      ...fixture.dependencies,
+      createLifecycle: () => lifecycle,
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(fixture.calls.createDatabase).toBe(0);
+  });
+
+  it("does not construct lifecycle for check, disabled, or malformed-master commands", async () => {
+    const createLifecycle = vi.fn(() => controlledLifecycle(() => false, "SIGNAL", vi.fn()));
+    const check = hostFixture();
+    const disabled = hostFixture({ masterEnabled: false });
+    const malformed = hostFixture({ malformedMaster: true });
+
+    await runRefundExecutionWorkerHost(CHECK, {}, { ...check.dependencies, createLifecycle });
+    await runRefundExecutionWorkerHost(RUN_ONCE, {}, { ...disabled.dependencies, createLifecycle });
+    await runRefundExecutionWorkerHost(RUN_ONCE, {}, { ...malformed.dependencies, createLifecycle });
+
+    expect(createLifecycle).not.toHaveBeenCalled();
+  });
+
   it.each(["ABSENT", "CONFIG_INVALID"] as const)(
     "requires configured credentials before database construction for %s",
     async (credential) => {
@@ -381,6 +571,16 @@ function cycleSuccess(): RefundExecutionWorkerCycleResult {
   return Object.freeze({ ok: true, cycle: Object.freeze(emptyCounters()) });
 }
 
+function cycleStopped(
+  overrides: Partial<ReturnType<typeof emptyCounters>>,
+): RefundExecutionWorkerCycleResult {
+  return Object.freeze({
+    ok: true,
+    stopped: true,
+    cycle: Object.freeze({ ...emptyCounters(), ...overrides }),
+  });
+}
+
 function workerFailure(
   code: "FEATURE_DISABLED" | "INVALID_WORKER_OWNER" | "CONFIG_INVALID" | "SYSTEMIC_FAILURE",
 ): RefundExecutionWorkerCycleResult {
@@ -403,4 +603,20 @@ function emptyCounters() {
     uncontactedSelected: 0,
     contactedSelected: 0,
   };
+}
+
+function drainedResult(reason: RefundExecutionWorkerDrainReason) {
+  return { ok: true, code: "LIFECYCLE_DRAINED", reason, cycle: emptyCounters() };
+}
+
+function controlledLifecycle(
+  shouldStop: () => boolean,
+  reason: RefundExecutionWorkerDrainReason,
+  dispose: () => void,
+): RefundExecutionWorkerHostLifecycle {
+  return Object.freeze({
+    shouldStop,
+    drainReason: () => shouldStop() ? reason : null,
+    dispose,
+  });
 }

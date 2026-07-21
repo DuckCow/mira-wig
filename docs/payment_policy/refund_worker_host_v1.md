@@ -6,6 +6,11 @@ This contract adds a host-neutral, one-shot process boundary for the existing TO
 worker. The intended architecture is an external scheduler invoking one process for one bounded
 cycle. This document creates no scheduler and grants no activation authority.
 
+The cooperative lifecycle amendment is
+`docs/payment_policy/refund_worker_lifecycle_v1.md`. Enabled `run-once` now supports SIGTERM/SIGINT
+cooperative drain and one 120-second cooperative budget; that amendment does not change this
+document's startup, migration-readiness, safe-output, or dormant-authority rules.
+
 ## Commands
 
 - `npm run refund:worker:check` performs read-only configuration, database-connectivity, and Prisma
@@ -69,6 +74,7 @@ partial external writes cannot be undone.
 | `CHECK_READY` | 0 |
 | `FEATURE_DISABLED` | 0 |
 | `CYCLE_COMPLETE` | 0 |
+| `LIFECYCLE_DRAINED` | 75 |
 | `INVALID_HOST_INPUT` | 64 |
 | `INVALID_WORKER_OWNER` | 64 |
 | `CONFIG_INVALID` | 78 |
@@ -81,15 +87,18 @@ the nonnegative safe-integer counters `selectedCount`, `attemptedCount`, `succee
 `replayedCount`, `temporaryCount`, `manualCount`, `conflictCount`, `inconsistentCount`,
 `skippedCount`, `failedCount`, `readySelected`, `uncontactedSelected`, and `contactedSelected`.
 Malformed counters become `SYSTEMIC_FAILURE`; extra or secret-like input properties never enter
-output. Failures contain no exception string or stack trace.
+output. `LIFECYCLE_DRAINED` uses the same exact counter validator and adds only a `SIGNAL` or
+`BUDGET` reason. Failures contain no exception string or stack trace.
 
 ## Explicitly absent
 
 No loop, scheduler, cron, queue, daemon, web timer, route handler, Server Action, serverless
-schedule, signal draining, timeout, process deadline, jitter, backoff, health endpoint, heartbeat,
-metrics, alerting, refund reconciliation, manual-resolution mutation, credential rotation, or
-exact-command canary exists in v1.
+schedule, external hard-deadline enforcement, overlap enforcement, jitter, backoff, health
+endpoint, heartbeat, metrics, alerting, refund reconciliation, manual-resolution mutation,
+credential rotation, or exact-command canary exists. The lifecycle amendment adds only signal drain
+and the 120-second cooperative budget.
 
 All worker and provider capability flags remain disabled by default. Code presence authorizes no
-SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. P3B2,
-P3C, P3D, and P3E are separate design, implementation, audit, and authorization acts.
+SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. `check`
+remains read-only. P3C, P3D, and P3E are separate design, implementation, audit, and authorization
+acts.

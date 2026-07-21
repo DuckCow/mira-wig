@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { isRefundExecutionWorkerEnabled } from "../execution-activation";
 import type { RefundExecutionWorkerHostDependencies } from "../run-refund-execution-worker-host";
 import { runRefundExecutionWorkerProcess } from "../worker-host-process";
 import type { RefundExecutionWorkerCycleResult } from "../worker-contract";
+import {
+  createRefundExecutionWorkerHostLifecycle,
+  REFUND_EXECUTION_WORKER_COOPERATIVE_BUDGET_MS,
+  type RefundExecutionWorkerHostSignal,
+  type RefundExecutionWorkerLifecycleRuntime,
+} from "../worker-host-lifecycle";
 import { compareRefundWorkerMigrations } from "../worker-migration-readiness";
 
 describe("refund execution worker process wrapper", () => {
@@ -31,17 +38,19 @@ describe("refund execution worker process wrapper", () => {
 
   it("writes invalid input only to stderr without constructing a database", async () => {
     const fixture = processFixture();
+    const createLifecycle = vi.fn();
     const exitCode = await runRefundExecutionWorkerProcess(
       ["run-once", "--service", "missing-rest"],
       {},
       fixture.output,
-      fixture.dependencies,
+      { ...fixture.dependencies, createLifecycle },
     );
 
     expect(exitCode).toBe(64);
     expect(fixture.stdout).toEqual([]);
     expect(fixture.stderr).toEqual(['{"ok":false,"code":"INVALID_HOST_INPUT"}\n']);
     expect(fixture.databaseCalls).toBe(0);
+    expect(createLifecycle).not.toHaveBeenCalled();
   });
 
   it("emits no owner, labels, database facts, credential material, or worker diagnostics", async () => {
@@ -72,6 +81,174 @@ describe("refund execution worker process wrapper", () => {
       "private-generation",
       "raw worker failure diagnostic",
     ]) expect(output).not.toContain(prohibited);
+  });
+
+  it("writes one exact lifecycle-drained JSON line to stderr and exits 75", async () => {
+    const fixture = processFixture();
+    let stopped = false;
+    const dependencies: RefundExecutionWorkerHostDependencies<ProcessDatabase> = Object.freeze({
+      ...fixture.dependencies,
+      createLifecycle: () => Object.freeze({
+        shouldStop: () => stopped,
+        drainReason: () => stopped ? "BUDGET" as const : null,
+        dispose: () => undefined,
+      }),
+      runWorkerCycle: (): Promise<RefundExecutionWorkerCycleResult> => {
+        stopped = true;
+        return Promise.resolve(Object.freeze({
+          ok: true,
+          stopped: true,
+          cycle: Object.freeze({ ...emptyCounters(), selectedCount: 1, attemptedCount: 1 }),
+        }));
+      },
+    });
+
+    const exitCode = await runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      { REFUND_EXECUTION_WORKER_ENABLED: "ENABLED", TOSS_SANDBOX_SECRET_KEY: "synthetic" },
+      fixture.output,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(75);
+    expect(fixture.stdout).toEqual([]);
+    expect(fixture.stderr).toHaveLength(1);
+    expect(JSON.parse(fixture.stderr[0])).toEqual({
+      ok: true,
+      code: "LIFECYCLE_DRAINED",
+      reason: "BUDGET",
+      cycle: { ...emptyCounters(), selectedCount: 1, attemptedCount: 1 },
+    });
+  });
+
+  it.each(["SIGTERM", "SIGINT"] as const)(
+    "keeps output empty while enabled run-once is active, drains on %s, then cleans lifecycle",
+    async (signal) => {
+      const fixture = processFixture();
+      const lifecycle = processLifecycleFixture();
+      const started = deferred();
+      const release = deferred();
+      const dependencies: RefundExecutionWorkerHostDependencies<ProcessDatabase> = Object.freeze({
+        ...fixture.dependencies,
+        createLifecycle: () => lifecycle.lifecycle,
+        runWorkerCycle: async (_database, _owner, _workerDependencies, _env, control) => {
+          started.resolve();
+          await release.promise;
+          return control.shouldStop()
+            ? Object.freeze({ ok: true, stopped: true, cycle: emptyCounters() })
+            : Object.freeze({ ok: true, cycle: emptyCounters() });
+        },
+      });
+
+      const operation = runRefundExecutionWorkerProcess(
+        ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+        { REFUND_EXECUTION_WORKER_ENABLED: "ENABLED", TOSS_SANDBOX_SECRET_KEY: "synthetic" },
+        fixture.output,
+        dependencies,
+      );
+      await started.promise;
+
+      expect(lifecycle.listenerCount("SIGTERM")).toBe(1);
+      expect(lifecycle.listenerCount("SIGINT")).toBe(1);
+      expect(lifecycle.timerDelays).toEqual([REFUND_EXECUTION_WORKER_COOPERATIVE_BUDGET_MS]);
+      expect(fixture.stdout).toEqual([]);
+      expect(fixture.stderr).toEqual([]);
+      lifecycle.emit(signal);
+      expect(fixture.stdout).toEqual([]);
+      expect(fixture.stderr).toEqual([]);
+      release.resolve();
+
+      await expect(operation).resolves.toBe(75);
+      expect(fixture.stdout).toEqual([]);
+      expect(fixture.stderr).toEqual([
+        `{"ok":true,"code":"LIFECYCLE_DRAINED","reason":"SIGNAL","cycle":${JSON.stringify(emptyCounters())}}\n`,
+      ]);
+      expect(lifecycle.listenerCount("SIGTERM")).toBe(0);
+      expect(lifecycle.listenerCount("SIGINT")).toBe(0);
+      expect(lifecycle.timerClears).toBe(1);
+      expect(fixture.stderr[0]).not.toMatch(/Error:|at\s+\S+|synthetic/u);
+    },
+  );
+
+  it("serializes a pre-cycle budget drain with zero counters and clears the timer", async () => {
+    const fixture = processFixture();
+    const lifecycle = processLifecycleFixture();
+    const dependencies: RefundExecutionWorkerHostDependencies<ProcessDatabase> = Object.freeze({
+      ...fixture.dependencies,
+      createLifecycle: () => {
+        lifecycle.fireTimer();
+        return lifecycle.lifecycle;
+      },
+    });
+
+    const exitCode = await runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      { REFUND_EXECUTION_WORKER_ENABLED: "ENABLED", TOSS_SANDBOX_SECRET_KEY: "synthetic" },
+      fixture.output,
+      dependencies,
+    );
+
+    expect(exitCode).toBe(75);
+    expect(fixture.stdout).toEqual([]);
+    expect(JSON.parse(fixture.stderr[0])).toEqual({
+      ok: true,
+      code: "LIFECYCLE_DRAINED",
+      reason: "BUDGET",
+      cycle: emptyCounters(),
+    });
+    expect(lifecycle.timerClears).toBe(1);
+    expect(lifecycle.listenerCount("SIGTERM")).toBe(0);
+    expect(lifecycle.listenerCount("SIGINT")).toBe(0);
+  });
+
+  it("serializes an invalid lifecycle reason only as bounded systemic failure", async () => {
+    const fixture = processFixture();
+    const lifecycle = processLifecycleFixture();
+    lifecycle.emit("SIGTERM");
+    const invalidLifecycle = new Proxy(lifecycle.lifecycle, {
+      get: (target, property) => {
+        if (property === "drainReason") return () => "INVALID_REASON_SECRET";
+        if (property === "shouldStop") return target.shouldStop;
+        if (property === "dispose") return target.dispose;
+        return undefined;
+      },
+    });
+
+    const exitCode = await runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      { REFUND_EXECUTION_WORKER_ENABLED: "ENABLED", TOSS_SANDBOX_SECRET_KEY: "synthetic" },
+      fixture.output,
+      { ...fixture.dependencies, createLifecycle: () => invalidLifecycle },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(fixture.stdout).toEqual([]);
+    expect(fixture.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(fixture.stderr[0]).not.toContain("INVALID_REASON_SECRET");
+  });
+
+  it.each([
+    ["check", ["check"], {}],
+    ["disabled", ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"], {}],
+    ["malformed master", ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"], {
+      REFUND_EXECUTION_WORKER_ENABLED: "malformed",
+    }],
+  ] as const)("creates no lifecycle for %s process path", async (_name, args, env) => {
+    const fixture = processFixture();
+    const createLifecycle = vi.fn(() => processLifecycleFixture().lifecycle);
+
+    await runRefundExecutionWorkerProcess(
+      args,
+      env,
+      fixture.output,
+      {
+        ...fixture.dependencies,
+        inspectMasterGate: isRefundExecutionWorkerEnabled,
+        createLifecycle,
+      },
+    );
+
+    expect(createLifecycle).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(
@@ -210,6 +387,51 @@ describe("refund execution worker process wrapper", () => {
 
 interface ProcessDatabase {
   readonly kind: "process-database";
+}
+
+type ProcessLifecycleTimer = Readonly<{ id: "process-lifecycle-budget" }>;
+
+function processLifecycleFixture() {
+  const listeners = new Map<RefundExecutionWorkerHostSignal, Set<() => void>>();
+  const timerDelays: number[] = [];
+  let timerListener: (() => void) | null = null;
+  let timerClears = 0;
+  const runtime: RefundExecutionWorkerLifecycleRuntime<ProcessLifecycleTimer> = Object.freeze({
+    addSignalListener: (signal, listener) => {
+      const registered = listeners.get(signal) ?? new Set<() => void>();
+      registered.add(listener);
+      listeners.set(signal, registered);
+    },
+    removeSignalListener: (signal, listener) => {
+      listeners.get(signal)?.delete(listener);
+    },
+    setTimer: (listener, delayMs) => {
+      timerListener = listener;
+      timerDelays.push(delayMs);
+      return Object.freeze({ id: "process-lifecycle-budget" as const });
+    },
+    clearTimer: () => {
+      timerClears += 1;
+      timerListener = null;
+    },
+  });
+  const lifecycle = createRefundExecutionWorkerHostLifecycle(runtime);
+  return {
+    lifecycle,
+    timerDelays,
+    get timerClears() { return timerClears; },
+    emit: (signal: RefundExecutionWorkerHostSignal) => {
+      for (const listener of listeners.get(signal) ?? []) listener();
+    },
+    fireTimer: () => timerListener?.(),
+    listenerCount: (signal: RefundExecutionWorkerHostSignal) => listeners.get(signal)?.size ?? 0,
+  };
+}
+
+function deferred() {
+  let resolvePromise: (() => void) | null = null;
+  const promise = new Promise<void>((resolve) => { resolvePromise = resolve; });
+  return Object.freeze({ promise, resolve: () => resolvePromise?.() });
 }
 
 function processFixture(options: Readonly<{ cycleFailure?: boolean }> = Object.freeze({})) {

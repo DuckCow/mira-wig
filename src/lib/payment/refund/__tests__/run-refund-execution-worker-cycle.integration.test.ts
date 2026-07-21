@@ -105,6 +105,174 @@ describe("runRefundExecutionWorkerCycle integration", () => {
     expect(await dispatchState(fixture)).toEqual(before);
   });
 
+  it("routes zero candidates when cooperative stop is already requested before selection", async () => {
+    const fixture = await tossFixture(fixtures);
+    const before = await dispatchState(fixture);
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "pre-stopped-worker" },
+      ports(fixture, calls),
+      READY_ENV,
+      Object.freeze({ shouldStop: () => true }),
+    );
+
+    expect(result).toEqual(stoppedCounters({ selectedCount: 0, attemptedCount: 0 }));
+    expect(calls).toEqual({ get: 0, post: 0 });
+    expect(await dispatchState(fixture)).toEqual(before);
+  });
+
+  it("stops after selection and before candidate-class processing", async () => {
+    const fixture = await tossFixture(fixtures);
+    const before = await dispatchState(fixture);
+    const calls = { get: 0, post: 0 };
+    const control = stopOnObservation(2);
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "post-selection-stop-worker" },
+      ports(fixture, calls),
+      READY_ENV,
+      control,
+    );
+
+    expect(result).toEqual(stoppedCounters({ selectedCount: 0, attemptedCount: 0 }));
+    expect(control.observationCount()).toBe(2);
+    expect(calls).toEqual({ get: 0, post: 0 });
+    expect(await dispatchState(fixture)).toEqual(before);
+  });
+
+  it("stops immediately before a candidate without selecting or routing it", async () => {
+    const fixture = await tossFixture(fixtures);
+    const before = await dispatchState(fixture);
+    const calls = { get: 0, post: 0 };
+    const control = stopOnObservation(5);
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "pre-candidate-stop-worker" },
+      ports(fixture, calls),
+      READY_ENV,
+      control,
+    );
+
+    expect(result).toEqual(stoppedCounters({ selectedCount: 0, attemptedCount: 0 }));
+    expect(control.observationCount()).toBe(5);
+    expect(calls).toEqual({ get: 0, post: 0 });
+    expect(await dispatchState(fixture)).toEqual(before);
+  });
+
+  it("finishes one in-flight candidate and admits no later candidate after cooperative stop", async () => {
+    const first = await tossFixture(fixtures, new Date("2020-01-01T00:00:00.000Z"));
+    const second = await tossFixture(fixtures, new Date("2020-01-02T00:00:00.000Z"));
+    const calls = { get: 0, post: 0 };
+    const base = ports(first, calls);
+    let stop = false;
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "in-flight-stop-worker" },
+      {
+        lookup: base.lookup,
+        cancellation: async (...args) => {
+          const outcome = await base.cancellation(...args);
+          stop = true;
+          return outcome;
+        },
+      },
+      READY_ENV,
+      Object.freeze({ shouldStop: () => stop }),
+    );
+
+    expect(result).toEqual(stoppedCounters({ readySelected: 1, succeededCount: 1 }));
+    expect(calls).toEqual({ get: 2, post: 1 });
+    expect((await dispatchState(first)).command.status).toBe("DONE");
+    expect((await dispatchState(second)).command.status).toBe("READY");
+  });
+
+  it("keeps cycle complete when the last candidate finishes before drain is observed", async () => {
+    const fixture = await tossFixture(fixtures);
+    const calls = { get: 0, post: 0 };
+    const base = ports(fixture, calls);
+    let stop = false;
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "late-stop-worker" },
+      {
+        lookup: base.lookup,
+        cancellation: async (...args) => {
+          const outcome = await base.cancellation(...args);
+          stop = true;
+          return outcome;
+        },
+      },
+      READY_ENV,
+      Object.freeze({ shouldStop: () => stop }),
+    );
+
+    expect(result).toEqual(successCounters({ readySelected: 1, succeededCount: 1 }));
+    expect(calls).toEqual({ get: 2, post: 1 });
+  });
+
+  it("stops between candidate classes without beginning the later class", async () => {
+    const contacted = await tossFixture(fixtures, new Date("2020-01-01T00:00:00.000Z"));
+    const ready = await tossFixture(fixtures, new Date("2020-01-02T00:00:00.000Z"));
+    await createContactedUnknownOutcome(contacted);
+    const calls = { get: 0, post: 0 };
+    let stop = false;
+    const lookup: TossRefundLookupPort = (paymentKey) => {
+      calls.get += 1;
+      if (paymentKey !== contacted.providerPaymentKey) {
+        throw new Error("LATER_CLASS_ROUTED");
+      }
+      stop = true;
+      return Promise.resolve({ kind: "response", body: JSON.stringify(successBody(contacted)) });
+    };
+    const cancellation: TossRefundCancellationPort = () => {
+      calls.post += 1;
+      throw new Error("LATER_CLASS_CONTACTED");
+    };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "between-class-stop-worker" },
+      { lookup, cancellation },
+      { ...READY_ENV, ...CONTACTED_ENV },
+      Object.freeze({ shouldStop: () => stop }),
+    );
+
+    expect(result).toEqual(stoppedCounters({ contactedSelected: 1, succeededCount: 1 }));
+    expect(calls).toEqual({ get: 1, post: 0 });
+    expect((await dispatchState(contacted)).command.status).toBe("DONE");
+    expect((await dispatchState(ready)).command.status).toBe("READY");
+  });
+
+  it.each([
+    ["throws", Object.freeze({ shouldStop: (): boolean => { throw new Error("STOP_SECRET"); } })],
+    ["returns a non-boolean", new Proxy(Object.freeze({ shouldStop: () => false }), {
+      get: (_target, property) => property === "shouldStop" ? () => "invalid" : undefined,
+    })],
+  ])("bounds a cooperative stop control that %s", async (_name, control) => {
+    const fixture = await tossFixture(fixtures);
+    const before = await dispatchState(fixture);
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db, { workerOwner: "invalid-control-worker" }, ports(fixture, calls), READY_ENV, control,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      message: "Refund execution worker cycle failed systemically.",
+    });
+    expect(JSON.stringify(result)).not.toContain("STOP_SECRET");
+    expect(calls).toEqual({ get: 0, post: 0 });
+    expect(await dispatchState(fixture)).toEqual(before);
+  });
+
   it("selects READY, acquires once, and runs the shared authorization/contact continuation", async () => {
     const fixture = await tossFixture(fixtures);
     const calls = { get: 0, post: 0 };
@@ -679,6 +847,21 @@ function successCounters(overrides: Readonly<Record<string, number>>) {
     ...overrides,
   };
   return { ok: true, cycle };
+}
+
+function stoppedCounters(overrides: Readonly<Record<string, number>>) {
+  return { ...successCounters(overrides), stopped: true };
+}
+
+function stopOnObservation(stopAt: number) {
+  let observations = 0;
+  return Object.freeze({
+    shouldStop: () => {
+      observations += 1;
+      return observations >= stopAt;
+    },
+    observationCount: () => observations,
+  });
 }
 
 function expectSuccessfulEmptyAggregate(result: RefundExecutionWorkerCycleResult): void {

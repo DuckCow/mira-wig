@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cycleComplete,
+  lifecycleDrained,
   parseRefundExecutionWorkerCliArgs,
   workerHostExitCode,
   type RefundExecutionWorkerHostResult,
@@ -124,6 +125,7 @@ describe("refund execution worker host CLI contract", () => {
     [success("CHECK_READY"), 0],
     [success("FEATURE_DISABLED"), 0],
     [success("CYCLE_COMPLETE"), 0],
+    [{ ok: true, code: "LIFECYCLE_DRAINED", reason: "SIGNAL", cycle: emptyCounters() }, 75],
     [failure("INVALID_HOST_INPUT"), 64],
     [failure("INVALID_WORKER_OWNER"), 64],
     [failure("CONFIG_INVALID"), 78],
@@ -203,6 +205,48 @@ describe("refund execution worker cycle output contract", () => {
 
     expect(cycleComplete(counters)).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
     expect(trapCalls).toBe(0);
+  });
+
+  it.each(["SIGNAL", "BUDGET"] as const)(
+    "sanitizes an exact %s lifecycle drain with the shared v1 counter contract",
+    (reason) => {
+      let getterCalls = 0;
+      const counters: Record<PropertyKey, unknown> = {
+        ...emptyCounters(),
+        selectedCount: 2,
+        attemptedCount: 1,
+        secretDiagnostic: "must-not-escape",
+      };
+      Object.defineProperty(counters, "secretAccessor", {
+        enumerable: true,
+        get: () => {
+          getterCalls += 1;
+          return "accessor-secret";
+        },
+      });
+      Object.defineProperty(counters, Symbol("secret"), {
+        enumerable: true,
+        value: "symbol-secret",
+      });
+      const result = lifecycleDrained(reason, counters);
+
+      expect(result).toEqual({
+        ok: true,
+        code: "LIFECYCLE_DRAINED",
+        reason,
+        cycle: { ...emptyCounters(), selectedCount: 2, attemptedCount: 1 },
+      });
+      expect(getterCalls).toBe(0);
+      expect(Reflect.ownKeys(result)).toEqual(["ok", "code", "reason", "cycle"]);
+      if (!result.ok) throw new Error("Expected sanitized lifecycle result.");
+      expect(Reflect.ownKeys(result.cycle)).toEqual(Object.keys(emptyCounters()));
+      expect(JSON.stringify(result)).not.toMatch(/must-not-escape|accessor-secret|symbol-secret/u);
+    },
+  );
+
+  it("bounds malformed lifecycle counters as systemic failure", () => {
+    expect(lifecycleDrained("SIGNAL", { ...emptyCounters(), selectedCount: -1 }))
+      .toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
   });
 });
 

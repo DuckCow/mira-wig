@@ -4,6 +4,10 @@ export type RunRefundExecutionWorkerCycleInput = Readonly<{
   workerOwner: string;
 }>;
 
+export type RefundExecutionWorkerCycleControl = Readonly<{
+  shouldStop(): boolean;
+}>;
+
 export type NormalizedRunRefundExecutionWorkerCycleInput =
   RunRefundExecutionWorkerCycleInput;
 
@@ -35,8 +39,20 @@ export type RefundExecutionWorkerCycleFailure = Readonly<{
   message: string;
 }>;
 
+export type RefundExecutionWorkerCycleSuccess = Readonly<{
+  ok: true;
+  cycle: RefundExecutionWorkerCycleCounters;
+}>;
+
+export type RefundExecutionWorkerCycleStopped = Readonly<{
+  ok: true;
+  stopped: true;
+  cycle: RefundExecutionWorkerCycleCounters;
+}>;
+
 export type RefundExecutionWorkerCycleResult =
-  | Readonly<{ ok: true; cycle: RefundExecutionWorkerCycleCounters }>
+  | RefundExecutionWorkerCycleSuccess
+  | RefundExecutionWorkerCycleStopped
   | RefundExecutionWorkerCycleFailure;
 
 export type NormalizeRefundExecutionWorkerCycleInputResult =
@@ -54,6 +70,31 @@ const FAILURE_MESSAGES: Readonly<Record<RefundExecutionWorkerCycleFailureCode, s
     SYSTEMIC_FAILURE: "Refund execution worker cycle failed systemically.",
   });
 
+export const EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS: RefundExecutionWorkerCycleCounters =
+  Object.freeze({
+    selectedCount: 0,
+    attemptedCount: 0,
+    succeededCount: 0,
+    replayedCount: 0,
+    temporaryCount: 0,
+    manualCount: 0,
+    conflictCount: 0,
+    inconsistentCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    readySelected: 0,
+    uncontactedSelected: 0,
+    contactedSelected: 0,
+  });
+
+const NEVER_STOPPING_CYCLE_CONTROL: RefundExecutionWorkerCycleControl = Object.freeze({
+  shouldStop: () => false,
+});
+
+export function neverStoppingRefundExecutionWorkerCycleControl(): RefundExecutionWorkerCycleControl {
+  return NEVER_STOPPING_CYCLE_CONTROL;
+}
+
 export function normalizeRefundExecutionWorkerCycleInput(
   value: unknown,
 ): NormalizeRefundExecutionWorkerCycleInputResult {
@@ -66,8 +107,14 @@ export function normalizeRefundExecutionWorkerCycleInput(
 
 export function workerCycleSuccess(
   counters: RefundExecutionWorkerCycleCounters,
-): Extract<RefundExecutionWorkerCycleResult, { ok: true }> {
+): RefundExecutionWorkerCycleSuccess {
   return Object.freeze({ ok: true, cycle: Object.freeze({ ...counters }) });
+}
+
+export function workerCycleStopped(
+  counters: RefundExecutionWorkerCycleCounters,
+): RefundExecutionWorkerCycleStopped {
+  return Object.freeze({ ok: true, stopped: true, cycle: Object.freeze({ ...counters }) });
 }
 
 export function workerFailure(

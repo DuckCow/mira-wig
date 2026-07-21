@@ -3,6 +3,7 @@ import {
   normalizeRefundExecutionWorkerCycleInput,
   type RefundExecutionWorkerCycleCounters,
 } from "./worker-contract";
+import type { RefundExecutionWorkerDrainReason } from "./worker-host-lifecycle";
 
 const HOST_LABEL = /^[A-Za-z0-9._-]{1,64}$/;
 const RUN_ONCE_ARGUMENT_COUNT = 7;
@@ -31,10 +32,30 @@ export type RefundExecutionWorkerHostResult =
     cycle: RefundExecutionWorkerCycleCounters;
   }>
   | Readonly<{
+    ok: true;
+    code: "LIFECYCLE_DRAINED";
+    reason: RefundExecutionWorkerDrainReason;
+    cycle: RefundExecutionWorkerCycleCounters;
+  }>
+  | Readonly<{
     ok: false;
     code: "INVALID_HOST_INPUT" | "INVALID_WORKER_OWNER" | "CONFIG_INVALID"
       | "MIGRATIONS_NOT_READY" | "DATABASE_UNAVAILABLE" | "SYSTEMIC_FAILURE";
   }>;
+
+const HOST_EXIT_CODE: Readonly<Record<RefundExecutionWorkerHostResult["code"], number>> =
+  Object.freeze({
+    CHECK_READY: 0,
+    FEATURE_DISABLED: 0,
+    CYCLE_COMPLETE: 0,
+    LIFECYCLE_DRAINED: 75,
+    INVALID_HOST_INPUT: 64,
+    INVALID_WORKER_OWNER: 64,
+    CONFIG_INVALID: 78,
+    MIGRATIONS_NOT_READY: 78,
+    DATABASE_UNAVAILABLE: 1,
+    SYSTEMIC_FAILURE: 1,
+  });
 
 export type ParseRefundExecutionWorkerCliResult =
   | Readonly<{ ok: true; command: RefundExecutionWorkerHostCommand }>
@@ -56,11 +77,7 @@ export function parseRefundExecutionWorkerCliArgs(
 }
 
 export function workerHostExitCode(result: RefundExecutionWorkerHostResult): number {
-  if (result.code === "CHECK_READY" || result.code === "FEATURE_DISABLED"
-    || result.code === "CYCLE_COMPLETE") return 0;
-  if (result.code === "INVALID_HOST_INPUT" || result.code === "INVALID_WORKER_OWNER") return 64;
-  if (result.code === "CONFIG_INVALID" || result.code === "MIGRATIONS_NOT_READY") return 78;
-  return 1;
+  return HOST_EXIT_CODE[result.code];
 }
 
 export function hostFailure(
@@ -100,6 +117,18 @@ export function cycleComplete(
   return counters
     ? Object.freeze({ ok: true, code: "CYCLE_COMPLETE", cycle: counters })
     : hostFailure("SYSTEMIC_FAILURE");
+}
+
+export function lifecycleDrained(
+  reason: RefundExecutionWorkerDrainReason,
+  cycle: unknown,
+): Extract<RefundExecutionWorkerHostResult, { code: "LIFECYCLE_DRAINED" }>
+  | Extract<RefundExecutionWorkerHostResult, { ok: false }> {
+  const counters = exactCycleCounters(cycle);
+  if (!counters || reason !== "SIGNAL" && reason !== "BUDGET") {
+    return hostFailure("SYSTEMIC_FAILURE");
+  }
+  return Object.freeze({ ok: true, code: "LIFECYCLE_DRAINED", reason, cycle: counters });
 }
 
 function isExactRunOnceArgs(args: readonly string[]): boolean {

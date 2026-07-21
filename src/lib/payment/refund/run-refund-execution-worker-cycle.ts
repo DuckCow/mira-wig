@@ -10,9 +10,13 @@ import {
   type RefundExecutionWorkerCandidateQueues,
 } from "./worker-allocation";
 import {
+  EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS,
+  neverStoppingRefundExecutionWorkerCycleControl,
   normalizeRefundExecutionWorkerCycleInput,
+  workerCycleStopped,
   workerCycleSuccess,
   workerFailure,
+  type RefundExecutionWorkerCycleControl,
   type RefundExecutionWorkerCycleCounters,
   type RefundExecutionWorkerCycleFailure,
   type RefundExecutionWorkerCycleResult,
@@ -37,26 +41,51 @@ type PreparedCycle = Readonly<{
   queues: RefundExecutionWorkerCandidateQueues;
   readiness: Readonly<Record<RefundExecutionWorkerCandidateClass, boolean>>;
 }> | RefundExecutionWorkerCycleFailure;
+type CandidateProcessingResult = Readonly<{ ok: true; stopped: boolean }>
+  | RefundExecutionWorkerCycleFailure;
+type ControlledPreparation = PreparedCycle | Readonly<{ ok: true; stopped: true }>;
+type CandidateStepResult = Readonly<{
+  ok: true;
+  stopped: boolean;
+  serviceOutcome: boolean;
+}> | RefundExecutionWorkerCycleFailure;
 
 export async function runRefundExecutionWorkerCycle(
   client: PrismaClient,
   input: RunRefundExecutionWorkerCycleInput,
   dependencies: RefundExecutionWorkerDependencies,
   env: ActivationEnv = process.env,
+  control: RefundExecutionWorkerCycleControl = neverStoppingRefundExecutionWorkerCycleControl(),
 ): Promise<RefundExecutionWorkerCycleResult> {
   const normalized = normalizeRefundExecutionWorkerCycleInput(input);
   if (!normalized.ok) return normalized;
-  const gate = workerGateResult(env);
-  if (gate !== true) return gate;
-  const prepared = await prepareWorkerCycle(client, env);
+  const prepared = await prepareControlledCycle(client, env, control);
   if (!prepared.ok) return prepared;
+  if ("stopped" in prepared) {
+    return workerCycleStopped(EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS);
+  }
   const allocation = reserveRefundExecutionWorkerCapacity(prepared.queues);
   const route = createRefundExecutionWorkerRouter(dependencies);
   const counters = emptyCounters();
   const processed = await processCandidateQueues(
-    client, prepared, allocation, route, normalized.input.workerOwner, env, counters,
+    client, prepared, allocation, route, normalized.input.workerOwner, env, counters, control,
   );
-  return processed.ok ? workerCycleSuccess(counters) : processed;
+  if (!processed.ok) return processed;
+  return processed.stopped ? workerCycleStopped(counters) : workerCycleSuccess(counters);
+}
+
+async function prepareControlledCycle(
+  client: PrismaClient,
+  env: ActivationEnv,
+  control: RefundExecutionWorkerCycleControl,
+): Promise<ControlledPreparation> {
+  const gate = workerGateResult(env);
+  if (gate !== true) return gate;
+  const initialStop = observeCooperativeStop(control);
+  if (!initialStop.ok) return initialStop;
+  return initialStop.shouldStop
+    ? Object.freeze({ ok: true, stopped: true })
+    : prepareWorkerCycle(client, env);
 }
 
 async function prepareWorkerCycle(
@@ -82,14 +111,22 @@ async function processCandidateQueues(
   workerOwner: string,
   env: ActivationEnv,
   counters: MutableCounters,
-): Promise<Readonly<{ ok: true }> | RefundExecutionWorkerCycleFailure> {
-  for (const candidateClass of workerCandidateClassOrder()) {
+  control: RefundExecutionWorkerCycleControl,
+): Promise<CandidateProcessingResult> {
+  const classOrder = workerCandidateClassOrder();
+  for (const [classIndex, candidateClass] of classOrder.entries()) {
+    const stop = observeCooperativeStop(control);
+    if (!stop.ok) return stop;
+    if (stop.shouldStop && hasRemainingAdmission(prepared, allocation, classIndex, 0, 0)) {
+      return stoppedCandidateProcessing();
+    }
     const result = await processCandidateClass(
-      client, prepared, allocation, route, candidateClass, workerOwner, env, counters,
+      client, prepared, allocation, route, candidateClass, classIndex,
+      workerOwner, env, counters, control,
     );
-    if (!result.ok) return result;
+    if (!result.ok || result.stopped) return result;
   }
-  return Object.freeze({ ok: true });
+  return completedCandidateProcessing();
 }
 
 async function processCandidateClass(
@@ -98,24 +135,65 @@ async function processCandidateClass(
   allocation: Readonly<Record<RefundExecutionWorkerCandidateClass, number>>,
   route: ReturnType<typeof createRefundExecutionWorkerRouter>,
   candidateClass: RefundExecutionWorkerCandidateClass,
+  classIndex: number,
   workerOwner: string,
   env: ActivationEnv,
   counters: MutableCounters,
-): Promise<Readonly<{ ok: true }> | RefundExecutionWorkerCycleFailure> {
+  control: RefundExecutionWorkerCycleControl,
+): Promise<CandidateProcessingResult> {
   let serviceOutcomes = 0;
-  for (const candidate of prepared.queues[candidateClass]) {
+  const queue = prepared.queues[candidateClass];
+  for (const [candidateIndex, candidate] of queue.entries()) {
     if (serviceOutcomes >= allocation[candidateClass]) break;
-    markSelected(counters, candidateClass);
-    if (!prepared.readiness[candidateClass]) {
-      counters.skippedCount += 1;
-      serviceOutcomes += 1;
-      continue;
-    }
-    const result = await routeOneCandidate(client, candidate, route, workerOwner, env, counters);
-    if (!result.ok) return result;
-    if (!result.selectorRaceLoss) serviceOutcomes += 1;
+    const step = await processCandidate(
+      client, prepared, allocation, route, candidateClass, classIndex, candidateIndex,
+      candidate, workerOwner, env, counters, control, serviceOutcomes,
+    );
+    if (!step.ok) return step;
+    if (step.serviceOutcome) serviceOutcomes += 1;
+    if (step.stopped) return stoppedCandidateProcessing();
   }
-  return Object.freeze({ ok: true });
+  return completedCandidateProcessing();
+}
+
+async function processCandidate(
+  client: PrismaClient,
+  prepared: Extract<PreparedCycle, { ok: true }>,
+  allocation: Readonly<Record<RefundExecutionWorkerCandidateClass, number>>,
+  route: ReturnType<typeof createRefundExecutionWorkerRouter>,
+  candidateClass: RefundExecutionWorkerCandidateClass,
+  classIndex: number,
+  candidateIndex: number,
+  candidate: RefundExecutionWorkerCandidateQueues[RefundExecutionWorkerCandidateClass][number],
+  workerOwner: string,
+  env: ActivationEnv,
+  counters: MutableCounters,
+  control: RefundExecutionWorkerCycleControl,
+  serviceOutcomes: number,
+): Promise<CandidateStepResult> {
+  const stopBeforeRoute = observeCooperativeStop(control);
+  if (!stopBeforeRoute.ok) return stopBeforeRoute;
+  if (stopBeforeRoute.shouldStop) return stoppedCandidateStep(false);
+  markSelected(counters, candidateClass);
+  if (!prepared.readiness[candidateClass]) {
+    counters.skippedCount += 1;
+    return completedCandidateStep(true);
+  }
+  const result = await routeOneCandidate(client, candidate, route, workerOwner, env, counters);
+  if (!result.ok) return result;
+  const serviceOutcome = !result.selectorRaceLoss;
+  const stopAfterRoute = observeCooperativeStop(control);
+  if (!stopAfterRoute.ok) return stopAfterRoute;
+  const completedServiceOutcomes = serviceOutcomes + (serviceOutcome ? 1 : 0);
+  const stopped = stopsLaterAdmission(
+    stopAfterRoute.shouldStop,
+    prepared,
+    allocation,
+    classIndex,
+    candidateIndex + 1,
+    completedServiceOutcomes,
+  );
+  return stopped ? stoppedCandidateStep(serviceOutcome) : completedCandidateStep(serviceOutcome);
 }
 
 async function routeOneCandidate(
@@ -166,21 +244,65 @@ function workerGateResult(
 }
 
 function emptyCounters(): MutableCounters {
-  return {
-    selectedCount: 0,
-    attemptedCount: 0,
-    succeededCount: 0,
-    replayedCount: 0,
-    temporaryCount: 0,
-    manualCount: 0,
-    conflictCount: 0,
-    inconsistentCount: 0,
-    skippedCount: 0,
-    failedCount: 0,
-    readySelected: 0,
-    uncontactedSelected: 0,
-    contactedSelected: 0,
-  };
+  return { ...EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS };
+}
+
+function observeCooperativeStop(
+  control: RefundExecutionWorkerCycleControl,
+): Readonly<{ ok: true; shouldStop: boolean }> | RefundExecutionWorkerCycleFailure {
+  try {
+    const shouldStop = control.shouldStop();
+    return typeof shouldStop === "boolean"
+      ? Object.freeze({ ok: true, shouldStop })
+      : workerFailure("SYSTEMIC_FAILURE");
+  } catch {
+    return workerFailure("SYSTEMIC_FAILURE");
+  }
+}
+
+function hasRemainingAdmission(
+  prepared: Extract<PreparedCycle, { ok: true }>,
+  allocation: Readonly<Record<RefundExecutionWorkerCandidateClass, number>>,
+  classIndex: number,
+  nextCandidateIndex: number,
+  serviceOutcomes: number,
+): boolean {
+  const classOrder = workerCandidateClassOrder();
+  const currentClass = classOrder[classIndex];
+  if (currentClass && serviceOutcomes < allocation[currentClass]
+    && nextCandidateIndex < prepared.queues[currentClass].length) return true;
+  return classOrder.slice(classIndex + 1).some((candidateClass) => (
+    allocation[candidateClass] > 0 && prepared.queues[candidateClass].length > 0
+  ));
+}
+
+function stopsLaterAdmission(
+  shouldStop: boolean,
+  prepared: Extract<PreparedCycle, { ok: true }>,
+  allocation: Readonly<Record<RefundExecutionWorkerCandidateClass, number>>,
+  classIndex: number,
+  nextCandidateIndex: number,
+  serviceOutcomes: number,
+): boolean {
+  return shouldStop && hasRemainingAdmission(
+    prepared, allocation, classIndex, nextCandidateIndex, serviceOutcomes,
+  );
+}
+
+function stoppedCandidateProcessing(): CandidateProcessingResult {
+  return Object.freeze({ ok: true, stopped: true });
+}
+
+function completedCandidateProcessing(): CandidateProcessingResult {
+  return Object.freeze({ ok: true, stopped: false });
+}
+
+function stoppedCandidateStep(serviceOutcome: boolean): CandidateStepResult {
+  return Object.freeze({ ok: true, stopped: true, serviceOutcome });
+}
+
+function completedCandidateStep(serviceOutcome: boolean): CandidateStepResult {
+  return Object.freeze({ ok: true, stopped: false, serviceOutcome });
 }
 
 function markSelected(
