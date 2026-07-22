@@ -23,11 +23,20 @@ const HEALTH = join(REFUND_ROOT, "worker-health.ts");
 const LIFECYCLE = join(REFUND_ROOT, "worker-host-lifecycle.ts");
 const PROCESS = join(REFUND_ROOT, "worker-host-process.ts");
 const SCRIPT = join(ROOT, "scripts", "refund-execution-worker.ts");
-const APPROVED_REACHABILITY = [CYCLE, HOST, PROCESS, SCRIPT].map(repositoryPath).sort();
-const APPROVED_LIFECYCLE_REACHABILITY = [LIFECYCLE, HOST_CONTRACT, HOST, PROCESS, SCRIPT]
+const REHEARSAL_RUNNER = join(REFUND_ROOT, "run-refund-deployment-rehearsal.ts");
+const REHEARSAL_PROCESS = join(REFUND_ROOT, "refund-deployment-rehearsal-process.ts");
+const REHEARSAL_SCRIPT = join(ROOT, "scripts", "refund-worker-deployment-rehearsal.ts");
+const REHEARSAL_CHAIN = [REHEARSAL_RUNNER, REHEARSAL_PROCESS, REHEARSAL_SCRIPT];
+const APPROVED_REACHABILITY = [CYCLE, HOST, PROCESS, SCRIPT, ...REHEARSAL_CHAIN]
+  .map(repositoryPath).sort();
+const APPROVED_LIFECYCLE_REACHABILITY = [
+  LIFECYCLE, HOST_CONTRACT, HOST, PROCESS, SCRIPT, ...REHEARSAL_CHAIN,
+]
   .map(repositoryPath)
   .sort();
-const APPROVED_HEALTH_REACHABILITY = [HEALTH, HOST_CONTRACT, HOST, PROCESS, SCRIPT]
+const APPROVED_HEALTH_REACHABILITY = [
+  HEALTH, HOST_CONTRACT, HOST, PROCESS, SCRIPT, ...REHEARSAL_CHAIN,
+]
   .map(repositoryPath)
   .sort();
 const WORKER_FILES = [
@@ -80,7 +89,7 @@ describe("refund execution worker reachability", () => {
     expect(source).not.toMatch(/\bfetch\s*\(|console\.|setInterval|setTimeout|cron|scheduler|signal/iu);
   });
 
-  it("exposes only the three approved one-shot commands and one cooperative lifecycle budget", () => {
+  it("exposes only the four approved one-shot commands and one cooperative lifecycle budget", () => {
     const packageJson: unknown = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
     const scripts = packageScripts(packageJson);
     const workerScripts = Object.fromEntries(
@@ -95,6 +104,7 @@ describe("refund execution worker reachability", () => {
       "refund:worker:check": "node --import tsx scripts/refund-execution-worker.ts check",
       "refund:worker:health": "node --import tsx scripts/refund-execution-worker.ts health",
       "refund:worker:once": "node --import tsx scripts/refund-execution-worker.ts run-once",
+      "refund:worker:rehearse": "node --import tsx scripts/refund-worker-deployment-rehearsal.ts",
     });
     expect(hostSource).not.toMatch(
       /setInterval|setTimeout|setImmediate|queueMicrotask|process\.on|cron|scheduler|daemon|heartbeat|while\s*\(/iu,

@@ -123,4 +123,7 @@ There is no monitoring platform, alert integration, heartbeat persistence, sched
 readiness claim. Privileged provider-free manual, reconciliation, and credential observations plus
 their thresholds are defined by `refund_worker_operations_runbook_v1.md`. Their case references are
 strictly prohibited as metric dimensions or alert labels. This documentation grants no activation
-authority. P3D and P3E remain separate design, implementation, audit, and authorization acts.
+authority. The P3D provider-free rehearsal capability is implemented, but repository capability, a
+successful local rehearsal result, release-specific/deployment-specific evidence, and activation
+authorization are distinct. Actual deployment evidence is absent and activation remains blocked.
+P3E is unimplemented and unauthorized; LIVE remains unreachable.

@@ -116,11 +116,14 @@ output. `LIFECYCLE_DRAINED` uses the same exact counter validator and adds only 
 
 No loop, scheduler, cron, queue, daemon, web timer, route handler, Server Action, serverless
 schedule, external hard-deadline enforcement, overlap enforcement, jitter, backoff, health
-endpoint, heartbeat, metrics, alerting, provider reconciliation, manual-resolution mutation,
-credential rotation, or exact-command canary exists. P3C2 adds only read-only operations commands
-and a runbook. The lifecycle amendment adds only signal drain and the 120-second cooperative budget.
+endpoint, heartbeat, metrics, alerting, provider reconciliation, manual-resolution mutation, or
+credential rotation exists. P3C2 adds only read-only operations commands and a runbook. P3D adds a
+provider-free exact-command rehearsal, not an enabled provider-capable exact-command canary. The
+lifecycle amendment adds only signal drain and the 120-second cooperative budget.
 
 All worker and provider capability flags remain disabled by default. Code presence authorizes no
 SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. `check` and
-`health` remain read-only. P3D and P3E are separate design, implementation, audit, and
-authorization acts.
+`health` remain read-only. P3D capability is implemented, but local rehearsal success,
+release/deployment evidence, and activation authorization remain distinct. Actual deployment
+evidence is absent; activation remains blocked. No P3E provider canary exists, P3E remains
+unauthorized, and LIVE remains unreachable.

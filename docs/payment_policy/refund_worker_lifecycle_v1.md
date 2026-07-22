@@ -70,8 +70,11 @@ none of this cadence, jitter, retry, or backoff behavior.
 The repository still contains no scheduler configuration, and no actual platform concurrency
 guarantee is proven. Monitoring integration, staffed ownership, alert routing, and
 provider-reconciliation authority remain absent. Lifecycle code grants no activation authority.
-SANDBOX provider execution remains unauthorized, and LIVE remains unreachable. P3D and P3E remain
-separate acts.
+SANDBOX provider execution remains unauthorized, and LIVE remains unreachable. The P3D
+provider-free rehearsal capability is implemented. Actual deployment evidence remains absent, and
+it supplies no activation authorization. Activation remains blocked. P3E remains unimplemented and
+unauthorized.
 
-Hard-deadline enforcement, overlap enforcement, external observability ingestion, reconciliation,
-credential rotation, and canary operation remain outside P3B2.
+Hard-deadline enforcement, deployed overlap enforcement, external observability ingestion,
+reconciliation, credential rotation, and provider canary operation remain outside P3B2 and are not
+created by the P3D provider-free simulations.

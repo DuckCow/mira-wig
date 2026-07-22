@@ -16,6 +16,7 @@
     "refund:worker:check": "node --import tsx scripts/refund-execution-worker.ts check",
     "refund:worker:health": "node --import tsx scripts/refund-execution-worker.ts health",
     "refund:worker:once": "node --import tsx scripts/refund-execution-worker.ts run-once",
+    "refund:worker:rehearse": "node --import tsx scripts/refund-worker-deployment-rehearsal.ts",
     "refund:ops:manual": "node --import tsx scripts/refund-operations.ts manual",
     "refund:ops:reconcile": "node --import tsx scripts/refund-operations.ts reconcile",
     "refund:ops:credential": "node --import tsx scripts/refund-operations.ts credential"

@@ -6,8 +6,9 @@ This runbook amends, and does not replace, `refund_worker_host_v1.md`,
 `refund_worker_lifecycle_v1.md`, and `refund_worker_observability_v1.md`. It defines privileged,
 provider-free observations and external operating requirements. It creates no scheduler, monitor,
 alert destination, staffed team, provider authority, manual-resolution mutation, credential-rotation
-capability, or activation approval. LIVE remains unreachable. P3D rehearsal and P3E SANDBOX canary
-remain separate acts.
+capability, or activation approval. LIVE remains unreachable. The P3D provider-free rehearsal
+capability is implemented; actual deployment evidence is absent and activation remains blocked.
+P3E SANDBOX canary is unimplemented and unauthorized.
 
 ## Privileged operator commands
 
@@ -172,7 +173,10 @@ separately authorized provider evidence.
 
 ## Unsatisfied activation checklist
 
-Every item below requires external evidence and is currently unsatisfied:
+Every item below is an activation-evidence requirement and is currently unsatisfied. Repository
+capability, one successful local rehearsal, evidence for the exact release candidate in the intended
+deployment-like environment, and activation authorization are distinct. Code presence alone does
+not check an item, and no deployed-platform evidence exists.
 
 - [ ] scheduler deployment;
 - [ ] one-active-invocation and skip-overlap proof;
@@ -190,7 +194,7 @@ Every item below requires external evidence and is currently unsatisfied:
 - [ ] credential rotation capability;
 - [ ] old-generation recovery capability;
 - [ ] emergency-stop access;
-- [ ] provider-free P3D rehearsal;
+- [ ] successful P3D rehearsal evidence for the exact release candidate and intended deployment-like environment (the provider-free capability is implemented);
 - [ ] separately authorized P3E SANDBOX canary.
 
 This checklist grants no activation authority.

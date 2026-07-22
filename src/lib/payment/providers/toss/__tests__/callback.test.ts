@@ -29,10 +29,14 @@ interface PaymentOptions {
   marketCode?: MarketCode;
 }
 
-const CANONICAL_MARKET_CURRENCY: Record<MarketCode, string> = {
-  [MarketCode.KR]: "KRW",
-  [MarketCode.US]: "USD",
-  [MarketCode.JP]: "JPY",
+const CANONICAL_MARKET: Record<MarketCode, Readonly<{
+  currency: string;
+  shippableCountries: ShippingCountry[];
+  defaultLocale: string;
+}>> = {
+  [MarketCode.KR]: { currency: "KRW", shippableCountries: [ShippingCountry.KR], defaultLocale: "ko" },
+  [MarketCode.US]: { currency: "USD", shippableCountries: [ShippingCountry.US], defaultLocale: "en" },
+  [MarketCode.JP]: { currency: "JPY", shippableCountries: [ShippingCountry.JP], defaultLocale: "ja" },
 };
 
 describe("Toss callback providerRef persistence", () => {
@@ -305,13 +309,13 @@ async function createSession(context: TestContext, options: PaymentOptions) {
 }
 
 async function ensureMarket(code: MarketCode): Promise<void> {
-  // Shared KR/US/JP Market rows are cross-file fixtures and must only hold
-  // canonical currencies; per-test mismatches belong on session/payment rows or synthetic market codes.
-  const currency = CANONICAL_MARKET_CURRENCY[code];
+  // Shared KR/US/JP Market rows are cross-file fixtures and must remain canonical;
+  // per-test mismatches belong on session/payment rows or synthetic market codes.
+  const canonical = CANONICAL_MARKET[code];
   await db.market.upsert({
     where: { code },
-    update: { currency, shippableCountries: [ShippingCountry.KR], defaultLocale: "ko", isActive: true },
-    create: { code, currency, shippableCountries: [ShippingCountry.KR], defaultLocale: "ko", isActive: true },
+    update: { ...canonical, isActive: true },
+    create: { code, ...canonical, isActive: true },
   });
 }
 

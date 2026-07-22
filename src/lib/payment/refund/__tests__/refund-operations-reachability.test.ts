@@ -31,8 +31,12 @@ const MANUAL = join(REFUND_ROOT, "refund-operations-manual.ts");
 const RECONCILIATION = join(REFUND_ROOT, "refund-operations-reconciliation.ts");
 const HOST = join(REFUND_ROOT, "run-refund-operations-host.ts");
 const PROCESS = join(REFUND_ROOT, "refund-operations-process.ts");
+const REHEARSAL_RUNNER = join(REFUND_ROOT, "run-refund-deployment-rehearsal.ts");
+const REHEARSAL_PROCESS = join(REFUND_ROOT, "refund-deployment-rehearsal-process.ts");
+const REHEARSAL_SCRIPT = join(ROOT, "scripts/refund-worker-deployment-rehearsal.ts");
+const REHEARSAL_CHAIN = [REHEARSAL_RUNNER, REHEARSAL_PROCESS, REHEARSAL_SCRIPT];
 const APPROVED_OPERATIONS_GRAPH = [
-  CONTRACT, CREDENTIAL, MANUAL, RECONCILIATION, HOST, PROCESS, SCRIPT,
+  CONTRACT, CREDENTIAL, MANUAL, RECONCILIATION, HOST, PROCESS, SCRIPT, ...REHEARSAL_CHAIN,
 ].map(repositoryPath).sort();
 
 describe("refund operations reachability and runbook", () => {
@@ -206,7 +210,8 @@ describe("refund operations reachability and runbook", () => {
       "not guarantees or current SLAs",
       "No timer, staffed window, alert destination, owner, acknowledgement",
       "150-second external hard deadline",
-      "provider-free P3D rehearsal",
+      "P3D provider-free rehearsal capability is implemented",
+      "successful P3D rehearsal evidence for the exact release candidate",
       "separately authorized P3E SANDBOX canary",
       "Operators must never edit the database directly.",
     ]) expect(normalizedRunbook).toContain(required);
