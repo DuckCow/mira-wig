@@ -126,4 +126,15 @@ strictly prohibited as metric dimensions or alert labels. This documentation gra
 authority. The P3D provider-free rehearsal capability is implemented, but repository capability, a
 successful local rehearsal result, release-specific/deployment-specific evidence, and activation
 authorization are distinct. Actual deployment evidence is absent and activation remains blocked.
-P3E is unimplemented and unauthorized; LIVE remains unreachable.
+P3E-A is implemented as a non-authorizing evidence-readiness contract; P3E-B, P3E-C, and P3E-D
+remain unimplemented and unauthorized.
+
+## P3E authority-model status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
+infrastructure exists; no distributed admission implementation exists; no durable single-use
+consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
+and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+Scheduled SANDBOX remains blocked and LIVE remains unreachable.
+The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.

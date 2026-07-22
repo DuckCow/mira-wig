@@ -72,9 +72,20 @@ guarantee is proven. Monitoring integration, staffed ownership, alert routing, a
 provider-reconciliation authority remain absent. Lifecycle code grants no activation authority.
 SANDBOX provider execution remains unauthorized, and LIVE remains unreachable. The P3D
 provider-free rehearsal capability is implemented. Actual deployment evidence remains absent, and
-it supplies no activation authorization. Activation remains blocked. P3E remains unimplemented and
+it supplies no activation authorization. Activation remains blocked. P3E-A is implemented only as
+a non-authorizing evidence-readiness contract; P3E-B, P3E-C, and P3E-D remain unimplemented and
 unauthorized.
 
 Hard-deadline enforcement, deployed overlap enforcement, external observability ingestion,
 reconciliation, credential rotation, and provider canary operation remain outside P3B2 and are not
 created by the P3D provider-free simulations.
+
+## P3E authority-model status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
+infrastructure exists; no distributed admission implementation exists; no durable single-use
+consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
+and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+Scheduled SANDBOX remains blocked and LIVE remains unreachable.
+The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.

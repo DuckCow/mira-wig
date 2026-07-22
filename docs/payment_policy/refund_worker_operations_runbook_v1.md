@@ -198,3 +198,30 @@ not check an item, and no deployed-platform evidence exists.
 - [ ] separately authorized P3E SANDBOX canary.
 
 This checklist grants no activation authority.
+
+## P3E-A canary design status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented,
+but no P3E infrastructure exists, no credential has been provisioned, no canary target exists, and
+no provider request has occurred. P3E-D remains unimplemented and unauthorized, scheduled SANDBOX
+operation remains blocked, and LIVE remains unreachable.
+
+`refund_worker_sandbox_canary_platform_v1.md` defines the future manual-only Cloud Run canary,
+separate preflight/canary identities, exact `RefundExecutionCommand.id` authority, distributed
+admission and sequential-duplicate gates, staffed window, emergency containment, and pure approval
+format. It does not create an operator command or deployment. The current state is blocked on all
+18 evidence-readiness gates. Gate 16 is durable single-use consumption evidence, independent of
+deliberate human approval. These are not executable approval gates, and P3E-A cannot authorize
+execution. P3E-B/P3E-C/P3E-D remain unimplemented and unauthorized until separately reviewed future
+phases can verify evidence, issue authority, and durably
+consume the bound approval exactly once; the current schema has no approval-consumption ledger.
+
+## P3E authority-model status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
+infrastructure exists; no distributed admission implementation exists; no durable single-use
+consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
+and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+Scheduled SANDBOX remains blocked and LIVE remains unreachable.
+The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.

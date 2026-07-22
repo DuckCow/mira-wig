@@ -141,10 +141,25 @@ deployment, migration, database-state, credential, or provider rollback.
 
 ## P3E gate
 
-The P3D provider-free rehearsal capability is implemented, but actual deployment evidence remains
-absent and activation remains `BLOCKED`. P3E is unimplemented and unauthorized. P3E requires
-separate explicit authorization and evidence for an actual scheduler/platform,
-one-active/skip-overlap configuration, external 150-second timeout, log ingestion, alert
-destination, named owners and contacts, staffed window, real SANDBOX credential handling,
-manual-review response, provider-assisted reconciliation authority, emergency-stop access, an exact
-canary target and budget, and a rollback path. P3D success alone does not authorize P3E.
+P3D capability is implemented: P3D provider-free rehearsal is implemented. P3E-A evidence-readiness
+contract is implemented,
+but no P3E infrastructure exists, no credential has been provisioned, no canary target exists, and
+no provider request has occurred. P3E-D remains unimplemented and unauthorized, scheduled SANDBOX
+operation remains blocked, and LIVE remains unreachable. Actual deployment evidence remains absent
+and activation remains `BLOCKED`.
+
+The frozen P3E-A design is documented in `refund_worker_sandbox_canary_platform_v1.md`. It selects a
+manual-only Cloud Run Job contract and deliberately excludes Cloud Scheduler from the first canary.
+Future P3E-B, P3E-C, and P3E-D each require separate authorization. P3D success or a pure P3E-A
+approval evaluation does not create platform evidence or authorize a provider request.
+P3D success alone does not authorize P3E.
+
+## P3E authority-model status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
+infrastructure exists; no distributed admission implementation exists; no durable single-use
+consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
+and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+Scheduled SANDBOX remains blocked and LIVE remains unreachable.
+The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.
