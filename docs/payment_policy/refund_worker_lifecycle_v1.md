@@ -6,6 +6,8 @@ This document amends, and does not replace,
 `docs/payment_policy/refund_worker_host_v1.md`. It freezes the cooperative process lifecycle and
 the contract a future external scheduler must satisfy. It creates no scheduler and grants no
 activation or provider-execution authority.
+Structured process observations and read-only health semantics are separately frozen in
+`docs/payment_policy/refund_worker_observability_v1.md`.
 
 ## One-shot lifecycle
 
@@ -63,7 +65,7 @@ none of this cadence, jitter, retry, or backoff behavior.
 The repository still contains no scheduler configuration, and no actual platform concurrency
 guarantee is proven. Monitoring, on-call ownership, and refund-reconciliation ownership remain
 absent. Lifecycle code grants no activation authority. SANDBOX provider execution remains
-unauthorized, and LIVE remains unreachable. P3C, P3D, and P3E remain separate acts.
+unauthorized, and LIVE remains unreachable. P3C2, P3D, and P3E remain separate acts.
 
-Hard-deadline enforcement, overlap enforcement, observability, reconciliation, credential
-rotation, and canary operation remain outside P3B2.
+Hard-deadline enforcement, overlap enforcement, external observability ingestion, reconciliation,
+credential rotation, and canary operation remain outside P3B2.

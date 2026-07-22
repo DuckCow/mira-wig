@@ -65,8 +65,8 @@ export async function runRefundExecutionWorkerCycle(
     return workerCycleStopped(EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS);
   }
   const allocation = reserveRefundExecutionWorkerCapacity(prepared.queues);
-  const route = createRefundExecutionWorkerRouter(dependencies);
   const counters = emptyCounters();
+  const route = createRefundExecutionWorkerRouter(observeProviderInvocations(dependencies, counters));
   const processed = await processCandidateQueues(
     client, prepared, allocation, route, normalized.input.workerOwner, env, counters, control,
   );
@@ -115,7 +115,7 @@ async function processCandidateQueues(
 ): Promise<CandidateProcessingResult> {
   const classOrder = workerCandidateClassOrder();
   for (const [classIndex, candidateClass] of classOrder.entries()) {
-    const stop = observeCooperativeStop(control);
+    const stop = observeCooperativeStop(control, counters);
     if (!stop.ok) return stop;
     if (stop.shouldStop && hasRemainingAdmission(prepared, allocation, classIndex, 0, 0)) {
       return stoppedCandidateProcessing();
@@ -171,7 +171,7 @@ async function processCandidate(
   control: RefundExecutionWorkerCycleControl,
   serviceOutcomes: number,
 ): Promise<CandidateStepResult> {
-  const stopBeforeRoute = observeCooperativeStop(control);
+  const stopBeforeRoute = observeCooperativeStop(control, counters);
   if (!stopBeforeRoute.ok) return stopBeforeRoute;
   if (stopBeforeRoute.shouldStop) return stoppedCandidateStep(false);
   markSelected(counters, candidateClass);
@@ -182,7 +182,7 @@ async function processCandidate(
   const result = await routeOneCandidate(client, candidate, route, workerOwner, env, counters);
   if (!result.ok) return result;
   const serviceOutcome = !result.selectorRaceLoss;
-  const stopAfterRoute = observeCooperativeStop(control);
+  const stopAfterRoute = observeCooperativeStop(control, counters);
   if (!stopAfterRoute.ok) return stopAfterRoute;
   const completedServiceOutcomes = serviceOutcomes + (serviceOutcome ? 1 : 0);
   const stopped = stopsLaterAdmission(
@@ -208,14 +208,16 @@ async function routeOneCandidate(
   try {
     const outcome = await route(client, candidate, workerOwner, env);
     if (stopsRefundExecutionWorkerCycle(outcome)) {
+      counters.failedCount += 1;
       return workerFailure(outcome.kind === "CONFIG_INVALID"
         ? "CONFIG_INVALID"
-        : "SYSTEMIC_FAILURE");
+        : "SYSTEMIC_FAILURE", counters);
     }
     incrementOutcome(counters, completedOutcomeKind(outcome.kind));
     return Object.freeze({ ok: true, selectorRaceLoss: isSelectorRaceLoss(outcome) });
   } catch {
-    return workerFailure("SYSTEMIC_FAILURE");
+    counters.failedCount += 1;
+    return workerFailure("SYSTEMIC_FAILURE", counters);
   }
 }
 
@@ -249,15 +251,32 @@ function emptyCounters(): MutableCounters {
 
 function observeCooperativeStop(
   control: RefundExecutionWorkerCycleControl,
+  counters: RefundExecutionWorkerCycleCounters = EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS,
 ): Readonly<{ ok: true; shouldStop: boolean }> | RefundExecutionWorkerCycleFailure {
   try {
     const shouldStop = control.shouldStop();
     return typeof shouldStop === "boolean"
       ? Object.freeze({ ok: true, shouldStop })
-      : workerFailure("SYSTEMIC_FAILURE");
+      : workerFailure("SYSTEMIC_FAILURE", counters);
   } catch {
-    return workerFailure("SYSTEMIC_FAILURE");
+    return workerFailure("SYSTEMIC_FAILURE", counters);
   }
+}
+
+function observeProviderInvocations(
+  dependencies: RefundExecutionWorkerDependencies,
+  counters: MutableCounters,
+): RefundExecutionWorkerDependencies {
+  return Object.freeze({
+    lookup: (...args: Parameters<RefundExecutionWorkerDependencies["lookup"]>) => {
+      counters.providerLookupCount += 1;
+      return dependencies.lookup(...args);
+    },
+    cancellation: (...args: Parameters<RefundExecutionWorkerDependencies["cancellation"]>) => {
+      counters.providerCancellationCount += 1;
+      return dependencies.cancellation(...args);
+    },
+  });
 }
 
 function hasRemainingAdmission(

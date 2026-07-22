@@ -94,7 +94,42 @@ describe("refund execution worker real process path", () => {
         databaseReachable: true,
         migrationStatus: "READY",
       },
+      process: processObservation("CHECK"),
     });
+  });
+
+  it("runs the actual read-only package health command with a stripped environment", async () => {
+    const result = await runPackage(
+      ["refund:worker:health"],
+      explicitEnv({ DATABASE_URL: requireDisposableDatabaseUrl(process.env.DATABASE_URL) }),
+    );
+
+    expectNormalJsonLine(result, "stdout", 0, "HEALTH_SNAPSHOT");
+    const parsed: unknown = JSON.parse(result.stdout);
+    expect(parsed).toMatchObject({
+      ok: true,
+      code: "HEALTH_SNAPSHOT",
+      readiness: {
+        workerMasterEnabled: false,
+        credentialStatus: "ABSENT",
+        databaseReachable: true,
+        migrationStatus: "READY",
+      },
+      routes: {
+        READY: false,
+        UNCONTACTED: false,
+        CONTACTED_LOOKUP: false,
+        CONTACTED_RECONTACT: false,
+      },
+      process: processObservation("HEALTH"),
+    });
+    if (!isRecord(parsed) || !isRecord(parsed.backlog)) {
+      throw new Error("Expected an exact health backlog object.");
+    }
+    for (const observation of Object.values(parsed.backlog)) {
+      if (!isRecord(observation)) throw new Error("Expected a health backlog observation.");
+      expect(typeof observation.count).toBe("number");
+    }
   });
 
   it("runs the actual package once command as a healthy disabled no-op", async () => {
@@ -188,6 +223,7 @@ describe("refund execution worker real process path", () => {
       code: "LIFECYCLE_DRAINED",
       reason: "SIGNAL",
       cycle: oneCompletedCandidateCounters(),
+      process: processObservation("RUN_ONCE"),
     });
 
     const cleanupBaseline = messageRecord(cleanup, "baseline");
@@ -206,7 +242,7 @@ describe("refund execution worker real process path", () => {
       secretReader: 0,
     });
     expect(harness.stderr).not.toMatch(
-      /private-signal|SIGTERM|SIGINT|REAL_|Error:|at\s+\S+|DATABASE_URL|TOSS|credential|provider|secret/iu,
+      /private-signal|SIGTERM|SIGINT|REAL_|Error:|at\s+\S+|DATABASE_URL|TOSS|credential|secret/iu,
     );
   });
 });
@@ -351,11 +387,30 @@ function oneCompletedCandidateCounters(): Readonly<Record<string, number>> {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 1,
     uncontactedSelected: 0,
     contactedSelected: 0,
   });
 }
+
+function processObservation(
+  command: "CHECK" | "HEALTH" | "RUN_ONCE",
+): Readonly<Record<string, unknown>> {
+  return {
+    formatVersion: "mira-refund-worker-process-observation/v1",
+    command,
+    operationDurationMs: NONNEGATIVE_DURATION_MATCHER,
+  };
+}
+
+const NONNEGATIVE_DURATION_MATCHER = Object.freeze({
+  asymmetricMatch: (value: unknown) => typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0,
+  toString: () => "NonnegativeSafeIntegerDuration",
+});
 
 function runPackage(args: readonly string[], env: NodeJS.ProcessEnv): Promise<ProcessResult> {
   return runProcess("npm", ["--prefix", ROOT, "run", "--silent", ...args], env, alternateCwd);

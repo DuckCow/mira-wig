@@ -1,12 +1,4 @@
 import {
-  isRefundExecutionDispatchAuthorizationEnabled,
-  isRefundExecutionLeaseEnabled,
-  isRefundExecutionObservationApplicationEnabled,
-  isRefundExecutionTossAuthorizationEnabled,
-  isRefundExecutionTossContactEnabled,
-  isRefundExecutionTossEligibilityLookupEnabled,
-  isRefundExecutionTossRecoveryLookupEnabled,
-  isRefundExecutionUncontactedRecoveryEnabled,
   RefundExecutionActivationConfigError,
 } from "./execution-activation";
 import {
@@ -17,6 +9,11 @@ import {
 } from "./providers/toss/refund-credential-config";
 import { workerFailure, type RefundExecutionWorkerCycleFailure } from "./worker-contract";
 import type { RefundExecutionWorkerCandidateQueues } from "./worker-allocation";
+import {
+  contactedRefundExecutionWorkerLookupRouteIsReady,
+  readyRefundExecutionWorkerRouteIsReady,
+  uncontactedRefundExecutionWorkerRouteIsReady,
+} from "./worker-route-readiness";
 
 type ActivationEnv = Readonly<Record<string, string | undefined>>;
 
@@ -37,12 +34,12 @@ export function preflightRefundExecutionWorkerRoutes(
   try {
     const credential = selectedCredentialReadiness(queues, env);
     if (credential === "CONFIG_INVALID") return workerFailure("CONFIG_INVALID");
-    const configured = credential === "CONFIGURED";
-    const ready = queues.READY.length === 0 || readyRouteEnabled(env, configured);
+    const ready = queues.READY.length === 0
+      || readyRefundExecutionWorkerRouteIsReady(env, credential);
     const uncontacted = queues.UNCONTACTED.length === 0
-      || uncontactedRouteEnabled(env, configured);
+      || uncontactedRefundExecutionWorkerRouteIsReady(env, credential);
     const contacted = queues.CONTACTED.length === 0
-      || contactedRouteEnabled(env, configured);
+      || contactedRefundExecutionWorkerLookupRouteIsReady(env, credential);
     return Object.freeze({
       ok: true,
       readiness: Object.freeze({ CONTACTED: contacted, UNCONTACTED: uncontacted, READY: ready }),
@@ -62,38 +59,6 @@ function selectedCredentialReadiness(
   return Object.values(queues).some((queue) => queue.length > 0)
     ? credentialReadiness(env)
     : "ABSENT";
-}
-
-function readyRouteEnabled(env: ActivationEnv, credentialConfigured: boolean): boolean {
-  return [
-    isRefundExecutionLeaseEnabled(env),
-    isRefundExecutionDispatchAuthorizationEnabled(env),
-    isRefundExecutionTossAuthorizationEnabled(env),
-    isRefundExecutionTossEligibilityLookupEnabled(env),
-    isRefundExecutionTossContactEnabled(env),
-    isRefundExecutionObservationApplicationEnabled(env),
-    credentialConfigured,
-  ].every(Boolean);
-}
-
-function uncontactedRouteEnabled(env: ActivationEnv, credentialConfigured: boolean): boolean {
-  return [
-    isRefundExecutionUncontactedRecoveryEnabled(env),
-    isRefundExecutionDispatchAuthorizationEnabled(env),
-    isRefundExecutionTossAuthorizationEnabled(env),
-    isRefundExecutionTossEligibilityLookupEnabled(env),
-    isRefundExecutionTossContactEnabled(env),
-    isRefundExecutionObservationApplicationEnabled(env),
-    credentialConfigured,
-  ].every(Boolean);
-}
-
-function contactedRouteEnabled(env: ActivationEnv, credentialConfigured: boolean): boolean {
-  return [
-    isRefundExecutionTossRecoveryLookupEnabled(env),
-    isRefundExecutionObservationApplicationEnabled(env),
-    credentialConfigured,
-  ].every(Boolean);
 }
 
 function credentialReadiness(

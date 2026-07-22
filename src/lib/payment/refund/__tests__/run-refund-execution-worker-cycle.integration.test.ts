@@ -2,6 +2,7 @@ import {
   PaymentMode,
   PaymentProvider,
   RefundExecutionCommandEventType,
+  RefundExecutionDispatchAttemptState,
 } from "@prisma/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
@@ -14,6 +15,7 @@ import {
   REFUND_EXECUTION_TOSS_CONTACT_ENABLED,
   REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
   REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED,
+  REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED,
   REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
   REFUND_EXECUTION_WORKER_ENABLED,
 } from "../execution-activation";
@@ -21,6 +23,7 @@ import { createTossRefundExecutionAuthorizer } from "../providers/toss/refund-au
 import { createTossRefundContactExecutor } from "../providers/toss/refund-contact-orchestrator";
 import type { TossRefundCancellationPort } from "../providers/toss/refund-cancellation-http";
 import type { TossRefundLookupPort } from "../providers/toss/refund-lookup-http";
+import { TOSS_REFUND_RECOVERY_MIN_RECONTACT_INTERVAL_MS } from "../providers/toss/refund-recovery-policy";
 import {
   runRefundExecutionWorkerCycle,
   type RefundExecutionWorkerCycleCounters,
@@ -68,6 +71,10 @@ const CONTACTED_ENV = {
   [REFUND_EXECUTION_WORKER_ENABLED]: "ENABLED",
   [REFUND_EXECUTION_TOSS_RECOVERY_LOOKUP_ENABLED]: "ENABLED",
   [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "ENABLED",
+};
+const CONTACTED_RECONTACT_ENV = {
+  ...CONTACTED_ENV,
+  [REFUND_EXECUTION_TOSS_RECOVERY_RECONTACT_ENABLED]: "ENABLED",
 };
 const EXPIRED = new Date("2000-01-01T00:00:00.000Z");
 
@@ -185,7 +192,9 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       Object.freeze({ shouldStop: () => stop }),
     );
 
-    expect(result).toEqual(stoppedCounters({ readySelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(stoppedCounters({
+      readySelected: 1, succeededCount: 1, providerLookupCount: 2, providerCancellationCount: 1,
+    }));
     expect(calls).toEqual({ get: 2, post: 1 });
     expect((await dispatchState(first)).command.status).toBe("DONE");
     expect((await dispatchState(second)).command.status).toBe("READY");
@@ -212,7 +221,9 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       Object.freeze({ shouldStop: () => stop }),
     );
 
-    expect(result).toEqual(successCounters({ readySelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(successCounters({
+      readySelected: 1, succeededCount: 1, providerLookupCount: 2, providerCancellationCount: 1,
+    }));
     expect(calls).toEqual({ get: 2, post: 1 });
   });
 
@@ -243,7 +254,9 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       Object.freeze({ shouldStop: () => stop }),
     );
 
-    expect(result).toEqual(stoppedCounters({ contactedSelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(stoppedCounters({
+      contactedSelected: 1, succeededCount: 1, providerLookupCount: 1,
+    }));
     expect(calls).toEqual({ get: 1, post: 0 });
     expect((await dispatchState(contacted)).command.status).toBe("DONE");
     expect((await dispatchState(ready)).command.status).toBe("READY");
@@ -267,6 +280,7 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       ok: false,
       code: "SYSTEMIC_FAILURE",
       message: "Refund execution worker cycle failed systemically.",
+      cycle: successCounters({ selectedCount: 0, attemptedCount: 0 }).cycle,
     });
     expect(JSON.stringify(result)).not.toContain("STOP_SECRET");
     expect(calls).toEqual({ get: 0, post: 0 });
@@ -276,18 +290,59 @@ describe("runRefundExecutionWorkerCycle integration", () => {
   it("selects READY, acquires once, and runs the shared authorization/contact continuation", async () => {
     const fixture = await tossFixture(fixtures);
     const calls = { get: 0, post: 0 };
+    const trace: string[] = [];
+    const lookup: TossRefundLookupPort = async () => {
+      calls.get += 1;
+      const dispatch = await db.refundExecutionDispatchAttempt.findFirst({
+        where: { commandId: fixture.commandId },
+        orderBy: { ordinal: "desc" },
+      });
+      if (!dispatch) {
+        trace.push("AUTHORIZATION_LOOKUP");
+      } else {
+        expect(dispatch).toMatchObject({
+          ordinal: 1,
+          state: RefundExecutionDispatchAttemptState.AUTHORIZED,
+          contactMarkedAt: null,
+        });
+        expect(await db.refundExecutionProviderEligibilityProof.count({
+          where: { binding: { refundAttemptId: fixture.refundAttemptId } },
+        })).toBe(1);
+        trace.push("CONTACT_REVALIDATION_LOOKUP");
+      }
+      return { kind: "response", body: JSON.stringify(eligibleBody(fixture)) };
+    };
+    const cancellation: TossRefundCancellationPort = async () => {
+      calls.post += 1;
+      const dispatch = await db.refundExecutionDispatchAttempt.findFirstOrThrow({
+        where: { commandId: fixture.commandId, ordinal: 1 },
+      });
+      expect(dispatch.state).toBe(
+        RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
+      );
+      expect(dispatch.contactMarkedAt).not.toBeNull();
+      trace.push("CANCELLATION");
+      return { kind: "success", body: JSON.stringify(successBody(fixture)) };
+    };
     const result = await runRefundExecutionWorkerCycle(
       db,
       { workerOwner: "  ready-worker  " },
-      ports(fixture, calls),
+      { lookup, cancellation },
       READY_ENV,
     );
 
-    expect(result).toEqual(successCounters({ readySelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(successCounters({
+      readySelected: 1, succeededCount: 1, providerLookupCount: 2, providerCancellationCount: 1,
+    }));
     expectSuccessfulAggregate(result);
     expect(Object.isFrozen(result)).toBe(true);
     expect(result.ok && Object.isFrozen(result.cycle)).toBe(true);
     expect(calls).toEqual({ get: 2, post: 1 });
+    expect(trace).toEqual([
+      "AUTHORIZATION_LOOKUP",
+      "CONTACT_REVALIDATION_LOOKUP",
+      "CANCELLATION",
+    ]);
     expect((await dispatchState(fixture)).command.status).toBe("DONE");
   });
 
@@ -332,7 +387,10 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       UNCONTACTED_ENV,
     );
 
-    expect(result).toEqual(successCounters({ uncontactedSelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(successCounters({
+      uncontactedSelected: 1, succeededCount: 1,
+      providerLookupCount: 2, providerCancellationCount: 1,
+    }));
     expectSuccessfulAggregate(result);
     expect(calls).toEqual({ get: 2, post: 1 });
     expect((await dispatchState(fixture)).command.status).toBe("DONE");
@@ -354,7 +412,9 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       CONTACTED_ENV,
     );
 
-    expect(result).toEqual(successCounters({ contactedSelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(successCounters({
+      contactedSelected: 1, succeededCount: 1, providerLookupCount: 1,
+    }));
     expectSuccessfulAggregate(result);
     expect(calls).toEqual({ get: 1, post: 0 });
     expect((await dispatchState(fixture)).command.status).toBe("DONE");
@@ -403,10 +463,138 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       READY_ENV,
     );
 
-    expect(result).toMatchObject({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(result).toEqual({
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      message: "Refund execution worker cycle failed systemically.",
+      cycle: successCounters({
+        selectedCount: 2,
+        attemptedCount: 2,
+        succeededCount: 1,
+        failedCount: 1,
+        providerLookupCount: 3,
+        providerCancellationCount: 1,
+        readySelected: 2,
+      }).cycle,
+    });
     expect((await dispatchState(first)).command.status).toBe("DONE");
     expect((await dispatchState(second)).command.status).toBe("LEASED");
     expect(JSON.stringify(result)).not.toContain("synthetic invariant failure");
+  });
+
+  it("counts one routed CONFIG_INVALID failure without provider invocation", async () => {
+    const fixture = await tossFixture(fixtures);
+    let leaseGateReads = 0;
+    const env = { ...READY_ENV };
+    Object.defineProperty(env, REFUND_EXECUTION_LEASE_ENABLED, {
+      enumerable: true,
+      get: () => {
+        leaseGateReads += 1;
+        return leaseGateReads === 1 ? "ENABLED" : "malformed-after-preflight";
+      },
+    });
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "config-stop-worker" },
+      ports(fixture, { get: 0, post: 0 }),
+      env,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      code: "CONFIG_INVALID",
+      message: "Refund execution worker configuration is invalid.",
+      cycle: successCounters({ failedCount: 1, readySelected: 1 }).cycle,
+    });
+    expect(leaseGateReads).toBe(2);
+  });
+
+  it("counts a throwing cancellation port exactly once under temporary classification", async () => {
+    const fixture = await tossFixture(fixtures);
+    const lookup = eligibleLookup(fixture, { get: 0, post: 0 });
+    const cancellation: TossRefundCancellationPort = () => {
+      throw new Error("CANCELLATION_THROW_SECRET");
+    };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "cancellation-throw-worker" },
+      { lookup, cancellation },
+      READY_ENV,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      cycle: successCounters({
+        temporaryCount: 1,
+        providerLookupCount: 2,
+        providerCancellationCount: 1,
+        readySelected: 1,
+      }).cycle,
+    });
+    expect(JSON.stringify(result)).not.toContain("CANCELLATION_THROW_SECRET");
+  });
+
+  it("counts a rejected cancellation Promise exactly once under temporary classification", async () => {
+    const fixture = await tossFixture(fixtures);
+    const calls = { get: 0, post: 0 };
+    const lookup = eligibleLookup(fixture, calls);
+    const cancellation: TossRefundCancellationPort = () => {
+      calls.post += 1;
+      return Promise.reject(new Error("CANCELLATION_REJECTION_SECRET"));
+    };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "cancellation-rejection-worker" },
+      { lookup, cancellation },
+      READY_ENV,
+    );
+
+    expect(result).toEqual(successCounters({
+      temporaryCount: 1,
+      providerLookupCount: 2,
+      providerCancellationCount: 1,
+      readySelected: 1,
+    }));
+    expect(calls).toEqual({ get: 2, post: 1 });
+    expect(result.ok && result.cycle.failedCount).toBe(0);
+    expect(JSON.stringify(result)).not.toContain("CANCELLATION_REJECTION_SECRET");
+  });
+
+  it("counts one lookup and one authorized cancellation through CONTACTED recontact", async () => {
+    const fixture = await tossFixture(fixtures);
+    await createContactedUnknownOutcome(fixture);
+    const capturedAt = await workerDatabaseTime();
+    const priorContact = new Date(
+      capturedAt.getTime() - TOSS_REFUND_RECOVERY_MIN_RECONTACT_INTERVAL_MS - 1_000,
+    );
+    await db.refundExecutionDispatchAttempt.updateMany({
+      where: { commandId: fixture.commandId, ordinal: 1 },
+      data: { authorizedAt: priorContact, contactMarkedAt: priorContact },
+    });
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "contacted-recontact-worker" },
+      {
+        lookup: eligibleLookup(fixture, calls),
+        cancellation: countingCancellation(fixture, calls),
+      },
+      CONTACTED_RECONTACT_ENV,
+    );
+
+    expect(result).toEqual(successCounters({
+      contactedSelected: 1,
+      succeededCount: 1,
+      providerLookupCount: 1,
+      providerCancellationCount: 1,
+    }));
+    expect(calls).toEqual({ get: 1, post: 1 });
+    expect(result.ok && result.cycle.failedCount).toBe(0);
+    expect((await dispatchState(fixture)).command.status).toBe("DONE");
   });
 
   it("bounds and orders READY hints by availableAt, then createdAt and id", async () => {
@@ -531,7 +719,9 @@ describe("runRefundExecutionWorkerCycle integration", () => {
       READY_ENV,
     );
 
-    expect(result).toEqual(successCounters({ readySelected: 1, succeededCount: 1 }));
+    expect(result).toEqual(successCounters({
+      readySelected: 1, succeededCount: 1, providerLookupCount: 2, providerCancellationCount: 1,
+    }));
     expectSuccessfulAggregate(result);
     expect(calls).toEqual({ get: 2, post: 1 });
     expect((await dispatchState(valid)).command.status).toBe("DONE");
@@ -786,6 +976,17 @@ async function createAuthorizedUncontacted(fixture: DispatchFixture): Promise<vo
   });
 }
 
+async function workerDatabaseTime(): Promise<Date> {
+  const rows = await db.$queryRaw<{ capturedAt: Date }[]>`
+    SELECT date_trunc('milliseconds', clock_timestamp()) AS "capturedAt"
+  `;
+  const capturedAt = rows[0]?.capturedAt;
+  if (rows.length !== 1 || !(capturedAt instanceof Date)) {
+    throw new Error("Unable to capture worker database time.");
+  }
+  return capturedAt;
+}
+
 function leaseInput(lease: Readonly<{
   commandId: string;
   leaseGeneration: number;
@@ -841,6 +1042,8 @@ function successCounters(overrides: Readonly<Record<string, number>>) {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 0,
     uncontactedSelected: 0,
     contactedSelected: 0,

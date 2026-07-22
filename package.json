@@ -14,6 +14,7 @@
     "make-admin": "tsx scripts/make-admin.ts",
     "payment:reconcile": "node --import tsx scripts/payment-reconcile.ts",
     "refund:worker:check": "node --import tsx scripts/refund-execution-worker.ts check",
+    "refund:worker:health": "node --import tsx scripts/refund-execution-worker.ts health",
     "refund:worker:once": "node --import tsx scripts/refund-execution-worker.ts run-once"
   },
   "prisma": {

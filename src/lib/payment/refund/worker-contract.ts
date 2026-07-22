@@ -22,6 +22,8 @@ export type RefundExecutionWorkerCycleCounters = Readonly<{
   inconsistentCount: number;
   skippedCount: number;
   failedCount: number;
+  providerLookupCount: number;
+  providerCancellationCount: number;
   readySelected: number;
   uncontactedSelected: number;
   contactedSelected: number;
@@ -37,6 +39,7 @@ export type RefundExecutionWorkerCycleFailure = Readonly<{
   ok: false;
   code: RefundExecutionWorkerCycleFailureCode;
   message: string;
+  cycle: RefundExecutionWorkerCycleCounters;
 }>;
 
 export type RefundExecutionWorkerCycleSuccess = Readonly<{
@@ -82,6 +85,8 @@ export const EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS: RefundExecutionWorker
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 0,
     uncontactedSelected: 0,
     contactedSelected: 0,
@@ -119,8 +124,14 @@ export function workerCycleStopped(
 
 export function workerFailure(
   code: RefundExecutionWorkerCycleFailureCode,
+  counters: RefundExecutionWorkerCycleCounters = EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS,
 ): RefundExecutionWorkerCycleFailure {
-  return Object.freeze({ ok: false, code, message: FAILURE_MESSAGES[code] });
+  return Object.freeze({
+    ok: false,
+    code,
+    message: FAILURE_MESSAGES[code],
+    cycle: Object.freeze({ ...counters }),
+  });
 }
 
 function hasExactDataFields(

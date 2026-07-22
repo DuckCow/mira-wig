@@ -12,6 +12,235 @@ import {
 import { compareRefundWorkerMigrations } from "../worker-migration-readiness";
 
 describe("refund execution worker process wrapper", () => {
+  it("classifies FEATURE_DISABLED, CYCLE_COMPLETE, and CONFIG_INVALID observations exactly", async () => {
+    const disabled = processFixture();
+    await expect(runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      {},
+      disabled.output,
+      { ...disabled.dependencies, inspectMasterGate: () => false },
+      JSON.stringify,
+      sequenceClock(0, 1),
+    )).resolves.toBe(0);
+    expectObservedLine(disabled.stdout[0], "RUN_ONCE", {
+      ok: true,
+      code: "FEATURE_DISABLED",
+    }, 1);
+
+    const complete = processFixture();
+    await expect(runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      {
+        REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
+        TOSS_SANDBOX_SECRET_KEY: "synthetic",
+      },
+      complete.output,
+      complete.dependencies,
+      JSON.stringify,
+      sequenceClock(2, 4),
+    )).resolves.toBe(0);
+    expectObservedLine(complete.stdout[0], "RUN_ONCE", {
+      ok: true,
+      code: "CYCLE_COMPLETE",
+      cycle: emptyCounters(),
+    }, 2);
+
+    const invalid = processFixture();
+    await expect(runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      {},
+      invalid.output,
+      { ...invalid.dependencies, inspectActivation: () => { throw new Error("CONFIG_SECRET"); } },
+      JSON.stringify,
+      sequenceClock(5, 8),
+    )).resolves.toBe(78);
+    expectObservedLine(invalid.stderr[0], "RUN_ONCE", {
+      ok: false,
+      code: "CONFIG_INVALID",
+    }, 3);
+    expect(invalid.stderr[0]).not.toContain("CONFIG_SECRET");
+  });
+
+  it("stops duration before awaiting writer latency", async () => {
+    const fixture = processFixture();
+    const release = deferred();
+    let clockCalls = 0;
+    const output = {
+      stdout: { write: async (value: string) => {
+        fixture.stdout.push(value);
+        await release.promise;
+      } },
+      stderr: fixture.output.stderr,
+    };
+    const clock = () => {
+      clockCalls += 1;
+      return clockCalls === 1 ? 100 : 107;
+    };
+
+    const operation = runRefundExecutionWorkerProcess(
+      ["check"], {}, output, fixture.dependencies, JSON.stringify, clock,
+    );
+    await vi.waitFor(() => expect(fixture.stdout).toHaveLength(1));
+    expect(clockCalls).toBe(2);
+    expectObservedLine(fixture.stdout[0], "CHECK", {
+      ok: true,
+      code: "CHECK_READY",
+      readiness: {
+        workerMasterEnabled: false,
+        credentialStatus: "ABSENT",
+        databaseReachable: true,
+        migrationStatus: "READY",
+      },
+    }, 7);
+    release.resolve();
+    await expect(operation).resolves.toBe(0);
+    expect(clockCalls).toBe(2);
+  });
+
+  it("preserves exact partial failure counters through host and process serialization", async () => {
+    const fixture = processFixture();
+    const partial = {
+      ...emptyCounters(),
+      selectedCount: 2,
+      attemptedCount: 2,
+      succeededCount: 1,
+      failedCount: 1,
+      providerLookupCount: 3,
+      providerCancellationCount: 1,
+      readySelected: 2,
+    };
+    const dependencies = {
+      ...fixture.dependencies,
+      runWorkerCycle: () => Promise.resolve({
+        ok: false as const,
+        code: "SYSTEMIC_FAILURE" as const,
+        message: "PARTIAL_FAILURE_SECRET",
+        cycle: partial,
+      }),
+    };
+
+    await expect(runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      {
+        REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
+        TOSS_SANDBOX_SECRET_KEY: "synthetic",
+      },
+      fixture.output,
+      dependencies,
+      JSON.stringify,
+      sequenceClock(10, 12),
+    )).resolves.toBe(1);
+    expectObservedLine(fixture.stderr[0], "RUN_ONCE", {
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      cycle: partial,
+    }, 2);
+    expect(fixture.stderr[0]).not.toContain("PARTIAL_FAILURE_SECRET");
+  });
+
+
+  it("emits exact HEALTH_SNAPSHOT observation with injected monotonic duration", async () => {
+    const fixture = processFixture();
+    const clock = sequenceClock(1_000, 1_042);
+
+    await expect(runRefundExecutionWorkerProcess(
+      ["health"], {}, fixture.output, fixture.dependencies, JSON.stringify, clock,
+    )).resolves.toBe(0);
+
+    expect(fixture.stderr).toEqual([]);
+    expectObservedLine(fixture.stdout[0], "HEALTH", {
+      ok: true,
+      code: "HEALTH_SNAPSHOT",
+      readiness: {
+        workerMasterEnabled: false,
+        credentialStatus: "ABSENT",
+        databaseReachable: true,
+        migrationStatus: "READY",
+      },
+      routes: {
+        READY: false,
+        UNCONTACTED: false,
+        CONTACTED_LOOKUP: false,
+        CONTACTED_RECONTACT: false,
+      },
+      backlog: emptyBacklog(),
+    }, 42);
+  });
+
+  it("preserves MIGRATIONS_NOT_READY exit and observation fields", async () => {
+    const fixture = processFixture({ migrationMismatch: true });
+    await expect(runRefundExecutionWorkerProcess(
+      ["check"], {}, fixture.output, fixture.dependencies, JSON.stringify, sequenceClock(4, 9),
+    )).resolves.toBe(78);
+    expectObservedLine(fixture.stderr[0], "CHECK", {
+      ok: false,
+      code: "MIGRATIONS_NOT_READY",
+    }, 5);
+  });
+
+  it.each([
+    ["start throws", () => trackedClock(() => { throw new Error("START_CLOCK_SECRET"); })],
+    ["end throws", () => trackedClock(
+      () => 10,
+      () => { throw new Error("END_CLOCK_SECRET"); },
+    )],
+    ["start is NaN", () => trackedClock(() => Number.NaN)],
+    ["end is NaN", () => trackedClock(() => 10, () => Number.NaN)],
+    ["end is positive Infinity", () => trackedClock(() => 10, () => Number.POSITIVE_INFINITY)],
+    ["start is negative Infinity", () => trackedClock(() => Number.NEGATIVE_INFINITY)],
+    ["start is negative", () => trackedClock(() => -1)],
+    ["end is negative", () => trackedClock(() => 10, () => -1)],
+    ["moves backwards", () => trackedClock(() => 10, () => 9)],
+    ["has an unsafe reading", () => trackedClock(
+      () => 0,
+      () => Number.MAX_SAFE_INTEGER + 1,
+    )],
+  ] as const)("fails closed to one static systemic line when the monotonic clock %s", async (
+    _name,
+    createClock,
+  ) => {
+    const fixture = processFixture();
+    const tracked = createClock();
+    await expect(runRefundExecutionWorkerProcess(
+      ["check"], {}, fixture.output, fixture.dependencies, JSON.stringify, tracked.clock,
+    )).resolves.toBe(1);
+    expectStaticSystemicFailure(fixture.stdout, fixture.stderr);
+    expect(tracked.callCount()).toBe(_name.includes("start") ? 1 : 2);
+    expect(fixture.stderr[0]).not.toMatch(/CLOCK_SECRET|Error:|at\s+\S+/u);
+  });
+
+  it("floors a valid fractional monotonic duration", async () => {
+    const fixture = processFixture();
+    await expect(runRefundExecutionWorkerProcess(
+      ["check"], {}, fixture.output, fixture.dependencies, JSON.stringify,
+      sequenceClock(100.25, 102.99),
+    )).resolves.toBe(0);
+    expectObservedLine(fixture.stdout[0], "CHECK", {
+      ok: true,
+      code: "CHECK_READY",
+      readiness: {
+        workerMasterEnabled: false,
+        credentialStatus: "ABSENT",
+        databaseReachable: true,
+        migrationStatus: "READY",
+      },
+    }, 2);
+  });
+
+  it("rejects a serializer-added process field without emitting it", async () => {
+    const fixture = processFixture();
+    await expect(runRefundExecutionWorkerProcess(
+      ["check"], {}, fixture.output, fixture.dependencies,
+      (result) => JSON.stringify({
+        ...result,
+        process: { ...result.process, secretAccessor: "PROCESS_SECRET" },
+      }),
+      sequenceClock(20, 23),
+    )).resolves.toBe(1);
+    expectStaticSystemicFailure(fixture.stdout, fixture.stderr);
+    expect(fixture.stderr[0]).not.toContain("PROCESS_SECRET");
+  });
+
   it("writes one safe CHECK_READY JSON line to stdout", async () => {
     const fixture = processFixture();
     const exitCode = await runRefundExecutionWorkerProcess(
@@ -24,7 +253,7 @@ describe("refund execution worker process wrapper", () => {
     expect(exitCode).toBe(0);
     expect(fixture.stderr).toEqual([]);
     expect(fixture.stdout).toHaveLength(1);
-    expect(JSON.parse(fixture.stdout[0])).toEqual({
+    expectObservedLine(fixture.stdout[0], "CHECK", {
       ok: true,
       code: "CHECK_READY",
       readiness: {
@@ -48,7 +277,8 @@ describe("refund execution worker process wrapper", () => {
 
     expect(exitCode).toBe(64);
     expect(fixture.stdout).toEqual([]);
-    expect(fixture.stderr).toEqual(['{"ok":false,"code":"INVALID_HOST_INPUT"}\n']);
+    expect(fixture.stderr).toHaveLength(1);
+    expectObservedLine(fixture.stderr[0], "INVALID", { ok: false, code: "INVALID_HOST_INPUT" });
     expect(fixture.databaseCalls).toBe(0);
     expect(createLifecycle).not.toHaveBeenCalled();
   });
@@ -70,7 +300,12 @@ describe("refund execution worker process wrapper", () => {
 
     expect(exitCode).toBe(1);
     expect(fixture.stdout).toEqual([]);
-    expect(fixture.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(fixture.stderr).toHaveLength(1);
+    expectObservedLine(fixture.stderr[0], "RUN_ONCE", {
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      cycle: emptyCounters(),
+    });
     const output = fixture.stderr.join("");
     for (const prohibited of [
       secret,
@@ -113,7 +348,7 @@ describe("refund execution worker process wrapper", () => {
     expect(exitCode).toBe(75);
     expect(fixture.stdout).toEqual([]);
     expect(fixture.stderr).toHaveLength(1);
-    expect(JSON.parse(fixture.stderr[0])).toEqual({
+    expectObservedLine(fixture.stderr[0], "RUN_ONCE", {
       ok: true,
       code: "LIFECYCLE_DRAINED",
       reason: "BUDGET",
@@ -160,9 +395,13 @@ describe("refund execution worker process wrapper", () => {
 
       await expect(operation).resolves.toBe(75);
       expect(fixture.stdout).toEqual([]);
-      expect(fixture.stderr).toEqual([
-        `{"ok":true,"code":"LIFECYCLE_DRAINED","reason":"SIGNAL","cycle":${JSON.stringify(emptyCounters())}}\n`,
-      ]);
+      expect(fixture.stderr).toHaveLength(1);
+      expectObservedLine(fixture.stderr[0], "RUN_ONCE", {
+        ok: true,
+        code: "LIFECYCLE_DRAINED",
+        reason: "SIGNAL",
+        cycle: emptyCounters(),
+      });
       expect(lifecycle.listenerCount("SIGTERM")).toBe(0);
       expect(lifecycle.listenerCount("SIGINT")).toBe(0);
       expect(lifecycle.timerClears).toBe(1);
@@ -190,7 +429,7 @@ describe("refund execution worker process wrapper", () => {
 
     expect(exitCode).toBe(75);
     expect(fixture.stdout).toEqual([]);
-    expect(JSON.parse(fixture.stderr[0])).toEqual({
+    expectObservedLine(fixture.stderr[0], "RUN_ONCE", {
       ok: true,
       code: "LIFECYCLE_DRAINED",
       reason: "BUDGET",
@@ -223,7 +462,8 @@ describe("refund execution worker process wrapper", () => {
 
     expect(exitCode).toBe(1);
     expect(fixture.stdout).toEqual([]);
-    expect(fixture.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(fixture.stderr).toHaveLength(1);
+    expectObservedLine(fixture.stderr[0], "RUN_ONCE", { ok: false, code: "SYSTEMIC_FAILURE" });
     expect(fixture.stderr[0]).not.toContain("INVALID_REASON_SECRET");
   });
 
@@ -309,6 +549,26 @@ describe("refund execution worker process wrapper", () => {
       channel: "stderr",
       value: '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n',
     }]);
+    expect(writes[0].value).not.toMatch(/SERIALIZATION_FAILURE|process|Error:|at\s+\S+/u);
+  });
+
+  it("uses one static stderr write when the serializer returns a non-string", async () => {
+    const fixture = processFixture();
+    const writes: Array<{ channel: "stdout" | "stderr"; value: string }> = [];
+    const nonStringSerializer = new Proxy(JSON.stringify, {
+      apply: () => 42,
+    });
+
+    await expect(runRefundExecutionWorkerProcess(
+      ["check"], {}, {
+        stdout: { write: (value) => writes.push({ channel: "stdout", value }) },
+        stderr: { write: (value) => writes.push({ channel: "stderr", value }) },
+      }, fixture.dependencies, nonStringSerializer,
+    )).resolves.toBe(1);
+    expect(writes).toEqual([{
+      channel: "stderr",
+      value: '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n',
+    }]);
   });
 
   it("does not reject or retry output when an operation failure and stderr failure compose", async () => {
@@ -377,7 +637,12 @@ describe("refund execution worker process wrapper", () => {
 
     expect(stderrAttempts).toHaveLength(1);
     expect(stdoutAttempts).toHaveLength(0);
-    expect(stderrAttempts).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(stderrAttempts).toHaveLength(1);
+    expectObservedLine(stderrAttempts[0], "RUN_ONCE", {
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      cycle: emptyCounters(),
+    });
     const output = stderrAttempts.join("\n");
     expect(output).not.toContain(rejectionSecret);
     expect(output).not.toContain("raw worker failure diagnostic");
@@ -434,7 +699,10 @@ function deferred() {
   return Object.freeze({ promise, resolve: () => resolvePromise?.() });
 }
 
-function processFixture(options: Readonly<{ cycleFailure?: boolean }> = Object.freeze({})) {
+function processFixture(options: Readonly<{
+  cycleFailure?: boolean;
+  migrationMismatch?: boolean;
+}> = Object.freeze({})) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   let databaseCalls = 0;
@@ -444,6 +712,7 @@ function processFixture(options: Readonly<{ cycleFailure?: boolean }> = Object.f
       ok: false,
       code: "SYSTEMIC_FAILURE",
       message: "raw worker failure diagnostic",
+      cycle: emptyCounters(),
     })
     : Promise.resolve({ ok: true, cycle: emptyCounters() });
   const dependencies: RefundExecutionWorkerHostDependencies<ProcessDatabase> = Object.freeze({
@@ -466,7 +735,7 @@ function processFixture(options: Readonly<{ cycleFailure?: boolean }> = Object.f
       exists: true,
       records: Object.freeze([{
         migration_name: "001",
-        checksum: "a".repeat(64),
+        checksum: (options.migrationMismatch ? "b" : "a").repeat(64),
         finished_at: new Date("2026-07-20T00:00:00.000Z"),
         rolled_back_at: null,
         applied_steps_count: 1,
@@ -474,6 +743,7 @@ function processFixture(options: Readonly<{ cycleFailure?: boolean }> = Object.f
     })),
     compareMigrations: compareRefundWorkerMigrations,
     disconnectDatabase: () => Promise.resolve(),
+    readHealthBacklog: () => Promise.resolve(emptyBacklog()),
     createWorkerDependencies: () => Object.freeze({
       lookup: () => Promise.resolve({ kind: "unavailable" as const }),
       cancellation: () => Promise.resolve({ kind: "unknown" as const }),
@@ -504,8 +774,76 @@ function emptyCounters() {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 0,
     uncontactedSelected: 0,
     contactedSelected: 0,
+  };
+}
+
+function expectObservedLine(
+  line: string,
+  command: "CHECK" | "HEALTH" | "RUN_ONCE" | "INVALID",
+  expectedResult: Readonly<Record<string, unknown>>,
+  expectedDuration?: number,
+): void {
+  expect(line.endsWith("\n")).toBe(true);
+  expect(line.split("\n")).toHaveLength(2);
+  const parsed: unknown = JSON.parse(line);
+  const durationExpectation: unknown = expectedDuration ?? expect.any(Number);
+  expect(parsed).toEqual({
+    ...expectedResult,
+    process: {
+      formatVersion: "mira-refund-worker-process-observation/v1",
+      command,
+      operationDurationMs: durationExpectation,
+    },
+  });
+  if (!parsed || typeof parsed !== "object" || !("process" in parsed)
+    || !parsed.process || typeof parsed.process !== "object"
+    || !("operationDurationMs" in parsed.process)) {
+    throw new Error("Expected exact process observation.");
+  }
+  const duration = parsed.process.operationDurationMs;
+  expect(Number.isSafeInteger(duration)).toBe(true);
+  expect(typeof duration === "number" && duration >= 0).toBe(true);
+}
+
+function expectStaticSystemicFailure(stdout: readonly string[], stderr: readonly string[]): void {
+  expect(stdout).toEqual([]);
+  expect(stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+  expect(stderr[0]).not.toMatch(/"process"|"command"|operationDurationMs/u);
+}
+
+function trackedClock(...readings: readonly (() => number)[]) {
+  let calls = 0;
+  return Object.freeze({
+    clock: () => {
+      const reading = readings[calls];
+      calls += 1;
+      if (!reading) throw new Error("CLOCK_SEQUENCE_EXHAUSTED");
+      return reading();
+    },
+    callCount: () => calls,
+  });
+}
+
+function sequenceClock(...values: readonly number[]): () => number {
+  let index = 0;
+  return () => {
+    const value = values[index];
+    index += 1;
+    if (value === undefined) throw new Error("CLOCK_SEQUENCE_EXHAUSTED");
+    return value;
+  };
+}
+
+function emptyBacklog() {
+  return {
+    READY: { count: 0, oldestAgeSeconds: null },
+    UNCONTACTED: { count: 0, oldestAgeSeconds: null },
+    CONTACTED: { count: 0, oldestAgeSeconds: null },
+    MANUAL_REVIEW: { count: 0, oldestAgeSeconds: null },
   };
 }

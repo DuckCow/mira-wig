@@ -19,6 +19,8 @@ import {
   checkReady,
   cycleComplete,
   featureDisabled,
+  healthSnapshot,
+  hostCycleFailure,
   hostFailure,
   lifecycleDrained,
   type RefundExecutionWorkerHostCommand,
@@ -43,6 +45,8 @@ import {
   type RefundExecutionWorkerCycleResult,
 } from "./run-refund-execution-worker-cycle";
 import { EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS } from "./worker-contract";
+import { readRefundExecutionWorkerHealthBacklog } from "./worker-health";
+import { refundExecutionWorkerRouteReadiness } from "./worker-route-readiness";
 
 type HostEnv = Readonly<Record<string, string | undefined>>;
 
@@ -60,6 +64,7 @@ export type RefundExecutionWorkerHostDependencies<Database> = Readonly<{
   ) => ReturnType<typeof compareRefundWorkerMigrations>;
   disconnectDatabase: (database: Database) => Promise<void>;
   createLifecycle?: () => RefundExecutionWorkerHostLifecycle;
+  readHealthBacklog?: (database: Database) => Promise<unknown>;
   createWorkerDependencies: () => RefundExecutionWorkerDependencies;
   runWorkerCycle: (
     database: Database,
@@ -81,6 +86,7 @@ export const defaultRefundExecutionWorkerHostDependencies: RefundExecutionWorker
     readMigrationLedger: readRefundWorkerMigrationLedger,
     compareMigrations: compareRefundWorkerMigrations,
     disconnectDatabase: (database) => database.$disconnect(),
+    readHealthBacklog: readRefundExecutionWorkerHealthBacklog,
     createWorkerDependencies: () => Object.freeze({
       lookup: createTossRefundLookupPort({ fetchFn: globalThis.fetch }),
       cancellation: createTossRefundCancellationPort({ fetchFn: globalThis.fetch }),
@@ -95,14 +101,14 @@ export async function runRefundExecutionWorkerHost<Database>(
   env: HostEnv,
   dependencies: RefundExecutionWorkerHostDependencies<Database>,
 ): Promise<RefundExecutionWorkerHostResult> {
-  if (command.kind === "CHECK") return runCheckHost(command, env, dependencies);
+  if (command.kind !== "RUN_ONCE") return runReadOnlyHost(command, env, dependencies);
   const earlyGate = earlyMasterGate(env, dependencies.inspectMasterGate);
   if (earlyGate !== true) return earlyGate;
   return runEnabledOnceHost(command, env, dependencies);
 }
 
-async function runCheckHost<Database>(
-  command: Extract<RefundExecutionWorkerHostCommand, { kind: "CHECK" }>,
+async function runReadOnlyHost<Database>(
+  command: Extract<RefundExecutionWorkerHostCommand, { kind: "CHECK" | "HEALTH" }>,
   env: HostEnv,
   dependencies: RefundExecutionWorkerHostDependencies<Database>,
 ): Promise<RefundExecutionWorkerHostResult> {
@@ -254,7 +260,31 @@ async function runReadyHostCommand<Database>(
   if (command.kind === "CHECK") {
     return checkReady(configuration.activation.workerEnabled, configuration.credentialStatus);
   }
+  if (command.kind === "HEALTH") {
+    return runHealthSnapshot(configuration, env, database, dependencies);
+  }
   return runOneCycle(command.workerOwner, env, database, dependencies, lifecycle);
+}
+
+async function runHealthSnapshot<Database>(
+  configuration: Extract<HostConfiguration, { ok: true }>,
+  env: HostEnv,
+  database: Database,
+  dependencies: RefundExecutionWorkerHostDependencies<Database>,
+): Promise<RefundExecutionWorkerHostResult> {
+  if (!dependencies.readHealthBacklog) return hostFailure("SYSTEMIC_FAILURE");
+  try {
+    const routes = refundExecutionWorkerRouteReadiness(env, configuration.credentialStatus);
+    const backlog = await dependencies.readHealthBacklog(database);
+    return healthSnapshot(
+      configuration.activation.workerEnabled,
+      configuration.credentialStatus,
+      routes,
+      backlog,
+    );
+  } catch {
+    return hostFailure("SYSTEMIC_FAILURE");
+  }
 }
 
 async function databaseConnectivity<Database>(
@@ -347,8 +377,8 @@ function mapWorkerResult(
   if (result.ok) return cycleComplete(result.cycle);
   if (result.code === "FEATURE_DISABLED") return featureDisabled();
   if (result.code === "INVALID_WORKER_OWNER") return hostFailure("INVALID_WORKER_OWNER");
-  if (result.code === "CONFIG_INVALID") return hostFailure("CONFIG_INVALID");
-  return hostFailure("SYSTEMIC_FAILURE");
+  if (result.code === "CONFIG_INVALID") return hostCycleFailure("CONFIG_INVALID", result.cycle);
+  return hostCycleFailure("SYSTEMIC_FAILURE", result.cycle);
 }
 
 type LifecycleObservation = Readonly<{ kind: "CONTINUE" }>

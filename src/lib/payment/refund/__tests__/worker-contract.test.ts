@@ -19,6 +19,8 @@ const ZERO_COUNTERS: RefundExecutionWorkerCycleCounters = {
   inconsistentCount: 0,
   skippedCount: 0,
   failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
   readySelected: 0,
   uncontactedSelected: 0,
   contactedSelected: 0,

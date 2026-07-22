@@ -117,7 +117,15 @@ describe("refund execution one-shot host integration", () => {
     expect(result).toEqual({
       ok: true,
       code: "CYCLE_COMPLETE",
-      cycle: { ...emptyCounters(), selectedCount: 1, attemptedCount: 1, succeededCount: 1, readySelected: 1 },
+      cycle: {
+        ...emptyCounters(),
+        selectedCount: 1,
+        attemptedCount: 1,
+        succeededCount: 1,
+        providerLookupCount: 2,
+        providerCancellationCount: 1,
+        readySelected: 1,
+      },
     });
     expect(calls).toEqual({ get: 2, post: 1 });
     expect(fetchPoison).not.toHaveBeenCalled();
@@ -164,6 +172,8 @@ describe("refund execution one-shot host integration", () => {
           selectedCount: 1,
           attemptedCount: 1,
           succeededCount: 1,
+          providerLookupCount: 2,
+          providerCancellationCount: 1,
           readySelected: 1,
         },
       });
@@ -188,6 +198,8 @@ describe("refund execution one-shot host integration", () => {
           selectedCount: 1,
           attemptedCount: 1,
           succeededCount: 1,
+          providerLookupCount: 2,
+          providerCancellationCount: 1,
           readySelected: 1,
         },
       });
@@ -221,7 +233,18 @@ describe("refund execution one-shot host integration", () => {
     release.resolve();
 
     const result = await operation;
-    expect(result).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    expect(result).toEqual({
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      cycle: {
+        ...emptyCounters(),
+        selectedCount: 1,
+        attemptedCount: 1,
+        failedCount: 1,
+        providerLookupCount: 1,
+        readySelected: 1,
+      },
+    });
     expect(JSON.stringify(result)).not.toContain("IN_FLIGHT_PROVIDER_FAKE_SECRET");
     expect(lifecycle.cleanup).toEqual(lifecycleCleanupCounts());
     await expectCommandStatus(fixture, "LEASED");
@@ -418,6 +441,8 @@ function emptyCounters() {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 0,
     uncontactedSelected: 0,
     contactedSelected: 0,

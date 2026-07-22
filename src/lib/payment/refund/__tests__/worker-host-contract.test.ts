@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cycleComplete,
+  healthSnapshot,
   lifecycleDrained,
   parseRefundExecutionWorkerCliArgs,
   workerHostExitCode,
@@ -16,6 +17,15 @@ describe("refund execution worker host CLI contract", () => {
       result: { code: "INVALID_HOST_INPUT" },
     });
     expect(parseRefundExecutionWorkerCliArgs(["check", "extra"]))
+      .toMatchObject({ ok: false, result: { code: "INVALID_HOST_INPUT" } });
+  });
+
+  it("accepts only the exact argument-free health command", () => {
+    expect(parseRefundExecutionWorkerCliArgs(["health"]))
+      .toEqual({ ok: true, command: { kind: "HEALTH" } });
+    expect(parseRefundExecutionWorkerCliArgs(["health", "extra"]))
+      .toMatchObject({ ok: false, result: { code: "INVALID_HOST_INPUT" } });
+    expect(parseRefundExecutionWorkerCliArgs(["HEALTH"]))
       .toMatchObject({ ok: false, result: { code: "INVALID_HOST_INPUT" } });
   });
 
@@ -123,6 +133,28 @@ describe("refund execution worker host CLI contract", () => {
 
   it.each([
     [success("CHECK_READY"), 0],
+    [{
+      ok: true,
+      code: "HEALTH_SNAPSHOT",
+      readiness: {
+        workerMasterEnabled: false,
+        credentialStatus: "ABSENT",
+        databaseReachable: true,
+        migrationStatus: "READY",
+      },
+      routes: {
+        READY: false,
+        UNCONTACTED: false,
+        CONTACTED_LOOKUP: false,
+        CONTACTED_RECONTACT: false,
+      },
+      backlog: {
+        READY: { count: 0, oldestAgeSeconds: null },
+        UNCONTACTED: { count: 0, oldestAgeSeconds: null },
+        CONTACTED: { count: 0, oldestAgeSeconds: null },
+        MANUAL_REVIEW: { count: 0, oldestAgeSeconds: null },
+      },
+    }, 0],
     [success("FEATURE_DISABLED"), 0],
     [success("CYCLE_COMPLETE"), 0],
     [{ ok: true, code: "LIFECYCLE_DRAINED", reason: "SIGNAL", cycle: emptyCounters() }, 75],
@@ -138,7 +170,7 @@ describe("refund execution worker host CLI contract", () => {
 });
 
 describe("refund execution worker cycle output contract", () => {
-  it("selects only exact approved counters without invoking or copying extra properties", () => {
+  it("rejects extra counter properties without invoking accessors", () => {
     let extraGetterCalls = 0;
     const counters: Record<PropertyKey, unknown> = {
       ...emptyCounters(),
@@ -156,12 +188,9 @@ describe("refund execution worker cycle output contract", () => {
 
     const result = cycleComplete(counters);
 
-    expect(result).toEqual({ ok: true, code: "CYCLE_COMPLETE", cycle: emptyCounters() });
+    expect(result).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
     expect(extraGetterCalls).toBe(0);
     expect(Object.isFrozen(result)).toBe(true);
-    if (!result.ok) throw new Error("Expected sanitized cycle output.");
-    expect(Object.isFrozen(result.cycle)).toBe(true);
-    expect(Reflect.ownKeys(result.cycle)).toEqual(Object.keys(emptyCounters()));
   });
 
   it.each([undefined, -1, Number.NaN, Number.POSITIVE_INFINITY, 0.5, 2 ** 53])(
@@ -210,24 +239,11 @@ describe("refund execution worker cycle output contract", () => {
   it.each(["SIGNAL", "BUDGET"] as const)(
     "sanitizes an exact %s lifecycle drain with the shared v1 counter contract",
     (reason) => {
-      let getterCalls = 0;
-      const counters: Record<PropertyKey, unknown> = {
+      const counters = {
         ...emptyCounters(),
         selectedCount: 2,
         attemptedCount: 1,
-        secretDiagnostic: "must-not-escape",
       };
-      Object.defineProperty(counters, "secretAccessor", {
-        enumerable: true,
-        get: () => {
-          getterCalls += 1;
-          return "accessor-secret";
-        },
-      });
-      Object.defineProperty(counters, Symbol("secret"), {
-        enumerable: true,
-        value: "symbol-secret",
-      });
       const result = lifecycleDrained(reason, counters);
 
       expect(result).toEqual({
@@ -236,17 +252,73 @@ describe("refund execution worker cycle output contract", () => {
         reason,
         cycle: { ...emptyCounters(), selectedCount: 2, attemptedCount: 1 },
       });
-      expect(getterCalls).toBe(0);
       expect(Reflect.ownKeys(result)).toEqual(["ok", "code", "reason", "cycle"]);
       if (!result.ok) throw new Error("Expected sanitized lifecycle result.");
       expect(Reflect.ownKeys(result.cycle)).toEqual(Object.keys(emptyCounters()));
-      expect(JSON.stringify(result)).not.toMatch(/must-not-escape|accessor-secret|symbol-secret/u);
+      expect(JSON.stringify(result)).not.toMatch(/accessor-secret|symbol-secret/u);
     },
   );
 
   it("bounds malformed lifecycle counters as systemic failure", () => {
     expect(lifecycleDrained("SIGNAL", { ...emptyCounters(), selectedCount: -1 }))
       .toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+  });
+});
+
+describe("refund execution worker health output contract", () => {
+  it("freezes the exact aggregate route and backlog shape", () => {
+    const result = healthSnapshot(false, "ABSENT", disabledRoutes(), emptyBacklog());
+    expect(result).toEqual({
+      ok: true,
+      code: "HEALTH_SNAPSHOT",
+      readiness: {
+        workerMasterEnabled: false,
+        credentialStatus: "ABSENT",
+        databaseReachable: true,
+        migrationStatus: "READY",
+      },
+      routes: disabledRoutes(),
+      backlog: emptyBacklog(),
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    if (result.code !== "HEALTH_SNAPSHOT") throw new Error("Expected health snapshot.");
+    expect(Object.isFrozen(result.routes)).toBe(true);
+    expect(Object.isFrozen(result.backlog.READY)).toBe(true);
+  });
+
+  it.each([
+    ["negative count", { ...emptyBacklog(), READY: { count: -1, oldestAgeSeconds: 0 } }],
+    ["fractional age", { ...emptyBacklog(), READY: { count: 1, oldestAgeSeconds: 0.5 } }],
+    ["null nonempty age", { ...emptyBacklog(), READY: { count: 1, oldestAgeSeconds: null } }],
+    ["non-null empty age", { ...emptyBacklog(), READY: { count: 0, oldestAgeSeconds: 0 } }],
+    ["extra backlog field", { ...emptyBacklog(), secret: "HEALTH_SECRET" }],
+  ])("rejects malformed health backlog: %s", (_name, backlog) => {
+    expect(healthSnapshot(false, "ABSENT", disabledRoutes(), backlog))
+      .toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+  });
+
+  it("rejects health accessors, symbols, and proxies without invoking traps", () => {
+    let calls = 0;
+    const accessor = { ...emptyBacklog() };
+    Object.defineProperty(accessor, "READY", {
+      enumerable: true,
+      get: () => {
+        calls += 1;
+        return { count: 0, oldestAgeSeconds: null };
+      },
+    });
+    const symbol = { ...emptyBacklog(), [Symbol("health")]: true };
+    const proxy = new Proxy(emptyBacklog(), {
+      ownKeys: () => {
+        calls += 1;
+        return [];
+      },
+    });
+    for (const backlog of [accessor, symbol, proxy]) {
+      expect(healthSnapshot(false, "ABSENT", disabledRoutes(), backlog))
+        .toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    }
+    expect(calls).toBe(0);
   });
 });
 
@@ -285,8 +357,28 @@ function emptyCounters() {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 0,
     uncontactedSelected: 0,
     contactedSelected: 0,
+  };
+}
+
+function disabledRoutes() {
+  return {
+    READY: false,
+    UNCONTACTED: false,
+    CONTACTED_LOOKUP: false,
+    CONTACTED_RECONTACT: false,
+  };
+}
+
+function emptyBacklog() {
+  return {
+    READY: { count: 0, oldestAgeSeconds: null },
+    UNCONTACTED: { count: 0, oldestAgeSeconds: null },
+    CONTACTED: { count: 0, oldestAgeSeconds: null },
+    MANUAL_REVIEW: { count: 0, oldestAgeSeconds: null },
   };
 }

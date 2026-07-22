@@ -10,12 +10,17 @@ The cooperative lifecycle amendment is
 `docs/payment_policy/refund_worker_lifecycle_v1.md`. Enabled `run-once` now supports SIGTERM/SIGINT
 cooperative drain and one 120-second cooperative budget; that amendment does not change this
 document's startup, migration-readiness, safe-output, or dormant-authority rules.
+The additive process-observation and read-only health contract is
+`docs/payment_policy/refund_worker_observability_v1.md`.
 
 ## Commands
 
 - `npm run refund:worker:check` performs read-only configuration, database-connectivity, and Prisma
   migration-ledger readiness checks. It never selects refund commands, constructs provider
   adapters, invokes the worker cycle, or deploys migrations.
+- `npm run refund:worker:health` performs the same readiness checks and one aggregate, read-only
+  business-table snapshot. It creates no lifecycle, adapters, selector reservation, cycle, lease,
+  provider-port invocation, or network request and is permitted while the master flag is disabled.
 - `npm run refund:worker:once -- --service <label> --revision <label> --slot <label>` constructs the
   internal owner `refund-sbx:<service>:<revision>:<slot>` and may run at most one existing bounded
   worker cycle after every readiness boundary passes.
@@ -72,6 +77,7 @@ partial external writes cannot be undone.
 | Code | Exit |
 |---|---:|
 | `CHECK_READY` | 0 |
+| `HEALTH_SNAPSHOT` | 0 |
 | `FEATURE_DISABLED` | 0 |
 | `CYCLE_COMPLETE` | 0 |
 | `LIFECYCLE_DRAINED` | 75 |
@@ -82,10 +88,18 @@ partial external writes cannot be undone.
 | `DATABASE_UNAVAILABLE` | 1 |
 | `SYSTEMIC_FAILURE` | 1 |
 
-`CHECK_READY` contains only aggregate readiness classifications. `CYCLE_COMPLETE` contains exactly
+Every safely observed normal result also contains the exact additive versioned `process`
+observation defined by the observability contract. If observation construction, canonical
+validation, or result serialization cannot be trusted, the process instead writes the original
+exact P3B1 fallback `{"ok":false,"code":"SYSTEMIC_FAILURE"}` to stderr and exits 1. That static
+fallback intentionally contains no process metadata. A writer failure after output begins causes no
+second or fallback write. `CHECK_READY` contains only aggregate readiness classifications.
+`HEALTH_SNAPSHOT` contains exact aggregate readiness, route readiness, and backlog fields.
+`CYCLE_COMPLETE` contains exactly
 the nonnegative safe-integer counters `selectedCount`, `attemptedCount`, `succeededCount`,
 `replayedCount`, `temporaryCount`, `manualCount`, `conflictCount`, `inconsistentCount`,
 `skippedCount`, `failedCount`, `readySelected`, `uncontactedSelected`, and `contactedSelected`.
+The exact cycle set also includes `providerLookupCount` and `providerCancellationCount`.
 Malformed counters become `SYSTEMIC_FAILURE`; extra or secret-like input properties never enter
 output. `LIFECYCLE_DRAINED` uses the same exact counter validator and adds only a `SIGNAL` or
 `BUDGET` reason. Failures contain no exception string or stack trace.
@@ -99,6 +113,6 @@ credential rotation, or exact-command canary exists. The lifecycle amendment add
 and the 120-second cooperative budget.
 
 All worker and provider capability flags remain disabled by default. Code presence authorizes no
-SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. `check`
-remains read-only. P3C, P3D, and P3E are separate design, implementation, audit, and authorization
-acts.
+SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. `check` and
+`health` remain read-only. P3C2, P3D, and P3E are separate design, implementation, audit, and
+authorization acts.

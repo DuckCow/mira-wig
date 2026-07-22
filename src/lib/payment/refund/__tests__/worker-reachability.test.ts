@@ -9,6 +9,7 @@ const REFUND_ROOT = join(ROOT, "src", "lib", "payment", "refund");
 const CYCLE = join(REFUND_ROOT, "run-refund-execution-worker-cycle.ts");
 const HOST = join(REFUND_ROOT, "run-refund-execution-worker-host.ts");
 const HOST_CONTRACT = join(REFUND_ROOT, "worker-host-contract.ts");
+const HEALTH = join(REFUND_ROOT, "worker-health.ts");
 const LIFECYCLE = join(REFUND_ROOT, "worker-host-lifecycle.ts");
 const PROCESS = join(REFUND_ROOT, "worker-host-process.ts");
 const SCRIPT = join(ROOT, "scripts", "refund-execution-worker.ts");
@@ -23,6 +24,9 @@ const EXCLUDED_PRODUCTION_DIRECTORIES = Object.freeze([
 const TEST_ONLY_DIRECTORIES = Object.freeze(["__tests__"] as const);
 const APPROVED_REACHABILITY = [CYCLE, HOST, PROCESS, SCRIPT].map(repositoryPath).sort();
 const APPROVED_LIFECYCLE_REACHABILITY = [LIFECYCLE, HOST_CONTRACT, HOST, PROCESS, SCRIPT]
+  .map(repositoryPath)
+  .sort();
+const APPROVED_HEALTH_REACHABILITY = [HEALTH, HOST_CONTRACT, HOST, PROCESS, SCRIPT]
   .map(repositoryPath)
   .sort();
 const WORKER_FILES = [
@@ -54,6 +58,17 @@ describe("refund execution worker reachability", () => {
     expect(reachable).not.toContain(repositoryPath(CYCLE));
   });
 
+  it("permits the health reader only through the one-shot host and excludes provider routing", () => {
+    const reachable = reverseReachableFiles(HEALTH, productionSourceFiles())
+      .map(repositoryPath)
+      .sort();
+    const healthSource = readFileSync(HEALTH, "utf8");
+
+    expect(reachable).toEqual(APPROVED_HEALTH_REACHABILITY);
+    expect(reachable.some((path) => path.startsWith("src/app/"))).toBe(false);
+    expect(healthSource).not.toMatch(/worker-router|providers\/|fetch|cancellation|lookup/iu);
+  });
+
   it("keeps selector, allocation, and provider routing inside the existing cycle core", () => {
     const source = WORKER_FILES.map((file) => readFileSync(file, "utf8")).join("\n");
     expect(source).toContain("createTossRefundExecutionAuthorizer");
@@ -64,7 +79,7 @@ describe("refund execution worker reachability", () => {
     expect(source).not.toMatch(/\bfetch\s*\(|console\.|setInterval|setTimeout|cron|scheduler|signal/iu);
   });
 
-  it("exposes only the two approved one-shot commands and one cooperative lifecycle budget", () => {
+  it("exposes only the three approved one-shot commands and one cooperative lifecycle budget", () => {
     const packageJson: unknown = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
     const scripts = packageScripts(packageJson);
     const workerScripts = Object.fromEntries(
@@ -77,6 +92,7 @@ describe("refund execution worker reachability", () => {
 
     expect(workerScripts).toEqual({
       "refund:worker:check": "node --import tsx scripts/refund-execution-worker.ts check",
+      "refund:worker:health": "node --import tsx scripts/refund-execution-worker.ts health",
       "refund:worker:once": "node --import tsx scripts/refund-execution-worker.ts run-once",
     });
     expect(hostSource).not.toMatch(

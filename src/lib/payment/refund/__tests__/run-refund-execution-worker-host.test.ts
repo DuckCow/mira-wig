@@ -218,7 +218,7 @@ describe("runRefundExecutionWorkerHost run-once", () => {
     expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, {
       ...fixture.dependencies,
       createLifecycle: () => lifecycle,
-    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE" });
+    })).toEqual({ ok: false, code: "SYSTEMIC_FAILURE", cycle: emptyCounters() });
   });
 
   it("does not rewrite a fully completed cycle when drain is first observable afterward", async () => {
@@ -389,8 +389,8 @@ describe("runRefundExecutionWorkerHost run-once", () => {
   it.each([
     [workerFailure("FEATURE_DISABLED"), { ok: true, code: "FEATURE_DISABLED" }],
     [workerFailure("INVALID_WORKER_OWNER"), { ok: false, code: "INVALID_WORKER_OWNER" }],
-    [workerFailure("CONFIG_INVALID"), { ok: false, code: "CONFIG_INVALID" }],
-    [workerFailure("SYSTEMIC_FAILURE"), { ok: false, code: "SYSTEMIC_FAILURE" }],
+    [workerFailure("CONFIG_INVALID"), { ok: false, code: "CONFIG_INVALID", cycle: emptyCounters() }],
+    [workerFailure("SYSTEMIC_FAILURE"), { ok: false, code: "SYSTEMIC_FAILURE", cycle: emptyCounters() }],
   ] as const)("maps the existing worker result without diagnostics", async (cycleResult, expected) => {
     const fixture = hostFixture({ cycleResult });
 
@@ -584,7 +584,12 @@ function cycleStopped(
 function workerFailure(
   code: "FEATURE_DISABLED" | "INVALID_WORKER_OWNER" | "CONFIG_INVALID" | "SYSTEMIC_FAILURE",
 ): RefundExecutionWorkerCycleResult {
-  return Object.freeze({ ok: false, code, message: "sensitive diagnostic must not escape" });
+  return Object.freeze({
+    ok: false,
+    code,
+    message: "sensitive diagnostic must not escape",
+    cycle: Object.freeze(emptyCounters()),
+  });
 }
 
 function emptyCounters() {
@@ -599,6 +604,8 @@ function emptyCounters() {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 0,
     uncontactedSelected: 0,
     contactedSelected: 0,

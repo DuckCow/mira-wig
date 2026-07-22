@@ -1,13 +1,4 @@
-import {
-  OrderStatus,
-  PaymentMode,
-  PaymentProvider,
-  Prisma,
-  RefundAttemptStatus,
-  RefundExecutionCommandStatus,
-  RefundExecutionDispatchAttemptState,
-  type PrismaClient,
-} from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   mergeRefundExecutionWorkerCandidates,
   REFUND_EXECUTION_WORKER_BATCH_SIZE,
@@ -15,6 +6,11 @@ import {
   type RefundExecutionWorkerCandidateClass,
   type RefundExecutionWorkerCandidateQueues,
 } from "./worker-allocation";
+import {
+  contactedRefundExecutionWorkerWhere,
+  readyRefundExecutionWorkerWhere,
+  uncontactedRefundExecutionWorkerWhere,
+} from "./worker-eligibility";
 
 type SelectorTx = Prisma.TransactionClient;
 
@@ -46,21 +42,7 @@ async function captureSelectorDatabaseTime(tx: SelectorTx): Promise<Date> {
 
 function selectReady(tx: SelectorTx, capturedAt: Date) {
   return tx.refundExecutionCommand.findMany({
-    where: {
-      status: RefundExecutionCommandStatus.READY,
-      dispatchAttempt: 0,
-      availableAt: { lte: capturedAt },
-      leaseOwner: null,
-      leaseUntil: null,
-      leaseTokenHash: null,
-      refundAttempt: {
-        status: RefundAttemptStatus.PROCESSING,
-        provider: PaymentProvider.TOSS,
-        mode: PaymentMode.SANDBOX,
-        providerRefundId: null,
-        order: { status: OrderStatus.REFUND_PENDING },
-      },
-    },
+    where: readyRefundExecutionWorkerWhere(capturedAt),
     orderBy: [{ availableAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     take: REFUND_EXECUTION_WORKER_BATCH_SIZE,
     select: { id: true },
@@ -69,18 +51,7 @@ function selectReady(tx: SelectorTx, capturedAt: Date) {
 
 function selectUncontacted(tx: SelectorTx, capturedAt: Date) {
   return tx.refundExecutionCommand.findMany({
-    where: {
-      status: RefundExecutionCommandStatus.LEASED,
-      dispatchAttempt: 0,
-      leaseUntil: { lte: capturedAt },
-      refundAttempt: {
-        status: RefundAttemptStatus.PROCESSING,
-        provider: PaymentProvider.TOSS,
-        mode: PaymentMode.SANDBOX,
-        providerRefundId: null,
-        order: { status: OrderStatus.REFUND_PENDING },
-      },
-    },
+    where: uncontactedRefundExecutionWorkerWhere(capturedAt),
     orderBy: [{ leaseUntil: "asc" }, { id: "asc" }],
     take: REFUND_EXECUTION_WORKER_BATCH_SIZE,
     select: { id: true },
@@ -89,20 +60,7 @@ function selectUncontacted(tx: SelectorTx, capturedAt: Date) {
 
 function selectContacted(tx: SelectorTx, capturedAt: Date) {
   return tx.refundExecutionCommand.findMany({
-    where: {
-      status: RefundExecutionCommandStatus.LEASED,
-      dispatchAttempt: { gte: 1 },
-      leaseUntil: { lte: capturedAt },
-      refundAttempt: {
-        status: RefundAttemptStatus.PROCESSING,
-        provider: PaymentProvider.TOSS,
-        mode: PaymentMode.SANDBOX,
-        order: { status: OrderStatus.REFUND_PENDING },
-      },
-      dispatchAttempts: {
-        some: { state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED },
-      },
-    },
+    where: contactedRefundExecutionWorkerWhere(capturedAt),
     orderBy: [{ leaseUntil: "asc" }, { id: "asc" }],
     take: REFUND_EXECUTION_WORKER_BATCH_SIZE,
     select: { id: true },

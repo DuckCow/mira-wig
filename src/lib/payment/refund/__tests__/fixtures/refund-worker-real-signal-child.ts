@@ -191,6 +191,8 @@ function oneCompletedCandidateCounters(): RefundExecutionWorkerCycleCounters {
     inconsistentCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    providerLookupCount: 0,
+    providerCancellationCount: 0,
     readySelected: 1,
     uncontactedSelected: 0,
     contactedSelected: 0,
