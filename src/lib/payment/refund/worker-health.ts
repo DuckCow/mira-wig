@@ -5,6 +5,9 @@ import {
   readyRefundExecutionWorkerWhere,
   uncontactedRefundExecutionWorkerWhere,
 } from "./worker-eligibility";
+import { refundExecutionOldestAgeSeconds } from "./refund-age";
+
+export { refundExecutionOldestAgeSeconds as refundExecutionWorkerOldestAgeSeconds } from "./refund-age";
 
 export type RefundExecutionWorkerBacklogObservation = Readonly<{
   count: number;
@@ -84,23 +87,8 @@ function backlogObservation(
   }
   return Object.freeze({
     count,
-    oldestAgeSeconds: refundExecutionWorkerOldestAgeSeconds(capturedAt, oldest),
+    oldestAgeSeconds: refundExecutionOldestAgeSeconds(capturedAt, oldest),
   });
-}
-
-export function refundExecutionWorkerOldestAgeSeconds(
-  capturedAt: Date,
-  oldest: Date,
-): number {
-  if (!isFiniteDate(capturedAt) || !isFiniteDate(oldest)) {
-    throw new Error("INVALID_HEALTH_AGE_SOURCE");
-  }
-  const age = Math.max(
-    0,
-    Math.floor((capturedAt.getTime() - oldest.getTime()) / 1_000),
-  );
-  if (!isNonnegativeSafeInteger(age)) throw new Error("INVALID_HEALTH_AGE");
-  return age;
 }
 
 function isFiniteDate(value: unknown): value is Date {

@@ -12,6 +12,8 @@ cooperative drain and one 120-second cooperative budget; that amendment does not
 document's startup, migration-readiness, safe-output, or dormant-authority rules.
 The additive process-observation and read-only health contract is
 `docs/payment_policy/refund_worker_observability_v1.md`.
+Provider-free privileged operations observations and their still-unsatisfied operating gates are
+defined in `docs/payment_policy/refund_worker_operations_runbook_v1.md`.
 
 ## Commands
 
@@ -24,6 +26,12 @@ The additive process-observation and read-only health contract is
 - `npm run refund:worker:once -- --service <label> --revision <label> --slot <label>` constructs the
   internal owner `refund-sbx:<service>:<revision>:<slot>` and may run at most one existing bounded
   worker cycle after every readiness boundary passes.
+
+The separate `refund:ops:manual`, `refund:ops:reconcile`, and `refund:ops:credential` commands use
+their own exact process contract. They do not extend the worker command enum, grant activation,
+perform provider reconciliation, resolve manual review, or rotate credentials. Their privileged
+case reference is exactly the durable refund-attempt identifier and never enters worker health or
+worker process metadata; a bounded reconciliation list retains a complete distinct `caseCount`.
 
 The three labels use only `[A-Za-z0-9._-]` and are each 1–64 characters. The owner and its labels
 never appear in output.
@@ -108,11 +116,11 @@ output. `LIFECYCLE_DRAINED` uses the same exact counter validator and adds only 
 
 No loop, scheduler, cron, queue, daemon, web timer, route handler, Server Action, serverless
 schedule, external hard-deadline enforcement, overlap enforcement, jitter, backoff, health
-endpoint, heartbeat, metrics, alerting, refund reconciliation, manual-resolution mutation,
-credential rotation, or exact-command canary exists. The lifecycle amendment adds only signal drain
-and the 120-second cooperative budget.
+endpoint, heartbeat, metrics, alerting, provider reconciliation, manual-resolution mutation,
+credential rotation, or exact-command canary exists. P3C2 adds only read-only operations commands
+and a runbook. The lifecycle amendment adds only signal drain and the 120-second cooperative budget.
 
 All worker and provider capability flags remain disabled by default. Code presence authorizes no
 SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. `check` and
-`health` remain read-only. P3C2, P3D, and P3E are separate design, implementation, audit, and
+`health` remain read-only. P3D and P3E are separate design, implementation, audit, and
 authorization acts.

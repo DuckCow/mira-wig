@@ -8,6 +8,11 @@ the contract a future external scheduler must satisfy. It creates no scheduler a
 activation or provider-execution authority.
 Structured process observations and read-only health semantics are separately frozen in
 `docs/payment_policy/refund_worker_observability_v1.md`.
+Emergency-stop, restart, manual-review, reconciliation, credential, and activation gates are
+defined without changing this lifecycle in
+`docs/payment_policy/refund_worker_operations_runbook_v1.md`.
+The operations commands remain provider-free one-shot observations and add no lifecycle timer,
+monitor, recurring process, revocation calculation, or activation authority.
 
 ## One-shot lifecycle
 
@@ -63,9 +68,10 @@ none of this cadence, jitter, retry, or backoff behavior.
 ## Authority and unresolved operations
 
 The repository still contains no scheduler configuration, and no actual platform concurrency
-guarantee is proven. Monitoring, on-call ownership, and refund-reconciliation ownership remain
-absent. Lifecycle code grants no activation authority. SANDBOX provider execution remains
-unauthorized, and LIVE remains unreachable. P3C2, P3D, and P3E remain separate acts.
+guarantee is proven. Monitoring integration, staffed ownership, alert routing, and
+provider-reconciliation authority remain absent. Lifecycle code grants no activation authority.
+SANDBOX provider execution remains unauthorized, and LIVE remains unreachable. P3D and P3E remain
+separate acts.
 
 Hard-deadline enforcement, overlap enforcement, external observability ingestion, reconciliation,
 credential rotation, and canary operation remain outside P3B2.

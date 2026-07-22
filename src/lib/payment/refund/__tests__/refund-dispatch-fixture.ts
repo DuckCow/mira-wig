@@ -34,24 +34,88 @@ export interface DispatchFixture {
   operationKey: string;
 }
 
+export enum DispatchFixtureConstructionStep {
+  USER_CREATED = "USER_CREATED",
+  CHECKOUT_SESSION_CREATED = "CHECKOUT_SESSION_CREATED",
+  PAYMENT_CREATED = "PAYMENT_CREATED",
+  ORDER_CREATED = "ORDER_CREATED",
+  REFUND_ATTEMPT_CREATED = "REFUND_ATTEMPT_CREATED",
+  REQUEST_TRANSITION_CREATED = "REQUEST_TRANSITION_CREATED",
+  CLAIM_CREATED = "CLAIM_CREATED",
+}
+
+export enum DispatchFixtureCleanupStep {
+  BEFORE_DEPENDENT_ROWS = "BEFORE_DEPENDENT_ROWS",
+}
+
+interface DispatchFixtureOptions {
+  totalAmount?: number;
+  targetAmount?: number;
+  availableAt?: Date;
+  provider?: PaymentProvider;
+  mode?: PaymentMode;
+  requestThroughProduction?: boolean;
+  useSchemaGeneratedRefundAttemptId?: boolean;
+  refundAttemptId?: string;
+  fixtureIdentity?: string;
+  afterConstructionStep?: (step: DispatchFixtureConstructionStep) => void;
+  beforeCleanupStep?: (step: DispatchFixtureCleanupStep) => void;
+}
+
+interface DispatchFixtureCleanupAuthority {
+  userIds: string[];
+  sessionIds: string[];
+  paymentIds: string[];
+  orderIds: string[];
+  refundAttemptIds: string[];
+  commandIds: string[];
+}
+
+interface DispatchFixtureCleanupJournal {
+  userId?: string;
+  sessionId?: string;
+  paymentId?: string;
+  orderId?: string;
+  refundAttemptId?: string;
+  commandId?: string;
+}
+
 export async function createDispatchFixture(
-  options: {
-    totalAmount?: number;
-    targetAmount?: number;
-    availableAt?: Date;
-    provider?: PaymentProvider;
-    mode?: PaymentMode;
-    requestThroughProduction?: boolean;
-  } = {},
+  options: DispatchFixtureOptions = {},
+): Promise<DispatchFixture> {
+  const journal: DispatchFixtureCleanupJournal = {};
+  try {
+    return await constructDispatchFixture(options, journal);
+  } catch (constructionError) {
+    const cleanupErrors = await cleanupDispatchAuthorities(
+      cleanupAuthorityFromJournal(journal),
+      options.beforeCleanupStep,
+    );
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [constructionError, ...cleanupErrors],
+        "Dispatch fixture construction and cleanup both failed.",
+        { cause: constructionError },
+      );
+    }
+    throw constructionError;
+  }
+}
+
+async function constructDispatchFixture(
+  options: DispatchFixtureOptions,
+  journal: DispatchFixtureCleanupJournal,
 ): Promise<DispatchFixture> {
   await ensureMarket();
-  const identity = randomUUID();
+  const identity = options.fixtureIdentity ?? randomUUID();
   const totalAmount = options.totalAmount ?? 1_000;
   const targetAmount = options.targetAmount ?? 400;
   const provider = options.provider ?? PaymentProvider.MOCK;
   const mode = options.mode ?? PaymentMode.SANDBOX;
   const userId = `dispatch_user_${identity}`;
   await db.user.create({ data: { id: userId, email: `${userId}@example.test`, name: "Dispatch test" } });
+  journal.userId = userId;
+  observeConstructionStep(options, DispatchFixtureConstructionStep.USER_CREATED);
   const session = await db.checkoutSession.create({
     data: {
       userId,
@@ -65,6 +129,8 @@ export async function createDispatchFixture(
       completedAt: DISPATCH_NOW,
     },
   });
+  journal.sessionId = session.id;
+  observeConstructionStep(options, DispatchFixtureConstructionStep.CHECKOUT_SESSION_CREATED);
   const providerRef = `provider_ref_initial_${identity}`;
   const providerPaymentKey = `provider_payment_final_${identity}`;
   const payment = await db.payment.create({
@@ -80,6 +146,8 @@ export async function createDispatchFixture(
       idempotencyKey: `payment_idem_${identity}`,
     },
   });
+  journal.paymentId = payment.id;
+  observeConstructionStep(options, DispatchFixtureConstructionStep.PAYMENT_CREATED);
   const order = await db.order.create({
     data: {
       checkoutSessionId: session.id,
@@ -94,46 +162,78 @@ export async function createDispatchFixture(
       paidAt: DISPATCH_NOW,
     },
   });
-  const refundAttemptId = `refund_${identity}`;
-  const operationKey = `refund:${payment.id}:${refundAttemptId}`;
-  const reason = "Dispatch fixture refund request";
-  await createRequestedAttempt({
+  journal.orderId = order.id;
+  observeConstructionStep(options, DispatchFixtureConstructionStep.ORDER_CREATED);
+  const attemptIdentity = refundAttemptFixtureIdentity(options, payment.id, identity);
+  const requestedAttempt = await createRequestedAttempt({
     requestThroughProduction: options.requestThroughProduction === true,
-    refundAttemptId,
+    refundAttemptId: attemptIdentity.configuredId,
     orderId: order.id,
     paymentId: payment.id,
     targetAmount,
-    reason,
+    reason: "Dispatch fixture refund request",
     provider,
     mode,
-    operationKey,
-  });
+    operationKey: attemptIdentity.operationKey,
+  }, journal, options);
   const claim = await claimRefundAttemptForExecution(db, {
     orderId: order.id,
-    refundAttemptId,
+    refundAttemptId: requestedAttempt.id,
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: "dispatch_admin",
     now: options.availableAt ?? DISPATCH_NOW,
   });
   if (!claim.ok) throw new Error(`Dispatch fixture claim failed: ${claim.code}`);
+  journal.commandId = claim.commandId;
+  observeConstructionStep(options, DispatchFixtureConstructionStep.CLAIM_CREATED);
   return {
     userId,
     sessionId: session.id,
     paymentId: payment.id,
     orderId: order.id,
-    refundAttemptId,
+    refundAttemptId: requestedAttempt.id,
     commandId: claim.commandId,
     totalAmount,
     targetAmount,
     providerRef,
     providerPaymentKey,
-    operationKey,
+    operationKey: requestedAttempt.operationKey,
   };
+}
+
+function observeConstructionStep(
+  options: DispatchFixtureOptions,
+  step: DispatchFixtureConstructionStep,
+): void {
+  options.afterConstructionStep?.(step);
+}
+
+function refundAttemptFixtureIdentity(
+  options: Readonly<{
+    requestThroughProduction?: boolean;
+    useSchemaGeneratedRefundAttemptId?: boolean;
+    refundAttemptId?: string;
+  }>,
+  paymentId: string,
+  identity: string,
+): Readonly<{ configuredId: string | undefined; operationKey: string }> {
+  if (options.useSchemaGeneratedRefundAttemptId
+    && (options.requestThroughProduction || options.refundAttemptId !== undefined)) {
+    throw new Error("Schema-generated refund attempt fixtures cannot set an explicit ID.");
+  }
+  const configuredId = options.useSchemaGeneratedRefundAttemptId
+    ? undefined
+    : options.refundAttemptId ?? `refund_${identity}`;
+  const operationIdentity = configuredId ?? `refund_${identity}`;
+  return Object.freeze({
+    configuredId,
+    operationKey: `refund:${paymentId}:${operationIdentity}`,
+  });
 }
 
 async function createRequestedAttempt(input: Readonly<{
   requestThroughProduction: boolean;
-  refundAttemptId: string;
+  refundAttemptId: string | undefined;
   orderId: string;
   paymentId: string;
   targetAmount: number;
@@ -141,8 +241,12 @@ async function createRequestedAttempt(input: Readonly<{
   provider: PaymentProvider;
   mode: PaymentMode;
   operationKey: string;
-}>): Promise<void> {
+}>, journal: DispatchFixtureCleanupJournal, options: DispatchFixtureOptions): Promise<Readonly<{
+  id: string;
+  operationKey: string;
+}>> {
   if (input.requestThroughProduction) {
+    if (!input.refundAttemptId) throw new Error("Explicit refund attempt ID required.");
     const requested = await requestRefundAttempt(db, {
       refundAttemptId: input.refundAttemptId,
       orderId: input.orderId,
@@ -153,10 +257,17 @@ async function createRequestedAttempt(input: Readonly<{
       now: DISPATCH_NOW,
     });
     if (!requested.ok) throw new Error(`Dispatch fixture request failed: ${requested.code}`);
+    journal.refundAttemptId = requested.refundAttempt.id;
+    observeConstructionStep(options, DispatchFixtureConstructionStep.REFUND_ATTEMPT_CREATED);
+    observeConstructionStep(options, DispatchFixtureConstructionStep.REQUEST_TRANSITION_CREATED);
+    return Object.freeze({
+      id: requested.refundAttempt.id,
+      operationKey: requested.refundAttempt.idempotencyKey,
+    });
   } else {
-    await db.refundAttempt.create({
+    const attempt = await db.refundAttempt.create({
       data: {
-        id: input.refundAttemptId,
+        ...(input.refundAttemptId ? { id: input.refundAttemptId } : {}),
         orderId: input.orderId,
         paymentId: input.paymentId,
         amount: input.targetAmount,
@@ -171,9 +282,18 @@ async function createRequestedAttempt(input: Readonly<{
         requestedAt: DISPATCH_NOW,
       },
     });
+    journal.refundAttemptId = attempt.id;
+    observeConstructionStep(options, DispatchFixtureConstructionStep.REFUND_ATTEMPT_CREATED);
+    const operationKey = `refund:${input.paymentId}:${attempt.id}`;
+    if (operationKey !== input.operationKey) {
+      await db.refundAttempt.update({
+        where: { id: attempt.id },
+        data: { idempotencyKey: operationKey },
+      });
+    }
     await db.refundAttemptTransition.create({
       data: {
-        refundAttemptId: input.refundAttemptId,
+        refundAttemptId: attempt.id,
         fromStatus: null,
         toStatus: RefundAttemptStatus.REQUESTED,
         orderStatusBefore: OrderStatus.PAID,
@@ -181,10 +301,12 @@ async function createRequestedAttempt(input: Readonly<{
         actorType: RefundAttemptActorType.ADMIN,
         actorUserId: "dispatch_admin",
         reason: input.reason,
-        operationKey: `refund-request:${input.refundAttemptId}`,
+        operationKey: `refund-request:${attempt.id}`,
         createdAt: DISPATCH_NOW,
       },
     });
+    observeConstructionStep(options, DispatchFixtureConstructionStep.REQUEST_TRANSITION_CREATED);
+    return Object.freeze({ id: attempt.id, operationKey });
   }
 }
 
@@ -314,40 +436,149 @@ export async function markDispatchContactForTest(
 }
 
 export async function cleanupDispatchFixtures(...fixtures: readonly DispatchFixture[]): Promise<void> {
-  const orderIds = fixtures.map((fixture) => fixture.orderId);
-  const paymentIds = fixtures.map((fixture) => fixture.paymentId);
-  const sessionIds = fixtures.map((fixture) => fixture.sessionId);
-  const userIds = fixtures.map((fixture) => fixture.userId);
-  const attempts = await db.refundAttempt.findMany({ where: { orderId: { in: orderIds } }, select: { id: true } });
-  const attemptIds = attempts.map((attempt) => attempt.id);
-  const commands = await db.refundExecutionCommand.findMany({
-    where: { refundAttemptId: { in: attemptIds } },
-    select: { id: true },
+  const cleanupErrors = await cleanupDispatchAuthorities({
+    orderIds: fixtures.map((fixture) => fixture.orderId),
+    paymentIds: fixtures.map((fixture) => fixture.paymentId),
+    sessionIds: fixtures.map((fixture) => fixture.sessionId),
+    userIds: fixtures.map((fixture) => fixture.userId),
+    refundAttemptIds: fixtures.map((fixture) => fixture.refundAttemptId),
+    commandIds: fixtures.map((fixture) => fixture.commandId),
   });
-  const commandIds = commands.map((command) => command.id);
-  const bindings = await db.refundExecutionProviderOperationBinding.findMany({
-    where: { refundAttemptId: { in: attemptIds } },
-    select: { id: true },
-  });
-  await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
-  await db.refundExecutionProviderContactEligibilityProof.deleteMany({
-    where: { dispatchAttempt: { commandId: { in: commandIds } } },
-  });
-  await db.refundExecutionProviderEligibilityProof.deleteMany({
-    where: { bindingId: { in: bindings.map((binding) => binding.id) } },
-  });
-  await db.refundExecutionProviderOperationBinding.deleteMany({
-    where: { id: { in: bindings.map((binding) => binding.id) } },
-  });
-  await db.refundExecutionDispatchAttempt.deleteMany({ where: { commandId: { in: commandIds } } });
-  await db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } });
-  await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
-  await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });
-  await db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } });
-  await db.order.deleteMany({ where: { id: { in: orderIds } } });
-  await db.payment.deleteMany({ where: { id: { in: paymentIds } } });
-  await db.checkoutSession.deleteMany({ where: { id: { in: sessionIds } } });
-  await db.user.deleteMany({ where: { id: { in: userIds } } });
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Dispatch fixture cleanup failed.");
+  }
+}
+
+function cleanupAuthorityFromJournal(
+  journal: DispatchFixtureCleanupJournal,
+): DispatchFixtureCleanupAuthority {
+  return {
+    userIds: journal.userId ? [journal.userId] : [],
+    sessionIds: journal.sessionId ? [journal.sessionId] : [],
+    paymentIds: journal.paymentId ? [journal.paymentId] : [],
+    orderIds: journal.orderId ? [journal.orderId] : [],
+    refundAttemptIds: journal.refundAttemptId ? [journal.refundAttemptId] : [],
+    commandIds: journal.commandId ? [journal.commandId] : [],
+  };
+}
+
+async function cleanupDispatchAuthorities(
+  authority: DispatchFixtureCleanupAuthority,
+  beforeCleanupStep?: (step: DispatchFixtureCleanupStep) => void,
+): Promise<unknown[]> {
+  const cleanupErrors: unknown[] = [];
+  try {
+    beforeCleanupStep?.(DispatchFixtureCleanupStep.BEFORE_DEPENDENT_ROWS);
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  const attemptRows = await collectCleanupQuery(
+    cleanupErrors,
+    () => db.refundAttempt.findMany({
+      where: {
+        OR: [
+          { id: { in: authority.refundAttemptIds } },
+          { orderId: { in: authority.orderIds } },
+        ],
+      },
+      select: { id: true },
+    }),
+  );
+  const attemptIds = uniqueStrings([
+    ...authority.refundAttemptIds,
+    ...attemptRows.map((attempt) => attempt.id),
+  ]);
+  const commandRows = await collectCleanupQuery(
+    cleanupErrors,
+    () => db.refundExecutionCommand.findMany({
+      where: { refundAttemptId: { in: attemptIds } },
+      select: { id: true },
+    }),
+  );
+  const commandIds = uniqueStrings([
+    ...authority.commandIds,
+    ...commandRows.map((command) => command.id),
+  ]);
+  const bindings = await collectCleanupQuery(
+    cleanupErrors,
+    () => db.refundExecutionProviderOperationBinding.findMany({
+      where: { refundAttemptId: { in: attemptIds } },
+      select: { id: true },
+    }),
+  );
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionProviderContactEligibilityProof.deleteMany({
+      where: { dispatchAttempt: { commandId: { in: commandIds } } },
+    })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionProviderEligibilityProof.deleteMany({
+      where: { bindingId: { in: bindings.map((binding) => binding.id) } },
+    })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionProviderOperationBinding.deleteMany({
+      where: { id: { in: bindings.map((binding) => binding.id) } },
+    })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionDispatchAttempt.deleteMany({ where: { commandId: { in: commandIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionCommandEvent.deleteMany({ where: { commandId: { in: commandIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.order.deleteMany({ where: { id: { in: authority.orderIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.payment.deleteMany({ where: { id: { in: authority.paymentIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.checkoutSession.deleteMany({ where: { id: { in: authority.sessionIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.user.deleteMany({ where: { id: { in: authority.userIds } } })
+  ));
+  return cleanupErrors;
+}
+
+async function collectCleanupQuery<T>(
+  errors: unknown[],
+  query: () => Promise<T[]>,
+): Promise<T[]> {
+  try {
+    return await query();
+  } catch (error) {
+    errors.push(error);
+    return [];
+  }
+}
+
+async function collectCleanupMutation(
+  errors: unknown[],
+  mutation: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await mutation();
+  } catch (error) {
+    errors.push(error);
+  }
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 async function ensureMarket(): Promise<void> {

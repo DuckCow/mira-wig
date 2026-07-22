@@ -110,11 +110,17 @@ migration or database failure, and `SYSTEMIC_FAILURE` do not satisfy the conditi
 an external missing-processing alert window, not an in-process timer. No scheduler, alert,
 destination, owner, SLA, acknowledgement, or escalation workflow currently implements this rule.
 
-Any nonzero `MANUAL_REVIEW` backlog must be externally visible. Alert routing, owner, SLA,
-acknowledgement, and resolution remain P3C2 blockers. Contacted-backlog age is sufficient for an
-external alert before the 13-day recovery deadline, but the warning margin remains a P3C2 operational
-decision. Repeated `BUDGET` drains require investigation under the lifecycle contract.
+Any nonzero `MANUAL_REVIEW` backlog must be externally visible. Alert routing, owner, staffed
+window, acknowledgement, and resolution remain unsatisfied external requirements. The fixed local
+classification thresholds are warning at 10 days and critical at 12 days; the hard recovery
+deadline is 13 days and is derived from the Toss recovery-policy authority. At or after 13 days the
+case remains `CONTACTED_DEADLINE_CRITICAL` and requires external escalation; there is no separate
+hard-deadline classification. These local observations do not prove provider truth, and no metrics
+consumer, timer, monitor, alert destination, owner, or workflow implements the thresholds. Repeated
+`BUDGET` drains require investigation under the lifecycle contract.
 
 There is no monitoring platform, alert integration, heartbeat persistence, scheduler, or operational
-readiness claim. This documentation grants no activation authority. P3C2, P3D, and P3E remain
-separate design, implementation, audit, and authorization acts.
+readiness claim. Privileged provider-free manual, reconciliation, and credential observations plus
+their thresholds are defined by `refund_worker_operations_runbook_v1.md`. Their case references are
+strictly prohibited as metric dimensions or alert labels. This documentation grants no activation
+authority. P3D and P3E remain separate design, implementation, audit, and authorization acts.
