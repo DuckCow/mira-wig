@@ -156,6 +156,7 @@ describe("refund execution worker host CLI contract", () => {
       },
     }, 0],
     [success("FEATURE_DISABLED"), 0],
+    [success("OVERLAP_SKIPPED"), 0],
     [success("CYCLE_COMPLETE"), 0],
     [{ ok: true, code: "LIFECYCLE_DRAINED", reason: "SIGNAL", cycle: emptyCounters() }, 75],
     [failure("INVALID_HOST_INPUT"), 64],
@@ -323,9 +324,9 @@ describe("refund execution worker health output contract", () => {
 });
 
 function success(
-  code: "CHECK_READY" | "FEATURE_DISABLED" | "CYCLE_COMPLETE",
+  code: "CHECK_READY" | "FEATURE_DISABLED" | "OVERLAP_SKIPPED" | "CYCLE_COMPLETE",
 ): RefundExecutionWorkerHostResult {
-  if (code === "FEATURE_DISABLED") return { ok: true, code };
+  if (code === "FEATURE_DISABLED" || code === "OVERLAP_SKIPPED") return { ok: true, code };
   if (code === "CYCLE_COMPLETE") return { ok: true, code, cycle: emptyCounters() };
   return {
     ok: true,

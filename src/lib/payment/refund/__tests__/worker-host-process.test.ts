@@ -12,7 +12,7 @@ import {
 import { compareRefundWorkerMigrations } from "../worker-migration-readiness";
 
 describe("refund execution worker process wrapper", () => {
-  it("classifies FEATURE_DISABLED, CYCLE_COMPLETE, and CONFIG_INVALID observations exactly", async () => {
+  it("classifies FEATURE_DISABLED, OVERLAP_SKIPPED, CYCLE_COMPLETE, and CONFIG_INVALID exactly", async () => {
     const disabled = processFixture();
     await expect(runRefundExecutionWorkerProcess(
       ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
@@ -25,6 +25,26 @@ describe("refund execution worker process wrapper", () => {
     expectObservedLine(disabled.stdout[0], "RUN_ONCE", {
       ok: true,
       code: "FEATURE_DISABLED",
+    }, 1);
+
+    const overlap = processFixture();
+    await expect(runRefundExecutionWorkerProcess(
+      ["run-once", "--service", "svc", "--revision", "rev", "--slot", "one"],
+      {
+        REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
+        TOSS_SANDBOX_SECRET_KEY: "synthetic",
+      },
+      overlap.output,
+      {
+        ...overlap.dependencies,
+        runProviderContactAdmission: () => Promise.resolve({ outcome: "BUSY" as const }),
+      },
+      JSON.stringify,
+      sequenceClock(1, 2),
+    )).resolves.toBe(0);
+    expectObservedLine(overlap.stdout[0], "RUN_ONCE", {
+      ok: true,
+      code: "OVERLAP_SKIPPED",
     }, 1);
 
     const complete = processFixture();
@@ -743,6 +763,10 @@ function processFixture(options: Readonly<{
     })),
     compareMigrations: compareRefundWorkerMigrations,
     disconnectDatabase: () => Promise.resolve(),
+    runProviderContactAdmission: async (_env, operation) => Object.freeze({
+      outcome: "ACQUIRED" as const,
+      result: await operation(),
+    }),
     readHealthBacklog: () => Promise.resolve(emptyBacklog()),
     createWorkerDependencies: () => Object.freeze({
       lookup: () => Promise.resolve({ kind: "unavailable" as const }),

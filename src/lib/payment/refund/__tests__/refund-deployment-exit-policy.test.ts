@@ -10,6 +10,7 @@ describe("refund deployment external policy", () => {
   it.each([
     [{ kind: "RESULT", code: "CYCLE_COMPLETE", exitCode: 0 }, "NEXT_CADENCE"],
     [{ kind: "RESULT", code: "FEATURE_DISABLED", exitCode: 0 }, "DISABLED_NO_PROCESSING"],
+    [{ kind: "RESULT", code: "OVERLAP_SKIPPED", exitCode: 0 }, "OVERLAP_NO_PROCESSING"],
     [{ kind: "RESULT", code: "LIFECYCLE_DRAINED", exitCode: 75, reason: "SIGNAL" }, "DRAINED_DO_NOT_OVERLAP"],
     [{ kind: "RESULT", code: "LIFECYCLE_DRAINED", exitCode: 75, reason: "BUDGET" }, "DRAINED_DO_NOT_OVERLAP"],
     [{ kind: "RESULT", code: "INVALID_HOST_INPUT", exitCode: 64 }, "SUSPEND_INVOCATION_DEFECT"],
@@ -52,6 +53,9 @@ describe("refund deployment external policy", () => {
       kind: "RESET", failureCount: 0,
     });
     expect(refundDeploymentBackoffDecision("DISABLED_NO_PROCESSING", 7)).toEqual({
+      kind: "NO_PROCESSING_SUCCESS",
+    });
+    expect(refundDeploymentBackoffDecision("OVERLAP_NO_PROCESSING", 7)).toEqual({
       kind: "NO_PROCESSING_SUCCESS",
     });
     expect(refundDeploymentBackoffDecision("SUSPEND_READINESS_DEFECT", 7)).toEqual({ kind: "SUSPEND" });

@@ -848,16 +848,64 @@ describe("reachability and documentation", () => {
         .replace(/\s+/gu, " ");
       for (const phrase of ["P3D provider-free rehearsal is implemented",
         "P3E-A evidence-readiness contract is implemented",
-        "P3E-A cannot issue executable approval", "no trusted evidence producer/verifier exists",
-        "no GCP infrastructure exists", "no distributed admission implementation exists",
-        "no durable single-use consumption ledger exists",
-        "P3E-B remains unimplemented and unauthorized",
+        "P3E-A cannot issue executable approval",
+        "P3E-B1 repository IaC/admission implementation exists",
+        "No GCP resource has been provisioned", "No image has been built or pushed",
+        "No cloud preflight has run", "No provider secret exists",
+        "No exact target is sealed", "No approval is issued",
+        "No trusted evidence producer/verifier exists",
+        "No durable single-use consumption ledger exists",
+        "P3E-B2 remains unimplemented and unauthorized",
         "P3E-C remains unimplemented and unauthorized",
         "P3E-D provider-contact execution remains unimplemented and unauthorized",
-        "scheduled SANDBOX remains blocked", "LIVE remains unreachable"]) {
+        "Scheduled SANDBOX remains blocked", "LIVE remains unreachable"]) {
         expect(text, `${name}: ${phrase}`).toContain(phrase);
       }
     }
+
+    const host = readFileSync(
+      join(ROOT, "docs/payment_policy/refund_worker_host_v1.md"), "utf8",
+    ).replace(/\s+/gu, " ");
+    expect(host).toContain(
+      "P3E-B1 repository code implements a PostgreSQL session-level job-wide distributed-admission boundary integrated before protected worker work",
+    );
+    expect(host).toContain("not deployed or proven in Cloud Run or Cloud SQL");
+    expect(host).toContain(
+      "Deployed platform enforcement remains unverified until separately authorized P3E-B2 provisioning and evidence",
+    );
+    expect(host).toContain(
+      "Cloud Run task count and parallelism are not the admission authority",
+    );
+    expect(host).not.toContain("overlap enforcement");
+
+    const platform = readFileSync(
+      join(ROOT, "docs/payment_policy/refund_worker_sandbox_canary_platform_v1.md"), "utf8",
+    ).replace(/\s+/gu, " ").replace(/\*/gu, "");
+    expect(platform).toContain(
+      "P3E-B1 now implements repository IaC, provider-free preflight, and PostgreSQL job-wide distributed-admission code",
+    );
+    expect(platform).toContain(
+      "P3E-B2 remains future provider-free provisioning and cloud preflight execution",
+    );
+    expect(platform).toContain(
+      "P3E-C remains future trusted evidence production/verification, exact target and secret sealing, approval issuance, and durable atomic single-use consumption",
+    );
+    expect(platform).toContain("P3E-D remains the single provider-contact canary phase");
+    for (const check of ["database connectivity", "PostgreSQL major", "migration readiness",
+      "disabled worker readiness", "zero-backlog health", "an empty manual-review queue",
+      "an empty reconciliation snapshot", "absent credential metadata",
+      "a production distributed-admission no-op probe"]) {
+      expect(platform, check).toContain(check);
+    }
+    expect(platform).toContain("Provider and secret boundaries and network contact are unreachable");
+    expect(platform).toContain("it performs no financial mutation");
+    expect(platform).toContain("The P3E-B preflight does not invoke the P3D rehearsal command");
+    expect(platform).toContain("P3D remains a separate local deployment-rehearsal contract");
+    expect(platform).toContain(
+      "the two share some underlying provider-free observations but are not the same execution",
+    );
+    expect(platform).not.toContain("P3E-B may later");
+    expect(platform).not.toContain("rehearsal checks");
   });
 });
 

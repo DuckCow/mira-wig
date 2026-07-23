@@ -89,6 +89,10 @@ async function main(): Promise<void> {
     })),
     compareMigrations: () => Object.freeze({ ok: true as const, status: "READY" as const }),
     disconnectDatabase: () => Promise.resolve(),
+    runProviderContactAdmission: async (_env, operation) => Object.freeze({
+      outcome: "ACQUIRED" as const,
+      result: await operation(),
+    }),
     createWorkerDependencies: () => Object.freeze({ lookup, cancellation }),
     runWorkerCycle: async (_database, _owner, _ports, _env, control) => runFakeCycle(control),
   });

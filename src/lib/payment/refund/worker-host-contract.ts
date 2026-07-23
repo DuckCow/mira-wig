@@ -9,6 +9,8 @@ import type { RefundExecutionWorkerRouteReadiness } from "./worker-route-readine
 
 const HOST_LABEL = /^[A-Za-z0-9._-]{1,64}$/;
 const RUN_ONCE_ARGUMENT_COUNT = 7;
+export const REFUND_WORKER_PROCESS_FORMAT_VERSION =
+  "mira-refund-worker-process-observation/v1";
 
 export type RefundExecutionWorkerHostCommand =
   | Readonly<{ kind: "CHECK" }>
@@ -48,6 +50,7 @@ export type RefundExecutionWorkerHostResult =
     }>;
   }>
   | Readonly<{ ok: true; code: "FEATURE_DISABLED" }>
+  | Readonly<{ ok: true; code: "OVERLAP_SKIPPED" }>
   | Readonly<{
     ok: true;
     code: "HEALTH_SNAPSHOT";
@@ -79,6 +82,7 @@ const HOST_EXIT_CODE: Readonly<Record<RefundExecutionWorkerHostResult["code"], n
     CHECK_READY: 0,
     HEALTH_SNAPSHOT: 0,
     FEATURE_DISABLED: 0,
+    OVERLAP_SKIPPED: 0,
     CYCLE_COMPLETE: 0,
     LIFECYCLE_DRAINED: 75,
     INVALID_HOST_INPUT: 64,
@@ -136,6 +140,13 @@ export function featureDisabled(): Extract<
   { code: "FEATURE_DISABLED" }
 > {
   return Object.freeze({ ok: true, code: "FEATURE_DISABLED" });
+}
+
+export function overlapSkipped(): Extract<
+  RefundExecutionWorkerHostResult,
+  { code: "OVERLAP_SKIPPED" }
+> {
+  return Object.freeze({ ok: true, code: "OVERLAP_SKIPPED" });
 }
 
 export function checkReady(

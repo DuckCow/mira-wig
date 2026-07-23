@@ -1,5 +1,11 @@
 # Refund worker one-shot host v1
 
+P3E-B1 adds one distributed admission after connectivity and migration readiness and before adapter
+construction/cycle entry. A busy session returns `OVERLAP_SKIPPED` with exit 0 and performs no
+selection, lease, mutation, secret read, adapter construction, or provider-port call. The acquired
+session is held through the protected result, then unlocked and closed. `check` and `health` remain
+outside the production admission lock.
+
 Status: implemented but dormant.
 
 This contract adds a host-neutral, one-shot process boundary for the existing TOSS/SANDBOX refund
@@ -88,6 +94,7 @@ partial external writes cannot be undone.
 | `HEALTH_SNAPSHOT` | 0 |
 | `FEATURE_DISABLED` | 0 |
 | `CYCLE_COMPLETE` | 0 |
+| `OVERLAP_SKIPPED` | 0 |
 | `LIFECYCLE_DRAINED` | 75 |
 | `INVALID_HOST_INPUT` | 64 |
 | `INVALID_WORKER_OWNER` | 64 |
@@ -114,12 +121,17 @@ output. `LIFECYCLE_DRAINED` uses the same exact counter validator and adds only 
 
 ## Explicitly absent
 
+P3E-B1 repository code implements a PostgreSQL session-level job-wide distributed-admission
+boundary integrated before protected worker work. It is not deployed or proven in Cloud Run or
+Cloud SQL. Deployed platform enforcement remains unverified until separately authorized P3E-B2
+provisioning and evidence; Cloud Run task count and parallelism are not the admission authority.
+
 No loop, scheduler, cron, queue, daemon, web timer, route handler, Server Action, serverless
-schedule, external hard-deadline enforcement, overlap enforcement, jitter, backoff, health
-endpoint, heartbeat, metrics, alerting, provider reconciliation, manual-resolution mutation, or
-credential rotation exists. P3C2 adds only read-only operations commands and a runbook. P3D adds a
-provider-free exact-command rehearsal, not an enabled provider-capable exact-command canary. The
-lifecycle amendment adds only signal drain and the 120-second cooperative budget.
+schedule, external hard-deadline enforcement, jitter, backoff, health endpoint, heartbeat, metrics,
+alerting, provider reconciliation, manual-resolution mutation, or credential rotation exists. P3C2
+adds only read-only operations commands and a runbook. P3D adds a provider-free exact-command
+rehearsal, not an enabled provider-capable exact-command canary. The lifecycle amendment adds only
+signal drain and the 120-second cooperative budget.
 
 All worker and provider capability flags remain disabled by default. Code presence authorizes no
 SANDBOX lookup or cancellation. LIVE selection and LIVE credentials remain unreachable. `check` and

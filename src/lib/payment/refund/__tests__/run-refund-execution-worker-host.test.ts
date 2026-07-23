@@ -152,6 +152,57 @@ describe("runRefundExecutionWorkerHost check", () => {
 });
 
 describe("runRefundExecutionWorkerHost run-once", () => {
+  it("maps a busy distributed admission to a zero-work overlap skip", async () => {
+    const fixture = hostFixture({ admissionOutcome: "BUSY" });
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, fixture.dependencies))
+      .toEqual({ ok: true, code: "OVERLAP_SKIPPED" });
+    expect(fixture.calls.admission).toBe(1);
+    expect(fixture.calls.adapters).toBe(0);
+    expect(fixture.calls.cycle).toBe(0);
+    expect(fixture.order).toEqual([
+      "master", "activation", "credential", "createDatabase", "connectivity",
+      "repository", "ledger", "comparison", "admission", "disconnect",
+    ]);
+  });
+
+  it("bounds admission unavailability before adapters and protected work", async () => {
+    const fixture = hostFixture({ admissionOutcome: "ADMISSION_UNAVAILABLE" });
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, fixture.dependencies))
+      .toEqual({ ok: false, code: "DATABASE_UNAVAILABLE" });
+    expect(fixture.calls.admission).toBe(1);
+    expect(fixture.calls.adapters).toBe(0);
+    expect(fixture.calls.cycle).toBe(0);
+    expect(fixture.calls.disconnect).toBe(1);
+  });
+
+  it("preserves counters when admission cleanup fails after a completed cycle", async () => {
+    const fixture = hostFixture({
+      admissionOutcome: "ADMISSION_CLEANUP_FAILED",
+      cycleResult: cycleSuccess({ attemptedCount: 1, providerLookupCount: 1 }),
+    });
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, fixture.dependencies))
+      .toEqual({
+        ok: false,
+        code: "SYSTEMIC_FAILURE",
+        cycle: { ...emptyCounters(), attemptedCount: 1, providerLookupCount: 1 },
+      });
+    expect(fixture.calls.cycle).toBe(1);
+    expect(fixture.calls.disconnect).toBe(1);
+  });
+
+  it("does not erase a primary cycle failure when admission cleanup also fails", async () => {
+    const fixture = hostFixture({
+      admissionOutcome: "ADMISSION_CLEANUP_FAILED",
+      cycleResult: workerFailure("CONFIG_INVALID"),
+    });
+
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, CONFIGURED_ENV, fixture.dependencies))
+      .toEqual({ ok: false, code: "CONFIG_INVALID", cycle: emptyCounters() });
+  });
+
   it.each([
     ["before database construction", "beforeDatabase"],
     ["after database construction", "createDatabase"],
@@ -382,7 +433,7 @@ describe("runRefundExecutionWorkerHost run-once", () => {
       .toEqual({ ok: true, code: "CYCLE_COMPLETE", cycle: emptyCounters() });
     expect(fixture.order).toEqual([
       "master", "activation", "credential", "createDatabase", "connectivity",
-      "repository", "ledger", "comparison", "adapters", "cycle", "disconnect",
+      "repository", "ledger", "comparison", "admission", "adapters", "cycle", "disconnect",
     ]);
   });
 
@@ -437,6 +488,7 @@ interface CallCounts {
   repository: number;
   ledger: number;
   comparison: number;
+  admission: number;
   disconnect: number;
   adapters: number;
   cycle: number;
@@ -458,6 +510,8 @@ type HostFixtureOptions = Readonly<{
   operationFailure?: boolean;
   disconnectFailure?: boolean;
   cycleResult?: RefundExecutionWorkerCycleResult;
+  admissionOutcome?: "ACQUIRED" | "BUSY" | "ADMISSION_UNAVAILABLE"
+    | "ADMISSION_CLEANUP_FAILED";
 }>;
 
 function hostFixture(options: HostFixtureOptions = Object.freeze({})) {
@@ -531,6 +585,19 @@ function hostFixture(options: HostFixtureOptions = Object.freeze({})) {
         ? Promise.reject(new Error("DISCONNECT"))
         : Promise.resolve();
     },
+    runProviderContactAdmission: async (_env, operation) => {
+      called("admission");
+      if (options.admissionOutcome === "BUSY") {
+        return Object.freeze({ outcome: "BUSY" as const });
+      }
+      if (options.admissionOutcome === "ADMISSION_UNAVAILABLE") {
+        return Object.freeze({ outcome: "ADMISSION_UNAVAILABLE" as const });
+      }
+      const result = await operation();
+      return options.admissionOutcome === "ADMISSION_CLEANUP_FAILED"
+        ? Object.freeze({ outcome: "ADMISSION_CLEANUP_FAILED" as const, result })
+        : Object.freeze({ outcome: "ACQUIRED" as const, result });
+    },
     createWorkerDependencies: () => {
       called("adapters");
       if (options.runtimeFailure === "adapters") poison();
@@ -560,6 +627,7 @@ function expectedCalls(overrides: Partial<CallCounts>): CallCounts {
     repository: 0,
     ledger: 0,
     comparison: 0,
+    admission: 0,
     disconnect: 0,
     adapters: 0,
     cycle: 0,
@@ -567,8 +635,10 @@ function expectedCalls(overrides: Partial<CallCounts>): CallCounts {
   };
 }
 
-function cycleSuccess(): RefundExecutionWorkerCycleResult {
-  return Object.freeze({ ok: true, cycle: Object.freeze(emptyCounters()) });
+function cycleSuccess(
+  overrides: Partial<ReturnType<typeof emptyCounters>> = Object.freeze({}),
+): RefundExecutionWorkerCycleResult {
+  return Object.freeze({ ok: true, cycle: Object.freeze({ ...emptyCounters(), ...overrides }) });
 }
 
 function cycleStopped(

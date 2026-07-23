@@ -1,5 +1,10 @@
 # Refund worker one-shot lifecycle v1
 
+The P3E-B1 distributed-admission session is owned outside the cooperative cycle and remains held
+through in-flight completion and result classification. Lifecycle drain never starts a second
+invocation. Unlock/close cleanup is awaited; cleanup failure cannot turn possible contact into a
+clean success, and abrupt session termination releases the PostgreSQL session lock.
+
 Status: implemented but dormant.
 
 This document amends, and does not replace,
@@ -73,8 +78,8 @@ provider-reconciliation authority remain absent. Lifecycle code grants no activa
 SANDBOX provider execution remains unauthorized, and LIVE remains unreachable. The P3D
 provider-free rehearsal capability is implemented. Actual deployment evidence remains absent, and
 it supplies no activation authorization. Activation remains blocked. P3E-A is implemented only as
-a non-authorizing evidence-readiness contract; P3E-B, P3E-C, and P3E-D remain unimplemented and
-unauthorized.
+a non-authorizing evidence-readiness contract. P3E-B1 repository IaC, provider-free preflight, and
+distributed admission exist; P3E-B2, P3E-C, and P3E-D remain unauthorized.
 
 Hard-deadline enforcement, deployed overlap enforcement, external observability ingestion,
 reconciliation, credential rotation, and provider canary operation remain outside P3B2 and are not
@@ -82,10 +87,20 @@ created by the P3D provider-free simulations.
 
 ## P3E authority-model status
 
-P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
-P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
-infrastructure exists; no distributed admission implementation exists; no durable single-use
-consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
-and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+P3D and P3E-A are implemented; P3E-A cannot issue executable approval. P3E-B1 repository IaC,
+preflight, and admission exist without GCP resources or execution. No trusted evidence issuer,
+provider secret, sealed target, executor, or durable single-use consumption ledger exists. P3E-B2,
+P3E-C, and P3E-D remain unauthorized.
 Scheduled SANDBOX remains blocked and LIVE remains unreachable.
 The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.
+
+## P3E-B1 canonical status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval. P3E-B1 repository IaC/admission implementation exists.
+No GCP resource has been provisioned. No image has been built or pushed. No cloud preflight has run.
+No provider secret exists. No exact target is sealed. No approval is issued. No trusted evidence
+producer/verifier exists. No durable single-use consumption ledger exists. P3E-B2 remains
+unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
+provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
+LIVE remains unreachable.

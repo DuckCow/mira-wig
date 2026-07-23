@@ -5,8 +5,10 @@ Status: P3E-A non-authorizing evidence-readiness contract is implemented; execut
 P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
 P3E-A cannot issue executable approval. A structurally complete package means only that it is ready
 for submission to a future trusted issuer.
-At this point no P3E infrastructure exists, no credential has been provisioned, no canary target
-exists, and no provider request has occurred. P3E-D remains unimplemented and unauthorized,
+P3E-B1 repository IaC, provider-free preflight, and distributed-admission implementation now exist,
+but no GCP infrastructure exists, no image has been built or pushed, no cloud preflight has run, no
+credential has been provisioned, no canary target exists, and no provider request has occurred.
+P3E-B2, P3E-C, and P3E-D remain unimplemented and unauthorized,
 scheduled SANDBOX operation remains blocked, and LIVE remains unreachable. This document is a
 repository design and approval contract. It is not deployment evidence or execution authority.
 
@@ -16,14 +18,17 @@ P3E is divided into separately authorized phases:
 
 - **P3E-A**, this phase, freezes the detailed evidence schema, provenance envelope, cross-binding
   evaluator, gates, and blockers. It cannot issue final approval or consume authority.
-- **P3E-B** may later provision provider-free infrastructure and implement/test the PostgreSQL
-  job-wide distributed admission boundary. It may not provision a Toss credential or contact a
-  provider.
-- **P3E-C** may later implement trusted evidence production/verification, exact target and secret
+- **P3E-B1** now implements repository IaC, provider-free preflight, and PostgreSQL job-wide
+  distributed-admission code. It has not provisioned or executed cloud infrastructure and may not
+  provision a Toss credential or contact a provider.
+- **P3E-B2** remains future provider-free provisioning and cloud preflight execution. It still may
+  not provision a Toss credential, seal a target, or contact a provider.
+- **P3E-C** remains future trusted evidence production/verification, exact target and secret
   sealing, approval issuance, and durable atomic single-use consumption. Sealing makes no provider
   request; failure, cancellation, timeout, and ambiguity still consume authority.
-- **P3E-D** may later authorize exactly one manual Cloud Run Job execution. It permits no scheduler,
-  automatic retry, or second execution before complete resolution.
+- **P3E-D** remains the single provider-contact canary phase and may later authorize exactly one
+  manual Cloud Run Job execution. It permits no scheduler, automatic retry, or second execution
+  before complete resolution.
 - **P3F** is the earliest phase that may consider a scheduled SANDBOX pilot. Neither P3E-D success
   nor this contract authorizes it.
 
@@ -38,8 +43,13 @@ decision.
 `refund-sandbox-preflight` is provider-free. It uses the same immutable container image digest as
 the canary, a dedicated user-managed `preflight-runtime-sa`, Cloud SQL connectivity, and a distinct
 read-only database role. It has no Toss secret binding. It runs readiness, migration, health,
-manual, reconciliation, credential-metadata, and rehearsal checks. Provider adapters, provider
-HTTP, financial mutation, scheduling, and canary execution are unreachable.
+manual, reconciliation, credential-metadata, and distributed-admission checks: database
+connectivity, PostgreSQL major, migration readiness, disabled worker readiness, zero-backlog health,
+an empty manual-review queue, an empty reconciliation snapshot, absent credential metadata, and a
+production distributed-admission no-op probe. Provider and secret boundaries and network contact
+are unreachable, and it performs no financial mutation. The P3E-B preflight does not invoke the P3D
+rehearsal command. P3D remains a separate local deployment-rehearsal contract; the two share some
+underlying provider-free observations but are not the same execution.
 
 `refund-sandbox-canary` is the future provider-capable job. Its frozen configuration is one
 container, one task, parallelism one, zero retries, 150-second Cloud Run task timeout, 120-second
@@ -279,10 +289,21 @@ other.
 
 ## Canonical phase-status statement
 
-P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
-P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
-infrastructure exists; no distributed admission implementation exists; no durable single-use
-consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
-and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented and
+cannot issue executable approval. P3E-B1 repository IaC, provider-free preflight, and distributed
+admission exist, but no GCP resource, image, cloud preflight run, provider secret, sealed target, or
+approval exists. No trusted evidence producer/verifier or durable single-use consumption ledger
+exists. P3E-B2, P3E-C, and P3E-D provider-contact execution remain unimplemented and unauthorized.
 Scheduled SANDBOX remains blocked and LIVE remains unreachable.
 The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.
+
+## P3E-B1 canonical status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval. P3E-B1 repository IaC/admission implementation exists.
+No GCP resource has been provisioned. No image has been built or pushed. No cloud preflight has run.
+No provider secret exists. No exact target is sealed. No approval is issued. No trusted evidence
+producer/verifier exists. No durable single-use consumption ledger exists. P3E-B2 remains
+unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
+provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
+LIVE remains unreachable.

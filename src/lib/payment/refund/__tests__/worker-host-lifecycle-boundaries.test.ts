@@ -233,6 +233,10 @@ function readinessFixture(reason: RefundExecutionWorkerDrainReason, stage: Readi
       counts.disconnect += 1;
       return Promise.resolve();
     },
+    runProviderContactAdmission: async (_env, operation) => Object.freeze({
+      outcome: "ACQUIRED" as const,
+      result: await operation(),
+    }),
     createWorkerDependencies: () => {
       counts.lookupAdapterFactory += 1;
       const lookup = () => {

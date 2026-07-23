@@ -1,6 +1,7 @@
 export type RefundDeploymentExitAction =
   | "NEXT_CADENCE"
   | "DISABLED_NO_PROCESSING"
+  | "OVERLAP_NO_PROCESSING"
   | "DRAINED_DO_NOT_OVERLAP"
   | "SUSPEND_INVOCATION_DEFECT"
   | "SUSPEND_READINESS_DEFECT"
@@ -22,6 +23,7 @@ const RESULT_ACTIONS: Readonly<Record<string, Readonly<{ exitCode: number; actio
   Object.freeze({
     CYCLE_COMPLETE: Object.freeze({ exitCode: 0, action: "NEXT_CADENCE" }),
     FEATURE_DISABLED: Object.freeze({ exitCode: 0, action: "DISABLED_NO_PROCESSING" }),
+    OVERLAP_SKIPPED: Object.freeze({ exitCode: 0, action: "OVERLAP_NO_PROCESSING" }),
     LIFECYCLE_DRAINED: Object.freeze({ exitCode: 75, action: "DRAINED_DO_NOT_OVERLAP" }),
     INVALID_HOST_INPUT: Object.freeze({ exitCode: 64, action: "SUSPEND_INVOCATION_DEFECT" }),
     INVALID_WORKER_OWNER: Object.freeze({ exitCode: 64, action: "SUSPEND_INVOCATION_DEFECT" }),
@@ -66,6 +68,7 @@ RefundDeploymentExitAction,
 RefundDeploymentBackoffDecision
 >>> = Object.freeze({
   DISABLED_NO_PROCESSING: Object.freeze({ kind: "NO_PROCESSING_SUCCESS" }),
+  OVERLAP_NO_PROCESSING: Object.freeze({ kind: "NO_PROCESSING_SUCCESS" }),
   DRAINED_DO_NOT_OVERLAP: Object.freeze({ kind: "DRAINED" }),
   SUSPEND_INVOCATION_DEFECT: Object.freeze({ kind: "SUSPEND" }),
   SUSPEND_READINESS_DEFECT: Object.freeze({ kind: "SUSPEND" }),

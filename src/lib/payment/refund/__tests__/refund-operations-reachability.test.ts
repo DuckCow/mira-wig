@@ -35,8 +35,13 @@ const REHEARSAL_RUNNER = join(REFUND_ROOT, "run-refund-deployment-rehearsal.ts")
 const REHEARSAL_PROCESS = join(REFUND_ROOT, "refund-deployment-rehearsal-process.ts");
 const REHEARSAL_SCRIPT = join(ROOT, "scripts/refund-worker-deployment-rehearsal.ts");
 const REHEARSAL_CHAIN = [REHEARSAL_RUNNER, REHEARSAL_PROCESS, REHEARSAL_SCRIPT];
+const PREFLIGHT_RUNNER = join(REFUND_ROOT, "run-refund-sandbox-provider-free-preflight.ts");
+const PREFLIGHT_PROCESS = join(REFUND_ROOT, "refund-sandbox-provider-free-preflight-process.ts");
+const PREFLIGHT_SCRIPT = join(ROOT, "scripts/refund-sandbox-provider-free-preflight.ts");
+const PREFLIGHT_CHAIN = [PREFLIGHT_RUNNER, PREFLIGHT_PROCESS, PREFLIGHT_SCRIPT];
 const APPROVED_OPERATIONS_GRAPH = [
-  CONTRACT, CREDENTIAL, MANUAL, RECONCILIATION, HOST, PROCESS, SCRIPT, ...REHEARSAL_CHAIN,
+  CONTRACT, CREDENTIAL, MANUAL, RECONCILIATION, HOST, PROCESS, SCRIPT,
+  ...REHEARSAL_CHAIN, ...PREFLIGHT_CHAIN,
 ].map(repositoryPath).sort();
 
 describe("refund operations reachability and runbook", () => {
@@ -73,7 +78,7 @@ describe("refund operations reachability and runbook", () => {
       .toEqual(APPROVED_OPERATIONS_GRAPH);
     for (const target of [CREDENTIAL, MANUAL, RECONCILIATION]) {
       expect(reverseReachableFiles(target, files).map(repositoryPath).sort()).toEqual(
-        [target, HOST, PROCESS, SCRIPT].map(repositoryPath).sort(),
+        [target, HOST, PROCESS, SCRIPT, ...PREFLIGHT_CHAIN].map(repositoryPath).sort(),
       );
     }
     expect(reverseReachableFiles(HOST, files).map(repositoryPath).sort())

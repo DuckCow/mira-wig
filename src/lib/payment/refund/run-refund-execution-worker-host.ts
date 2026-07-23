@@ -23,6 +23,7 @@ import {
   hostCycleFailure,
   hostFailure,
   lifecycleDrained,
+  overlapSkipped,
   type RefundExecutionWorkerHostCommand,
   type RefundExecutionWorkerHostResult,
 } from "./worker-host-contract";
@@ -47,6 +48,10 @@ import {
 import { EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS } from "./worker-contract";
 import { readRefundExecutionWorkerHealthBacklog } from "./worker-health";
 import { refundExecutionWorkerRouteReadiness } from "./worker-route-readiness";
+import {
+  runWithRefundProviderContactAdmission,
+  type RefundProviderContactAdmissionResult,
+} from "./refund-provider-contact-admission";
 
 type HostEnv = Readonly<Record<string, string | undefined>>;
 
@@ -66,6 +71,10 @@ export type RefundExecutionWorkerHostDependencies<Database> = Readonly<{
   createLifecycle?: () => RefundExecutionWorkerHostLifecycle;
   readHealthBacklog?: (database: Database) => Promise<unknown>;
   createWorkerDependencies: () => RefundExecutionWorkerDependencies;
+  runProviderContactAdmission: <Result>(
+    env: HostEnv,
+    operation: () => Promise<Result>,
+  ) => Promise<RefundProviderContactAdmissionResult<Result>>;
   runWorkerCycle: (
     database: Database,
     workerOwner: string,
@@ -87,6 +96,7 @@ export const defaultRefundExecutionWorkerHostDependencies: RefundExecutionWorker
     compareMigrations: compareRefundWorkerMigrations,
     disconnectDatabase: (database) => database.$disconnect(),
     readHealthBacklog: readRefundExecutionWorkerHealthBacklog,
+    runProviderContactAdmission: runWithRefundProviderContactAdmission,
     createWorkerDependencies: () => Object.freeze({
       lookup: createTossRefundLookupPort({ fetchFn: globalThis.fetch }),
       cancellation: createTossRefundCancellationPort({ fetchFn: globalThis.fetch }),
@@ -263,7 +273,41 @@ async function runReadyHostCommand<Database>(
   if (command.kind === "HEALTH") {
     return runHealthSnapshot(configuration, env, database, dependencies);
   }
-  return runOneCycle(command.workerOwner, env, database, dependencies, lifecycle);
+  return runAdmittedCycle(command.workerOwner, env, database, dependencies, lifecycle);
+}
+
+async function runAdmittedCycle<Database>(
+  workerOwner: string,
+  env: HostEnv,
+  database: Database,
+  dependencies: RefundExecutionWorkerHostDependencies<Database>,
+  lifecycle: RefundExecutionWorkerHostLifecycle,
+): Promise<RefundExecutionWorkerHostResult> {
+  let admission: RefundProviderContactAdmissionResult<RefundExecutionWorkerHostResult>;
+  try {
+    admission = await dependencies.runProviderContactAdmission(
+      env,
+      () => runOneCycle(workerOwner, env, database, dependencies, lifecycle),
+    );
+  } catch {
+    return hostFailure("SYSTEMIC_FAILURE");
+  }
+  if (admission.outcome === "BUSY") return overlapSkipped();
+  if (admission.outcome === "ADMISSION_UNAVAILABLE") {
+    return hostFailure("DATABASE_UNAVAILABLE");
+  }
+  if (admission.outcome === "ADMISSION_CLEANUP_FAILED") {
+    return admissionCleanupFailure(admission.result);
+  }
+  return admission.result;
+}
+
+function admissionCleanupFailure(
+  primary: RefundExecutionWorkerHostResult,
+): RefundExecutionWorkerHostResult {
+  if (!primary.ok) return primary;
+  if ("cycle" in primary) return hostCycleFailure("SYSTEMIC_FAILURE", primary.cycle);
+  return hostFailure("SYSTEMIC_FAILURE");
 }
 
 async function runHealthSnapshot<Database>(

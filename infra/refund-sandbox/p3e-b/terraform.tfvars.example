@@ -1,0 +1,13 @@
+project_id                       = "example-refund-sbx"
+project_number                   = "123456789012"
+resource_prefix                  = "mira-p3e-sbx"
+container_image_digest_uri       = "asia-northeast3-docker.pkg.dev/example-refund-sbx/mira-p3e-sbx-refund-images/refund-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+database_major_version           = 18
+database_tier                    = "db-custom-1-3840"
+preflight_database_secret_version = 1
+canary_database_secret_version    = 1
+
+# B1 creates no executor, alert delivery, secret version, project, backend bucket, or image.
+future_preflight_invoker_members = []
+alert_policies_enabled           = false
+notification_channel_names       = []

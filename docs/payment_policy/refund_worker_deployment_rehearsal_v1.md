@@ -1,5 +1,11 @@
 # Refund worker deployment rehearsal v1
 
+P3D capability is implemented provider-free. P3E-B1 does not change this local-only boundary.
+P3D never acquires the production provider-
+contact admission lock and cannot invoke the cloud-capable provider-free preflight. The preflight is
+a separate exact command and still cannot authorize provider execution.
+Actual deployment evidence remains absent, and activation remains `BLOCKED`.
+
 Status: implemented provider-free rehearsal; activation blocked.
 
 This contract amends, and does not replace, `refund_worker_host_v1.md`,
@@ -104,6 +110,7 @@ Omission from the ten-item result does not mean those facts are proven.
 ## External exit and backoff policy
 
 `CYCLE_COMPLETE/0` advances to the next cadence and resets the systemic sequence.
+`OVERLAP_SKIPPED/0` is a nonprocessing skip and never resets processing success or requests backoff.
 `FEATURE_DISABLED/0` means disabled with no processing success. `LIFECYCLE_DRAINED/75` prevents
 overlap. Invocation defects suspend on 64; readiness defects suspend on 78; database or systemic
 exit 1 uses external jittered backoff of 1, 2, 4, 8, then at most 15 minutes. External timeout/124
@@ -118,6 +125,10 @@ The pure overlap simulation admits exactly one injected invocation for `ACQUIRED
 returns `INVALID_ADMISSION_STATE` without invocation for every other value. It
 implements no platform, cross-process, filesystem, or database lock. Therefore
 `OVERLAP_SKIP_NOT_PROVEN` remains a blocker.
+
+P3E-B1 separately adds and locally proves the real PostgreSQL session admission used by the dormant
+host. P3D itself still does not acquire it, and no deployed-project evidence exists, so P3D's
+release-specific `OVERLAP_SKIP_NOT_PROVEN` blocker remains honest.
 
 The test-only timeout simulation starts a provider-free child, fires a shortened injected deadline,
 kills it, awaits close, and maps external timeout to `STOP_AND_RECONCILE_POSSIBLE_CONTACT`. It is not
@@ -141,25 +152,33 @@ deployment, migration, database-state, credential, or provider rollback.
 
 ## P3E gate
 
-P3D capability is implemented: P3D provider-free rehearsal is implemented. P3E-A evidence-readiness
-contract is implemented,
-but no P3E infrastructure exists, no credential has been provisioned, no canary target exists, and
-no provider request has occurred. P3E-D remains unimplemented and unauthorized, scheduled SANDBOX
-operation remains blocked, and LIVE remains unreachable. Actual deployment evidence remains absent
-and activation remains `BLOCKED`.
+P3D capability and P3E-A non-authorizing evidence readiness are implemented. P3E-B1 repository IaC,
+provider-free preflight, and distributed admission exist, but no GCP resource, image, cloud preflight
+run, provider credential, target, executor, or approval exists. P3E-B2, P3E-C, and P3E-D remain
+unauthorized. Scheduled SANDBOX and LIVE remain blocked; activation remains `BLOCKED`.
 
 The frozen P3E-A design is documented in `refund_worker_sandbox_canary_platform_v1.md`. It selects a
 manual-only Cloud Run Job contract and deliberately excludes Cloud Scheduler from the first canary.
-Future P3E-B, P3E-C, and P3E-D each require separate authorization. P3D success or a pure P3E-A
+P3E-B2, P3E-C, and P3E-D each require separate authorization. P3D success or a pure P3E-A
 approval evaluation does not create platform evidence or authorize a provider request.
 P3D success alone does not authorize P3E.
 
 ## P3E authority-model status
 
-P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
-P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
-infrastructure exists; no distributed admission implementation exists; no durable single-use
-consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
-and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+P3D and P3E-A are implemented; P3E-A cannot issue executable approval. P3E-B1 repository IaC,
+preflight, and admission exist without GCP resources or execution. No trusted evidence issuer,
+provider secret, sealed target, executor, or durable single-use consumption ledger exists. P3E-B2,
+P3E-C, and P3E-D remain unauthorized.
 Scheduled SANDBOX remains blocked and LIVE remains unreachable.
 The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.
+
+## P3E-B1 canonical status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval. P3E-B1 repository IaC/admission implementation exists.
+No GCP resource has been provisioned. No image has been built or pushed. No cloud preflight has run.
+No provider secret exists. No exact target is sealed. No approval is issued. No trusted evidence
+producer/verifier exists. No durable single-use consumption ledger exists. P3E-B2 remains
+unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
+provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
+LIVE remains unreachable.

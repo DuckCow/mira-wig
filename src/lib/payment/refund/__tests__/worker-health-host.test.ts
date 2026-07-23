@@ -165,6 +165,10 @@ function healthHostFixture(options: Readonly<{
       calls.disconnect += 1;
       return Promise.resolve();
     },
+    runProviderContactAdmission: async (_env, operation) => Object.freeze({
+      outcome: "ACQUIRED" as const,
+      result: await operation(),
+    }),
     createWorkerDependencies: () => {
       calls.adapters += 1;
       return Object.freeze({ lookup: fetch, cancellation: fetch });

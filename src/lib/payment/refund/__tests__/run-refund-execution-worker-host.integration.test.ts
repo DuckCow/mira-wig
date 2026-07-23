@@ -16,6 +16,7 @@ import {
   defaultRefundExecutionWorkerHostDependencies,
   runRefundExecutionWorkerHost,
 } from "../run-refund-execution-worker-host";
+import { runWithRefundProviderContactAdmission } from "../refund-provider-contact-admission";
 import {
   createRefundExecutionWorkerHostLifecycle,
   REFUND_EXECUTION_WORKER_COOPERATIVE_BUDGET_MS,
@@ -47,6 +48,51 @@ afterEach(async () => {
 });
 
 describe("refund execution one-shot host integration", () => {
+  it("returns real-session overlap before every poisoned financial and provider boundary", async () => {
+    const entered = deferred();
+    const release = deferred();
+    const holder = runWithRefundProviderContactAdmission(
+      { DATABASE_URL: requireDisposableDatabaseUrl(process.env.DATABASE_URL) },
+      async () => {
+        entered.resolve();
+        await release.promise;
+        return "HELD" as const;
+      },
+    );
+    await entered.promise;
+    const poison = Object.freeze({
+      selector: vi.fn(),
+      lease: vi.fn(),
+      secretReader: vi.fn(),
+      adapter: vi.fn(),
+      lookup: vi.fn(),
+      cancellation: vi.fn(),
+      mutation: vi.fn(),
+    });
+
+    const result = await runRefundExecutionWorkerHost(RUN_ONCE, enabledEnv(), {
+      ...defaultRefundExecutionWorkerHostDependencies,
+      createWorkerDependencies: () => {
+        poison.adapter();
+        return fakePorts(null, { get: 0, post: 0 }).dependencies;
+      },
+      runWorkerCycle: () => {
+        poison.selector();
+        poison.lease();
+        poison.secretReader();
+        poison.lookup();
+        poison.cancellation();
+        poison.mutation();
+        return Promise.reject(new Error("PROTECTED_BOUNDARY_MUST_NOT_RUN"));
+      },
+    });
+
+    expect(result).toEqual({ ok: true, code: "OVERLAP_SKIPPED" });
+    for (const boundary of Object.values(poison)) expect(boundary).not.toHaveBeenCalled();
+    release.resolve();
+    await expect(holder).resolves.toEqual({ outcome: "ACQUIRED", result: "HELD" });
+  });
+
   it("checks the real disposable database and migration ledger without business mutation or network", async () => {
     const before = await readRefundMutationSnapshot();
     const fetchPoison = vi.fn(() => {

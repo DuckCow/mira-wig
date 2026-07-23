@@ -1,5 +1,9 @@
 # Refund worker operations runbook v1
 
+P3E-B1 leaves all operations commands provider-free and outside the production distributed-
+admission lock. `OVERLAP_SKIPPED` means no provider-capable work began; operators must not treat it
+as `CYCLE_COMPLETE`, provider success, a retry request, or authority to execute another canary.
+
 Status: implemented but dormant.
 
 This runbook amends, and does not replace, `refund_worker_host_v1.md`,
@@ -201,10 +205,10 @@ This checklist grants no activation authority.
 
 ## P3E-A canary design status
 
-P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented,
-but no P3E infrastructure exists, no credential has been provisioned, no canary target exists, and
-no provider request has occurred. P3E-D remains unimplemented and unauthorized, scheduled SANDBOX
-operation remains blocked, and LIVE remains unreachable.
+P3D provider-free rehearsal and P3E-A non-authorizing evidence readiness are implemented. P3E-B1
+repository IaC, provider-free preflight, and distributed admission exist, but no GCP resource,
+image, cloud preflight run, provider credential, target, executor, or approval exists. P3E-B2,
+P3E-C, and P3E-D remain unauthorized; scheduled SANDBOX and LIVE remain blocked.
 
 `refund_worker_sandbox_canary_platform_v1.md` defines the future manual-only Cloud Run canary,
 separate preflight/canary identities, exact `RefundExecutionCommand.id` authority, distributed
@@ -212,16 +216,26 @@ admission and sequential-duplicate gates, staffed window, emergency containment,
 format. It does not create an operator command or deployment. The current state is blocked on all
 18 evidence-readiness gates. Gate 16 is durable single-use consumption evidence, independent of
 deliberate human approval. These are not executable approval gates, and P3E-A cannot authorize
-execution. P3E-B/P3E-C/P3E-D remain unimplemented and unauthorized until separately reviewed future
+execution. P3E-B2/P3E-C/P3E-D remain unimplemented and unauthorized until separately reviewed future
 phases can verify evidence, issue authority, and durably
 consume the bound approval exactly once; the current schema has no approval-consumption ledger.
 
 ## P3E authority-model status
 
-P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
-P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
-infrastructure exists; no distributed admission implementation exists; no durable single-use
-consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
-and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+P3D and P3E-A are implemented; P3E-A cannot issue executable approval. P3E-B1 repository IaC,
+preflight, and admission exist without GCP resources or execution. No trusted evidence issuer,
+provider secret, sealed target, executor, or durable single-use consumption ledger exists. P3E-B2,
+P3E-C, and P3E-D remain unauthorized.
 Scheduled SANDBOX remains blocked and LIVE remains unreachable.
 The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.
+
+## P3E-B1 canonical status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval. P3E-B1 repository IaC/admission implementation exists.
+No GCP resource has been provisioned. No image has been built or pushed. No cloud preflight has run.
+No provider secret exists. No exact target is sealed. No approval is issued. No trusted evidence
+producer/verifier exists. No durable single-use consumption ledger exists. P3E-B2 remains
+unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
+provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
+LIVE remains unreachable.

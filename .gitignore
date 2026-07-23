@@ -43,6 +43,16 @@ next-env.d.ts
 
 /src/generated/prisma
 
+# Terraform working data and local inputs
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.auto.tfvars
+infra/refund-sandbox/p3e-b/terraform.tfvars
+
 # local upload staging (mock S3)
 /uploads/
 

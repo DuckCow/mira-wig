@@ -4,7 +4,7 @@ import {
 } from "./refund-operations-contract";
 import {
   REFUND_WORKER_PROCESS_FORMAT_VERSION,
-} from "./worker-host-process";
+} from "./worker-host-contract";
 import {
   REFUND_EXECUTION_WORKER_EXTERNAL_HARD_DEADLINE_MS,
 } from "./worker-host-lifecycle";

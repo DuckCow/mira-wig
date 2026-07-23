@@ -1,5 +1,6 @@
 import {
   parseRefundExecutionWorkerCliArgs,
+  REFUND_WORKER_PROCESS_FORMAT_VERSION,
   workerHostExitCode,
   type RefundExecutionWorkerHostResult,
 } from "./worker-host-contract";
@@ -12,8 +13,8 @@ type HostEnv = Readonly<Record<string, string | undefined>>;
 type OutputWriter = Readonly<{ write(value: string): unknown }>;
 type PreparedOutput = Readonly<{ destination: OutputWriter; line: string; exitCode: number }>;
 const SYSTEMIC_FAILURE_LINE = '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n';
-export const REFUND_WORKER_PROCESS_FORMAT_VERSION =
-  "mira-refund-worker-process-observation/v1";
+
+export { REFUND_WORKER_PROCESS_FORMAT_VERSION } from "./worker-host-contract";
 
 export type RefundExecutionWorkerProcessCommand = "CHECK" | "HEALTH" | "RUN_ONCE" | "INVALID";
 export type RefundExecutionWorkerProcessObservation = Readonly<{

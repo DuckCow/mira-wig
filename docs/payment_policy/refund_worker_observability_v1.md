@@ -105,7 +105,7 @@ exit == 0
 ```
 
 A zero-candidate `CYCLE_COMPLETE` still proves that the processing invocation completed normally.
-`CHECK_READY`, `HEALTH_SNAPSHOT`, `FEATURE_DISABLED`, `LIFECYCLE_DRAINED`, `CONFIG_INVALID`,
+`CHECK_READY`, `HEALTH_SNAPSHOT`, `FEATURE_DISABLED`, `OVERLAP_SKIPPED`, `LIFECYCLE_DRAINED`, `CONFIG_INVALID`,
 migration or database failure, and `SYSTEMIC_FAILURE` do not satisfy the condition. Five minutes is
 an external missing-processing alert window, not an in-process timer. No scheduler, alert,
 destination, owner, SLA, acknowledgement, or escalation workflow currently implements this rule.
@@ -126,15 +126,33 @@ strictly prohibited as metric dimensions or alert labels. This documentation gra
 authority. The P3D provider-free rehearsal capability is implemented, but repository capability, a
 successful local rehearsal result, release-specific/deployment-specific evidence, and activation
 authorization are distinct. Actual deployment evidence is absent and activation remains blocked.
-P3E-A is implemented as a non-authorizing evidence-readiness contract; P3E-B, P3E-C, and P3E-D
-remain unimplemented and unauthorized.
+P3E-A is implemented as a non-authorizing evidence-readiness contract. P3E-B1 repository IaC,
+provider-free preflight, and distributed admission exist; P3E-B2, P3E-C, and P3E-D remain
+unimplemented and unauthorized.
+
+`OVERLAP_SKIPPED` is an exit-0 nonprocessing observation. It does not satisfy the processing-success
+condition, reset processing-success state, request retry, or enter ordinary backoff. External
+ingestion may count it only as low-cardinality overlap evidence. Repository IaC records future
+failure, timeout, missing-result, overlap, preflight, and configuration event ownership but creates
+no metric backend, policy, channel, or delivery proof.
 
 ## P3E authority-model status
 
-P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
-P3E-A cannot issue executable approval; no trusted evidence producer/verifier exists; no GCP
-infrastructure exists; no distributed admission implementation exists; no durable single-use
-consumption ledger exists. P3E-B remains unimplemented and unauthorized. P3E-C remains unimplemented
-and unauthorized. P3E-D provider-contact execution remains unimplemented and unauthorized.
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness is implemented and
+non-authorizing. P3E-B1 repository IaC, provider-free preflight, and distributed admission exist,
+but no GCP resource, image, cloud preflight run, provider secret, sealed target, executor, or
+approval exists. P3E-B2, P3E-C, and P3E-D remain unauthorized; no durable single-use consumption
+ledger exists.
 Scheduled SANDBOX remains blocked and LIVE remains unreachable.
 The status remains exact: scheduled SANDBOX remains blocked; LIVE remains unreachable.
+
+## P3E-B1 canonical status
+
+P3D provider-free rehearsal is implemented. P3E-A evidence-readiness contract is implemented.
+P3E-A cannot issue executable approval. P3E-B1 repository IaC/admission implementation exists.
+No GCP resource has been provisioned. No image has been built or pushed. No cloud preflight has run.
+No provider secret exists. No exact target is sealed. No approval is issued. No trusted evidence
+producer/verifier exists. No durable single-use consumption ledger exists. P3E-B2 remains
+unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
+provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
+LIVE remains unreachable.
