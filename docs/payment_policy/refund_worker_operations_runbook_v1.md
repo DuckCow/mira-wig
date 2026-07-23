@@ -239,3 +239,11 @@ producer/verifier exists. No durable single-use consumption ledger exists. P3E-B
 unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
 provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
 LIVE remains unreachable.
+
+## P3E-B2-R1A repository authority status
+
+R1A defines, but does not provision, isolated Terraform state and Cloud Run Job execution-deny
+authorities. It creates no state bucket, backend, deny-policy exception, executor, Job, operator
+binding, or operational evidence. The future Deny Admin is a distinct break-glass authority, not an
+ordinary deployer or preflight executor. R1B and later packages remain required; scheduled SANDBOX
+and LIVE remain blocked.

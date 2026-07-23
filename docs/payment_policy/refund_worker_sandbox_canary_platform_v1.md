@@ -307,3 +307,11 @@ producer/verifier exists. No durable single-use consumption ledger exists. P3E-B
 unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
 provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
 LIVE remains unreachable.
+
+## P3E-B2-R1A authority status
+
+R1A adds repository definitions only for Terraform state ownership and a separate universal deny of
+Cloud Run Job execution. No bucket, backend, deny policy, exception, executor, Job, or cloud
+evidence exists. The P3E-B1 monolith remains non-applicable from an empty project; R1B and later
+foundation, image, database, secret, runtime, and invocation packages remain required. Scheduled
+SANDBOX remains blocked and LIVE remains unreachable.

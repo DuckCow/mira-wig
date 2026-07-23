@@ -52,6 +52,8 @@ crash.log
 crash.*.log
 *.auto.tfvars
 infra/refund-sandbox/p3e-b/terraform.tfvars
+infra/refund-sandbox/p3e-b2/**/terraform.tfvars
+infra/refund-sandbox/p3e-b2/**/backend.hcl
 
 # local upload staging (mock S3)
 /uploads/

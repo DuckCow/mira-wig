@@ -179,3 +179,13 @@ Canonical status: P3E-A is committed and non-authorizing. P3E-B1 repository IaC/
 implementation exists. No GCP resource, image, cloud preflight, provider secret, sealed target, or
 approval exists. P3E-B2, P3E-C, and P3E-D remain unauthorized. Scheduled SANDBOX and LIVE remain
 blocked.
+
+## P3E-B2-R1A repository authority amendment
+
+The P3E-B2 feasibility review found that this monolithic B1 root is not an empty-project apply
+sequence. R1A defines only separate state-bucket and universal Job-execution-deny authorities under
+`infra/refund-sandbox/p3e-b2/`; it does not alter or make this root applicable. No state bucket or
+deny policy exists because of those definitions. R1B must split the actual foundation graph, and
+later packages must resolve image, private database connectivity, database bootstrap, secret
+versions, runtime definitions, and invocation authority. Scheduled SANDBOX remains blocked and LIVE
+remains unreachable.
