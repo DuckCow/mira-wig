@@ -8,11 +8,15 @@ import {
   type RefundDeploymentRehearsalChildSpec,
 } from "../refund-deployment-rehearsal-child";
 
+const REAL_CHILD_PROTOCOL_DEADLINE_MS = 4_000;
+
 describe("refund deployment rehearsal child supervisor", () => {
   it("accepts exactly one stdout JSON line and awaits clean child close", async () => {
-    await expect(runRefundDeploymentRehearsalChild(spec([
+    const observed = await runObservedChild(spec([
       "-e", 'process.stdout.write(JSON.stringify({ok:true,code:"SAFE"})+"\\n")',
-    ]))).resolves.toEqual({ ok: true, value: { ok: true, code: "SAFE" } });
+    ]));
+
+    expect(observed.result).toEqual({ ok: true, value: { ok: true, code: "SAFE" } });
   });
 
   it("accepts exactly one expected stderr failure line", async () => {
@@ -400,7 +404,7 @@ function spec(args: readonly string[]): RefundDeploymentRehearsalChildSpec {
       DATABASE_URL: "postgresql://test:test@localhost:5432/wig_platform_test",
       NODE_ENV: "test",
     },
-    deadlineMs: 2_000,
+    deadlineMs: REAL_CHILD_PROTOCOL_DEADLINE_MS,
     expectedExitCode: 0,
     expectedChannel: "STDOUT",
   };

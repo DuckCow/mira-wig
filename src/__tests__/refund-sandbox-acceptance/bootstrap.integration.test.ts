@@ -27,6 +27,7 @@ import { claimRefundAttemptForExecution } from "../../lib/payment/refund/claim";
 import { acquireRefundExecutionLease } from "../../lib/payment/refund/acquire-lease";
 import {
   defaultDriftCheck,
+  PRISMA_VERIFY_TIMEOUT_MS,
   repositoryMigrations,
   verifyAcceptanceDatabase,
   verifyMigrationRecords,
@@ -54,6 +55,9 @@ type CatalogMutation = (transaction: Prisma.TransactionClient) => Promise<void>;
 type CatalogVerifier = (client: DatabaseInvariantQueryClient) => Promise<void>;
 
 const FORCED_CATALOG_ROLLBACK = new Error("TEST_FORCED_CATALOG_ROLLBACK");
+// Two serial Prisma children each own a kill-and-close deadline. The outer test must
+// outlive both so their bounded runner, rather than Vitest's default, owns termination.
+const DATABASE_VERIFICATION_TEST_TIMEOUT_MS = (2 * PRISMA_VERIFY_TIMEOUT_MS) + 5_000;
 const owned: Owned[] = [];
 const bootstrap = new AcceptanceBootstrap(db, "wig_platform_test");
 
@@ -104,7 +108,7 @@ describe("acceptance-only pre-refund bootstrap", () => {
     expect(() => verifyDatabaseInvariantCatalog(catalog)).not.toThrow();
 
     expect(await validationSnapshot()).toEqual(before);
-  });
+  }, DATABASE_VERIFICATION_TEST_TIMEOUT_MS);
 
   it("rejects CHECK TRUE through the actual M3 verifier and rolls catalog DDL back", async () => {
     const before = await readDatabaseInvariantCatalog(db);
