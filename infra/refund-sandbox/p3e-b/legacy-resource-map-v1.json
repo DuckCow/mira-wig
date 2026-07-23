@@ -1,0 +1,35 @@
+{
+  "contractVersion": "mira-refund-p3e-b1-retirement/v1",
+  "statuses": {
+    "P3E_B1_MONOLITH": "RETIRED_UNAPPLIED",
+    "FOUNDATION_OWNER": "P3E_B2_R1B_FOUNDATION",
+    "RUNTIME_OWNER": "DEFERRED_TO_LATER_PACKAGES",
+    "STATE_MIGRATION": "NOT_REQUIRED_NO_STATE_EXISTED"
+  },
+  "killCondition": "DISCOVERY_OF_UNDISCLOSED_REAL_B1_STATE_OR_RESOURCE",
+  "resources": [
+    {"oldAddress":"google_project_service.required","resourceType":"google_project_service","sourceFile":"apis.tf","function":"Activate the mixed B1 API set.","owner":"SERVICE_ACTIVATION","disposition":"CORRECTED","newIdentity":"google_project_service.required"},
+    {"oldAddress":"google_artifact_registry_repository.refund_images","resourceType":"google_artifact_registry_repository","sourceFile":"artifact_registry.tf","function":"Regional immutable Docker repository.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_artifact_registry_repository.refund_images"},
+    {"oldAddress":"google_cloud_run_v2_job.preflight","resourceType":"google_cloud_run_v2_job","sourceFile":"cloud_run_jobs.tf","function":"Provider-free preflight Job definition.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"preflight_cloud_run_job"},
+    {"oldAddress":"google_cloud_run_v2_job.canary","resourceType":"google_cloud_run_v2_job","sourceFile":"cloud_run_jobs.tf","function":"Dormant canary Job definition.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"dormant_canary_cloud_run_job"},
+    {"oldAddress":"google_sql_database_instance.refund","resourceType":"google_sql_database_instance","sourceFile":"cloud_sql.tf","function":"Private PostgreSQL 18 instance.","owner":"FOUNDATION","disposition":"CORRECTED","newIdentity":"google_sql_database_instance.refund"},
+    {"oldAddress":"google_sql_database.refund","resourceType":"google_sql_database","sourceFile":"cloud_sql.tf","function":"Application database.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_sql_database.refund"},
+    {"oldAddress":"google_service_account.preflight","resourceType":"google_service_account","sourceFile":"identities.tf","function":"Preflight runtime identity.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"preflight_runtime_service_account"},
+    {"oldAddress":"google_service_account.canary","resourceType":"google_service_account","sourceFile":"identities.tf","function":"Dormant canary runtime identity.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"dormant_canary_runtime_service_account"},
+    {"oldAddress":"google_project_iam_member.runtime","resourceType":"google_project_iam_member","sourceFile":"identities.tf","function":"Four runtime Cloud SQL Client and Log Writer bindings.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"runtime_project_role_bindings"},
+    {"oldAddress":"google_compute_network.refund","resourceType":"google_compute_network","sourceFile":"network.tf","function":"Custom-mode regional VPC.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_compute_network.refund"},
+    {"oldAddress":"google_compute_subnetwork.refund","resourceType":"google_compute_subnetwork","sourceFile":"network.tf","function":"Regional private subnet.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_compute_subnetwork.refund"},
+    {"oldAddress":"google_compute_global_address.private_service_access","resourceType":"google_compute_global_address","sourceFile":"network.tf","function":"Private service access allocation.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_compute_global_address.private_service_access"},
+    {"oldAddress":"google_service_networking_connection.private_service_access","resourceType":"google_service_networking_connection","sourceFile":"network.tf","function":"Private service access connection.","owner":"FOUNDATION","disposition":"CORRECTED","newIdentity":"google_service_networking_connection.private_service_access"},
+    {"oldAddress":"google_compute_firewall.allow_private_sql","resourceType":"google_compute_firewall","sourceFile":"network.tf","function":"Allow provider-free PostgreSQL egress to PSA.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_compute_firewall.allow_private_sql"},
+    {"oldAddress":"google_compute_firewall.deny_other_egress","resourceType":"google_compute_firewall","sourceFile":"network.tf","function":"Deny all other tagged IPv4 egress.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_compute_firewall.deny_other_egress"},
+    {"oldAddress":"google_secret_manager_secret.preflight_database_url","resourceType":"google_secret_manager_secret","sourceFile":"secrets.tf","function":"Preflight database credential container without a version.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_secret_manager_secret.preflight_database_url"},
+    {"oldAddress":"google_secret_manager_secret.canary_database_url","resourceType":"google_secret_manager_secret","sourceFile":"secrets.tf","function":"Canary database credential container without a version.","owner":"FOUNDATION","disposition":"PRESERVED","newIdentity":"google_secret_manager_secret.canary_database_url"},
+    {"oldAddress":"google_secret_manager_secret_iam_member.preflight_database_access","resourceType":"google_secret_manager_secret_iam_member","sourceFile":"secrets.tf","function":"Preflight secret accessor binding.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"preflight_database_secret_binding"},
+    {"oldAddress":"google_secret_manager_secret_iam_member.canary_database_access","resourceType":"google_secret_manager_secret_iam_member","sourceFile":"secrets.tf","function":"Canary secret accessor binding.","owner":"RUNTIME_DEFERRED","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"canary_database_secret_binding"}
+  ],
+  "artifacts": [
+    {"oldIdentity":"database_roles.sql","owner":"LATER_DB_BOOTSTRAP","disposition":"MOVED_BYTE_IDENTICALLY","newIdentity":"p3e-b2/runtime-deferred/database_roles.sql"},
+    {"oldIdentity":"deferred_observability_definitions","owner":"LATER_OBSERVABILITY","disposition":"INTENTIONALLY_DEFERRED","newIdentity":"runtime-deferred/resource-ownership-v1.json"}
+  ]
+}

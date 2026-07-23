@@ -1,0 +1,35 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-runtime-deferred/v1",
+  "executable": false,
+  "statuses": {
+    "RUNTIME_IDENTITY_AUTHORITY": "DEFERRED",
+    "RUNTIME_SECRET_BINDINGS": "DEFERRED",
+    "RUNTIME_JOB_DEFINITIONS": "DEFERRED",
+    "IMAGE_DIGEST": "ABSENT",
+    "DB_SECRET_VERSIONS": "ABSENT",
+    "PRIVATE_CONNECTION_PATH": "UNRESOLVED",
+    "DB_BOOTSTRAP": "UNIMPLEMENTED",
+    "RUNTIME_DEPLOYABLE": "FALSE",
+    "CANARY_EXECUTABLE": "FALSE"
+  },
+  "ownership": [
+    {"identity":"preflight_runtime_service_account","oldAddress":"google_service_account.preflight","owner":"LATER_RUNTIME_IDENTITY"},
+    {"identity":"dormant_canary_runtime_service_account","oldAddress":"google_service_account.canary","owner":"LATER_RUNTIME_IDENTITY"},
+    {"identity":"runtime_project_role_bindings","oldAddress":"google_project_iam_member.runtime","instances":["preflight_cloud_sql","preflight_logging","canary_cloud_sql","canary_logging"],"owner":"LATER_RUNTIME_IAM"},
+    {"identity":"preflight_database_secret_binding","oldAddress":"google_secret_manager_secret_iam_member.preflight_database_access","owner":"LATER_RUNTIME_IAM"},
+    {"identity":"canary_database_secret_binding","oldAddress":"google_secret_manager_secret_iam_member.canary_database_access","owner":"LATER_RUNTIME_IAM"},
+    {"identity":"preflight_cloud_run_job","oldAddress":"google_cloud_run_v2_job.preflight","owner":"LATER_PREFLIGHT_RUNTIME"},
+    {"identity":"dormant_canary_cloud_run_job","oldAddress":"google_cloud_run_v2_job.canary","owner":"LATER_CANARY_RUNTIME"},
+    {"identity":"image_digest","oldInput":"container_image_digest_uri","owner":"P3E_B2_R2A_IMAGE"},
+    {"identity":"preflight_database_secret_version","oldInput":"preflight_database_secret_version","owner":"LATER_DATABASE_CREDENTIAL"},
+    {"identity":"canary_database_secret_version","oldInput":"canary_database_secret_version","owner":"LATER_DATABASE_CREDENTIAL"},
+    {"identity":"job_cpu_memory","oldState":"PROVIDER_DEFAULT_UNREVIEWED","owner":"LATER_RUNTIME_DEFINITION"},
+    {"identity":"private_ip_proxy_socket_architecture","oldState":"MIXED_SOCKET_AND_DIRECT_VPC_ASSUMPTIONS","owner":"P3E_B2_R2A_CONNECTIVITY"},
+    {"identity":"database_bootstrap_and_grants","oldArtifact":"database_roles.sql","owner":"LATER_DB_BOOTSTRAP"},
+    {"identity":"migrations_and_role_grants","oldState":"UNEXECUTED","owner":"LATER_DB_BOOTSTRAP"},
+    {"identity":"monitoring_and_alert_deployment","oldArtifact":"deferred_observability_definitions","owner":"LATER_OBSERVABILITY"},
+    {"identity":"preflight_invocation_binding","oldInput":"future_preflight_invoker_members","owner":"LATER_PREFLIGHT_INVOCATION"},
+    {"identity":"future_invocation_authority","oldState":"ABSENT","owner":"LATER_INVOCATION_AUTHORITY"},
+    {"identity":"later_deny_exception","oldState":"ABSENT","owner":"LATER_DENY_BREAK_GLASS"}
+  ]
+}

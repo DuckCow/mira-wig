@@ -189,3 +189,16 @@ deny policy exists because of those definitions. R1B must split the actual found
 later packages must resolve image, private database connectivity, database bootstrap, secret
 versions, runtime definitions, and invocation authority. Scheduled SANDBOX remains blocked and LIVE
 remains unreachable.
+
+## P3E-B2-R1B foundation authority amendment
+
+R1B retires this definitions-only, unapplied mixed Terraform root. Repository history and
+`infra/refund-sandbox/p3e-b/legacy-resource-map-v1.json` preserve its exact resource ownership.
+Separate R1B roots now define service activation, the provider-free foundation, and one unbound
+non-executing foundation-deployer custom role; runtime identities, IAM, Jobs, image, secret
+versions, database bootstrap, observability, and invocation remain non-executable and deferred.
+No state migration was required because no B1 state or cloud resource existed. Discovery of any
+undisclosed B1 state is a kill condition and must not be imported into the new roots.
+
+No cloud resource, role, binding, backend, image, secret version, target, or approval exists because
+of R1B. Scheduled SANDBOX remains blocked and LIVE remains unreachable.

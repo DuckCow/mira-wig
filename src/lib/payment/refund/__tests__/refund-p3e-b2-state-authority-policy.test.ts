@@ -13,7 +13,7 @@ const POLICY_DOCUMENT = join(
   "docs/payment_policy/refund_worker_p3e_b2_state_authority_v1.md",
 );
 const EXECUTABLE_ROOTS = Object.freeze([BOOTSTRAP, AUTHORITY, GUARDRAILS]);
-const EXPECTED_INFRASTRUCTURE_FILES = Object.freeze([
+const EXPECTED_R1A_INFRASTRUCTURE_FILES = Object.freeze([
   "README.md",
   "authority-guardrails/.terraform.lock.hcl",
   "authority-guardrails/main.tf",
@@ -50,14 +50,21 @@ const EXPECTED_INFRASTRUCTURE_FILES = Object.freeze([
 ]);
 
 describe("P3E-B2-R1A state and execution authority policy", () => {
-  it("freezes the exact recursive 33-path infrastructure inventory", () => {
+  it("preserves the exact committed R1A-owned 33-path subinventory", () => {
     const infrastructureRoot = realpathSync(INFRA);
     const files = walk(infrastructureRoot)
       .map((path) => relative(infrastructureRoot, path).split(sep).join("/"))
+      .filter((path) => (
+        path === "README.md" ||
+        path.startsWith("authority-guardrails/") ||
+        path.startsWith("modules/state-bucket/") ||
+        path.startsWith("state-backend-authority/") ||
+        path.startsWith("state-bootstrap-create/")
+      ))
       .sort();
-    expect(EXPECTED_INFRASTRUCTURE_FILES).toHaveLength(33);
-    expect(new Set(EXPECTED_INFRASTRUCTURE_FILES).size).toBe(33);
-    expect(files).toEqual(EXPECTED_INFRASTRUCTURE_FILES);
+    expect(EXPECTED_R1A_INFRASTRUCTURE_FILES).toHaveLength(33);
+    expect(new Set(EXPECTED_R1A_INFRASTRUCTURE_FILES).size).toBe(33);
+    expect(files).toEqual(EXPECTED_R1A_INFRASTRUCTURE_FILES);
   });
 
   it("pins the reviewed toolchain and preserves local versus partial-backend ownership", () => {
@@ -172,7 +179,7 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
   });
 
   it("contains no R1A foundation, runtime, credential, or execution resource", () => {
-    const source = readTerraform(INFRA);
+    const source = EXECUTABLE_ROOTS.map(readTerraform).join("\n");
     const forbiddenResourceTypes = [
       "google_project",
       "google_billing_project_info",
@@ -228,7 +235,9 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     for (const prefix of [
       "p3e-b2/state-backend-authority",
       "p3e-b2/authority-guardrails",
+      "p3e-b2/service-activation",
       "p3e-b2/foundation",
+      "p3e-b2/foundation-deployer-authority",
       "p3e-b2/runtime",
       "p3e-b2/database-bootstrap",
       "p3e-b2/preflight-invocation",
@@ -249,7 +258,7 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     expect(documentation).toContain("authority root creates no binding");
     expect(documentation).toContain("R1A creates no exception and performs no probe");
     expect(documentation).toContain(
-      "FOUNDATION_DEPLOYER_ROLE: BLOCKED_PENDING_R1B_RESOURCE_GRAPH",
+      "FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED",
     );
   });
 
@@ -258,7 +267,7 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     for (const status of [
       "STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED",
       "JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED",
-      "FOUNDATION_DEPLOYER_ROLE: BLOCKED_PENDING_R1B_RESOURCE_GRAPH",
+      "FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED",
       "P3E_B2_FOUNDATION: NOT_PROVISIONED",
       "P3E_B2_RUNTIME: NOT_DEPLOYABLE",
       "PROVIDER_EXECUTION: BLOCKED",

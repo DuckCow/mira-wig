@@ -182,3 +182,11 @@ producer/verifier exists. No durable single-use consumption ledger exists. P3E-B
 unimplemented and unauthorized. P3E-C remains unimplemented and unauthorized. P3E-D
 provider-contact execution remains unimplemented and unauthorized. Scheduled SANDBOX remains blocked and
 LIVE remains unreachable.
+
+## P3E-B2-R1B foundation status
+
+R1B retires the unapplied mixed B1 Terraform root and defines separate repository-only
+service-activation, provider-free foundation, and unbound non-executing deployer-role authorities.
+Runtime identities, IAM, Jobs, images, database secrets/bootstrap, observability, and invocation
+remain deferred. This changes no P3D rehearsal behavior and supplies no cloud or provider evidence.
+Scheduled SANDBOX remains blocked and LIVE remains unreachable.

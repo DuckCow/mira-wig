@@ -315,3 +315,11 @@ Cloud Run Job execution. No bucket, backend, deny policy, exception, executor, J
 evidence exists. The P3E-B1 monolith remains non-applicable from an empty project; R1B and later
 foundation, image, database, secret, runtime, and invocation packages remain required. Scheduled
 SANDBOX remains blocked and LIVE remains unreachable.
+
+## P3E-B2-R1B foundation status
+
+R1B retires the unapplied B1 monolith and defines separate repository-only service-activation,
+provider-free foundation, and unbound non-executing foundation-deployer-role authorities.
+Runtime identity, IAM, Jobs, images, secret versions, database bootstrap, observability, invocation,
+trusted evidence, and durable approval consumption remain deferred. No cloud resource or execution
+authority exists. Scheduled SANDBOX remains blocked and LIVE remains unreachable.

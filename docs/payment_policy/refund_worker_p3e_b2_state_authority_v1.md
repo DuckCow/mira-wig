@@ -23,6 +23,9 @@ private-IP proxy/socket design, database bootstrap, database credential secret v
 Job definitions, and preflight invocation. R1A does not move or redesign any P3E-B1 resource and
 does not conceal those blockers behind an early root migration.
 
+R1B subsequently completed that repository-only split. The 33-path R1A-owned subinventory remains
+unchanged and exact; R1B adds a separately audited inventory rather than rewriting R1A history.
+
 ## State creation, authority, and handoff
 
 The shared `modules/state-bucket` configuration is the single repository authority for both state
@@ -87,7 +90,9 @@ Exact future backend prefixes are:
 
 - `p3e-b2/state-backend-authority`
 - `p3e-b2/authority-guardrails`
+- `p3e-b2/service-activation`
 - `p3e-b2/foundation`
+- `p3e-b2/foundation-deployer-authority`
 - `p3e-b2/runtime`
 - `p3e-b2/database-bootstrap`
 - `p3e-b2/preflight-invocation`
@@ -138,14 +143,14 @@ Deny changes are eventually consistent. A future separately approved protocol mu
 
 R1A creates no exception and performs no probe.
 
-## Deferred R1B deployer authority
+## R1B deployer authority amendment
 
-`FOUNDATION_DEPLOYER_ROLE: BLOCKED_PENDING_R1B_RESOURCE_GRAPH`
+`FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED`
 
-R1B must derive every permission from the split foundation graph and exclude
+R1B derived every permission from the split foundation graph and excludes
 `run.jobs.run`/`run.jobs.runWithOverrides`, deny-policy mutation, secret-payload access, database
-password access, service-account key creation, Owner, and Editor. No custom deployer role is guessed
-in R1A.
+password access, service-account key creation, Owner, and Editor. The definition has no identity or
+binding and supplies no cloud evidence.
 
 ## Rollback, cost, and evidence
 
@@ -155,16 +160,19 @@ backend/state bypass, public IAM, broad basic roles, or deletion-protection remo
 and deny-policy break glass require separate authorization, two-person evidence, and post-action
 verification. Repository files prove no cloud fact.
 
-The existing P3E-B1 Terraform, distributed admission, provider-free preflight, Cloud SQL guard,
-worker host/process, P3E-A, P3D, schema, and migrations remain unchanged. The B1 monolith remains
-definitions-only and non-applicable from an empty project. R1B and later packages remain required.
+The distributed admission, provider-free preflight, Cloud SQL guard, worker host/process, P3E-A,
+P3D, schema, and migrations remain unchanged. The definitions-only B1 monolith is retired without
+state migration because no state or cloud resource existed. Later packages remain required.
 
 Exact status:
 
 ```text
 STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED
 JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED
-FOUNDATION_DEPLOYER_ROLE: BLOCKED_PENDING_R1B_RESOURCE_GRAPH
+SERVICE_ACTIVATION_AUTHORITY: DEFINED_NOT_PROVISIONED
+FOUNDATION_ROOT: DEFINED_NOT_PROVISIONED
+FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED
+FOUNDATION_DEPLOYER_BINDING: ABSENT
 P3E_B2_FOUNDATION: NOT_PROVISIONED
 P3E_B2_RUNTIME: NOT_DEPLOYABLE
 PROVIDER_EXECUTION: BLOCKED

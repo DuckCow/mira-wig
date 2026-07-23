@@ -1,0 +1,317 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-foundation-authority/v1",
+  "serviceActivationApis": [
+    "artifactregistry.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "iam.googleapis.com",
+    "secretmanager.googleapis.com",
+    "servicenetworking.googleapis.com",
+    "serviceusage.googleapis.com",
+    "sqladmin.googleapis.com",
+    "storage.googleapis.com"
+  ],
+  "serviceActivationApiSetSha256": "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3",
+  "serviceActivationBootstrap": {
+    "status": "EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED",
+    "preenabledApiNames": [
+      "cloudresourcemanager.googleapis.com",
+      "serviceusage.googleapis.com",
+      "storage.googleapis.com"
+    ],
+    "preenabledApiSetSha256": "2b5b1961dd67cc23e748d7b6a80df83aac85e475b74403469ac99ef3ac3f0bc7",
+    "managedByActivationRootAfterBootstrap": true,
+    "identity": "NOT_SELECTED",
+    "role": "NOT_DEFINED",
+    "binding": "ABSENT",
+    "cloudVerification": "NOT_PERFORMED"
+  },
+  "serviceActivationOperator": {
+    "status": "EXTERNAL_PERMISSION_CONTRACT_DEFINED_NOT_GRANTED",
+    "provider": {
+      "source": "hashicorp/google",
+      "version": "7.40.0",
+      "resourceType": "google_project_service",
+      "userProjectOverride": false,
+      "billingProjectOverride": false,
+      "quotaProjectOverride": false
+    },
+    "methods": [
+      "cloudresourcemanager.projects.get",
+      "serviceusage.operations.get",
+      "serviceusage.services.batchEnable",
+      "serviceusage.services.enable",
+      "serviceusage.services.list"
+    ],
+    "methodSetSha256": "ddc12bb0dae1cdbe0e9b7a8cd5838cc6cb8759b9323fb32171ad239963050120",
+    "permissions": [
+      "resourcemanager.projects.get",
+      "servicemanagement.services.bind",
+      "serviceusage.operations.get",
+      "serviceusage.services.enable",
+      "serviceusage.services.list"
+    ],
+    "permissionSetSha256": "3371ab566521c0c48800e932b2d11ab09382e9e249f061b395c5a45576fff7ef",
+    "sharedReadPermissionsWithFoundationDeployer": [
+      "resourcemanager.projects.get"
+    ],
+    "sharedReadPermissionSetSha256": "066987a0d6fc58a75ade7e31b099ea0c31bc101a829e7dc094c135b052587a61",
+    "activationExclusivePermissions": [
+      "servicemanagement.services.bind",
+      "serviceusage.operations.get",
+      "serviceusage.services.enable",
+      "serviceusage.services.list"
+    ],
+    "activationExclusivePermissionSetSha256": "c9ca2657b673902e5f80ff6e8d2a091c5e9984f441d9176f17c0bc8e0358ce19",
+    "permissionScopes": {
+      "resourcemanager.projects.get": "exact dedicated consumer project",
+      "servicemanagement.services.bind": "every admitted target public service",
+      "serviceusage.operations.get": "returned Service Usage long-running operation",
+      "serviceusage.services.enable": "exact dedicated consumer project",
+      "serviceusage.services.list": "exact dedicated consumer project Service Usage collection"
+    },
+    "excludedMethods": [
+      "serviceusage.operations.cancel",
+      "serviceusage.operations.delete",
+      "serviceusage.operations.list",
+      "serviceusage.services.batchGet",
+      "serviceusage.services.disable",
+      "serviceusage.services.get"
+    ],
+    "excludedPermissions": [
+      "resourcemanager.projects.list",
+      "resourcemanager.projects.setIamPolicy",
+      "serviceusage.services.disable",
+      "serviceusage.services.get",
+      "serviceusage.services.use"
+    ],
+    "excludedPermissionPrefixes": [
+      "serviceusage.consumerpolicy.",
+      "serviceusage.mcppolicy.",
+      "serviceusage.quotas."
+    ],
+    "foundationDeployerCanCompleteActivationLifecycle": false,
+    "setHashAlgorithm": "SHA-256 over UTF-8 sorted values joined by LF with no trailing LF",
+    "evidence": {
+      "retrievedAt": "2026-07-23",
+      "sources": [
+        {
+          "title": "google_project_service provider 7.40.0 resource implementation",
+          "url": "https://github.com/hashicorp/terraform-provider-google/blob/v7.40.0/google/services/resourcemanager/resource_google_project_service.go"
+        },
+        {
+          "title": "google_project_service provider 7.40.0 batching implementation",
+          "url": "https://github.com/hashicorp/terraform-provider-google/blob/v7.40.0/google/services/resourcemanager/serviceusage_batching.go"
+        },
+        {
+          "title": "google provider 7.40.0 Service Usage enable and list implementation",
+          "url": "https://github.com/hashicorp/terraform-provider-google/blob/v7.40.0/google/services/resourcemanager/resource_google_project.go"
+        },
+        {
+          "title": "google provider 7.40.0 Service Usage operation waiter",
+          "url": "https://github.com/hashicorp/terraform-provider-google/blob/v7.40.0/google/services/serviceusage/service_usage_operation.go"
+        },
+        {
+          "title": "Service Usage services.list",
+          "url": "https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services/list"
+        },
+        {
+          "title": "Service Usage services.enable",
+          "url": "https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services/enable"
+        },
+        {
+          "title": "Service Usage services.batchEnable",
+          "url": "https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services/batchEnable"
+        },
+        {
+          "title": "Service Usage operations.get",
+          "url": "https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/operations/get"
+        },
+        {
+          "title": "Service Usage access control with IAM",
+          "url": "https://docs.cloud.google.com/service-usage/docs/access-control"
+        },
+        {
+          "title": "Cloud Resource Manager projects.get",
+          "url": "https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects/get"
+        }
+      ]
+    },
+    "binding": "ABSENT",
+    "identity": "NOT_SELECTED",
+    "role": "NOT_DEFINED",
+    "grantAuthority": "EXTERNAL_SEPARATE"
+  },
+  "foundationResourceTypes": [
+    "google_artifact_registry_repository",
+    "google_compute_firewall",
+    "google_compute_global_address",
+    "google_compute_network",
+    "google_compute_subnetwork",
+    "google_secret_manager_secret",
+    "google_service_networking_connection",
+    "google_sql_database",
+    "google_sql_database_instance"
+  ],
+  "foundationResourceAddresses": [
+    "google_artifact_registry_repository.refund_images",
+    "google_compute_firewall.allow_private_sql",
+    "google_compute_firewall.deny_other_egress",
+    "google_compute_global_address.private_service_access",
+    "google_compute_network.refund",
+    "google_compute_subnetwork.refund",
+    "google_secret_manager_secret.canary_database_url",
+    "google_secret_manager_secret.preflight_database_url",
+    "google_service_networking_connection.private_service_access",
+    "google_sql_database.refund",
+    "google_sql_database_instance.refund"
+  ],
+  "foundationResourceGraphSha256": "f15f2716c0524ccd5ca3b86757076b433cce9a5c4c468aa808eae645c028c0ec",
+  "foundationDeployerPermissions": [
+    "artifactregistry.locations.get",
+    "artifactregistry.locations.list",
+    "artifactregistry.repositories.create",
+    "artifactregistry.repositories.get",
+    "artifactregistry.repositories.list",
+    "artifactregistry.repositories.update",
+    "cloudsql.databases.create",
+    "cloudsql.databases.get",
+    "cloudsql.databases.list",
+    "cloudsql.databases.update",
+    "cloudsql.instances.create",
+    "cloudsql.instances.get",
+    "cloudsql.instances.list",
+    "cloudsql.instances.update",
+    "compute.firewalls.create",
+    "compute.firewalls.get",
+    "compute.firewalls.list",
+    "compute.firewalls.update",
+    "compute.globalAddresses.create",
+    "compute.globalAddresses.createInternal",
+    "compute.globalAddresses.get",
+    "compute.globalAddresses.list",
+    "compute.globalAddresses.use",
+    "compute.globalOperations.get",
+    "compute.networks.create",
+    "compute.networks.get",
+    "compute.networks.list",
+    "compute.networks.updatePolicy",
+    "compute.networks.use",
+    "compute.projects.get",
+    "compute.regionOperations.get",
+    "compute.regions.get",
+    "compute.subnetworks.create",
+    "compute.subnetworks.get",
+    "compute.subnetworks.list",
+    "compute.subnetworks.setPrivateIpGoogleAccess",
+    "compute.subnetworks.update",
+    "compute.subnetworks.use",
+    "resourcemanager.projects.get",
+    "secretmanager.locations.get",
+    "secretmanager.locations.list",
+    "secretmanager.secrets.create",
+    "secretmanager.secrets.get",
+    "secretmanager.secrets.list",
+    "secretmanager.secrets.update",
+    "servicenetworking.operations.get",
+    "servicenetworking.services.addPeering",
+    "servicenetworking.services.get",
+    "servicenetworking.services.updateConsumerConfig",
+    "serviceusage.services.use"
+  ],
+  "foundationDeployerPermissionSetSha256": "13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944",
+  "forbiddenPermissions": [
+    "billing.*",
+    "cloudresourcemanager.projects.create",
+    "cloudresourcemanager.projects.delete",
+    "cloudsql.users.create",
+    "cloudsql.users.delete",
+    "cloudsql.users.update",
+    "iam.roles.create",
+    "iam.roles.delete",
+    "iam.roles.undelete",
+    "iam.roles.update",
+    "iam.serviceAccountKeys.create",
+    "iam.serviceAccountKeys.delete",
+    "iam.serviceAccounts.actAs",
+    "iam.serviceAccounts.setIamPolicy",
+    "resourcemanager.projects.setIamPolicy",
+    "run.executions.cancel",
+    "run.jobs.create",
+    "run.jobs.delete",
+    "run.jobs.run",
+    "run.jobs.runWithOverrides",
+    "run.jobs.setIamPolicy",
+    "run.jobs.update",
+    "secretmanager.secrets.setIamPolicy",
+    "secretmanager.versions.access",
+    "secretmanager.versions.add",
+    "secretmanager.versions.destroy",
+    "secretmanager.versions.disable",
+    "secretmanager.versions.enable",
+    "servicemanagement.services.bind",
+    "serviceusage.services.disable",
+    "serviceusage.services.enable"
+  ],
+  "deferredResources": [
+    "canary_database_secret_binding",
+    "canary_database_secret_version",
+    "database_bootstrap_and_grants",
+    "dormant_canary_cloud_run_job",
+    "dormant_canary_runtime_service_account",
+    "foundation_deployer_binding_and_identity",
+    "future_invocation_authority",
+    "image_digest",
+    "monitoring_and_alert_deployment",
+    "preflight_cloud_run_job",
+    "preflight_database_secret_binding",
+    "preflight_database_secret_version",
+    "preflight_invocation_binding",
+    "preflight_runtime_service_account",
+    "private_ip_proxy_socket_architecture",
+    "runtime_project_role_bindings"
+  ],
+  "statePrefixes": [
+    "p3e-b2/authority-guardrails",
+    "p3e-b2/database-bootstrap",
+    "p3e-b2/foundation",
+    "p3e-b2/foundation-deployer-authority",
+    "p3e-b2/preflight-invocation",
+    "p3e-b2/runtime",
+    "p3e-b2/service-activation",
+    "p3e-b2/state-backend-authority"
+  ],
+  "statuses": {
+    "P3E_B1_MONOLITH": "RETIRED_UNAPPLIED",
+    "STATE_BACKEND_AUTHORITY": "DEFINED_NOT_PROVISIONED",
+    "JOB_EXECUTION_DENY": "DEFINED_NOT_APPLIED",
+    "SERVICE_ACTIVATION_AUTHORITY": "DEFINED_NOT_PROVISIONED",
+    "SERVICE_ACTIVATION_BOOTSTRAP_PREREQUISITES": "EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED",
+    "SERVICE_ACTIVATION_BOOTSTRAP_API_SET": "DEFINED_NOT_VERIFIED",
+    "SERVICE_ACTIVATION_ROOT": "NOT_INITIALIZABLE_UNTIL_BOOTSTRAP_PREREQUISITES",
+    "SERVICE_ACTIVATION_HANDOFF": "OPERATOR_ATTESTED_APPLIED_AND_REVIEWED_REQUIRED",
+    "SERVICE_ACTIVATION_OPERATOR": "EXTERNAL_SEPARATE",
+    "SERVICE_ACTIVATION_PROVIDER": "HASHICORP_GOOGLE_7_40_0",
+    "SERVICE_ACTIVATION_RESOURCE": "GOOGLE_PROJECT_SERVICE",
+    "SERVICE_ACTIVATION_OPERATOR_PERMISSION_CONTRACT": "DEFINED_NOT_GRANTED",
+    "SERVICE_ACTIVATION_OPERATOR_METHOD_CONTRACT": "DEFINED",
+    "SERVICE_ACTIVATION_SHARED_READ_PERMISSION": "RESOURCEMANAGER_PROJECTS_GET",
+    "SERVICE_ACTIVATION_EXCLUSIVE_PERMISSIONS": "DEFINED_NOT_GRANTED",
+    "SERVICE_ACTIVATION_OPERATOR_IDENTITY": "NOT_SELECTED",
+    "SERVICE_ACTIVATION_OPERATOR_ROLE": "NOT_DEFINED",
+    "SERVICE_ACTIVATION_OPERATOR_BINDING": "ABSENT",
+    "SERVICE_ACTIVATION_USER_PROJECT_OVERRIDE": "DISABLED",
+    "FOUNDATION_ACTIVATION_GATE": "ENFORCED",
+    "FOUNDATION_CLOUD_AUTHENTICATION": "NOT_PERFORMED",
+    "FOUNDATION_ROOT": "DEFINED_NOT_PROVISIONED",
+    "FOUNDATION_DEPLOYER_ROLE": "DEFINED_NOT_CREATED",
+    "FOUNDATION_DEPLOYER_BINDING": "ABSENT",
+    "RUNTIME_IDENTITY_AUTHORITY": "DEFERRED",
+    "RUNTIME_JOB_DEFINITIONS": "DEFERRED",
+    "P3E_B2_FOUNDATION": "NOT_PROVISIONED",
+    "P3E_B2_RUNTIME": "NOT_DEPLOYABLE",
+    "PROVIDER_EXECUTION": "BLOCKED",
+    "SCHEDULED_SANDBOX": "BLOCKED",
+    "LIVE": "UNREACHABLE"
+  }
+}

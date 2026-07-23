@@ -1,0 +1,52 @@
+# Synthetic example only. Replace every value through a separately authorized attended review.
+project_id      = "mira-refund-sbx-example"
+resource_prefix = "mira-p3e-sbx"
+
+service_activation_handoff = {
+  contract_version = "mira-refund-p3e-b2-foundation-authority/v1"
+  project_id       = "mira-refund-sbx-example"
+  managed_api_names = [
+    "artifactregistry.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "iam.googleapis.com",
+    "secretmanager.googleapis.com",
+    "servicenetworking.googleapis.com",
+    "serviceusage.googleapis.com",
+    "sqladmin.googleapis.com",
+    "storage.googleapis.com",
+  ]
+  managed_api_set_sha256 = "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3"
+  bootstrap_preenabled_api_names = [
+    "cloudresourcemanager.googleapis.com",
+    "serviceusage.googleapis.com",
+    "storage.googleapis.com",
+  ]
+  bootstrap_preenabled_api_set_sha256 = "2b5b1961dd67cc23e748d7b6a80df83aac85e475b74403469ac99ef3ac3f0bc7"
+  source_state_prefix                 = "p3e-b2/service-activation"
+  provider_source                     = "hashicorp/google"
+  provider_version                    = "7.40.0"
+  resource_type                       = "google_project_service"
+  activation_apply_status             = "APPLIED"
+  operator_review_status              = "OPERATOR_REVIEWED"
+  evidence_type                       = "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED"
+}
+
+database_major_version                = 18
+database_tier                         = "db-custom-1-3840"
+database_availability_mode            = "ZONAL"
+database_initial_disk_size_gb         = 20
+database_disk_autoresize_limit_gb     = 100
+backup_start_time_utc                 = "18:00"
+backup_retention_count                = 7
+transaction_log_retention_days        = 7
+database_deletion_protection          = true
+database_retain_backups_on_delete     = true
+database_final_backup_enabled         = true
+database_final_backup_retention_days  = 7
+
+maintenance_window = {
+  day          = 7
+  hour         = 18
+  update_track = "stable"
+}

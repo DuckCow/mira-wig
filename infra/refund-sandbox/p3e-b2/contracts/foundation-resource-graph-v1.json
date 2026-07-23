@@ -1,0 +1,214 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-foundation-resource-graph/v1",
+  "retrievedAt": "2026-07-23",
+  "sources": {
+    "artifactRegistry": {
+      "title": "Artifact Registry roles and permissions",
+      "url": "https://docs.cloud.google.com/iam/docs/roles-permissions/artifactregistry"
+    },
+    "cloudSql": {
+      "title": "Cloud SQL roles and permissions",
+      "url": "https://docs.cloud.google.com/iam/docs/roles-permissions/cloudsql"
+    },
+    "compute": {
+      "title": "Compute Engine roles and permissions",
+      "url": "https://docs.cloud.google.com/iam/docs/roles-permissions/compute"
+    },
+    "computeNetworkPolicyMethods": {
+      "title": "Compute Engine firewall and subnetwork method permission requirements",
+      "url": "https://docs.cloud.google.com/compute/docs/access/iam"
+    },
+    "customRoleSupport": {
+      "title": "Support levels for permissions in custom roles",
+      "url": "https://docs.cloud.google.com/iam/docs/custom-roles-permissions-support"
+    },
+    "privateServicesAccess": {
+      "title": "Configure private services access",
+      "url": "https://docs.cloud.google.com/vpc/docs/configure-private-services-access"
+    },
+    "secretManager": {
+      "title": "Secret Manager roles and permissions",
+      "url": "https://docs.cloud.google.com/iam/docs/roles-permissions/secretmanager"
+    },
+    "serviceNetworking": {
+      "title": "Service Networking roles and permissions",
+      "url": "https://docs.cloud.google.com/iam/docs/roles-permissions/servicenetworking"
+    },
+    "serviceUsage": {
+      "title": "Access control with IAM for Service Usage",
+      "url": "https://docs.cloud.google.com/service-usage/docs/access-control"
+    },
+    "terraformProvider": {
+      "title": "HashiCorp Google provider 7.40.0 resource documentation",
+      "url": "https://registry.terraform.io/providers/hashicorp/google/7.40.0/docs"
+    }
+  },
+  "resources": [
+    {
+      "address": "google_artifact_registry_repository.refund_images",
+      "resourceType": "google_artifact_registry_repository",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "artifactregistry.googleapis.com",
+      "permissions": ["artifactregistry.locations.get", "artifactregistry.locations.list", "artifactregistry.repositories.create", "artifactregistry.repositories.get", "artifactregistry.repositories.list", "artifactregistry.repositories.update", "resourcemanager.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["artifactRegistry", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Repository deletion or replacement is break-glass; immutable audited image history may be lost.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_compute_firewall.allow_private_sql",
+      "resourceType": "google_compute_firewall",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "compute.googleapis.com",
+      "permissions": ["compute.firewalls.create", "compute.firewalls.get", "compute.firewalls.list", "compute.firewalls.update", "compute.networks.get", "compute.networks.updatePolicy", "compute.projects.get", "compute.globalOperations.get", "serviceusage.services.use"],
+      "sourceIds": ["compute", "computeNetworkPolicyMethods", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Removal changes the provider-free egress boundary and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_compute_firewall.deny_other_egress",
+      "resourceType": "google_compute_firewall",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "compute.googleapis.com",
+      "permissions": ["compute.firewalls.create", "compute.firewalls.get", "compute.firewalls.list", "compute.firewalls.update", "compute.networks.get", "compute.networks.updatePolicy", "compute.projects.get", "compute.globalOperations.get", "serviceusage.services.use"],
+      "sourceIds": ["compute", "computeNetworkPolicyMethods", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Removal opens the provider-free egress boundary and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_compute_global_address.private_service_access",
+      "resourceType": "google_compute_global_address",
+      "operations": ["CREATE", "READ"],
+      "deleteIntentionallyExcluded": true,
+      "api": "compute.googleapis.com",
+      "permissions": ["compute.globalAddresses.create", "compute.globalAddresses.createInternal", "compute.globalAddresses.get", "compute.globalAddresses.list", "compute.globalAddresses.use", "compute.globalOperations.get", "compute.networks.get", "compute.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["compute", "privateServicesAccess", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "The allocated PSA range can back managed-service subnets; replacement is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_compute_network.refund",
+      "resourceType": "google_compute_network",
+      "operations": ["CREATE", "READ"],
+      "deleteIntentionallyExcluded": true,
+      "api": "compute.googleapis.com",
+      "permissions": ["compute.networks.create", "compute.networks.get", "compute.networks.list", "compute.networks.use", "compute.projects.get", "compute.globalOperations.get", "serviceusage.services.use"],
+      "sourceIds": ["compute", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Network mutation requiring compute.networks.update is excluded because that permission is TESTING; replacement is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_compute_subnetwork.refund",
+      "resourceType": "google_compute_subnetwork",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "compute.googleapis.com",
+      "permissions": ["compute.networks.get", "compute.networks.updatePolicy", "compute.networks.use", "compute.projects.get", "compute.regions.get", "compute.regionOperations.get", "compute.subnetworks.create", "compute.subnetworks.get", "compute.subnetworks.list", "compute.subnetworks.setPrivateIpGoogleAccess", "compute.subnetworks.update", "compute.subnetworks.use", "serviceusage.services.use"],
+      "sourceIds": ["compute", "computeNetworkPolicyMethods", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Subnet deletion breaks later private connectivity and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_secret_manager_secret.canary_database_url",
+      "resourceType": "google_secret_manager_secret",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "secretmanager.googleapis.com",
+      "permissions": ["resourcemanager.projects.get", "secretmanager.locations.get", "secretmanager.locations.list", "secretmanager.secrets.create", "secretmanager.secrets.get", "secretmanager.secrets.list", "secretmanager.secrets.update", "serviceusage.services.use"],
+      "sourceIds": ["secretManager", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Container deletion is break-glass; versions and payload authority remain absent.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_secret_manager_secret.preflight_database_url",
+      "resourceType": "google_secret_manager_secret",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "secretmanager.googleapis.com",
+      "permissions": ["resourcemanager.projects.get", "secretmanager.locations.get", "secretmanager.locations.list", "secretmanager.secrets.create", "secretmanager.secrets.get", "secretmanager.secrets.list", "secretmanager.secrets.update", "serviceusage.services.use"],
+      "sourceIds": ["secretManager", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Container deletion is break-glass; versions and payload authority remain absent.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_service_networking_connection.private_service_access",
+      "resourceType": "google_service_networking_connection",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "servicenetworking.googleapis.com",
+      "permissions": ["compute.globalAddresses.get", "compute.globalAddresses.list", "compute.networks.get", "compute.networks.list", "compute.projects.get", "resourcemanager.projects.get", "servicenetworking.operations.get", "servicenetworking.services.addPeering", "servicenetworking.services.get", "servicenetworking.services.updateConsumerConfig", "serviceusage.services.use"],
+      "sourceIds": ["serviceNetworking", "privateServicesAccess", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Provider deletion policy is ABANDON; connection deletion is never an ordinary foundation operation.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_sql_database.refund",
+      "resourceType": "google_sql_database",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "sqladmin.googleapis.com",
+      "permissions": ["cloudsql.databases.create", "cloudsql.databases.get", "cloudsql.databases.list", "cloudsql.databases.update", "cloudsql.instances.get", "cloudsql.instances.list", "resourcemanager.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["cloudSql", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Application database deletion is break-glass and must preserve financial evidence.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_sql_database_instance.refund",
+      "resourceType": "google_sql_database_instance",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "sqladmin.googleapis.com",
+      "permissions": ["cloudsql.instances.create", "cloudsql.instances.get", "cloudsql.instances.list", "cloudsql.instances.update", "compute.globalAddresses.get", "compute.globalAddresses.list", "compute.networks.get", "compute.networks.use", "compute.projects.get", "resourcemanager.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["cloudSql", "privateServicesAccess", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Terraform and provider deletion protection apply; instance replacement is external break-glass only.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    }
+  ],
+  "permissionSupport": {
+    "artifactregistry.locations.get":"SUPPORTED","artifactregistry.locations.list":"SUPPORTED","artifactregistry.repositories.create":"SUPPORTED","artifactregistry.repositories.get":"SUPPORTED","artifactregistry.repositories.list":"SUPPORTED","artifactregistry.repositories.update":"SUPPORTED",
+    "cloudsql.databases.create":"SUPPORTED","cloudsql.databases.get":"SUPPORTED","cloudsql.databases.list":"SUPPORTED","cloudsql.databases.update":"SUPPORTED","cloudsql.instances.create":"SUPPORTED","cloudsql.instances.get":"SUPPORTED","cloudsql.instances.list":"SUPPORTED","cloudsql.instances.update":"SUPPORTED",
+    "compute.firewalls.create":"SUPPORTED","compute.firewalls.get":"SUPPORTED","compute.firewalls.list":"SUPPORTED","compute.firewalls.update":"SUPPORTED","compute.globalAddresses.create":"SUPPORTED","compute.globalAddresses.createInternal":"SUPPORTED","compute.globalAddresses.get":"SUPPORTED","compute.globalAddresses.list":"SUPPORTED","compute.globalAddresses.use":"SUPPORTED","compute.globalOperations.get":"SUPPORTED","compute.networks.create":"SUPPORTED","compute.networks.get":"SUPPORTED","compute.networks.list":"SUPPORTED","compute.networks.updatePolicy":"SUPPORTED","compute.networks.use":"SUPPORTED","compute.projects.get":"SUPPORTED","compute.regionOperations.get":"SUPPORTED","compute.regions.get":"SUPPORTED","compute.subnetworks.create":"SUPPORTED","compute.subnetworks.get":"SUPPORTED","compute.subnetworks.list":"SUPPORTED","compute.subnetworks.setPrivateIpGoogleAccess":"SUPPORTED","compute.subnetworks.update":"SUPPORTED","compute.subnetworks.use":"SUPPORTED",
+    "resourcemanager.projects.get":"SUPPORTED",
+    "secretmanager.locations.get":"SUPPORTED","secretmanager.locations.list":"SUPPORTED","secretmanager.secrets.create":"SUPPORTED","secretmanager.secrets.get":"SUPPORTED","secretmanager.secrets.list":"SUPPORTED","secretmanager.secrets.update":"SUPPORTED",
+    "servicenetworking.operations.get":"SUPPORTED","servicenetworking.services.addPeering":"SUPPORTED","servicenetworking.services.get":"SUPPORTED","servicenetworking.services.updateConsumerConfig":"SUPPORTED",
+    "serviceusage.services.use":"SUPPORTED"
+  },
+  "permissionEvidence": {
+    "compute.networks.updatePolicy": {
+      "title": "Network-policy attachment required by admitted firewall create/update and subnetwork create methods",
+      "methodResourceRelationships": [
+        {
+          "method": "compute.firewalls.insert",
+          "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.deny_other_egress"]
+        },
+        {
+          "method": "compute.firewalls.patch",
+          "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.deny_other_egress"]
+        },
+        {
+          "method": "compute.subnetworks.insert",
+          "resourceAddresses": ["google_compute_subnetwork.refund"]
+        }
+      ],
+      "resourceScope": "exact foundation VPC network policy",
+      "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.deny_other_egress", "google_compute_subnetwork.refund"],
+      "sourceIds": ["compute", "computeNetworkPolicyMethods", "customRoleSupport", "terraformProvider"],
+      "retrievedAt": "2026-07-23",
+      "customRoleSupport": "SUPPORTED",
+      "deleteOperationJustification": false
+    }
+  },
+  "operationEvidence": {
+    "compute.subnetworks.patch": {
+      "title": "Admitted subnetwork update uses subnetwork read and update permissions without network-policy attachment authority",
+      "permissions": ["compute.subnetworks.get", "compute.subnetworks.update"],
+      "resourceAddresses": ["google_compute_subnetwork.refund"],
+      "sourceIds": ["compute", "computeNetworkPolicyMethods", "terraformProvider"],
+      "retrievedAt": "2026-07-23",
+      "deleteOperationJustification": false
+    }
+  },
+  "supportRule": "The official custom-role support authority says an omitted support level is supported; no included permission is TESTING or NOT_SUPPORTED."
+}

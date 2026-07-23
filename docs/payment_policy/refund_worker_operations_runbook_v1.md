@@ -247,3 +247,11 @@ authorities. It creates no state bucket, backend, deny-policy exception, executo
 binding, or operational evidence. The future Deny Admin is a distinct break-glass authority, not an
 ordinary deployer or preflight executor. R1B and later packages remain required; scheduled SANDBOX
 and LIVE remain blocked.
+
+## P3E-B2-R1B foundation authority status
+
+R1B retires the definitions-only, unapplied B1 monolith and defines separate repository-only
+service-activation, provider-free foundation, and unbound non-executing foundation-deployer-role
+authorities. Runtime identity, IAM, Jobs, image, secret versions, database bootstrap, observability,
+and invocation remain deferred. The operations commands gain no cloud or provider capability.
+Scheduled SANDBOX remains blocked and LIVE remains unreachable.
