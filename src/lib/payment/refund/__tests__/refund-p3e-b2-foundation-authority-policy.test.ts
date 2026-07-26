@@ -219,12 +219,15 @@ describe("P3E-B2-R1B foundation authority policy", () => {
       .sort();
     const r1bFiles = files
       .filter(isR1BPath)
-      .filter((path) => path !== "contracts/runtime-image-connection-v1.json");
+      .filter((path) => ![
+        "contracts/runtime-authority-v1.json",
+        "contracts/runtime-image-connection-v1.json",
+      ].includes(path));
     expect(EXPECTED_R1B_FILES).toHaveLength(36);
     expect(new Set(EXPECTED_R1B_FILES).size).toBe(36);
     expect(r1bFiles).toEqual(EXPECTED_R1B_FILES);
-    expect(files).toHaveLength(70);
-    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(33);
+    expect(files).toHaveLength(81);
+    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(43);
   });
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {
@@ -703,8 +706,10 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     ]) {
       expect(documentation).toContain(status);
     }
-    expect(documentation).toContain("P3E-B2-R2B");
-    expect(documentation).toMatch(/does not authorize\s+R2B\./u);
+    expect(documentation).toContain("P3E-B2-R2B1");
+    expect(documentation).toContain(
+      "does not authorize runtime apply, image publication",
+    );
   });
 
   it("fails closed on every symlink shape while accepting the same ordinary inventory", () => {

@@ -24,9 +24,26 @@ RUNTIME_DEPLOYABLE: FALSE
 CANARY_EXECUTABLE: FALSE
 ```
 
+P3E-B2-R2B1 supersedes the dormant-definition subset through
+`../contracts/runtime-authority-v1.json` and the isolated `../runtime` root. It defines, without
+provisioning, the two runtime service accounts; the exact conditioned Cloud SQL Client members;
+the two exact secret-level database accessors; the preflight and dormant-canary Jobs; and their
+CPU, memory, task, retry, timeout, and Direct VPC settings. Every production resource remains
+unconditionally plan/apply-blocked in R2B1, and both Job interfaces carry the exact foundation
+firewall target tag `refund-provider-free`. It accepts only exact references to a
+future release image digest and future existing database secret versions; it does not create
+either. The historical statuses above remain the R1B snapshot.
+
+Still deferred are image publication; database secret payloads and versions; database bootstrap,
+migrations, and grants; monitoring and alert deployment; preflight invocation; future invocation
+authority; provider credential secret versions; and any deny exception. The R2A private proxy
+socket architecture remains owned by R2A. R2B1 adds no invoker, scheduler, execution, target,
+approval, provider credential, or trusted cloud evidence.
+
 `resource-ownership-v1.json` freezes every B1 runtime, IAM, image, secret-version, connectivity,
-bootstrap, observability, and invocation owner. `database_roles.sql` was moved byte-identically
-from the retired root; it remains an unexecuted later database-bootstrap input.
+bootstrap, observability, and invocation owner, plus the explicit R2B1 supersession subset.
+`database_roles.sql` was moved byte-identically from the retired root; it remains an unexecuted
+later database-bootstrap input.
 
 Repository history—not stale `.tf`, `.disabled`, `.bak`, or copied Job HCL—is the source for the
 retired definitions. Later packages must re-derive runtime authority from current contracts.

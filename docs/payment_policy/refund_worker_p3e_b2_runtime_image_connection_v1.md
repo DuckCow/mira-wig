@@ -346,14 +346,18 @@ RELEASE_IMAGE_DIGEST: ABSENT
 
 Publication provenance/SBOM and a registry release digest belong to a later release authority.
 
-## Deferred authority and next package
+## Deferred authority and R2B1 supersession
 
 R2A grants no Cloud SQL Client role, runtime identity, secret payload/version, database
 user/password, Direct VPC Job attachment, Cloud Run Job, image publication, execution, target,
 approval, provider contact, or trusted cloud evidence.
 
-The candidate next package is P3E-B2-R2B: runtime identity, database secret-version authority,
-and dormant Cloud Run Job definitions. This document does not authorize it.
+P3E-B2-R2B1 now defines, but does not provision, runtime identity, exact database secret-version
+reference admission, and dormant Cloud Run Job Terraform. Its authority is
+`infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. It consumes the unchanged R2A
+image contract and does not publish the image, create a release digest, create a database secret
+payload/version, apply Terraform, invoke a Job, or authorize provider contact. This R2A document
+remains the immutable image and private-socket authority.
 
 ## Primary authorities
 

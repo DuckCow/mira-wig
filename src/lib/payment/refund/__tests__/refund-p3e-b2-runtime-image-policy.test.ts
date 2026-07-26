@@ -84,7 +84,7 @@ const EXPECTED_FORBIDDEN_PREFIXES = Object.freeze([
 ]);
 
 describe("P3E-B2-R2A runtime image and private socket policy", () => {
-  it("freezes the exact R2A inventory and intentional 70-path P3E-B2 supersession", () => {
+  it("freezes the exact R2A inventory within the 81-path P3E-B2 supersession", () => {
     const r2a = discoverR2aFiles();
     expect(EXPECTED_R2A_FILES).toHaveLength(21);
     expect(new Set(EXPECTED_R2A_FILES).size).toBe(21);
@@ -101,7 +101,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(70);
+    expect(completeInfra).toHaveLength(81);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
@@ -1321,7 +1321,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     });
   });
 
-  it("keeps schema and migrations byte-authoritative and creates no runtime resource", () => {
+  it("keeps schema, migrations, and the R2A subinventory byte-authoritative", () => {
     expect(sha256(readFileSync(join(ROOT, "prisma/schema.prisma")))).toBe(
       "d532c427aa50aa7e4295b7a4822303f1db38d8c3653a45ad4ab354d404592eaa",
     );
@@ -1329,6 +1329,9 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       "9b0c951f0b2f98ef4bdd53b578d31f5ba4263a4dc43d1997971c7d1d37a7e705",
     );
     const terraform = repositoryRelativeFiles(INFRA)
+      .filter((path) => !path.startsWith(
+        "infra/refund-sandbox/p3e-b2/runtime/",
+      ))
       .filter((path) => path.endsWith(".tf"))
       .map((path) => readFileSync(join(ROOT, path), "utf8"))
       .join("\n");
@@ -1349,8 +1352,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     for (const [key, value] of Object.entries(contract.status)) {
       expect(documentation).toContain(`${key}: ${value}`);
     }
-    expect(documentation).toContain("P3E-B2-R2B");
-    expect(documentation).toContain("does not authorize it");
+    expect(documentation).toContain("P3E-B2-R2B1");
+    expect(documentation).toContain("does not publish the image");
     expect(documentation).toContain(
       "LOCAL_REPRODUCIBILITY_PROOF: NOT_RELEASE_AUTHORITY",
     );
@@ -1360,10 +1363,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     );
     expect(documentation).not.toContain("PROVIDER_FREE_PROOF_REQUIRED");
     expect(foundation).toContain(
-      "P3E-B2-R2B: runtime identity, database",
+      "P3E-B2-R2B1 now defines, but does not provision, runtime",
     );
     expect(foundation).toContain(
-      "secret-version authority, and dormant Cloud Run Job definitions",
+      "exact database secret-version reference admission",
     );
     expect(foundation).not.toContain(
       "smallest candidate next package is P3E-B2-R2A",

@@ -12,6 +12,30 @@
     "RUNTIME_DEPLOYABLE": "FALSE",
     "CANARY_EXECUTABLE": "FALSE"
   },
+  "supersession": {
+    "package": "P3E-B2-R2B1",
+    "contract": "../contracts/runtime-authority-v1.json",
+    "status": "DORMANT_DEFINITIONS_ONLY_NOT_PROVISIONED",
+    "ownedIdentities": [
+      "preflight_runtime_service_account",
+      "dormant_canary_runtime_service_account",
+      "runtime_project_role_bindings",
+      "preflight_database_secret_binding",
+      "canary_database_secret_binding",
+      "preflight_cloud_run_job",
+      "dormant_canary_cloud_run_job",
+      "job_cpu_memory"
+    ],
+    "referenceOnlyIdentities": [
+      "image_digest",
+      "preflight_database_secret_version",
+      "canary_database_secret_version"
+    ],
+    "preservedR2AIdentity": "private_ip_proxy_socket_architecture",
+    "executionAuthority": "ABSENT",
+    "runtimeRootApplyPolicy": "UNCONDITIONALLY_BLOCKED_IN_R2B1",
+    "directVpcFirewallTargetTag": "refund-provider-free"
+  },
   "ownership": [
     {"identity":"preflight_runtime_service_account","oldAddress":"google_service_account.preflight","owner":"LATER_RUNTIME_IDENTITY"},
     {"identity":"dormant_canary_runtime_service_account","oldAddress":"google_service_account.canary","owner":"LATER_RUNTIME_IDENTITY"},

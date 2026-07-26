@@ -438,6 +438,15 @@ SCHEDULED_SANDBOX: BLOCKED
 LIVE: UNREACHABLE
 ```
 
-The smallest candidate next package after committed R2A is P3E-B2-R2B: runtime identity, database
-secret-version authority, and dormant Cloud Run Job definitions. This document does not authorize
-R2B.
+R2B1 supersession note (2026-07-26): P3E-B2-R2B1 now defines, but does not provision, runtime
+identity, exact database secret-version reference admission, and dormant Cloud Run Job Terraform.
+The authoritative current contract is
+`infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. The R1B inventory and status
+block above remain historical authority. R2B1 does not authorize runtime apply, image publication,
+secret payload/version creation, database bootstrap, Job invocation, scheduler, deny exception, or
+provider contact.
+
+Correction note: the R2B1 production root is unconditionally plan/apply-blocked while deny
+effectiveness is not cloud-proven. Its two Direct VPC Job interfaces use exactly the foundation
+firewall target tag `refund-provider-free`, connecting the dormant definitions to both committed
+egress rules without changing this historical foundation graph.

@@ -23,6 +23,13 @@ R1B adds three deliberately separate executable definition roots:
 unapplied, and contains no Terraform. Repository history preserves it; any discovery of undisclosed
 real B1 state or resources is a kill condition and must not be imported into the new roots.
 
+R2B1 adds one isolated `runtime` definition root. It owns exactly two user-managed runtime service
+accounts, two single-instance-conditioned Cloud SQL Client members, two exact secret-level
+database accessors, and two deletion-protected dormant Cloud Run v2 Jobs. The root consumes only
+bounded operator-attested handoffs and exact future references; it performs no lookup, creates no
+secret version, publishes no image, grants no invocation authority, and cannot prove that the
+foundation or execution deny exists in cloud.
+
 ## State bucket contract
 
 Both state roots instantiate `modules/state-bucket`. The module fixes `asia-northeast3`, `STANDARD`
@@ -216,6 +223,53 @@ so effective IAM and API state remain later gates and this is not P3E-C evidence
 No Terraform command in R1A or R1B is cloud authorization. Credential-free validation is limited to
 formatting, backend-disabled initialization, validation, and provider-mocked tests using Google
 provider 7.40.0.
+
+## R2B1 dormant runtime boundary
+
+`runtime` uses the future state prefix `p3e-b2/runtime` and a partial GCS backend. Its exact
+eight-address graph and sorted digest are frozen in
+`contracts/runtime-authority-v1.json`. Both Jobs use the same exact future repository-qualified
+`@sha256:` image input, but the real release digest remains absent. Each Job reads only its own
+future exact numeric database-secret version and its own secret-level
+`roles/secretmanager.secretAccessor` binding. R2B1 creates neither a payload nor a version.
+
+Every production resource declaration has an unconditional lifecycle precondition backed by a
+constant false local. No caller input, handoff, environment, workspace, command mode, or test
+override can admit plan/apply while execution-deny effectiveness is not cloud-proven.
+
+Cloud SQL proxy connection authority is `roles/cloudsql.client` for each dedicated runtime
+identity, with an IAM condition for the exact admitted instance resource and SQL Admin API
+service. The application does not call the Logging API, so no logging role is retained.
+
+The preflight Job runs only `sandbox-preflight`. The dormant canary definition runs
+`worker-once`, but has no provider credential, target, approval, invoker, scheduler, or deny
+exception. Both definitions use Gen2 Direct VPC egress, the exact foundation network and subnet,
+`PRIVATE_RANGES_ONLY`, one task, parallelism one, zero retries, one CPU, 512 MiB, and 300 seconds.
+Each interface has exactly the committed foundation firewall target tag
+`refund-provider-free`; there is no additional tag or connector.
+The timeout is 120 seconds of proxy readiness plus the existing 150-second external worker
+deadline, three seconds of proxy shutdown, and 27 seconds of result/process margin.
+
+```text
+RUNTIME_IDENTITY_AUTHORITY: DEFINED_NOT_PROVISIONED
+RUNTIME_SECRET_BINDINGS: DEFINED_NOT_APPLIED
+RUNTIME_JOB_DEFINITIONS: DEFINED_DORMANT_NOT_PROVISIONED
+DATABASE_SECRET_VERSION_REFERENCES: DEFINED_EXACT_INPUTS_NOT_CREATED
+RELEASE_IMAGE_DIGEST: ABSENT
+RUNTIME_DEPLOYABLE: FALSE
+CANARY_EXECUTABLE: FALSE
+PROVIDER_EXECUTION: BLOCKED
+SCHEDULED_SANDBOX: BLOCKED
+LIVE: UNREACHABLE
+JOB_EXECUTION_DENY_EFFECTIVE: NOT_CLOUD_PROVEN
+RUNTIME_APPLY_AUTHORIZED: FALSE
+RUNTIME_ROOT_APPLY_POLICY: UNCONDITIONALLY_BLOCKED_IN_R2B1
+```
+
+Runtime deployer authority remains deferred because the exact create/read/update provider method
+and permission set has not been independently derived across Cloud Run Job, service-account,
+project IAM, secret IAM, Artifact Registry, and deny-authority separation. R2B1 defines no
+deployer identity, custom role, or binding.
 
 Exact status:
 
