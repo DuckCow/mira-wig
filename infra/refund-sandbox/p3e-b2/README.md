@@ -196,6 +196,13 @@ The exact 50-permission role hash is
 Its foundation-only `compute.networks.updatePolicy` permission is justified only by both firewall
 resources and the subnetwork in the eleven-address ledger; it is not IAM policy authority.
 
+## R2A image boundary
+
+P3E-B2-R2A adds only the provider-free image definition and private Cloud SQL proxy/socket
+contract in `contracts/runtime-image-connection-v1.json`. It publishes no image and creates no
+runtime resource. The R1A and R1B inventories remain historical exact subinventories; the
+complete package inventory is intentionally superseded by the separate exact R2A inventory.
+
 After a future successful activation apply, the raw output remains
 `operator_review_status = REVIEW_REQUIRED` and
 `evidence_type = TERRAFORM_APPLY_OUTPUT_NOT_CLOUD_AUTHENTICATED`. Foundation accepts only an exact

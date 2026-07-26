@@ -4,6 +4,7 @@ import { REFUND_EXECUTION_ACTIVATION_KEYS } from "../execution-activation";
 import {
   REFUND_SANDBOX_PROVIDER_FREE_PREFLIGHT_MODE,
   REFUND_SANDBOX_PROVIDER_FREE_PREFLIGHT_MODE_KEY,
+  parseCanonicalRefundCloudSqlDatabaseUrl,
   safeRefundSandboxProviderFreePreflightEnvironment,
 } from "../refund-sandbox-provider-free-preflight-environment";
 
@@ -21,6 +22,14 @@ function inspectDatabaseUrl(databaseUrl: string) {
 }
 
 describe("provider-free cloud preflight environment guard", () => {
+  it("exposes the exact canonical socket and instance binding to the container adapter", () => {
+    expect(parseCanonicalRefundCloudSqlDatabaseUrl(DATABASE_URL)).toEqual({
+      socketHost: SOCKET,
+      instanceConnectionName: "mira-refund-sbx:asia-northeast3:refund-db",
+    });
+    expect(parseCanonicalRefundCloudSqlDatabaseUrl(null)).toBeNull();
+  });
+
   it("accepts only the explicit provider-free mode and Cloud SQL socket shape", () => {
     const env = Object.freeze({
       [REFUND_SANDBOX_PROVIDER_FREE_PREFLIGHT_MODE_KEY]:

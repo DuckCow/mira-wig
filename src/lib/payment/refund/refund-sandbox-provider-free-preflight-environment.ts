@@ -41,6 +41,11 @@ export type RefundSandboxProviderFreePreflightEnvironment = Readonly<{
   activationEnvironment: PreflightEnv;
 }>;
 
+export type CanonicalRefundCloudSqlDatabaseUrl = Readonly<{
+  socketHost: string;
+  instanceConnectionName: string;
+}>;
+
 export function safeRefundSandboxProviderFreePreflightEnvironment(
   env: unknown,
 ): RefundSandboxProviderFreePreflightEnvironment | null {
@@ -50,7 +55,8 @@ export function safeRefundSandboxProviderFreePreflightEnvironment(
     !== REFUND_SANDBOX_PROVIDER_FREE_PREFLIGHT_MODE) return null;
   if (hasForbiddenValue(inspected)) return null;
   const connectionString = inspected.DATABASE_URL;
-  if (typeof connectionString !== "string" || !cloudSqlDatabaseUrl(connectionString)) {
+  if (typeof connectionString !== "string"
+    || parseCanonicalRefundCloudSqlDatabaseUrl(connectionString) === null) {
     return null;
   }
   return Object.freeze({
@@ -77,21 +83,28 @@ function hasForbiddenValue(env: Readonly<Record<string, unknown>>): boolean {
   });
 }
 
-function cloudSqlDatabaseUrl(value: string): boolean {
+export function parseCanonicalRefundCloudSqlDatabaseUrl(
+  value: unknown,
+): CanonicalRefundCloudSqlDatabaseUrl | null {
+  if (typeof value !== "string") return null;
   try {
     const rawSocket = exactRawCloudSqlSocket(value);
-    if (rawSocket === null) return false;
+    if (rawSocket === null) return null;
     const url = new URL(value);
     const database = decodeURIComponent(url.pathname).slice(1);
     const user = decodeURIComponent(url.username);
     const password = decodeURIComponent(url.password);
     const socket = exactCloudSqlSocketParameter(url);
-    if (socket === null || socket !== rawSocket) return false;
+    if (socket === null || socket !== rawSocket) return null;
     const parsed = parsePgConnectionString(value);
-    return canonicalCloudSqlUrl(url, database, user, password, socket)
-      && matchingPgConfiguration(parsed, database, user, password, socket);
+    if (!canonicalCloudSqlUrl(url, database, user, password, socket)
+      || !matchingPgConfiguration(parsed, database, user, password, socket)) return null;
+    return Object.freeze({
+      socketHost: socket,
+      instanceConnectionName: socket.slice("/cloudsql/".length),
+    });
   } catch {
-    return false;
+    return null;
   }
 }
 

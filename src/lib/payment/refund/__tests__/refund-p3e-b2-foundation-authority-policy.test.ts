@@ -1,22 +1,21 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import authorityContract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/foundation-authority-v1.json";
 import resourceGraph from "../../../../../infra/refund-sandbox/p3e-b2/contracts/foundation-resource-graph-v1.json";
 import runtimeOwnership from "../../../../../infra/refund-sandbox/p3e-b2/runtime-deferred/resource-ownership-v1.json";
+import { walkRefundP3eRealFiles as walk } from "./refund-p3e-real-filesystem-inventory";
 
 const ROOT = process.cwd();
 const INFRA = join(ROOT, "infra/refund-sandbox/p3e-b2");
@@ -214,15 +213,17 @@ const EXPECTED_PERMISSIONS = Object.freeze([
 ]);
 
 describe("P3E-B2-R1B foundation authority policy", () => {
-  it("freezes the exact 36-path R1B subinventory and exact 69-path combined package", () => {
+  it("preserves the exact 36-path R1B subinventory after the R2A supersession", () => {
     const files = walk(INFRA)
       .map((path) => relative(INFRA, path).split(sep).join("/"))
       .sort();
-    const r1bFiles = files.filter(isR1BPath);
+    const r1bFiles = files
+      .filter(isR1BPath)
+      .filter((path) => path !== "contracts/runtime-image-connection-v1.json");
     expect(EXPECTED_R1B_FILES).toHaveLength(36);
     expect(new Set(EXPECTED_R1B_FILES).size).toBe(36);
     expect(r1bFiles).toEqual(EXPECTED_R1B_FILES);
-    expect(files).toHaveLength(69);
+    expect(files).toHaveLength(70);
     expect(files.filter((path) => !isR1BPath(path))).toHaveLength(33);
   });
 
@@ -702,8 +703,8 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     ]) {
       expect(documentation).toContain(status);
     }
-    expect(documentation).toContain("P3E-B2-R2A");
-    expect(documentation).toContain("does not authorize it");
+    expect(documentation).toContain("P3E-B2-R2B");
+    expect(documentation).toMatch(/does not authorize\s+R2B\./u);
   });
 
   it("fails closed on every symlink shape while accepting the same ordinary inventory", () => {
@@ -813,51 +814,6 @@ function readTerraform(root: string): string {
     .filter((path) => path.endsWith(".tf"))
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
-}
-
-function walk(root: string): string[] {
-  const lexicalRoot = resolve(root);
-  rejectSymlink(lexicalRoot);
-  const realRoot = realpathSync(lexicalRoot);
-  assertContained(realRoot, realRoot);
-  return walkContained(realRoot, realRoot);
-}
-
-function walkContained(root: string, directory: string): string[] {
-  assertContained(root, directory);
-  return readdirSync(directory)
-    .filter((name) => name !== ".terraform")
-    .flatMap((name) => {
-      const path = join(directory, name);
-      rejectSymlink(path);
-      const status = lstatSync(path);
-      const realPath = realpathSync(path);
-      assertContained(root, realPath);
-      if (status.isDirectory()) {
-        return walkContained(root, realPath);
-      }
-      if (status.isFile()) {
-        return [realPath];
-      }
-      throw new Error(`Unsupported inventory entry: ${path}`);
-    });
-}
-
-function rejectSymlink(path: string): void {
-  if (lstatSync(path).isSymbolicLink()) {
-    throw new Error(`Inventory symlink rejected: ${path}`);
-  }
-}
-
-function assertContained(root: string, candidate: string): void {
-  const pathFromRoot = relative(root, candidate);
-  if (
-    pathFromRoot === ".." ||
-    pathFromRoot.startsWith(`..${sep}`) ||
-    isAbsolute(pathFromRoot)
-  ) {
-    throw new Error(`Inventory path escaped root: ${candidate}`);
-  }
 }
 
 function resourceAddresses(source: string): string[] {

@@ -353,6 +353,11 @@ RUNTIME_IDENTITY_AUTHORITY: DEFERRED
 RUNTIME_SECRET_BINDINGS: DEFERRED
 RUNTIME_JOB_DEFINITIONS: DEFERRED
 IMAGE_DIGEST: ABSENT
+
+R2A supersession note (2026-07-23): a local reproducible image definition and private-socket
+contract now exist, but no image is published and the release digest remains absent. See
+`refund_worker_p3e_b2_runtime_image_connection_v1.md`. Runtime identity, Cloud SQL Client IAM,
+secret version, Job Terraform, Direct VPC attachment, and execution remain deferred.
 DB_SECRET_VERSIONS: ABSENT
 PRIVATE_CONNECTION_PATH: UNRESOLVED
 DB_BOOTSTRAP: UNIMPLEMENTED
@@ -433,5 +438,6 @@ SCHEDULED_SANDBOX: BLOCKED
 LIVE: UNREACHABLE
 ```
 
-The smallest candidate next package is P3E-B2-R2A: reproducible container image and private Cloud
-SQL proxy/socket architecture. This document does not authorize it.
+The smallest candidate next package after committed R2A is P3E-B2-R2B: runtime identity, database
+secret-version authority, and dormant Cloud Run Job definitions. This document does not authorize
+R2B.

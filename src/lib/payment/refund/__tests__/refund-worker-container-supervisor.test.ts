@@ -1,0 +1,670 @@
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { PassThrough } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  PROXY_READINESS_POLL_INTERVAL_MS,
+  PROXY_READINESS_TIMEOUT_MS,
+  defaultRefundWorkerContainerSupervisorDependencies,
+  runRefundWorkerContainerSupervisor,
+  type RefundWorkerContainerSupervisorDependencies,
+} from "../refund-worker-container-supervisor";
+
+const INSTANCE = "sample-project:asia-northeast3:refund-db";
+const DATABASE_URL =
+  `postgresql://refund_role:synthetic_password@localhost:5432/refund_sandbox?host=/cloudsql/${INSTANCE}`;
+const ENABLED_ENV = Object.freeze({
+  REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
+  TOSS_SANDBOX_SECRET_KEY: "TEST_SECRET_DO_NOT_EXPOSE",
+  TOSS_SANDBOX_MERCHANT_ACCOUNT_BINDING: "merchant",
+  TOSS_SANDBOX_CREDENTIAL_GENERATION_BINDING: "generation",
+  REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
+  DATABASE_URL,
+  CLOUD_RUN_JOB: "refund-worker",
+  CLOUD_RUN_EXECUTION: "execution-1",
+  CLOUD_RUN_TASK_COUNT: "1",
+  CLOUD_RUN_TASK_INDEX: "0",
+  CLOUD_RUN_TASK_ATTEMPT: "0",
+});
+
+describe("refund worker container supervisor", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("freezes the production Direct VPC readiness allowance", () => {
+    expect(PROXY_READINESS_TIMEOUT_MS).toBe(120_000);
+    expect(PROXY_READINESS_POLL_INTERVAL_MS).toBe(250);
+    expect(defaultRefundWorkerContainerSupervisorDependencies).toMatchObject({
+      proxyReadinessTimeoutMs: 120_000,
+      proxyReadinessPollIntervalMs: 250,
+    });
+  });
+
+  it.each<readonly string[]>([
+    [],
+    ["worker-once", "extra"],
+    ["unknown"],
+    ["worker-once", "worker-once"],
+  ])("rejects a non-exact command vector %j without spawning", async (args) => {
+    const harness = supervisorHarness();
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      args,
+      {},
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(64);
+    expect(harness.spawnCalls).toEqual([]);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"INVALID_HOST_INPUT"}\n']);
+  });
+
+  it("preserves the existing disabled worker result and never starts the proxy", async () => {
+    const worker = completedChild(0, '{"ok":true,"code":"FEATURE_DISABLED"}\n', "");
+    const harness = supervisorHarness([worker]);
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      {},
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.spawnCalls).toHaveLength(1);
+    expect(harness.spawnCalls[0]?.executable).toBe(process.execPath);
+    expect(harness.spawnCalls[0]?.args).toContain("run-once");
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(harness.stdout).toEqual(['{"ok":true,"code":"FEATURE_DISABLED"}\n']);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("preserves malformed activation classification without proxy admission", async () => {
+    const worker = completedChild(78, "", '{"ok":false,"code":"CONFIG_INVALID"}\n');
+    const harness = supervisorHarness([worker]);
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      { REFUND_EXECUTION_WORKER_ENABLED: "yes" },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(78);
+    expect(harness.spawnCalls).toHaveLength(1);
+    expect(harness.spawnCalls[0]?.executable).toBe(process.execPath);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"CONFIG_INVALID"}\n']);
+  });
+
+  it("uses the exact private proxy vector before a worker and awaits clean shutdown", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const worker = completedChild(0, '{"ok":true,"code":"CYCLE_COMPLETE"}\n', "");
+    const harness = supervisorHarness([proxy, worker], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.spawnCalls).toHaveLength(2);
+    expect(harness.spawnCalls[0]).toMatchObject({
+      executable: "/test/cloud-sql-proxy",
+      args: [
+        "--private-ip",
+        "--unix-socket=/cloudsql",
+        "--health-check",
+        "--http-address=127.0.0.1",
+        "--http-port=9801",
+        "--exit-zero-on-sigterm",
+        INSTANCE,
+      ],
+    });
+    expect(harness.spawnCalls[1]?.executable).toBe(process.execPath);
+    expect(proxy.killCalls).toEqual(["SIGTERM"]);
+    expect(harness.stdout).toEqual(['{"ok":true,"code":"CYCLE_COMPLETE"}\n']);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("rejects a canonical socket/instance mismatch before any child starts", async () => {
+    const harness = supervisorHarness();
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      { ...ENABLED_ENV, REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME:
+        "other-project:asia-northeast3:refund-db" },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(78);
+    expect(harness.spawnCalls).toEqual([]);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(JSON.stringify(harness)).not.toContain("synthetic_password");
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"CONFIG_INVALID"}\n']);
+  });
+
+  it.each([
+    ["missing task count", { CLOUD_RUN_TASK_COUNT: undefined }],
+    ["multiple tasks", { CLOUD_RUN_TASK_COUNT: "2" }],
+    ["nonzero task index", { CLOUD_RUN_TASK_INDEX: "1" }],
+    ["automatic retry", { CLOUD_RUN_TASK_ATTEMPT: "1" }],
+    ["noncanonical integer", { CLOUD_RUN_TASK_COUNT: "01" }],
+    ["missing job", { CLOUD_RUN_JOB: undefined }],
+    ["missing execution", { CLOUD_RUN_EXECUTION: undefined }],
+  ])("fails closed for %s before proxy spawn", async (_name, mutation) => {
+    const harness = supervisorHarness();
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      { ...ENABLED_ENV, ...mutation },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(64);
+    expect(harness.spawnCalls).toEqual([]);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"INVALID_HOST_INPUT"}\n']);
+  });
+
+  it("preserves malformed credential classification without readiness admission", async () => {
+    const worker = completedChild(78, "", '{"ok":false,"code":"CONFIG_INVALID"}\n');
+    const harness = supervisorHarness([worker]);
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      { ...ENABLED_ENV, TOSS_SANDBOX_MERCHANT_ACCOUNT_BINDING: undefined },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(78);
+    expect(harness.spawnCalls).toHaveLength(1);
+    expect(harness.spawnCalls[0]?.executable).toBe(process.execPath);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"CONFIG_INVALID"}\n']);
+  });
+
+  it.each([
+    ["proxy override", { CSQL_PROXY_CREDENTIALS_FILE: "TEST_PROXY_SECRET" }],
+    ["PG host override", { PGHOST: "TEST_REMOTE_DATABASE_SECRET" }],
+    ["malformed DATABASE_URL", { DATABASE_URL: "not-a-database-url" }],
+  ])("rejects %s before spawn or readiness", async (_name, mutation) => {
+    const harness = supervisorHarness();
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      { ...ENABLED_ENV, ...mutation },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(78);
+    expect(harness.spawnCalls).toEqual([]);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(JSON.stringify(harness.stderr)).not.toMatch(
+      /TEST_PROXY_SECRET|TEST_REMOTE_DATABASE_SECRET|cloudsql/iu,
+    );
+  });
+
+  it("admits a worker after bounded fake readiness retries", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const worker = completedChild(0, '{"ok":true,"code":"CYCLE_COMPLETE"}\n', "");
+    const harness = supervisorHarness(
+      [proxy, worker],
+      { readiness: [false, false, true], readinessTimeoutMs: 750, readinessPollIntervalMs: 250 },
+    );
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.readinessCalls).toBe(3);
+    expect(harness.sleepCalls.slice(0, 2)).toEqual([250, 250]);
+    expect(harness.spawnCalls[1]?.atMs).toBe(500);
+    expect(harness.spawnCalls).toHaveLength(2);
+  });
+
+  it("stops at the exact injected readiness timeout and never starts the worker", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness(
+      [proxy],
+      { readiness: false, readinessTimeoutMs: 750, readinessPollIntervalMs: 250 },
+    );
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.spawnCalls).toHaveLength(1);
+    expect(harness.readinessCalls).toBe(3);
+    expect(harness.sleepCalls.slice(0, 3)).toEqual([250, 250, 250]);
+    expect(harness.sleepCalls[3]).toBe(2_000);
+    expect(proxy.killCalls).toEqual(["SIGTERM"]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n']);
+  });
+
+  it("does not admit a worker after proxy early exit", async () => {
+    const proxy = completedChild(1, "", "TEST_PROXY_DIAGNOSTIC_SECRET\n");
+    const harness = supervisorHarness([proxy], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.spawnCalls).toHaveLength(1);
+    expect(harness.sleepCalls).toEqual([]);
+    expect(JSON.stringify(harness.stderr)).not.toContain("TEST_PROXY_DIAGNOSTIC_SECRET");
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n']);
+  });
+
+  it("preserves a worker failure after proxy cleanup", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const worker = completedChild(78, "", '{"ok":false,"code":"CONFIG_INVALID"}\n');
+    const harness = supervisorHarness([proxy, worker], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(78);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"CONFIG_INVALID"}\n']);
+  });
+
+  it("cannot report worker success when proxy cleanup is unconfirmed", async () => {
+    const proxy = runningChild({ closeOnTerm: null });
+    const worker = completedChild(0, '{"ok":true,"code":"CYCLE_COMPLETE"}\n', "");
+    const harness = supervisorHarness([proxy, worker], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(proxy.killCalls).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+  });
+
+  it("cannot report worker success after the ready proxy exits during work", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const worker = runningChild({ closeOnTerm: null });
+    const harness = supervisorHarness([proxy, worker], { readiness: true });
+    const result = runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+    await harness.spawned(2);
+
+    proxy.stderr.write("TEST_PROXY_RUNTIME_DIAGNOSTIC_SECRET\n");
+    proxy.close(1, null);
+    worker.stdout.write('{"ok":true,"code":"CYCLE_COMPLETE"}\n');
+    worker.close(0, null);
+
+    expect(await result).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(JSON.stringify(harness.stderr)).not.toContain(
+      "TEST_PROXY_RUNTIME_DIAGNOSTIC_SECRET",
+    );
+  });
+
+  it("forwards one SIGTERM to an in-flight worker and keeps the proxy until completion", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const worker = runningChild({ closeOnTerm: null });
+    const harness = supervisorHarness([proxy, worker], { readiness: true });
+
+    const result = runRefundWorkerContainerSupervisor(
+      ["worker-once"],
+      ENABLED_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+    await harness.spawned(2);
+
+    process.emit("SIGTERM", "SIGTERM");
+    process.emit("SIGINT", "SIGINT");
+    expect(worker.killCalls).toEqual(["SIGTERM"]);
+    expect(proxy.killCalls).toEqual([]);
+    expect(settled).toBe(false);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual([]);
+    worker.stderr.write('{"ok":true,"code":"LIFECYCLE_DRAINED"}\n');
+    worker.close(75, null);
+
+    expect(await result).toBe(75);
+    expect(proxy.killCalls).toEqual(["SIGTERM"]);
+    expect(proxy.exitCode).toBe(0);
+    expect(worker.exitCode).toBe(75);
+    expect(harness.stderr).toEqual([
+      '{"ok":true,"code":"LIFECYCLE_DRAINED"}\n',
+    ]);
+  });
+
+  it("emits no fallback when the supervisor process is forcibly terminated before a result", async () => {
+    const fixture = spawnForcedTerminationFixture();
+    try {
+      if (!fixture.stdout || !fixture.stderr) throw new Error("MISSING_FIXTURE_STREAM");
+      const fixtureStdout = fixture.stdout;
+      const fixtureStderr = fixture.stderr;
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      fixtureStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+      fixtureStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+
+      await waitForChildMessage(fixture, "WORKER_STARTED");
+      const forwarded = waitForChildMessage(fixture, "WORKER_SIGTERM");
+      fixture.kill("SIGTERM");
+      await forwarded;
+      expect(Buffer.concat(stdout).toString("utf8")).toBe("");
+      expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+
+      const closed = waitForChildClose(fixture);
+      fixture.kill("SIGKILL");
+      const { code, signal } = await within(closed, 2_000);
+
+      expect(code).toBeNull();
+      expect(signal).toBe("SIGKILL");
+      expect(Buffer.concat(stdout).toString("utf8")).toBe("");
+      expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+    } finally {
+      if (fixture.exitCode === null && fixture.signalCode === null) {
+        fixture.kill("SIGKILL");
+      }
+    }
+  });
+});
+
+type SpawnCall = Readonly<{
+  executable: string;
+  args: readonly string[];
+  atMs: number;
+}>;
+
+function supervisorHarness(
+  children: FakeChild[] = [],
+  options: Readonly<{
+    readiness?: boolean | readonly boolean[];
+    readinessTimeoutMs?: number;
+    readinessPollIntervalMs?: number;
+  }> = {},
+) {
+  const spawnCalls: SpawnCall[] = [];
+  const spawnWaiters: Array<Readonly<{ count: number; resolve: () => void }>> = [];
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const sleepCalls: number[] = [];
+  let readinessCalls = 0;
+  let now = 0;
+  const dependencies: RefundWorkerContainerSupervisorDependencies = Object.freeze({
+    ...defaultRefundWorkerContainerSupervisorDependencies,
+    proxyExecutable: "/test/cloud-sql-proxy",
+    workerBundle: "/test/refund-execution-worker.mjs",
+    preflightBundle: "/test/refund-sandbox-provider-free-preflight.mjs",
+    spawn: (executable, args) => {
+      spawnCalls.push(Object.freeze({
+        executable,
+        args: Object.freeze([...args]),
+        atMs: now,
+      }));
+      for (const waiter of spawnWaiters) {
+        if (spawnCalls.length >= waiter.count) waiter.resolve();
+      }
+      const child = children.shift();
+      if (!child) throw new Error("UNEXPECTED_SPAWN");
+      child.start();
+      return child;
+    },
+    fetch: () => {
+      const configured = options.readiness ?? false;
+      const ok = typeof configured === "boolean"
+        ? configured
+        : configured[readinessCalls] ?? configured.at(-1) ?? false;
+      readinessCalls += 1;
+      return Promise.resolve(Object.freeze({ ok }));
+    },
+    sleep: async (milliseconds) => {
+      await Promise.resolve();
+      sleepCalls.push(milliseconds);
+      now += milliseconds;
+    },
+    now: () => now,
+    proxyReadinessTimeoutMs: options.readinessTimeoutMs ?? 750,
+    proxyReadinessPollIntervalMs: options.readinessPollIntervalMs ?? 250,
+    inspectSelf: () => Promise.reject(new Error("NOT_USED")),
+  });
+  return {
+    dependencies,
+    spawnCalls,
+    spawned: (count: number) => (
+      spawnCalls.length >= count
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+          spawnWaiters.push(Object.freeze({ count, resolve }));
+        })
+    ),
+    get readinessCalls() {
+      return readinessCalls;
+    },
+    sleepCalls,
+    stdout,
+    stderr,
+    output: Object.freeze({
+      stdout: Object.freeze({ write: (value: string) => stdout.push(value) }),
+      stderr: Object.freeze({ write: (value: string) => stderr.push(value) }),
+    }),
+  };
+}
+
+function spawnForcedTerminationFixture() {
+  const supervisorUrl = pathToFileURL(join(
+    process.cwd(),
+    "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+  )).href;
+  const source = `
+    import { EventEmitter } from "node:events";
+    import { PassThrough } from "node:stream";
+    import {
+      defaultRefundWorkerContainerSupervisorDependencies,
+      runRefundWorkerContainerSupervisor,
+    } from ${JSON.stringify(supervisorUrl)};
+
+    class FakeChild extends EventEmitter {
+      stdout = new PassThrough();
+      stderr = new PassThrough();
+      exitCode = null;
+      signalCode = null;
+      worker = false;
+      kill(signal) {
+        if (this.worker && signal === "SIGTERM") process.send?.("WORKER_SIGTERM");
+        return true;
+      }
+    }
+
+    let spawnCount = 0;
+    const dependencies = Object.freeze({
+      ...defaultRefundWorkerContainerSupervisorDependencies,
+      proxyExecutable: "/test/cloud-sql-proxy",
+      workerBundle: "/test/refund-execution-worker.mjs",
+      spawn: () => {
+        spawnCount += 1;
+        const child = new FakeChild();
+        child.worker = spawnCount === 2;
+        if (child.worker) {
+          child.stdout.write('{"ok":true');
+          queueMicrotask(() => process.send?.("WORKER_STARTED"));
+        }
+        return child;
+      },
+      fetch: async () => Object.freeze({ ok: true }),
+      sleep: async () => undefined,
+      now: () => 0,
+      proxyReadinessTimeoutMs: 25,
+      proxyReadinessPollIntervalMs: 5,
+      inspectSelf: async () => { throw new Error("NOT_USED"); },
+    });
+    const output = Object.freeze({
+      stdout: Object.freeze({ write: (value) => process.stdout.write(value) }),
+      stderr: Object.freeze({ write: (value) => process.stderr.write(value) }),
+    });
+    void runRefundWorkerContainerSupervisor(
+      ["worker-check"],
+      {
+        REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: ${JSON.stringify(INSTANCE)},
+        DATABASE_URL: ${JSON.stringify(DATABASE_URL)},
+      },
+      output,
+      dependencies,
+    );
+  `;
+  return spawn(process.execPath, [
+    "--import", "tsx",
+    "--input-type=module",
+    "--eval", source,
+  ], {
+    cwd: process.cwd(),
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      NODE_ENV: "test",
+    },
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+  });
+}
+
+function waitForChildMessage(
+  child: ReturnType<typeof spawn>,
+  expected: string,
+): Promise<void> {
+  return within(new Promise<void>((resolve, reject) => {
+    const onMessage = (value: unknown) => {
+      if (value !== expected) return;
+      dispose();
+      resolve();
+    };
+    const onClose = () => {
+      dispose();
+      reject(new Error(`FIXTURE_CLOSED_BEFORE_${expected}`));
+    };
+    const dispose = () => {
+      child.removeListener("message", onMessage);
+      child.removeListener("close", onClose);
+    };
+    child.on("message", onMessage);
+    child.once("close", onClose);
+  }), 2_000);
+}
+
+function waitForChildClose(
+  child: ReturnType<typeof spawn>,
+): Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>> {
+  return new Promise((resolve) => {
+    child.once("close", (code, signal) => {
+      resolve(Object.freeze({ code, signal }));
+    });
+  });
+}
+
+function within<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("TEST_FIXTURE_TIMEOUT")), milliseconds);
+    void promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error("TEST_FIXTURE_REJECTION"));
+      },
+    );
+  });
+}
+
+class FakeChild extends EventEmitter {
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  readonly killCalls: NodeJS.Signals[] = [];
+  readonly #begin: (child: FakeChild) => void;
+  readonly #closeOnTerm: number | null;
+
+  constructor(begin: (child: FakeChild) => void, closeOnTerm: number | null = 0) {
+    super();
+    this.#begin = begin;
+    this.#closeOnTerm = closeOnTerm;
+  }
+
+  start() {
+    queueMicrotask(() => this.#begin(this));
+  }
+
+  kill(signal: NodeJS.Signals = "SIGTERM") {
+    this.killCalls.push(signal);
+    if (this.#closeOnTerm !== null && this.exitCode === null && this.signalCode === null) {
+      queueMicrotask(() => this.close(this.#closeOnTerm, null));
+    }
+    return true;
+  }
+
+  close(code: number | null, signal: NodeJS.Signals | null) {
+    this.exitCode = code;
+    this.signalCode = signal;
+    this.emit("close", code, signal);
+  }
+}
+
+function completedChild(exitCode: number, stdout: string, stderr: string): FakeChild {
+  return new FakeChild((child) => {
+    if (stdout) child.stdout.write(stdout);
+    if (stderr) child.stderr.write(stderr);
+    child.close(exitCode, null);
+  });
+}
+
+function runningChild(options: Readonly<{ closeOnTerm: number | null }>): FakeChild {
+  return new FakeChild(() => undefined, options.closeOnTerm);
+}

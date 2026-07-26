@@ -10,6 +10,13 @@ RUNTIME_IDENTITY_AUTHORITY: DEFERRED
 RUNTIME_SECRET_BINDINGS: DEFERRED
 RUNTIME_JOB_DEFINITIONS: DEFERRED
 IMAGE_DIGEST: ABSENT
+
+P3E-B2-R2A now owns an implemented-but-unpublished local image definition and private-socket
+contract. This R1B file remains the historical runtime-deferred inventory authority: its
+`IMAGE_DIGEST: ABSENT` fact is still true because no release image was published. The superseding
+nonsecret R2A machine contract is
+`../contracts/runtime-image-connection-v1.json`; runtime identity, IAM, secret version, Job
+Terraform, Direct VPC attachment, publication, and execution remain deferred.
 DB_SECRET_VERSIONS: ABSENT
 PRIVATE_CONNECTION_PATH: UNRESOLVED
 DB_BOOTSTRAP: UNIMPLEMENTED

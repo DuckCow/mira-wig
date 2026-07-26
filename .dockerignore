@@ -1,0 +1,3 @@
+# Defense in depth only. Authoritative R2A builds use a generated temporary
+# context and never use the repository root as their BuildKit context.
+**

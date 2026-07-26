@@ -1,0 +1,385 @@
+{
+  "contractVersion": "mira-refund-worker-runtime-image-connection/v1",
+  "retrievedAt": "2026-07-24",
+  "localProof": {
+    "authority": "LOCAL_REPRODUCIBILITY_PROOF: NOT_RELEASE_AUTHORITY",
+    "releaseImageDigest": "ABSENT",
+    "syntheticRevision": "p3e-b2-r2a-local-proof-v1",
+    "sourceDateEpoch": 1784764800
+  },
+  "proofImageLifecycle": {
+    "proofImageTagStrategy": "COLLISION_SAFE_PER_INVOCATION",
+    "preexistingTagPolicy": "FAIL_WITHOUT_OVERWRITE",
+    "cleanupTarget": "EXACT_INVOCATION_TAG_ONLY",
+    "cleanupOnOrderlySuccessAndFailure": "REQUIRED",
+    "removeByRawImageId": "FORBIDDEN",
+    "broadDockerPrune": "FORBIDDEN",
+    "cleanupFailurePreventsSuccess": true
+  },
+  "proofImageIdentity": {
+    "localImageStoreIdentityProfile": "DOCKER_DESKTOP_CONTAINERD_MANIFEST_ID",
+    "configAuthority": "IIDFILE_EQUALS_CONTAINERIMAGE_CONFIG_DIGEST",
+    "manifestAuthority": "CONTAINERIMAGE_DIGEST_EQUALS_DESCRIPTOR_DIGEST",
+    "localStoreBinding": "LOCAL_IMAGE_ID_EQUALS_MANIFEST_DIGEST",
+    "configManifestEquality": "FORBIDDEN",
+    "tagOwnership": "UNIQUE_ABSENT_BEFORE_BUILD_PLUS_EXACT_PROFILE_MATCH",
+    "unknownProfilePolicy": "FAIL_CLOSED"
+  },
+  "proofImageInspectionBounds": {
+    "inspectionJsonMaxBytes": 262144,
+    "repoTagMaxCount": 64,
+    "repoDigestMaxCount": 64,
+    "repoTagMaxBytes": 512,
+    "repoDigestMaxBytes": 512,
+    "repositoryReferenceAggregateMaxBytes": 65536,
+    "oversizedInputPolicy": "FAIL_CLOSED_WITH_BOUNDED_NON_DISCLOSING_ERROR",
+    "truncationPolicy": "FORBIDDEN"
+  },
+  "platform": {
+    "os": "linux",
+    "architecture": "amd64",
+    "cloudRunEnvironment": "SECOND_GENERATION"
+  },
+  "node": {
+    "version": "22.23.1",
+    "suite": "bookworm-slim",
+    "image": "node:22.23.1-bookworm-slim",
+    "linuxAmd64ManifestDigest": "sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27",
+    "source": "https://github.com/nodejs/docker-node"
+  },
+  "cloudSqlAuthProxy": {
+    "version": "2.22.0",
+    "image": "gcr.io/cloud-sql-connectors/cloud-sql-proxy",
+    "linuxAmd64ManifestDigest": "sha256:b239a84edd20cfcf1fef20a8d297ac578a73e5cb0ba0eaaf5498782de4f9f861",
+    "embeddedExecutableSha256": "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb",
+    "officialStandaloneLinuxAmd64Sha256": "42e73a8775bc3300b6514816cc4893f01b109a50f65aa779a451d3e4ff4c3ead",
+    "source": "https://github.com/GoogleCloudPlatform/cloud-sql-proxy"
+  },
+  "bundles": [
+    {
+      "entrypoint": "scripts/refund-execution-worker.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-execution-worker.mjs"
+    },
+    {
+      "entrypoint": "scripts/refund-sandbox-provider-free-preflight.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs"
+    },
+    {
+      "entrypoint": "containers/refund-worker/entrypoint.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs"
+    }
+  ],
+  "commands": [
+    "image-self-check",
+    "sandbox-preflight",
+    "worker-check",
+    "worker-health",
+    "worker-once"
+  ],
+  "defaultCommand": "NONE_FAIL_CLOSED",
+  "connection": {
+    "networkMode": "DIRECT_VPC_EGRESS",
+    "egressMode": "PRIVATE_RANGES_ONLY",
+    "databaseEndpoint": "CLOUD_SQL_PRIVATE_IP_ONLY",
+    "applicationTransport": "POSTGRESQL_UNIX_SOCKET",
+    "socketRoot": "/cloudsql",
+    "socketTemplate": "/cloudsql/<project-id>:asia-northeast3:<instance-id>",
+    "region": "asia-northeast3",
+    "instanceConnectionNameEnvironmentKey": "REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME",
+    "canonicalDatabaseUrlAuthority": "localhost:5432",
+    "committedSubnetCidr": "10.74.0.0/24",
+    "directVpcMinimumSubnetPrefix": 26
+  },
+  "proxyInvocation": {
+    "arguments": [
+      "--private-ip",
+      "--unix-socket=/cloudsql",
+      "--health-check",
+      "--http-address=127.0.0.1",
+      "--http-port=9801",
+      "--exit-zero-on-sigterm",
+      "<exact-instance-connection-name>"
+    ],
+    "forbiddenArguments": [
+      "--address=0.0.0.0",
+      "--auto-iam-authn",
+      "--config-file",
+      "--credentials-file",
+      "--gcloud-auth",
+      "--impersonate-service-account",
+      "--token"
+    ],
+    "environmentOverridePrefix": "CSQL_PROXY_",
+    "environmentOverridePolicy": "REJECT_NONBLANK"
+  },
+  "proxyReadiness": {
+    "timeoutMs": 120000,
+    "pollIntervalMs": 250,
+    "authority": "ENGINEERING_ALLOWANCE_NOT_CLOUD_EVIDENCE",
+    "directVpcColdStartMayExceedOneMinute": true,
+    "workerDatabaseConnectivityCheckFollowsReadiness": true
+  },
+  "termination": {
+    "proxyGracefulShutdownMs": 2000,
+    "proxyForcedShutdownMs": 1000,
+    "platformForcedTerminationMayPreventFinalResult": true,
+    "missingFinalResultClassification": "STOP_AND_RECONCILE_POSSIBLE_CONTACT",
+    "guaranteedWorkerDrainBeforePlatformKill": false
+  },
+  "cloudRunTask": {
+    "requiredEnvironmentKeys": [
+      "CLOUD_RUN_JOB",
+      "CLOUD_RUN_EXECUTION",
+      "CLOUD_RUN_TASK_INDEX",
+      "CLOUD_RUN_TASK_ATTEMPT",
+      "CLOUD_RUN_TASK_COUNT"
+    ],
+    "taskCount": 1,
+    "taskIndex": 0,
+    "taskAttempt": 0,
+    "callerSuppliedOwnerLabels": "FORBIDDEN",
+    "futureTaskTimeoutConstraint": "GREATER_THAN_PROXY_STARTUP_PLUS_ADMITTED_WORKER_EXECUTION_PLUS_SHUTDOWN",
+    "futureTaskTimeoutExactValue": "DEFERRED_TO_P3E_B2_R2B",
+    "deployableWithoutDerivedTimeoutProof": false
+  },
+  "reproducibility": {
+    "platform": "linux/amd64",
+    "rootLockfile": "package-lock.json",
+    "sourceDateEpoch": 1784764800,
+    "builds": 2,
+    "cachePolicy": "INDEPENDENT_NO_CACHE",
+    "output": "OCI_LAYOUT",
+    "exportTimestampPolicy": "rewrite-timestamp=true",
+    "provenanceDuringByteComparison": false,
+    "sbomDuringByteComparison": false,
+    "comparison": [
+      "RAW_INDEX_JSON_SHA256",
+      "ORDERED_INDEX_MANIFEST_DESCRIPTORS",
+      "SELECTED_CHILD_MANIFEST_DESCRIPTOR_DIGEST",
+      "RAW_CHILD_MANIFEST_SHA256",
+      "CONFIG_DESCRIPTOR_AND_RAW_DIGEST",
+      "ORDERED_LAYER_DESCRIPTORS_AND_RAW_DIGESTS"
+    ],
+    "temporaryArtifactPolicy": "DELETE_AFTER_CAPTURE"
+  },
+  "buildContext": {
+    "authority": "DETERMINISTIC_TEMPORARY_CONTEXT_FROM_EXACT_ESBUILD_GRAPH",
+    "repositoryRootAsBuildContext": false,
+    "symlinkPolicy": "REJECT",
+    "pathEscapePolicy": "REJECT",
+    "modePolicy": "REGULAR_0644_DIRECTORY_0755",
+    "timestampEpochSeconds": 1784764800,
+    "manifestAlgorithm": "SORTED_PATH_SIZE_MODE_SHA256_JSON",
+    "expectedFileCount": 144,
+    "expectedManifestSha256": "45897aed9870925bb5eea47879fbefba396637b90f14c56e7e6b85d69333defa",
+    "repositoryGraphInputCount": 107,
+    "packagedGraphInputCount": 45,
+    "entrypointCount": 3,
+    "temporaryArtifactPolicy": "DELETE_IN_FINALLY"
+  },
+  "filesystemInspection": {
+    "ownershipAuthority": "IMAGE_NATIVE_NOT_HOST_EXTRACTION",
+    "scope": "COMPLETE_ROOT_FILESYSTEM",
+    "applicationRoot": "/app",
+    "systemClosureAuthority": "PINNED_BASE_PLUS_EXACT_REVIEWED_DELTAS",
+    "baseComparison": "BIDIRECTIONAL",
+    "hostExtractionUidGidAccepted": false,
+    "unexpectedEntryPolicy": "FAIL_CLOSED",
+    "symlinkPolicy": "INSPECT_LSTAT_BEFORE_TARGET",
+    "forbiddenContentCountScope": "COMPLETE_ROOT_FILESYSTEM",
+    "virtualRuntimeMountContents": "EXCLUDED_FROM_IMAGE_LAYER_INVENTORY"
+  },
+  "runtimeOwnership": {
+    "defaultUser": "65532:65532",
+    "rootOwnedReadOnlyRoots": [
+      "/",
+      "/app",
+      "/etc",
+      "/usr",
+      "/usr/local",
+      "/usr/local/bin"
+    ],
+    "runtimeUserWritableRoots": [
+      "/cloudsql",
+      "/tmp/refund-worker"
+    ],
+    "otherWritableRootPolicy": "FORBIDDEN"
+  },
+  "systemClosure": {
+    "classificationVersion": "PINNED_NODE_BASE_DELTA_V1",
+    "removedEntryCount": 2620,
+    "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
+    "changedEntryCount": 3,
+    "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
+    "addedEntryCount": 159,
+    "addedMetadataContentManifestSha256": "f6a701f3dd140701d920243ab90990e3966ffd1ed13e10767991abcc68f384bc",
+    "removalCategories": [
+      {
+        "code": "APT_DPKG_EXECUTABLE_METADATA_AND_SCHEDULER_SURFACE",
+        "entryCount": 73
+      },
+      {
+        "code": "NODE_PACKAGE_MANAGER_PACKAGE_CACHE_AND_SHIM_SURFACE",
+        "entryCount": 2542
+      },
+      {
+        "code": "INTERACTIVE_SHELL_SURFACE",
+        "entryCount": 4
+      },
+      {
+        "code": "PACKAGE_SIGNATURE_VERIFIER_SURFACE",
+        "entryCount": 1
+      }
+    ],
+    "changedEntries": [
+      {
+        "path": "/run/lock",
+        "baseMode": "01777",
+        "runtimeMode": "0755",
+        "reason": "REMOVE_RUNTIME_USER_WRITE"
+      },
+      {
+        "path": "/tmp",
+        "baseMode": "01777",
+        "runtimeMode": "0755",
+        "reason": "REMOVE_RUNTIME_USER_WRITE"
+      },
+      {
+        "path": "/var/tmp",
+        "baseMode": "01777",
+        "runtimeMode": "0755",
+        "reason": "REMOVE_RUNTIME_USER_WRITE"
+      }
+    ],
+    "additionCategories": [
+      {
+        "code": "EXACT_APPLICATION_CLOSURE",
+        "entryCount": 156
+      },
+      {
+        "code": "RUNTIME_USER_WRITABLE_DIRECTORIES",
+        "entryCount": 2
+      },
+      {
+        "code": "VERIFIED_CLOUD_SQL_PROXY_EXECUTABLE",
+        "entryCount": 1
+      }
+    ]
+  },
+  "applicationClosure": {
+    "authority": "EXACT_IMAGE_NATIVE_METADATA_AND_CONTENT_MANIFEST",
+    "entryCount": 156,
+    "metadataManifestSha256": "615d451c325b18d9f02ee95bc07c913b1a8229fe481cab71a867d203279515fb",
+    "contentManifestSha256": "b41fe8913eda7eb3c38646c13f808f2fff26aaaea52ad742f6960f8443b02a63"
+  },
+  "forbiddenRuntimeExecutables": [
+    "apt",
+    "apt-cache",
+    "apt-cdrom",
+    "apt-compat",
+    "apt-config",
+    "apt-daily-upgrade.timer",
+    "apt-daily.timer",
+    "apt-get",
+    "apt-helper",
+    "apt-key",
+    "apt-mark",
+    "aptitude",
+    "ar",
+    "as",
+    "bash",
+    "c++",
+    "c89",
+    "c99",
+    "cc",
+    "corepack",
+    "cpp",
+    "curl",
+    "dash",
+    "deb-systemd-helper",
+    "deb-systemd-invoke",
+    "dpkg",
+    "dpkg-db-backup",
+    "dpkg-db-backup.timer",
+    "dpkg-deb",
+    "dpkg-divert",
+    "dpkg-fsys-usrunmess",
+    "dpkg-maintscript-helper",
+    "dpkg-preconfigure",
+    "dpkg-query",
+    "dpkg-realpath",
+    "dpkg-reconfigure",
+    "dpkg-split",
+    "dpkg-statoverride",
+    "dpkg-trigger",
+    "esbuild",
+    "g++",
+    "gcc",
+    "ld",
+    "make",
+    "nm",
+    "npm",
+    "npx",
+    "objcopy",
+    "objdump",
+    "pnpm",
+    "pnpx",
+    "ranlib",
+    "rbash",
+    "sh",
+    "strip",
+    "tsc",
+    "tsx",
+    "update-alternatives",
+    "wget",
+    "yarn",
+    "yarnpkg"
+  ],
+  "forbiddenRuntimePathPrefixes": [
+    "/app/node_modules/esbuild",
+    "/app/node_modules/tsx",
+    "/app/node_modules/typescript",
+    "/opt/yarn",
+    "/usr/local/lib/node_modules/corepack",
+    "/usr/local/lib/node_modules/npm"
+  ],
+  "inventory": {
+    "r2aChangedPathCount": 21,
+    "trackedModificationCount": 8,
+    "untrackedAdditionCount": 13
+  },
+  "deferredOwnership": {
+    "apiActivation": "R1B_FOUNDATION_AUTHORITY_NOT_PROVISIONED",
+    "stateBucket": "R1A_STATE_AUTHORITY_NOT_PROVISIONED",
+    "runtimeServiceAccount": "P3E_B2_R2B",
+    "cloudSqlClientIam": "P3E_B2_R2B",
+    "databaseSecretVersion": "P3E_B2_R2B",
+    "cloudRunJobTerraform": "P3E_B2_R2B",
+    "directVpcAttachment": "P3E_B2_R2B",
+    "imagePublication": "LATER_RELEASE_AUTHORITY"
+  },
+  "status": {
+    "P3E_B1_MONOLITH": "RETIRED_UNAPPLIED",
+    "STATE_BACKEND_AUTHORITY": "DEFINED_NOT_PROVISIONED",
+    "JOB_EXECUTION_DENY": "DEFINED_NOT_APPLIED",
+    "SERVICE_ACTIVATION_AUTHORITY": "DEFINED_NOT_PROVISIONED",
+    "FOUNDATION_ROOT": "DEFINED_NOT_PROVISIONED",
+    "FOUNDATION_DEPLOYER_ROLE": "DEFINED_NOT_CREATED",
+    "REFUND_WORKER_IMAGE_DEFINITION": "IMPLEMENTED_NOT_PUBLISHED",
+    "REFUND_WORKER_IMAGE_PLATFORM": "LINUX_AMD64",
+    "REFUND_WORKER_IMAGE_LOCAL_REPRODUCIBILITY": "PROVIDER_FREE_PROOF_COMPLETE_NOT_RELEASE_AUTHORITY",
+    "REFUND_WORKER_RELEASE_IMAGE_DIGEST": "ABSENT",
+    "CLOUD_SQL_PROXY_BINARY": "PINNED_NOT_DEPLOYED",
+    "CLOUD_SQL_PRIVATE_SOCKET_ARCHITECTURE": "DEFINED_NOT_PROVEN",
+    "DIRECT_VPC_EGRESS": "REQUIRED_NOT_CONFIGURED",
+    "CLOUD_SQL_CLIENT_IAM": "DEFERRED",
+    "DATABASE_SECRET_VERSION": "ABSENT",
+    "RUNTIME_IDENTITY_AUTHORITY": "DEFERRED",
+    "RUNTIME_JOB_DEFINITIONS": "DEFERRED",
+    "P3E_B2_FOUNDATION": "NOT_PROVISIONED",
+    "P3E_B2_RUNTIME": "NOT_DEPLOYABLE",
+    "PROVIDER_EXECUTION": "BLOCKED",
+    "SCHEDULED_SANDBOX": "BLOCKED",
+    "LIVE": "UNREACHABLE"
+  }
+}
