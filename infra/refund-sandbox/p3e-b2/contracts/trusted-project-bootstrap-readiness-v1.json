@@ -1,0 +1,124 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-trusted-project-bootstrap-readiness/v1",
+  "packageId": "P3E-B2-TB1",
+  "evidenceScope": "PROJECT_BOOTSTRAP_READINESS",
+  "status": "REPOSITORY_DEFINITION_ONLY",
+  "principalIdentifierSha256": "CORRELATION_FINGERPRINT_NOT_ANONYMIZATION",
+  "authority": {
+    "cloudMutation": "NONE",
+    "cloudObservationDuringImplementation": "NONE",
+    "runtime": "NONE",
+    "jobExecution": "NONE",
+    "providerContact": "NONE",
+    "live": "NONE"
+  },
+  "bootstrapApis": {
+    "names": [
+      "cloudresourcemanager.googleapis.com",
+      "serviceusage.googleapis.com",
+      "storage.googleapis.com"
+    ],
+    "setSha256": "2b5b1961dd67cc23e748d7b6a80df83aac85e475b74403469ac99ef3ac3f0bc7",
+    "setHashAlgorithm": "SHA-256 over UTF-8 sorted values joined by LF with no trailing LF"
+  },
+  "dispositions": [
+    "READY_FOR_STATE_BUCKET_PACKAGE",
+    "BOOTSTRAP_API_ACTIVATION_REQUIRED",
+    "BILLING_NOT_READY",
+    "PROJECT_NOT_DEDICATED_OR_INVALID",
+    "OBSERVATION_INCOMPLETE",
+    "EVIDENCE_STALE_OR_UNTRUSTED",
+    "INDEPENDENT_REVIEW_REQUIRED"
+  ],
+  "readOnlySources": [
+    "cloudresourcemanager.googleapis.com/v3/projects.get",
+    "cloudbilling.googleapis.com/v1/projects.getBillingInfo",
+    "serviceusage.googleapis.com/v1/services.list"
+  ],
+  "readOnlyCommandKinds": [
+    "PROJECT_GET",
+    "BILLING_INFO_GET",
+    "BOOTSTRAP_SERVICES_LIST",
+    "GCLOUD_VERSION",
+    "COLLECTOR_IDENTITY"
+  ],
+  "jsonSchema": {
+    "role": "STRUCTURAL_PREFILTER_ONLY_NOT_READINESS_AUTHORITY",
+    "authoritativeReadinessEvaluator": "DUPLICATE_SAFE_PARSE_PLUS_SEMANTIC_VALIDATION_PLUS_DIGEST_VERIFICATION_PLUS_DISPOSITION_EVALUATION"
+  },
+  "failureAndWorkBounds": {
+    "injectedDependencyFailures": "STATIC_BOUNDED_NO_RAW_CAUSE_PROPAGATION",
+    "canonicalArrayWorkBound": "LENGTH_REJECTED_BEFORE_LENGTH_PROPORTIONAL_WORK"
+  },
+  "commandBoundary": {
+    "realSubprocessAdapterIncluded": false,
+    "publicResult": "SANITIZED_COMMAND_SPECIFIC_DISCRIMINATED_UNION_ONLY",
+    "rawStdoutReturned": false,
+    "rawStderrReturned": false,
+    "rawPrincipalIdentifierReturned": false,
+    "implicitActiveProject": "FORBIDDEN",
+    "applicationDefaultCredentials": "FORBIDDEN",
+    "cloudSdkConfiguration": "EXPLICIT_EXTERNAL_PATH_REQUIRED",
+    "repositoryEvidenceOutput": "FORBIDDEN",
+    "maxStdoutBytes": 65536,
+    "maxStderrBytes": 4096,
+    "timeoutMilliseconds": 30000,
+    "maxReadAttempts": 3,
+    "retryableClasses": [
+      "TRANSIENT_429",
+      "TRANSIENT_5XX"
+    ],
+    "nonretryableClasses": [
+      "AUTHENTICATION_FAILED",
+      "AUTHORIZATION_FAILED",
+      "NOT_FOUND",
+      "PROJECT_MISMATCH",
+      "MALFORMED_OUTPUT",
+      "COMMAND_FAILED",
+      "EXECUTOR_REJECTED",
+      "RETRY_WAIT_REJECTED",
+      "PATH_CANONICALIZATION_FAILED"
+    ]
+  },
+  "evidence": {
+    "schema": "../trusted-project-bootstrap-readiness/evidence.schema.json",
+    "canonicalization": "RFC8785_JCS_RESTRICTED_DOMAIN_V1",
+    "maxCanonicalDepth": 64,
+    "maxCanonicalNodes": 10000,
+    "digestAlgorithm": "SHA-256",
+    "digestPreimage": "UTF-8 canonical evidence with integrity.evidenceSha256 omitted",
+    "maxEvidenceBytes": 65536,
+    "maxAgeSeconds": 900,
+    "futureClockAllowanceSeconds": 60,
+    "realEvidenceLocation": "EXTERNAL_OPERATIONALLY_RESTRICTED_ONLY",
+    "repositoryCommitPolicy": "REAL_EVIDENCE_FORBIDDEN",
+    "tamperEvidenceNotCollectorAuthenticity": true,
+    "trustedSigningAuthority": "ABSENT_DEFERRED",
+    "durableCustodyAuthority": "ABSENT_DEFERRED"
+  },
+  "evidenceWriter": {
+    "status": "DEFERRED",
+    "outputPathCheck": "ADVISORY_PREFLIGHT_ONLY_NOT_A_WRITE_SAFETY_BOUNDARY"
+  },
+  "review": {
+    "collectionWithoutReviewer": "ALLOWED_BUT_NOT_READY",
+    "readyRequiresIndependentReviewer": true,
+    "selfReview": "FORBIDDEN",
+    "cryptographicNonrepudiation": "NOT_CLAIMED"
+  },
+  "downstream": {
+    "mustReobserveImmediatelyBeforeMutation": [
+      "project ID and project number binding",
+      "project lifecycle",
+      "billing readiness",
+      "exact bootstrap API states"
+    ],
+    "apiActivationAuthority": "ABSENT",
+    "stateAuthority": "ABSENT",
+    "denyAuthority": "ABSENT",
+    "foundationAuthority": "ABSENT",
+    "runtimeAuthority": "ABSENT",
+    "jobExecutionAuthority": "ABSENT",
+    "providerContactAuthority": "ABSENT"
+  }
+}

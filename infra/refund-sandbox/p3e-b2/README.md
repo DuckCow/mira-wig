@@ -3,6 +3,38 @@
 Status: repository definitions only. No Google Cloud project, bucket, backend, deny policy, role,
 resource, or execution authority has been created or inspected.
 
+TB1 adds a read-only trusted-project/bootstrap-readiness evidence definition:
+
+- `contracts/trusted-project-bootstrap-readiness-v1.json` freezes the exact project, billing,
+  three-API, freshness, independent-review, and absent-authority contract;
+- `trusted-project-bootstrap-readiness/evidence.schema.json` defines the exact evidence shapes;
+- `scripts/refund-p3e-b2-bootstrap-readiness.mts` provides a fail-closed parser, restricted
+  canonicalizer, digest evaluator, and injected read-only command boundary with no real subprocess
+  adapter.
+
+TB1 implementation and tests make no cloud observation. Real evidence must stay outside the
+repository, expires for readiness after 900 seconds, and cannot authorize API activation or any
+other mutation. A future mutating package must independently re-observe the project, billing, and
+API tuple immediately before mutation. Principal SHA-256 values are correlation fingerprints, not
+anonymization or identity proof.
+
+```text
+TB1_JSON_SCHEMA_ROLE: STRUCTURAL_PREFILTER_ONLY_NOT_READINESS_AUTHORITY
+TB1_EVIDENCE_WRITER: DEFERRED
+TB1_OUTPUT_PATH_CHECK: ADVISORY_PREFLIGHT_ONLY_NOT_A_WRITE_SAFETY_BOUNDARY
+TB1_INJECTED_DEPENDENCY_FAILURES: STATIC_BOUNDED_NO_RAW_CAUSE_PROPAGATION
+TB1_CANONICAL_ARRAY_WORK_BOUND: LENGTH_REJECTED_BEFORE_LENGTH_PROPORTIONAL_WORK
+```
+
+The command boundary returns only command-specific sanitized records. Raw stdout, stderr, decoded
+gcloud objects, billing-account identifiers, and raw principal identifiers are never public
+results.
+
+Injected executor, retry-wait, and canonical-path failures are normalized to finite static results;
+their original values, messages, stacks, causes, and objects are never public. Canonical array
+length is rejected against remaining node capacity before own-key inspection or any
+length-proportional allocation or traversal.
+
 R1A defines three deliberately separate Terraform authority boundaries:
 
 - `state-bootstrap-create` is a one-time local-state root that can create only the shared state

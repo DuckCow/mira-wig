@@ -1,0 +1,555 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mira.invalid/refund/p3e-b2/trusted-project-bootstrap-readiness-v1.schema.json",
+  "title": "Mira refund P3E-B2 trusted project bootstrap readiness structural prefilter v1",
+  "description": "Structural prefilter only. Readiness authority additionally requires duplicate-safe parsing, semantic validation, digest recomputation, timestamp evaluation, and disposition coherence.",
+  "$comment": "TB1_JSON_SCHEMA_ROLE: STRUCTURAL_PREFILTER_ONLY_NOT_READINESS_AUTHORITY",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "evidenceScope",
+    "project",
+    "billing",
+    "operators",
+    "bootstrapApis",
+    "collection",
+    "sources",
+    "downstreamAuthority",
+    "review",
+    "integrity"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "mira-refund-p3e-b2-trusted-project-bootstrap-readiness/v1"
+    },
+    "evidenceScope": {
+      "const": "PROJECT_BOOTSTRAP_READINESS"
+    },
+    "project": {
+      "$ref": "#/$defs/project"
+    },
+    "billing": {
+      "$ref": "#/$defs/billing"
+    },
+    "operators": {
+      "$ref": "#/$defs/operators"
+    },
+    "bootstrapApis": {
+      "$ref": "#/$defs/bootstrapApis"
+    },
+    "collection": {
+      "$ref": "#/$defs/collection"
+    },
+    "sources": {
+      "$ref": "#/$defs/sources"
+    },
+    "downstreamAuthority": {
+      "$ref": "#/$defs/downstreamAuthority"
+    },
+    "review": {
+      "$ref": "#/$defs/review"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operators": {
+            "properties": {
+              "reviewer": {
+                "properties": {
+                  "status": {
+                    "const": "ABSENT"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "reviewer"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "review": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "disposition"
+            ],
+            "properties": {
+              "disposition": {
+                "const": "INDEPENDENT_REVIEW_REQUIRED"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?Z$"
+    },
+    "projectNumber": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16,
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "principalClass": {
+      "enum": [
+        "USER",
+        "SERVICE_ACCOUNT",
+        "WORKLOAD_IDENTITY"
+      ]
+    },
+    "disposition": {
+      "enum": [
+        "READY_FOR_STATE_BUCKET_PACKAGE",
+        "BOOTSTRAP_API_ACTIVATION_REQUIRED",
+        "BILLING_NOT_READY",
+        "PROJECT_NOT_DEDICATED_OR_INVALID",
+        "OBSERVATION_INCOMPLETE",
+        "EVIDENCE_STALE_OR_UNTRUSTED",
+        "INDEPENDENT_REVIEW_REQUIRED"
+      ]
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "projectNumber",
+        "lifecycleState",
+        "bindingSource",
+        "bindingResponseSha256"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+        },
+        "projectNumber": {
+          "$ref": "#/$defs/projectNumber"
+        },
+        "lifecycleState": {
+          "const": "ACTIVE"
+        },
+        "bindingSource": {
+          "const": "cloudresourcemanager.googleapis.com/v3/projects.get"
+        },
+        "bindingResponseSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "accountIdentifierRetained",
+        "observationSource"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "ENABLED_ACTIVE",
+            "DISABLED",
+            "UNOBSERVABLE"
+          ]
+        },
+        "accountIdentifierRetained": {
+          "const": false
+        },
+        "observationSource": {
+          "const": "cloudbilling.googleapis.com/v1/projects.getBillingInfo"
+        }
+      }
+    },
+    "operators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collector",
+        "reviewer"
+      ],
+      "properties": {
+        "collector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "principalClass",
+            "principalIdentifierSha256"
+          ],
+          "properties": {
+            "principalClass": {
+              "$ref": "#/$defs/principalClass"
+            },
+            "principalIdentifierSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "reviewer": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "const": "ABSENT"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "principalClass",
+                "principalIdentifierSha256"
+              ],
+              "properties": {
+                "status": {
+                  "const": "PRESENT"
+                },
+                "principalClass": {
+                  "$ref": "#/$defs/principalClass"
+                },
+                "principalIdentifierSha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "bootstrapApis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "setSha256",
+        "observations"
+      ],
+      "properties": {
+        "names": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {
+              "const": "cloudresourcemanager.googleapis.com"
+            },
+            {
+              "const": "serviceusage.googleapis.com"
+            },
+            {
+              "const": "storage.googleapis.com"
+            }
+          ],
+          "items": false
+        },
+        "setSha256": {
+          "const": "2b5b1961dd67cc23e748d7b6a80df83aac85e475b74403469ac99ef3ac3f0bc7"
+        },
+        "observations": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/resourceManagerObservation"
+            },
+            {
+              "$ref": "#/$defs/serviceUsageObservation"
+            },
+            {
+              "$ref": "#/$defs/storageObservation"
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "apiObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "state",
+        "consumerProjectNumber"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ENABLED",
+            "DISABLED",
+            "UNOBSERVABLE"
+          ]
+        },
+        "consumerProjectNumber": {
+          "$ref": "#/$defs/projectNumber"
+        }
+      }
+    },
+    "resourceManagerObservation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/apiObservation"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "cloudresourcemanager.googleapis.com"
+            }
+          }
+        }
+      ]
+    },
+    "serviceUsageObservation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/apiObservation"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "serviceusage.googleapis.com"
+            }
+          }
+        }
+      ]
+    },
+    "storageObservation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/apiObservation"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "storage.googleapis.com"
+            }
+          }
+        }
+      ]
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startedAt",
+        "completedAt",
+        "maxAgeSeconds"
+      ],
+      "properties": {
+        "startedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "maxAgeSeconds": {
+          "const": 900
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/projectSource"
+        },
+        {
+          "$ref": "#/$defs/billingSource"
+        },
+        {
+          "$ref": "#/$defs/serviceUsageSource"
+        }
+      ],
+      "items": false
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "toolVersion",
+        "api",
+        "responseSha256"
+      ],
+      "properties": {
+        "tool": {
+          "const": "gcloud"
+        },
+        "toolVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$"
+        },
+        "api": {
+          "type": "string"
+        },
+        "responseSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "projectSource": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/source"
+        },
+        {
+          "properties": {
+            "api": {
+              "const": "cloudresourcemanager.googleapis.com/v3/projects.get"
+            }
+          }
+        }
+      ]
+    },
+    "billingSource": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/source"
+        },
+        {
+          "properties": {
+            "api": {
+              "const": "cloudbilling.googleapis.com/v1/projects.getBillingInfo"
+            }
+          }
+        }
+      ]
+    },
+    "serviceUsageSource": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/source"
+        },
+        {
+          "properties": {
+            "api": {
+              "const": "serviceusage.googleapis.com/v1/services.list"
+            }
+          }
+        }
+      ]
+    },
+    "downstreamAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiMutationAuthorized",
+        "stateAuthorityAuthorized",
+        "denyAuthorityAuthorized",
+        "foundationAuthorityAuthorized",
+        "runtimeAuthorityAuthorized",
+        "jobExecutionAuthorized",
+        "providerContactAuthorized"
+      ],
+      "properties": {
+        "apiMutationAuthorized": {
+          "const": false
+        },
+        "stateAuthorityAuthorized": {
+          "const": false
+        },
+        "denyAuthorityAuthorized": {
+          "const": false
+        },
+        "foundationAuthorityAuthorized": {
+          "const": false
+        },
+        "runtimeAuthorityAuthorized": {
+          "const": false
+        },
+        "jobExecutionAuthorized": {
+          "const": false
+        },
+        "providerContactAuthorized": {
+          "const": false
+        }
+      }
+    },
+    "review": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "disposition"
+          ],
+          "properties": {
+            "disposition": {
+              "const": "INDEPENDENT_REVIEW_REQUIRED"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "disposition",
+            "reviewedAt"
+          ],
+          "properties": {
+            "disposition": {
+              "$ref": "#/$defs/disposition"
+            },
+            "reviewedAt": {
+              "$ref": "#/$defs/utcTimestamp"
+            }
+          }
+        }
+      ]
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalization",
+        "algorithm",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "canonicalization": {
+          "const": "RFC8785_JCS_RESTRICTED_DOMAIN_V1"
+        },
+        "algorithm": {
+          "const": "SHA-256"
+        },
+        "evidenceSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}
