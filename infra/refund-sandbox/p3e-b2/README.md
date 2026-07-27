@@ -30,6 +30,35 @@ The command boundary returns only command-specific sanitized records. Raw stdout
 gcloud objects, billing-account identifiers, and raw principal identifiers are never public
 results.
 
+TB2A-R1 adds a separate evidence-v2 attended collector-core definition without changing the v1
+contract or v1 schema. The exact six-command order is `EFFECTIVE_CONFIG_GET`, `GCLOUD_VERSION`,
+`COLLECTOR_IDENTITY`, `PROJECT_GET`, `BILLING_INFO_GET`, and `BOOTSTRAP_SERVICES_LIST`. The first
+three are local receipts; the final three remain the exact remote-source set.
+
+Method A lists the complete enabled-service inventory without a name filter, sort, or result
+limit. It parses the official Service Usage shape (`name` contains the service resource and
+`parent` contains only the consumer project), ignores structurally valid non-target services, and
+maps a missing target to `UNOBSERVABLE`. It never infers `DISABLED` from absence.
+Complete all-enabled evidence with an absent reviewer remains
+`INDEPENDENT_REVIEW_REQUIRED`; a missing target is `OBSERVATION_INCOMPLETE`.
+
+```text
+TB2A_R1_METHOD_A_DISABLED_INFERENCE: FORBIDDEN
+TB2A_R1_METHOD_A_MISSING_TARGET_STATE: UNOBSERVABLE
+TB2A_R1_BOOTSTRAP_API_ACTIVATION_DISPOSITION_REAL_REACHABILITY:
+UNREACHABLE_WITH_METHOD_A
+```
+
+The collector permission contract contains only `resourcemanager.projects.get` and
+`serviceusage.services.list`, scoped to the exact dedicated project. It excludes
+`serviceusage.services.get`, `serviceusage.services.use`, `serviceusage.services.batchGet`,
+quota-project overrides, activation, billing mutation, and consumer-policy mutation.
+
+The provider-free subprocess tests spawn only the committed Node fixture through
+`process.execPath`. The fixture self-check emits only a bounded result summary. No real gcloud,
+Cloud SDK configuration, credential, cloud observation, evidence writer, provider, database, or
+mutation is introduced by TB2A-R1.
+
 Injected executor, retry-wait, and canonical-path failures are normalized to finite static results;
 their original values, messages, stacks, causes, and objects are never public. Canonical array
 length is rejected against remaining node capacity before own-key inspection or any

@@ -1,0 +1,101 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-trusted-project-bootstrap-readiness/v2",
+  "packageId": "P3E-B2-TB2A-R1",
+  "evidenceScope": "PROJECT_BOOTSTRAP_READINESS",
+  "status": "REPOSITORY_DEFINITION_ONLY",
+  "previousVersion": {
+    "contract": "mira-refund-p3e-b2-trusted-project-bootstrap-readiness/v1",
+    "interpretation": "IMMUTABLE_SEPARATE_VERSION"
+  },
+  "bootstrapApis": {
+    "names": [
+      "cloudresourcemanager.googleapis.com",
+      "serviceusage.googleapis.com",
+      "storage.googleapis.com"
+    ],
+    "setSha256": "2b5b1961dd67cc23e748d7b6a80df83aac85e475b74403469ac99ef3ac3f0bc7"
+  },
+  "readOnlySources": [
+    "gcloud.projects.describe:json(projectId,projectNumber,lifecycleState)",
+    "gcloud.billing.projects.describe:json(projectId,billingEnabled)",
+    "gcloud.services.list.enabled:json(name,config.name,state,parent)"
+  ],
+  "readOnlyCommandKinds": [
+    "EFFECTIVE_CONFIG_GET",
+    "GCLOUD_VERSION",
+    "COLLECTOR_IDENTITY",
+    "PROJECT_GET",
+    "BILLING_INFO_GET",
+    "BOOTSTRAP_SERVICES_LIST"
+  ],
+  "attempts": {
+    "maxAttempts": 1,
+    "maxRetries": 0,
+    "automaticRetries": "NONE",
+    "transientStatusInferenceFromStderr": "FORBIDDEN"
+  },
+  "methodA": {
+    "disabledInference": "FORBIDDEN",
+    "missingTargetState": "UNOBSERVABLE",
+    "evidenceObservationStates": [
+      "ENABLED",
+      "UNOBSERVABLE"
+    ],
+    "bootstrapApiActivationDispositionRealReachability": "UNREACHABLE_WITH_METHOD_A",
+    "validNonTargetService": "IGNORED",
+    "malformedEntryAnywhere": "FAIL_CLOSED",
+    "targetDuplicate": "FAIL_CLOSED",
+    "targetProjectMismatch": "FAIL_CLOSED",
+    "targetNameConfigMismatch": "FAIL_CLOSED"
+  },
+  "collectorPermissions": {
+    "included": [
+      "resourcemanager.projects.get",
+      "serviceusage.services.list"
+    ],
+    "excluded": [
+      "serviceusage.services.get",
+      "serviceusage.services.use",
+      "serviceusage.services.batchGet",
+      "quota-project overrides",
+      "consumer-policy mutation",
+      "API activation",
+      "billing mutation"
+    ]
+  },
+  "identity": {
+    "fingerprintAttests": "LOCAL_CREDENTIAL_STORE_SINGLE_ACTIVE_ACCOUNT_UNDER_CLEAN_CONFIGURATION",
+    "effectiveProviderCaller": "NOT_ATTESTED",
+    "credentialOwnership": "NOT_ATTESTED",
+    "providerAuditAttribution": "NOT_ATTESTED",
+    "nonrepudiation": "NOT_ATTESTED",
+    "anonymization": "NOT_CLAIMED"
+  },
+  "evidence": {
+    "schema": "../trusted-project-bootstrap-readiness-v2/evidence.schema.json",
+    "canonicalization": "RFC8785_JCS_RESTRICTED_DOMAIN_V1",
+    "maxEvidenceBytes": 65536,
+    "maxAgeSeconds": 900,
+    "maxTotalDurationSeconds": 120,
+    "remoteSourceCount": 3,
+    "reviewer": "ABSENT_REQUIRED",
+    "observationCompleteReviewDisposition": "INDEPENDENT_REVIEW_REQUIRED",
+    "missingTargetDisposition": "OBSERVATION_INCOMPLETE",
+    "projectBindingResponseSha256": "REMOVED_AS_DUPLICATE",
+    "realEvidenceLocation": "EXTERNAL_OPERATIONALLY_RESTRICTED_ONLY",
+    "repositoryCommitPolicy": "REAL_EVIDENCE_FORBIDDEN"
+  },
+  "evidenceWriter": {
+    "status": "DEFERRED",
+    "repositoryOutput": "FORBIDDEN"
+  },
+  "downstream": {
+    "allAuthorityFields": false,
+    "readyForStateBucketPackage": "FORBIDDEN_WITH_REVIEWER_ABSENT"
+  },
+  "machineTruths": {
+    "TB2A_R1_METHOD_A_DISABLED_INFERENCE": "FORBIDDEN",
+    "TB2A_R1_METHOD_A_MISSING_TARGET_STATE": "UNOBSERVABLE",
+    "TB2A_R1_BOOTSTRAP_API_ACTIVATION_DISPOSITION_REAL_REACHABILITY": "UNREACHABLE_WITH_METHOD_A"
+  }
+}

@@ -84,7 +84,7 @@ const EXPECTED_FORBIDDEN_PREFIXES = Object.freeze([
 ]);
 
 describe("P3E-B2-R2A runtime image and private socket policy", () => {
-  it("freezes the exact R2A inventory within the 83-path P3E-B2 supersession", () => {
+  it("freezes the exact R2A inventory within the P3E-B2 supersession", () => {
     const r2a = discoverR2aFiles();
     expect(EXPECTED_R2A_FILES).toHaveLength(21);
     expect(new Set(EXPECTED_R2A_FILES).size).toBe(21);
@@ -101,7 +101,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(83);
+    expect(completeInfra).toHaveLength(86);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",

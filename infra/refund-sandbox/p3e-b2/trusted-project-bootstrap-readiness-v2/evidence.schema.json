@@ -1,0 +1,707 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mira.invalid/refund/p3e-b2/trusted-project-bootstrap-readiness-v2.schema.json",
+  "title": "Mira refund P3E-B2 trusted project bootstrap readiness structural prefilter v2",
+  "description": "Structural prefilter only. Readiness authority additionally requires duplicate-safe parsing, exact-version semantic validation, digest recomputation, timestamp evaluation, and disposition coherence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "evidenceScope",
+    "project",
+    "billing",
+    "operators",
+    "bootstrapApis",
+    "collection",
+    "sources",
+    "configuration",
+    "provenance",
+    "downstreamAuthority",
+    "review",
+    "integrity"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "mira-refund-p3e-b2-trusted-project-bootstrap-readiness/v2"
+    },
+    "evidenceScope": {
+      "const": "PROJECT_BOOTSTRAP_READINESS"
+    },
+    "project": {
+      "$ref": "#/$defs/project"
+    },
+    "billing": {
+      "$ref": "#/$defs/billing"
+    },
+    "operators": {
+      "$ref": "#/$defs/operators"
+    },
+    "bootstrapApis": {
+      "$ref": "#/$defs/bootstrapApis"
+    },
+    "collection": {
+      "$ref": "#/$defs/collection"
+    },
+    "sources": {
+      "$ref": "#/$defs/sources"
+    },
+    "configuration": {
+      "$ref": "#/$defs/configuration"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "downstreamAuthority": {
+      "$ref": "#/$defs/downstreamAuthority"
+    },
+    "review": {
+      "$ref": "#/$defs/review"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?Z$"
+    },
+    "projectNumber": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16,
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "projectNumber",
+        "lifecycleState",
+        "bindingSource"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+        },
+        "projectNumber": {
+          "$ref": "#/$defs/projectNumber"
+        },
+        "lifecycleState": {
+          "const": "ACTIVE"
+        },
+        "bindingSource": {
+          "const": "gcloud.projects.describe:json(projectId,projectNumber,lifecycleState)"
+        }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "accountIdentifierRetained",
+        "observationSource"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "ENABLED_ACTIVE",
+            "DISABLED",
+            "UNOBSERVABLE"
+          ]
+        },
+        "accountIdentifierRetained": {
+          "const": false
+        },
+        "observationSource": {
+          "const": "cloudbilling.googleapis.com/v1/projects.getBillingInfo"
+        }
+      }
+    },
+    "operators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collector",
+        "reviewer"
+      ],
+      "properties": {
+        "collector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "principalClass",
+            "principalIdentifierSha256"
+          ],
+          "properties": {
+            "principalClass": {
+              "enum": [
+                "USER",
+                "SERVICE_ACCOUNT"
+              ]
+            },
+            "principalIdentifierSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "reviewer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "ABSENT"
+            }
+          }
+        }
+      }
+    },
+    "apiObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "state",
+        "consumerProjectNumber"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ENABLED",
+            "UNOBSERVABLE"
+          ]
+        },
+        "consumerProjectNumber": {
+          "$ref": "#/$defs/projectNumber"
+        }
+      }
+    },
+    "bootstrapApis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "setSha256",
+        "observations"
+      ],
+      "properties": {
+        "names": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "cloudresourcemanager.googleapis.com"
+            },
+            {
+              "const": "serviceusage.googleapis.com"
+            },
+            {
+              "const": "storage.googleapis.com"
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "setSha256": {
+          "const": "2b5b1961dd67cc23e748d7b6a80df83aac85e475b74403469ac99ef3ac3f0bc7"
+        },
+        "observations": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/apiObservation"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "cloudresourcemanager.googleapis.com"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/apiObservation"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "serviceusage.googleapis.com"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/apiObservation"
+                },
+                {
+                  "properties": {
+                    "name": {
+                      "const": "storage.googleapis.com"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      }
+    },
+    "commandReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "startedAt",
+        "completedAt",
+        "durationMs"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "startedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startedAt",
+        "completedAt",
+        "maxAgeSeconds",
+        "maxTotalDurationSeconds",
+        "maxAttempts",
+        "maxRetries",
+        "automaticRetries",
+        "totalDurationMs",
+        "nonce",
+        "commands"
+      ],
+      "properties": {
+        "startedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "maxAgeSeconds": {
+          "const": 900
+        },
+        "maxTotalDurationSeconds": {
+          "const": 120
+        },
+        "maxAttempts": {
+          "const": 1
+        },
+        "maxRetries": {
+          "const": 0
+        },
+        "automaticRetries": {
+          "const": "NONE"
+        },
+        "totalDurationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120000
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,128}$"
+        },
+        "commands": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/commandReceipt"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "EFFECTIVE_CONFIG_GET"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/commandReceipt"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "GCLOUD_VERSION"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/commandReceipt"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "COLLECTOR_IDENTITY"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/commandReceipt"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "PROJECT_GET"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/commandReceipt"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "BILLING_INFO_GET"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/commandReceipt"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "BOOTSTRAP_SERVICES_LIST"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 6,
+          "maxItems": 6
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "commandSurface",
+        "tool",
+        "toolVersion",
+        "argvSha256",
+        "responseSha256"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "commandSurface": {
+          "type": "string"
+        },
+        "tool": {
+          "const": "gcloud"
+        },
+        "toolVersion": {
+          "const": "577.0.0"
+        },
+        "argvSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "responseSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "PROJECT_GET"
+                },
+                "commandSurface": {
+                  "const": "gcloud.projects.describe:json(projectId,projectNumber,lifecycleState)"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "BILLING_INFO_GET"
+                },
+                "commandSurface": {
+                  "const": "gcloud.billing.projects.describe:json(projectId,billingEnabled)"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/source"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "BOOTSTRAP_SERVICES_LIST"
+                },
+                "commandSurface": {
+                  "const": "gcloud.services.list.enabled:json(name,config.name,state,parent)"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "cleanliness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiEndpointOverridesAbsent",
+        "customCaCertsFileAbsent",
+        "impersonationAbsent",
+        "accessTokenFileAbsent",
+        "credentialFileOverrideAbsent",
+        "proxyOverridesAbsent",
+        "quotaProjectAbsent",
+        "coreAccountPresent"
+      ],
+      "properties": {
+        "apiEndpointOverridesAbsent": {
+          "const": true
+        },
+        "customCaCertsFileAbsent": {
+          "const": true
+        },
+        "impersonationAbsent": {
+          "const": true
+        },
+        "accessTokenFileAbsent": {
+          "const": true
+        },
+        "credentialFileOverrideAbsent": {
+          "const": true
+        },
+        "proxyOverridesAbsent": {
+          "const": true
+        },
+        "quotaProjectAbsent": {
+          "const": true
+        },
+        "coreAccountPresent": {
+          "const": true
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanliness",
+        "propertyNameFingerprintSha256",
+        "argvSha256",
+        "responseSha256"
+      ],
+      "properties": {
+        "cleanliness": {
+          "$ref": "#/$defs/cleanliness"
+        },
+        "propertyNameFingerprintSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "argvSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "responseSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositoryCommit",
+        "adapterContractVersion",
+        "gcloudVersion",
+        "versionArgvSha256",
+        "versionResponseSha256",
+        "collectorIdentityArgvSha256",
+        "collectorIdentityResponseSha256",
+        "effectiveCallerAttested"
+      ],
+      "properties": {
+        "repositoryCommit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "adapterContractVersion": {
+          "const": "mira-refund-p3e-b2-attended-collector-adapter/v1"
+        },
+        "gcloudVersion": {
+          "const": "577.0.0"
+        },
+        "versionArgvSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "versionResponseSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "collectorIdentityArgvSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "collectorIdentityResponseSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "effectiveCallerAttested": {
+          "const": false
+        }
+      }
+    },
+    "downstreamAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiMutationAuthorized",
+        "stateAuthorityAuthorized",
+        "denyAuthorityAuthorized",
+        "foundationAuthorityAuthorized",
+        "runtimeAuthorityAuthorized",
+        "jobExecutionAuthorized",
+        "providerContactAuthorized"
+      ],
+      "properties": {
+        "apiMutationAuthorized": {
+          "const": false
+        },
+        "stateAuthorityAuthorized": {
+          "const": false
+        },
+        "denyAuthorityAuthorized": {
+          "const": false
+        },
+        "foundationAuthorityAuthorized": {
+          "const": false
+        },
+        "runtimeAuthorityAuthorized": {
+          "const": false
+        },
+        "jobExecutionAuthorized": {
+          "const": false
+        },
+        "providerContactAuthorized": {
+          "const": false
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition"
+      ],
+      "properties": {
+        "disposition": {
+          "enum": [
+            "INDEPENDENT_REVIEW_REQUIRED",
+            "OBSERVATION_INCOMPLETE"
+          ]
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalization",
+        "algorithm",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "canonicalization": {
+          "const": "RFC8785_JCS_RESTRICTED_DOMAIN_V1"
+        },
+        "algorithm": {
+          "const": "SHA-256"
+        },
+        "evidenceSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

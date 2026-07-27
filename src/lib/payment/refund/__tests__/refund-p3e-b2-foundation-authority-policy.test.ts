@@ -232,8 +232,14 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(isR1BPath(
       "trusted-project-bootstrap-readiness/evidence.schema.json",
     )).toBe(false);
-    expect(files).toHaveLength(83);
-    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(45);
+    expect(isR1BPath(
+      "contracts/attended-collector-core-v1.json",
+    )).toBe(false);
+    expect(isR1BPath(
+      "contracts/trusted-project-bootstrap-readiness-v2.json",
+    )).toBe(false);
+    expect(files).toHaveLength(86);
+    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(48);
   });
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {
@@ -811,7 +817,11 @@ describe("P3E-B2-R1B foundation authority policy", () => {
 });
 
 function isR1BPath(path: string): boolean {
-  if (path === "contracts/trusted-project-bootstrap-readiness-v1.json") {
+  if ([
+    "contracts/attended-collector-core-v1.json",
+    "contracts/trusted-project-bootstrap-readiness-v1.json",
+    "contracts/trusted-project-bootstrap-readiness-v2.json",
+  ].includes(path)) {
     return false;
   }
 

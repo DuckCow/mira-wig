@@ -1,0 +1,132 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-attended-collector-core/v1",
+  "packageId": "P3E-B2-TB2A-R1",
+  "status": "DORMANT_PROVIDER_FREE_DEFINITION_ONLY",
+  "evidenceVersion": "mira-refund-p3e-b2-trusted-project-bootstrap-readiness/v2",
+  "authority": {
+    "implementation": "REPOSITORY_DEFINITION_ONLY",
+    "realCollection": "FORBIDDEN",
+    "credentialAccess": "FORBIDDEN",
+    "cloudObservation": "FORBIDDEN",
+    "cloudMutation": "NONE",
+    "evidenceWriter": "ABSENT",
+    "providerContact": "NONE",
+    "databaseAccess": "NONE"
+  },
+  "collectorPermissions": {
+    "scope": "EXACT_DEDICATED_PROJECT_ONLY",
+    "included": [
+      "resourcemanager.projects.get",
+      "serviceusage.services.list"
+    ],
+    "excluded": [
+      "serviceusage.services.get",
+      "serviceusage.services.use",
+      "serviceusage.services.batchGet",
+      "consumer-policy mutation",
+      "API activation",
+      "billing mutation",
+      "quota-project overrides"
+    ]
+  },
+  "commandOrder": [
+    "EFFECTIVE_CONFIG_GET",
+    "GCLOUD_VERSION",
+    "COLLECTOR_IDENTITY",
+    "PROJECT_GET",
+    "BILLING_INFO_GET",
+    "BOOTSTRAP_SERVICES_LIST"
+  ],
+  "remoteSources": [
+    "PROJECT_GET",
+    "BILLING_INFO_GET",
+    "BOOTSTRAP_SERVICES_LIST"
+  ],
+  "localReceipts": [
+    "EFFECTIVE_CONFIG_GET",
+    "GCLOUD_VERSION",
+    "COLLECTOR_IDENTITY"
+  ],
+  "observationMethod": {
+    "id": "METHOD_A_ENABLED_SERVICE_INVENTORY",
+    "serviceCommand": "services list --enabled --page-size=200 --format=json(name,config.name,state,parent)",
+    "filter": "ABSENT",
+    "sort": "ABSENT",
+    "limit": "ABSENT",
+    "billingProject": "ABSENT",
+    "quotaProject": "ABSENT",
+    "missingTargetState": "UNOBSERVABLE",
+    "disabledInference": "FORBIDDEN",
+    "activationDispositionRealReachability": "UNREACHABLE_WITH_METHOD_A"
+  },
+  "configurationBoundary": {
+    "coreAccount": "PRESENT_UNAMBIGUOUS_REQUIRED",
+    "valuesInPublicResult": false,
+    "propertyNameFingerprint": "SHA-256 over sorted admitted set property names joined by LF",
+    "rejectedSetProperties": [
+      "api_endpoint_overrides/*",
+      "core/custom_ca_certs_file",
+      "auth/impersonate_service_account",
+      "auth/access_token_file",
+      "auth/credential_file_override",
+      "proxy/*",
+      "billing/quota_project"
+    ]
+  },
+  "executableBoundary": {
+    "launcher": "ABSOLUTE_SUPPLIED_PATH",
+    "python": "SEPARATELY_SUPPLIED_ABSOLUTE_PATH",
+    "lstatBeforeRealpath": true,
+    "symlink": "FORBIDDEN",
+    "nonRegularFile": "FORBIDDEN",
+    "groupOrWorldWritable": "FORBIDDEN",
+    "repositoryContained": "FORBIDDEN",
+    "pinnedGcloudVersion": "577.0.0",
+    "freshArchiveExtraction": "NOT_REQUIRED",
+    "executingUidAttackerProtection": "NOT_CLAIMED"
+  },
+  "processBoundary": {
+    "shell": false,
+    "detached": true,
+    "unref": false,
+    "stdio": [
+      "ignore",
+      "pipe",
+      "pipe"
+    ],
+    "continuousDrain": true,
+    "commandDeadlineMilliseconds": 30000,
+    "sigtermGraceMilliseconds": 2000,
+    "closeDeadlineMilliseconds": 5000,
+    "signalUndefinedPid": "FORBIDDEN",
+    "signalAfterExitObserved": "FORBIDDEN",
+    "signalFailure": "PROCESS_TERMINATION_UNCONFIRMED",
+    "publicRawStdout": false,
+    "publicRawStderr": false
+  },
+  "attempts": {
+    "maxAttempts": 1,
+    "maxRetries": 0,
+    "automaticRetries": "NONE",
+    "stderrStatusInference": "FORBIDDEN"
+  },
+  "evidence": {
+    "reviewer": "ABSENT_REQUIRED",
+    "observationCompleteDisposition": "INDEPENDENT_REVIEW_REQUIRED",
+    "missingTargetDisposition": "OBSERVATION_INCOMPLETE",
+    "remoteSourceCount": 3,
+    "maxTotalDurationSeconds": 120,
+    "projectBindingSource": "gcloud.projects.describe:json(projectId,projectNumber,lifecycleState)",
+    "projectBindingResponseSha256": "ABSENT",
+    "downstreamAuthority": "ALL_FALSE",
+    "readyDisposition": "FORBIDDEN"
+  },
+  "selfCheck": {
+    "mode": "FIXTURE_SELF_CHECK",
+    "executable": "process.execPath",
+    "fixtureOnly": true,
+    "network": "NONE",
+    "credentials": "FORBIDDEN",
+    "evidenceBodyOutput": "FORBIDDEN"
+  }
+}
