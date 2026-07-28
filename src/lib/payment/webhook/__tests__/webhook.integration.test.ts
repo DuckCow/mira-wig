@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
   FulfillmentType,
   PaymentAttemptStatus,
@@ -12,7 +12,8 @@ import {
   WebhookIngressRejectionStage,
   WigCategory,
 } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { POST as paypalWebhookPost } from "@/app/api/payments/paypal/webhook/route";
 import { POST as tossWebhookPost } from "@/app/api/payments/toss/webhook/route";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
@@ -28,12 +29,23 @@ import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
 import { tossBasicAuthorization } from "@/lib/payment/providers/toss/auth";
 import { deriveTossOrderId } from "@/lib/payment/providers/toss/order-id";
 import { handleWebhook } from "../handle";
+import { createMockWebhookPipeline } from "../mock-pipeline";
 import type { WebhookHandleOptions } from "../pipeline-types";
-import { WEBHOOK_RAW_PREFIX_CHARS } from "../rejections";
+import {
+  WEBHOOK_BODY_OVER_LIMIT_LOWER_BOUND,
+  WEBHOOK_MAX_CONTENT_LENGTH_BYTES,
+  WEBHOOK_RAW_PREFIX_CHARS,
+} from "../rejections";
 
 const B4_NOW = new Date("2026-08-02T00:00:00.000Z");
 const B4_RECEIVED_AT = new Date("2026-08-02T00:02:00.000Z");
 const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
+const ORIGINAL_TOSS_EXTERNAL_ENABLED = process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+const ORIGINAL_TOSS_SECRET = process.env.TOSS_SANDBOX_SECRET_KEY;
+const ORIGINAL_PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
+const ORIGINAL_PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
+const ORIGINAL_PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 
 interface TestContext {
   userId: string;
@@ -72,32 +84,315 @@ interface TossFetchCall {
   init: Parameters<typeof fetch>[1];
 }
 
+interface PublicStreamProbe {
+  pullCount: number;
+  cancelCount: number;
+  pullsAfterCancellation: number;
+  cancelled: boolean;
+}
+
 describe("payment webhook core", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
     ctx = makeContext();
     process.env.PAYMENT_MODE = "SANDBOX";
+    delete process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+    delete process.env.TOSS_SANDBOX_SECRET_KEY;
+    delete process.env.PAYPAL_CLIENT_ID;
+    delete process.env.PAYPAL_CLIENT_SECRET;
+    delete process.env.PAYPAL_WEBHOOK_ID;
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
   });
 
   afterEach(async () => {
-    restorePaymentMode();
+    restoreWebhookEnvironment();
     await cleanup(ctx);
   });
 
-  it("valid webhook records PROCESSED, completes payment, and route returns 2xx", async () => {
+  it.each([
+    ["Toss", PaymentProvider.TOSS, tossWebhookPost],
+    ["PayPal", PaymentProvider.PAYPAL, paypalWebhookPost],
+  ] as const)(
+    "public %s route rejects exact unsigned checkout facts with zero financial/order mutation",
+    async (_label, provider, post) => {
+      const session = await submitSessionWithOneLine(ctx);
+      const payload = capturePayload(ctx, session);
+      const response = await post(publicRouteRequest(provider, payload));
+      const replay = await post(publicRouteRequest(provider, payload));
+
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(replay.status).toBeGreaterThanOrEqual(400);
+      await expect(response.json()).resolves.toMatchObject({ ok: false, kind: "verifyFailed" });
+      await expect(replay.json()).resolves.toMatchObject({ ok: false, kind: "verifyFailed" });
+      await expectZeroPublicIngressWrites(ctx, session, payload, provider);
+    },
+  );
+
+  it.each([
+    ["PAYMENT_MODE missing", undefined, "ENABLED", "test_secret_present"],
+    ["PAYMENT_MODE blank", "   ", "ENABLED", "test_secret_present"],
+    ["SANDBOX alone", "SANDBOX", undefined, undefined],
+    ["LIVE without a verifier", "LIVE", "ENABLED", "test_secret_present"],
+    ["malformed PAYMENT_MODE", "sandbox", "ENABLED", "test_secret_present"],
+    ["external flag absent with credential", "SANDBOX", undefined, "test_secret_present"],
+    ["partial external flag", "SANDBOX", "enabled", "test_secret_present"],
+    ["valid external flag with missing credential", "SANDBOX", "ENABLED", "   "],
+  ] as const)(
+    "public Toss route denies %s without mock fallback",
+    async (_label, paymentMode, externalEnabled, secret) => {
+      setOptionalEnv("PAYMENT_MODE", paymentMode);
+      setOptionalEnv(TOSS_SANDBOX_EXTERNAL_ENABLED, externalEnabled);
+      setOptionalEnv(TOSS_SANDBOX_SECRET_KEY, secret);
+      const session = await submitSessionWithOneLine(ctx);
+      const payload = capturePayload(ctx, session);
+
+      const response = await tossWebhookPost(publicRouteRequest(PaymentProvider.TOSS, payload));
+
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+    },
+  );
+
+  it("keeps explicit mock injection isolated from a parallel public Toss call", async () => {
     const session = await submitSessionWithOneLine(ctx);
-    await initiateForSession(ctx, session.sessionId);
-    const payload = capturePayload(ctx, session);
+    const publicPayload = capturePayload(ctx, session);
+    const injectedPayload = capturePayload(ctx, session);
 
-    const response = await tossWebhookPost(routeRequest(payload));
+    const [publicResponse, injectedResult] = await Promise.all([
+      tossWebhookPost(publicRouteRequest(PaymentProvider.TOSS, publicPayload)),
+      handleTestWebhook(PaymentProvider.TOSS, rawWebhook(injectedPayload)),
+    ]);
 
-    expect(response.status).toBe(200);
-    await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
+    expect(publicResponse.status).toBeGreaterThanOrEqual(400);
+    await expect(publicResponse.json()).resolves.toMatchObject({
+      ok: false,
+      kind: "verifyFailed",
+    });
+    expect(injectedResult).toMatchObject({ kind: "processed", status: 200 });
+    await expect(eventCount(publicPayload.transmissionId)).resolves.toBe(0);
+    await expect(eventStatus(injectedPayload.transmissionId))
+      .resolves.toBe(PaymentEventStatus.PROCESSED);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    const payment = await onlyPayment(session.sessionId);
+    expect(payment.providerPaymentKey).toBe(injectedPayload.providerPaymentKey);
+  });
+
+  it("public Toss route cancels chunked oversize ingress before verification with zero financial/order mutation", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    const streamed = oversizedPublicRouteRequest(payload);
+
+    const response = await tossWebhookPost(streamed.request);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, kind: "verifyFailed" });
+    expect(streamed.probe).toMatchObject({
+      pullCount: 2,
+      cancelCount: 1,
+      pullsAfterCancellation: 0,
+      cancelled: true,
+    });
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("BODY.TOO_LARGE");
+    expect(rejection.rawBodyBytes).toBe(WEBHOOK_BODY_OVER_LIMIT_LOWER_BOUND);
+    expect(rejection.rawBodyHash).toBeNull();
+    expect(rejection.rawBodyPrefix).toHaveLength(WEBHOOK_RAW_PREFIX_CHARS);
+    expect(rejection.rawBodyPrefix).not.toContain("\u0000");
+    expect(rejection.rawBodyPrefix?.startsWith("\uFFFD")).toBe(true);
+    await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+  });
+
+  it.each([
+    "65537",
+    "2147483647",
+    "2147483648",
+    "9007199254740991",
+    "9007199254740992",
+    "9".repeat(512),
+  ])(
+    "public Toss route rejects canonical declared oversize %s without reading or financial mutation",
+    async (contentLength) => {
+      const session = await submitSessionWithOneLine(ctx);
+      const payload = capturePayload(ctx, session);
+      const streamed = declaredLengthPublicRouteRequest(payload, contentLength);
+
+      const response = await tossWebhookPost(streamed.request);
+
+      expect(response.status).toBe(413);
+      expect(streamed.probe).toMatchObject({
+        pullCount: 0,
+        cancelCount: 0,
+        pullsAfterCancellation: 0,
+      });
+      const rejection = await onlyRejection(payload.transmissionId);
+      expect(rejection.code).toBe("BODY.TOO_LARGE");
+      expect(rejection.rawBodyBytes).toBe(WEBHOOK_BODY_OVER_LIMIT_LOWER_BOUND);
+      expect(rejection.rawBodyHash).toBeNull();
+      expect(rejection.lastError).toContain("at least 65,537 bytes");
+      await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+    },
+  );
+
+  it("public Toss route persists a complete NUL-containing rejection without changing exact body evidence", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    const body = `\u0000${JSON.stringify(payload)}`;
+    const response = await tossWebhookPost(completePublicRouteRequest(payload, body));
+
+    expect(response.status).toBe(400);
+    const rejection = await onlyRejection(payload.transmissionId);
+    const originalBytes = new TextEncoder().encode(body);
+    expect(rejection.rawBodyBytes).toBe(originalBytes.byteLength);
+    expect(rejection.rawBodyHash).toBe(independentByteHash(originalBytes));
+    expect(rejection.rawBodyPrefix).toBe(`\uFFFD${JSON.stringify(payload)}`.slice(0, WEBHOOK_RAW_PREFIX_CHARS));
+    expect(rejection.rawBodyPrefix).not.toContain("\u0000");
+    await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+  });
+
+  it.each([
+    {
+      label: "malformed UTF-8",
+      bytes: Uint8Array.of(0xC3, 0x28),
+      prefix: "\uFFFD(",
+    },
+    {
+      label: "valid Korean and emoji UTF-8",
+      bytes: new TextEncoder().encode("가발🙂"),
+      prefix: "가발🙂",
+    },
+    {
+      label: "embedded NUL plus malformed UTF-8",
+      bytes: Uint8Array.of(0x00, 0xC3, 0x28),
+      prefix: "\uFFFD\uFFFD(",
+    },
+    {
+      label: "ordinary JSON rejection",
+      bytes: new TextEncoder().encode('{"message":"ordinary rejection"}'),
+      prefix: '{"message":"ordinary rejection"}',
+    },
+  ])(
+    "public Toss route keeps exact original-byte evidence for complete $label",
+    async ({ bytes, prefix }) => {
+      const session = await submitSessionWithOneLine(ctx);
+      const payload = capturePayload(ctx, session);
+
+      const response = await tossWebhookPost(completePublicRouteByteRequest(payload, [bytes]));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ ok: false, kind: "verifyFailed" });
+      const rejection = await onlyRejection(payload.transmissionId);
+      expect(rejection.rawBodyBytes).toBe(bytes.byteLength);
+      expect(rejection.rawBodyHash).toBe(independentByteHash(bytes));
+      expect(rejection.rawBodyPrefix).toBe(prefix);
+      expect(rejection.rawBodyPrefix).not.toContain("\u0000");
+      await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+    },
+  );
+
+  it("public overflow diagnostic failure performs one insert attempt and no financial write", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    const streamed = oversizedPublicRouteRequest(payload);
+    const createSpy = vi.spyOn(db.webhookIngressRejection, "create")
+      .mockRejectedValue(new Error("diagnostic insert sentinel"));
+
+    try {
+      await expect(tossWebhookPost(streamed.request)).rejects.toThrow("diagnostic insert sentinel");
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy.mock.calls[0]?.[0].data).toMatchObject({
+        code: "BODY.TOO_LARGE",
+        rawBodyBytes: WEBHOOK_BODY_OVER_LIMIT_LOWER_BOUND,
+        rawBodyHash: null,
+      });
+      await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+    } finally {
+      createSpy.mockRestore();
+    }
+  });
+
+  it("public read-failure diagnostic failure performs one insert attempt and no financial write", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    const request = failingPublicRouteRequest(payload);
+    const createSpy = vi.spyOn(db.webhookIngressRejection, "create")
+      .mockRejectedValue(new Error("diagnostic insert sentinel"));
+
+    try {
+      await expect(tossWebhookPost(request)).rejects.toThrow("diagnostic insert sentinel");
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy.mock.calls[0]?.[0].data).toMatchObject({
+        code: "BODY.READ_FAILED",
+        rawBodyHash: null,
+      });
+      await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+    } finally {
+      createSpy.mockRestore();
+    }
+  });
+
+  it("normalizes NUL produced by JSON escapes in every persisted candidate metadata field", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    const unsafeTransmissionId = `${payload.transmissionId}\u0000unsafe`;
+    const unsafeEventType = "PAYMENT.CAPTURED\u0000unsafe";
+    const safeTransmissionId = unsafeTransmissionId.replace("\u0000", "\uFFFD");
+    ctx.transmissionIds.push(safeTransmissionId);
+    const body = JSON.stringify({
+      transmissionId: unsafeTransmissionId,
+      eventType: unsafeEventType,
+    });
+
+    const result = await handleTestWebhook(PaymentProvider.TOSS, {
+      body,
+      headers: { "x-mira-verify": "fail" },
+      receivedAt: B4_RECEIVED_AT,
+    });
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 400 });
+    const rejection = await onlyRejection(safeTransmissionId);
+    expect(rejection.candidateEventType).toBe(unsafeEventType.replace("\u0000", "\uFFFD"));
+    expect(safeTransmissionId).not.toContain("\u0000");
+    expect(rejection.candidateEventType).not.toContain("\u0000");
+    await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.TOSS);
+  });
+
+  it.each([
+    ["test", "SANDBOX"],
+    ["development", "SANDBOX"],
+    ["production", "LIVE"],
+  ] as const)(
+    "public PayPal route denies credentials/placeholders in %s with %s mode",
+    async (nodeEnv, paymentMode) => {
+      setOptionalEnv("NODE_ENV", nodeEnv);
+      process.env.PAYMENT_MODE = paymentMode;
+      process.env.PAYPAL_CLIENT_ID = "present_client_id";
+      process.env.PAYPAL_CLIENT_SECRET = "present_client_secret";
+      process.env.PAYPAL_WEBHOOK_ID = "present_webhook_id";
+      const session = await submitSessionWithOneLine(ctx);
+      const payload = capturePayload(ctx, session);
+
+      const response = await paypalWebhookPost(publicRouteRequest(PaymentProvider.PAYPAL, payload));
+
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.PAYPAL);
+    },
+  );
+
+  it("unsupported public provider is rejected without obtaining mock authority", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+
+    const result = await handleWebhook(
+      db,
+      PaymentProvider.MOCK,
+      rawWebhook(payload),
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.MOCK);
   });
 
   it("same transmissionId replay is absorbed without reprocessing", async () => {
@@ -105,8 +400,8 @@ describe("payment webhook core", () => {
     const payload = capturePayload(ctx, session);
     const raw = rawWebhook(payload);
 
-    const first = await handleWebhook(db, PaymentProvider.TOSS, raw);
-    const second = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    const first = await handleTestWebhook(PaymentProvider.TOSS, raw);
+    const second = await handleTestWebhook(PaymentProvider.TOSS, raw);
 
     expect(first.status).toBe(200);
     expect(second.kind).toBe("duplicate");
@@ -120,8 +415,8 @@ describe("payment webhook core", () => {
     const firstPayload = capturePayload(ctx, session);
     const secondPayload = capturePayload(ctx, session, { providerPaymentKey: firstPayload.providerPaymentKey });
 
-    await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(firstPayload));
-    const second = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(secondPayload));
+    await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(firstPayload));
+    const second = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(secondPayload));
 
     expect(second.status).toBe(200);
     await expect(eventStatus(secondPayload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
@@ -135,7 +430,7 @@ describe("payment webhook core", () => {
     await initiateForSession(ctx, session.sessionId);
     const payload = capturePayload(ctx, session);
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(payload));
     const payment = await onlyPayment(session.sessionId);
     const event = await eventSnapshot(payload.transmissionId);
 
@@ -159,9 +454,9 @@ describe("payment webhook core", () => {
     const firstPayload = capturePayload(ctx, session);
     const secondPayload = capturePayload(ctx, session, { providerPaymentKey: firstPayload.providerPaymentKey });
 
-    await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(firstPayload));
+    await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(firstPayload));
     process.env.PAYMENT_MODE = "LIVE";
-    const second = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(secondPayload));
+    const second = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(secondPayload));
     const payment = await onlyPayment(session.sessionId);
 
     expect(second.status).toBe(200);
@@ -180,7 +475,7 @@ describe("payment webhook core", () => {
     const session = await submitSessionWithOneLine(ctx);
     const payload = capturePayload(ctx, session);
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, {
+    const result = await handleTestWebhook(PaymentProvider.TOSS, {
       ...rawWebhook(payload),
       headers: { "x-mira-verify": "fail" },
     });
@@ -200,7 +495,7 @@ describe("payment webhook core", () => {
     const transmissionId = trackTransmissionId(ctx);
     const body = JSON.stringify({ transmissionId, kind: "capture" });
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, { body, receivedAt: B4_RECEIVED_AT });
+    const result = await handleTestWebhook(PaymentProvider.TOSS, { body, receivedAt: B4_RECEIVED_AT });
 
     expect(result.kind).toBe("verifyFailed");
     expect(result.status).toBe(400);
@@ -216,11 +511,11 @@ describe("payment webhook core", () => {
     const payload = capturePayload(ctx, session);
     const raw = rawWebhook(payload);
 
-    const forged = await handleWebhook(db, PaymentProvider.TOSS, {
+    const forged = await handleTestWebhook(PaymentProvider.TOSS, {
       ...raw,
       headers: { "x-mira-verify": "fail" },
     });
-    const genuine = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    const genuine = await handleTestWebhook(PaymentProvider.TOSS, raw);
 
     expect(forged.kind).toBe("verifyFailed");
     expect(forged.status).toBeGreaterThanOrEqual(400);
@@ -233,7 +528,7 @@ describe("payment webhook core", () => {
   it("ignored webhook records IGNORED and has no completion side effect", async () => {
     const payload = ignoredPayload(ctx);
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(payload));
 
     expect(result.kind).toBe("ignored");
     expect(result.status).toBe(200);
@@ -245,7 +540,7 @@ describe("payment webhook core", () => {
     const session = await submitSessionWithOneLine(ctx);
     const payload = capturePayload(ctx, session, { amount: session.totalAmount + 1 });
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(payload));
 
     expect(result.status).toBe(200);
     await expect(eventStatus(payload.transmissionId)).resolves.toBe(PaymentEventStatus.PROCESSED);
@@ -259,7 +554,7 @@ describe("payment webhook core", () => {
     const invalidPayload = { ...payload };
     delete invalidPayload.amount;
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, {
+    const result = await handleTestWebhook(PaymentProvider.TOSS, {
       body: JSON.stringify(invalidPayload),
       receivedAt: B4_RECEIVED_AT,
     });
@@ -275,18 +570,15 @@ describe("payment webhook core", () => {
     await expect(outboxCount(PaymentProvider.TOSS, requiredProviderKey(payload))).resolves.toBe(0);
   });
 
-  it("invalid PAYMENT_MODE records retryable failure and reprocesses after config is fixed", async () => {
+  it("explicit mock injection records invalid PAYMENT_MODE retryably and reprocesses after config is fixed", async () => {
     process.env.PAYMENT_MODE = "prod";
     const session = await submitSessionWithOneLine(ctx);
     const payload = capturePayload(ctx, session);
 
-    const response = await tossWebhookPost(routeRequest(payload));
-    const responseBody: unknown = await response.json();
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(payload));
     const retryable = await eventSnapshot(payload.transmissionId);
 
-    expect(response.status).toBe(500);
-    expect(responseBody).toMatchObject({ ok: false, kind: "retryable" });
-    expect(JSON.stringify(responseBody)).not.toContain("prod");
+    expect(result).toMatchObject({ kind: "retryable", status: 500 });
     expect(retryable.status).toBe(PaymentEventStatus.RETRYABLE_FAILED);
     expect(retryable.failureStage).toBe(PaymentEventFailureStage.COMPLETE);
     expect(retryable.failureCode).toBe("COMPLETE.CONFIG_UNAVAILABLE");
@@ -300,7 +592,7 @@ describe("payment webhook core", () => {
     await expect(paymentCount(session.sessionId)).resolves.toBe(0);
 
     process.env.PAYMENT_MODE = "SANDBOX";
-    const replay = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const replay = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(payload));
     const processed = await eventSnapshot(payload.transmissionId);
 
     expect(replay.status).toBe(200);
@@ -318,10 +610,10 @@ describe("payment webhook core", () => {
     const payload = capturePayload(ctx, session);
     const raw = rawWebhook(payload);
 
-    const first = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    const first = await handleTestWebhook(PaymentProvider.TOSS, raw);
     const retryable = await eventSnapshot(payload.transmissionId);
     await deleteConflictingOrder(conflict);
-    const second = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    const second = await handleTestWebhook(PaymentProvider.TOSS, raw);
 
     expect(first.kind).toBe("retryable");
     expect(first.status).toBe(500);
@@ -345,7 +637,7 @@ describe("payment webhook core", () => {
     const payload = capturePayload(ctx, session);
     const raw = rawWebhook(payload);
 
-    const first = await handleWebhook(db, PaymentProvider.TOSS, raw);
+    const first = await handleTestWebhook(PaymentProvider.TOSS, raw);
     await deleteConflictingOrder(conflict);
     const duplicateProviderKey = providerPaymentKeyFor(ctx);
     const duplicateBody = JSON.stringify({
@@ -353,7 +645,7 @@ describe("payment webhook core", () => {
       providerPaymentKey: duplicateProviderKey,
       filler: "x".repeat(WEBHOOK_RAW_PREFIX_CHARS + 128),
     });
-    const duplicate = await handleWebhook(db, PaymentProvider.TOSS, {
+    const duplicate = await handleTestWebhook(PaymentProvider.TOSS, {
       body: duplicateBody,
       receivedAt: B4_RECEIVED_AT,
     });
@@ -383,7 +675,7 @@ describe("payment webhook core", () => {
     const payload = capturePayload(ctx, session);
     const raw = rawWebhook(payload);
 
-    await handleWebhook(db, PaymentProvider.TOSS, raw);
+    await handleTestWebhook(PaymentProvider.TOSS, raw);
     await deleteConflictingOrder(conflict);
 
     let firstReplay: Promise<Awaited<ReturnType<typeof handleWebhook>>> | undefined;
@@ -392,8 +684,8 @@ describe("payment webhook core", () => {
       await tx.$queryRaw(Prisma.sql`
         SELECT "id" FROM "CheckoutSession" WHERE "id" = ${session.sessionId} FOR UPDATE
       `);
-      firstReplay = handleWebhook(db, PaymentProvider.TOSS, raw);
-      secondReplay = handleWebhook(db, PaymentProvider.TOSS, raw);
+      firstReplay = handleTestWebhook(PaymentProvider.TOSS, raw);
+      secondReplay = handleTestWebhook(PaymentProvider.TOSS, raw);
       await delay(50);
     });
     if (!firstReplay || !secondReplay) throw new Error("Replay promises were not initialized");
@@ -414,7 +706,7 @@ describe("payment webhook core", () => {
       filler: "x".repeat(WEBHOOK_RAW_PREFIX_CHARS + 128),
     });
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, {
+    const result = await handleTestWebhook(PaymentProvider.TOSS, {
       body,
       headers: { "x-mira-verify": "fail" },
       receivedAt: B4_RECEIVED_AT,
@@ -432,7 +724,7 @@ describe("payment webhook core", () => {
     const session = await submitSessionWithOneLine(ctx);
     const payload = capturePayload(ctx, session);
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawWebhook(payload));
 
     expect(result.status).toBe(200);
     const payment = await onlyPayment(session.sessionId);
@@ -444,8 +736,8 @@ describe("payment webhook core", () => {
     const payload = tossPayload(ctx, "toss_half_config_code_only");
     const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), {
-      env: {},
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), {
+      env: { PAYMENT_MODE: "SANDBOX" },
       fetchFn: fetch.fetchFn,
       sandboxExternalCodeRegistry: tossWebhookCodeRegistry(),
     });
@@ -462,8 +754,11 @@ describe("payment webhook core", () => {
     const payload = tossPayload(ctx, "toss_missing_secret");
     const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), {
-      env: { [TOSS_SANDBOX_EXTERNAL_ENABLED]: "ENABLED" },
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), {
+      env: {
+        PAYMENT_MODE: "SANDBOX",
+        [TOSS_SANDBOX_EXTERNAL_ENABLED]: "ENABLED",
+      },
       fetchFn: fetch.fetchFn,
     });
 
@@ -481,7 +776,7 @@ describe("payment webhook core", () => {
     const payload = tossPayload(ctx, `toss_lookup_${randomUUID()}`);
     const unavailable = recordingTossFetch(new Response(JSON.stringify({ code: "FAILED_INTERNAL" }), { status: 503 }));
 
-    const first = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(unavailable.fetchFn));
+    const first = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(unavailable.fetchFn));
     expect(first).toMatchObject({ kind: "verifyFailed", status: 503 });
     await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
     const rejection = await onlyRejection(payload.transmissionId);
@@ -494,11 +789,106 @@ describe("payment webhook core", () => {
       amount: session.totalAmount,
       currency: session.currency,
     }));
-    const second = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(available.fetchFn));
+    const second = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(available.fetchFn));
 
     expect(second.status).toBe(200);
     await expect(eventCount(payload.transmissionId)).resolves.toBe(1);
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("configured Toss path rejects a missing payment authentication fact without mock fallback", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payload = tossPayload(ctx, undefined, { paymentKey: undefined });
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: "unused" }));
+
+    const result = await handleTestWebhook(
+      PaymentProvider.TOSS,
+      rawTossWebhook(payload),
+      realTossOptions(fetch.fetchFn),
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 400 });
+    expect(fetch.calls).toEqual([]);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("TOSS.PAYMENT_KEY_MISSING");
+    await expectRejectedTossWithoutCompletion(ctx, session, payload);
+  });
+
+  it("configured Toss path rejects malformed provider verification without mock fallback", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payload = tossPayload(ctx);
+    const fetch = recordingTossFetch(new Response(JSON.stringify({ status: "DONE" }), { status: 200 }));
+
+    const result = await handleTestWebhook(
+      PaymentProvider.TOSS,
+      rawTossWebhook(payload),
+      realTossOptions(fetch.fetchFn),
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 502 });
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("TOSS.LOOKUP_MALFORMED");
+    await expectRejectedTossWithoutCompletion(ctx, session, payload);
+  });
+
+  it("configured Toss path rejects mismatched lookup facts without mock fallback", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payload = tossPayload(ctx);
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: "different_provider_payment_key" }));
+
+    const result = await handleTestWebhook(
+      PaymentProvider.TOSS,
+      rawTossWebhook(payload),
+      realTossOptions(fetch.fetchFn),
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 400 });
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("TOSS.PAYMENT_KEY_MISMATCH");
+    await expectRejectedTossWithoutCompletion(ctx, session, payload);
+  });
+
+  it("configured Toss verifier exception rejects without mock fallback", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payload = tossPayload(ctx);
+    const rejectingFetch: typeof fetch = () => Promise.reject(new Error("deterministic lookup failure"));
+
+    const result = await handleTestWebhook(
+      PaymentProvider.TOSS,
+      rawTossWebhook(payload),
+      realTossOptions(rejectingFetch),
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("TOSS.LOOKUP_NETWORK_ERROR");
+    await expectRejectedTossWithoutCompletion(ctx, session, payload);
+  });
+
+  it("configured Toss verifier construction failure rejects without mock fallback", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payload = tossPayload(ctx);
+    const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
+
+    const result = await handleTestWebhook(
+      PaymentProvider.TOSS,
+      rawTossWebhook(payload),
+      {
+        ...realTossOptions(fetch.fetchFn),
+        tossLookupTimeoutMs: 0,
+      },
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    expect(fetch.calls).toEqual([]);
+    const rejection = await onlyRejection(payload.transmissionId);
+    expect(rejection.code).toBe("TOSS.WEBHOOK_VERIFIER_CONSTRUCTION_FAILED");
+    await expectRejectedTossWithoutCompletion(ctx, session, payload);
   });
 
   it.each(["CANCEL_STATUS_CHANGED", "DEPOSIT_CALLBACK"])(
@@ -507,7 +897,7 @@ describe("payment webhook core", () => {
       const payload = tossPayload(ctx, undefined, { eventType, paymentKey: undefined });
       const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: "unused" }));
 
-      const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+      const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
 
       expect(result).toMatchObject({ kind: "verifyFailed", status: 200 });
       expect(fetch.calls).toEqual([]);
@@ -530,7 +920,7 @@ describe("payment webhook core", () => {
       currency: session.currency,
     }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
     const call = onlyTossFetchCall(fetch.calls);
 
     expect(result.status).toBe(200);
@@ -542,6 +932,64 @@ describe("payment webhook core", () => {
     });
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
   });
+
+  it("duplicate verified Toss delivery remains idempotent", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiateForSession(ctx, session.sessionId);
+    const payment = await onlyPayment(session.sessionId);
+    const payload = tossPayload(ctx);
+    const raw = rawTossWebhook(payload);
+    const fetch = recordingTossFetch(tossLookupResponse({
+      paymentKey: requiredTossPaymentKey(payload),
+      orderId: deriveTossOrderId(payment.id),
+      amount: session.totalAmount,
+      currency: session.currency,
+    }));
+    const options = realTossOptions(fetch.fetchFn);
+
+    const first = await handleTestWebhook(PaymentProvider.TOSS, raw, options);
+    const second = await handleTestWebhook(PaymentProvider.TOSS, raw, options);
+
+    expect(first).toMatchObject({ kind: "processed", status: 200 });
+    expect(second).toMatchObject({ kind: "duplicate", status: 200 });
+    expect(fetch.calls).toHaveLength(2);
+    await expect(eventCount(payload.transmissionId)).resolves.toBe(1);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it.each([
+    ["amount", { amount: 12_001, currency: "KRW" }],
+    ["currency", { amount: 12_000, currency: "USD" }],
+  ] as const)(
+    "Toss verified webhook %s mismatch fails closed and queues one compensation",
+    async (_label, mismatch) => {
+      const session = await submitSessionWithOneLine(ctx);
+      await initiateForSession(ctx, session.sessionId);
+      const payment = await onlyPayment(session.sessionId);
+      const payload = tossPayload(ctx);
+      const fetch = recordingTossFetch(tossLookupResponse({
+        paymentKey: requiredTossPaymentKey(payload),
+        orderId: deriveTossOrderId(payment.id),
+        amount: mismatch.amount,
+        currency: mismatch.currency,
+      }));
+
+      const result = await handleTestWebhook(
+        PaymentProvider.TOSS,
+        rawTossWebhook(payload),
+        realTossOptions(fetch.fetchFn),
+      );
+
+      expect(result).toMatchObject({ kind: "processed", status: 200 });
+      await expect(orderCount(ctx.userId)).resolves.toBe(0);
+      await expect(outboxCount(PaymentProvider.TOSS, requiredTossPaymentKey(payload))).resolves.toBe(1);
+      await expect(db.checkoutSession.findUniqueOrThrow({
+        where: { id: session.sessionId },
+        select: { status: true },
+      })).resolves.toEqual({ status: "FAILED" });
+    },
+  );
 
   it("Toss verified-vs-configured mode divergence is retryable after recording provenance", async () => {
     process.env.PAYMENT_MODE = "LIVE";
@@ -556,7 +1004,7 @@ describe("payment webhook core", () => {
       currency: session.currency,
     }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
     const event = await eventSnapshot(payload.transmissionId);
 
     expect(result).toMatchObject({ kind: "retryable", status: 500 });
@@ -582,9 +1030,9 @@ describe("payment webhook core", () => {
       currency: session.currency,
     }));
 
-    const first = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const first = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
     process.env.PAYMENT_MODE = "SANDBOX";
-    const second = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const second = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
     const event = await eventSnapshot(payload.transmissionId);
 
     expect(first).toMatchObject({ kind: "retryable", status: 500 });
@@ -600,7 +1048,7 @@ describe("payment webhook core", () => {
     await createSyntheticTossEvent(payload, { verifiedMode: PaymentMode.LIVE, binding: "toss:sandbox:v1" });
     const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
 
     expect(result).toMatchObject({ kind: "verifyFailed", status: 409 });
     const rejection = await onlyRejection(payload.transmissionId);
@@ -614,7 +1062,7 @@ describe("payment webhook core", () => {
     await createSyntheticTossEvent(payload, { verifiedMode: PaymentMode.SANDBOX, binding: "toss:sandbox:v0" });
     const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
     const event = await eventSnapshot(payload.transmissionId);
 
     expect(result).toMatchObject({ kind: "retryable", status: 500 });
@@ -628,7 +1076,7 @@ describe("payment webhook core", () => {
     await createSyntheticTossEvent(payload, { verifiedMode: null, binding: null });
     const fetch = recordingTossFetch(tossLookupResponse({ paymentKey: requiredTossPaymentKey(payload) }));
 
-    const result = await handleWebhook(db, PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
+    const result = await handleTestWebhook(PaymentProvider.TOSS, rawTossWebhook(payload), realTossOptions(fetch.fetchFn));
     const event = await eventSnapshot(payload.transmissionId);
 
     expect(result).toMatchObject({ kind: "failed", status: 200 });
@@ -809,6 +1257,7 @@ function tossPayload(
 function realTossOptions(fetchFn: typeof fetch): WebhookHandleOptions {
   return {
     env: {
+      PAYMENT_MODE: "SANDBOX",
       [TOSS_SANDBOX_EXTERNAL_ENABLED]: "ENABLED",
       [TOSS_SANDBOX_SECRET_KEY]: fakeTossSecret(),
     },
@@ -867,10 +1316,203 @@ function onlyTossFetchCall(calls: readonly TossFetchCall[]): TossFetchCall {
   return call;
 }
 
-function routeRequest(payload: MockWebhookPayload): Request {
+function publicRouteRequest(provider: PaymentProvider, payload: MockWebhookPayload): Request {
+  const headers = new Headers({ "content-type": "application/json" });
+  if (provider === PaymentProvider.TOSS) {
+    headers.set("tosspayments-webhook-transmission-id", payload.transmissionId);
+  }
+  return new Request(`http://localhost/api/payments/${provider.toLowerCase()}/webhook`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      ...payload,
+      eventType: "PAYMENT_STATUS_CHANGED",
+      eventId: `public_attack_${payload.transmissionId}`,
+      data: { paymentKey: payload.providerPaymentKey },
+    }),
+  });
+}
+
+function oversizedPublicRouteRequest(payload: MockWebhookPayload): {
+  request: Request;
+  probe: PublicStreamProbe;
+} {
+  const probe: PublicStreamProbe = {
+    pullCount: 0,
+    cancelCount: 0,
+    pullsAfterCancellation: 0,
+    cancelled: false,
+  };
+  const firstChunk = new Uint8Array(WEBHOOK_MAX_CONTENT_LENGTH_BYTES).fill("a".charCodeAt(0));
+  firstChunk[0] = 0;
+  const chunks = [
+    firstChunk,
+    Uint8Array.of("b".charCodeAt(0)),
+    Uint8Array.of("c".charCodeAt(0)),
+  ];
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      probe.pullCount += 1;
+      if (probe.cancelled) {
+        probe.pullsAfterCancellation += 1;
+        return;
+      }
+      const chunk = chunks[index];
+      if (!chunk) {
+        controller.close();
+        return;
+      }
+      index += 1;
+      controller.enqueue(chunk);
+    },
+    cancel() {
+      probe.cancelled = true;
+      probe.cancelCount += 1;
+    },
+  }, { highWaterMark: 0 });
+  const headers = new Headers({
+    "content-type": "application/json",
+    "tosspayments-webhook-transmission-id": payload.transmissionId,
+    "x-mira-event-type": "PAYMENT_STATUS_CHANGED",
+    "x-mira-transmission-id": payload.transmissionId,
+  });
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers,
+    body,
+    duplex: "half",
+  };
+  return {
+    request: new Request("http://localhost/api/payments/toss/webhook", init),
+    probe,
+  };
+}
+
+function declaredLengthPublicRouteRequest(
+  payload: MockWebhookPayload,
+  contentLength: string,
+): { request: Request; probe: PublicStreamProbe } {
+  const probe: PublicStreamProbe = {
+    pullCount: 0,
+    cancelCount: 0,
+    pullsAfterCancellation: 0,
+    cancelled: false,
+  };
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      probe.pullCount += 1;
+      if (probe.cancelled) {
+        probe.pullsAfterCancellation += 1;
+        return;
+      }
+      controller.enqueue(new TextEncoder().encode("must-not-be-read"));
+      controller.close();
+    },
+    cancel() {
+      probe.cancelled = true;
+      probe.cancelCount += 1;
+    },
+  }, { highWaterMark: 0 });
+  const headers = new Headers({
+    "content-length": contentLength,
+    "content-type": "application/json",
+    "x-mira-event-type": "PAYMENT_STATUS_CHANGED",
+    "x-mira-transmission-id": payload.transmissionId,
+  });
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers,
+    body,
+    duplex: "half",
+  };
+  return {
+    request: new Request("http://localhost/api/payments/toss/webhook", init),
+    probe,
+  };
+}
+
+function completePublicRouteRequest(payload: MockWebhookPayload, body: string): Request {
   return new Request("http://localhost/api/payments/toss/webhook", {
     method: "POST",
-    body: JSON.stringify(payload),
+    headers: {
+      "content-type": "application/json",
+      "tosspayments-webhook-transmission-id": payload.transmissionId,
+      "x-mira-event-type": payload.eventType,
+      "x-mira-transmission-id": payload.transmissionId,
+    },
+    body,
+  });
+}
+
+function completePublicRouteByteRequest(
+  payload: MockWebhookPayload,
+  chunks: readonly Uint8Array[],
+): Request {
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = chunks[index];
+      if (!chunk) {
+        controller.close();
+        return;
+      }
+      index += 1;
+      controller.enqueue(chunk);
+      if (index === chunks.length) controller.close();
+    },
+  }, { highWaterMark: 0 });
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "tosspayments-webhook-transmission-id": payload.transmissionId,
+      "x-mira-event-type": payload.eventType,
+      "x-mira-transmission-id": payload.transmissionId,
+    },
+    body,
+    duplex: "half",
+  };
+  return new Request("http://localhost/api/payments/toss/webhook", init);
+}
+
+function failingPublicRouteRequest(payload: MockWebhookPayload): Request {
+  let pullCount = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pullCount += 1;
+      if (pullCount === 1) {
+        controller.enqueue(new TextEncoder().encode("partial"));
+        return;
+      }
+      controller.error(new Error("stream read sentinel"));
+    },
+  }, { highWaterMark: 0 });
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "tosspayments-webhook-transmission-id": payload.transmissionId,
+      "x-mira-event-type": payload.eventType,
+      "x-mira-transmission-id": payload.transmissionId,
+    },
+    body,
+    duplex: "half",
+  };
+  return new Request("http://localhost/api/payments/toss/webhook", init);
+}
+
+function independentByteHash(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function handleTestWebhook(
+  provider: PaymentProvider,
+  raw: Parameters<typeof handleWebhook>[2],
+  options?: WebhookHandleOptions,
+) {
+  return handleWebhook(db, provider, raw, options ?? {
+    testOnlyPipeline: createMockWebhookPipeline(provider),
   });
 }
 
@@ -1063,14 +1705,90 @@ async function outboxCount(provider: PaymentProvider, providerPaymentKey: string
   return db.paymentOutbox.count({ where: { dedupKey: `void:${provider}:${providerPaymentKey}` } });
 }
 
+async function expectZeroPublicIngressWrites(
+  context: TestContext,
+  session: Awaited<ReturnType<typeof submitSessionWithOneLine>>,
+  payload: MockWebhookPayload,
+  provider: PaymentProvider = PaymentProvider.TOSS,
+): Promise<void> {
+  const providerPaymentKey = requiredProviderKey(payload);
+  const sessionState = await db.checkoutSession.findUniqueOrThrow({
+    where: { id: session.sessionId },
+    select: { status: true },
+  });
+  const variantId = context.variantIds[0];
+  if (!variantId) throw new Error("Missing test variant.");
+  const variant = await db.wigVariant.findUniqueOrThrow({
+    where: { id: variantId },
+    select: { stock: true },
+  });
+
+  await expect(db.payment.count({
+    where: { checkoutSessionId: session.sessionId, status: PaymentAttemptStatus.SUCCEEDED },
+  })).resolves.toBe(0);
+  await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  await expect(orderCount(context.userId)).resolves.toBe(0);
+  await expect(db.orderItem.count({ where: { order: { userId: context.userId } } })).resolves.toBe(0);
+  await expect(db.orderShipping.count({ where: { order: { userId: context.userId } } })).resolves.toBe(0);
+  await expect(db.manufacturingRequest.count({
+    where: { orderItem: { order: { userId: context.userId } } },
+  })).resolves.toBe(0);
+  await expect(db.cartItem.count({ where: { userId: context.userId } })).resolves.toBe(1);
+  await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+  await expect(outboxCount(provider, providerPaymentKey)).resolves.toBe(0);
+  expect(sessionState.status).toBe("SUBMITTED");
+  expect(variant.stock).toBe(5);
+}
+
+async function expectRejectedTossWithoutCompletion(
+  context: TestContext,
+  session: Awaited<ReturnType<typeof submitSessionWithOneLine>>,
+  payload: TossWebhookPayload,
+): Promise<void> {
+  const payment = await onlyPayment(session.sessionId);
+  expect(payment).toMatchObject({
+    provider: PaymentProvider.TOSS,
+    status: PaymentAttemptStatus.INITIATED,
+    providerPaymentKey: null,
+  });
+  await expect(db.payment.count({
+    where: { checkoutSessionId: session.sessionId, status: PaymentAttemptStatus.SUCCEEDED },
+  })).resolves.toBe(0);
+  await expect(orderCount(context.userId)).resolves.toBe(0);
+  await expect(db.orderItem.count({ where: { order: { userId: context.userId } } })).resolves.toBe(0);
+  await expect(db.orderShipping.count({ where: { order: { userId: context.userId } } })).resolves.toBe(0);
+  await expect(db.manufacturingRequest.count({
+    where: { orderItem: { order: { userId: context.userId } } },
+  })).resolves.toBe(0);
+  await expect(db.cartItem.count({ where: { userId: context.userId } })).resolves.toBe(1);
+  await expect(eventCount(payload.transmissionId)).resolves.toBe(0);
+  if (payload.paymentKey) {
+    await expect(outboxCount(PaymentProvider.TOSS, payload.paymentKey)).resolves.toBe(0);
+  }
+  await expect(db.checkoutSession.findUniqueOrThrow({
+    where: { id: session.sessionId },
+    select: { status: true },
+  })).resolves.toEqual({ status: "SUBMITTED" });
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function restorePaymentMode(): void {
-  if (ORIGINAL_PAYMENT_MODE === undefined) {
-    delete process.env.PAYMENT_MODE;
+function setOptionalEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
     return;
   }
-  process.env.PAYMENT_MODE = ORIGINAL_PAYMENT_MODE;
+  process.env[name] = value;
+}
+
+function restoreWebhookEnvironment(): void {
+  setOptionalEnv("PAYMENT_MODE", ORIGINAL_PAYMENT_MODE);
+  setOptionalEnv(TOSS_SANDBOX_EXTERNAL_ENABLED, ORIGINAL_TOSS_EXTERNAL_ENABLED);
+  setOptionalEnv(TOSS_SANDBOX_SECRET_KEY, ORIGINAL_TOSS_SECRET);
+  setOptionalEnv("PAYPAL_CLIENT_ID", ORIGINAL_PAYPAL_CLIENT_ID);
+  setOptionalEnv("PAYPAL_CLIENT_SECRET", ORIGINAL_PAYPAL_CLIENT_SECRET);
+  setOptionalEnv("PAYPAL_WEBHOOK_ID", ORIGINAL_PAYPAL_WEBHOOK_ID);
+  setOptionalEnv("NODE_ENV", ORIGINAL_NODE_ENV);
 }

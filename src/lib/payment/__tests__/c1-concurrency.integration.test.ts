@@ -19,6 +19,7 @@ import { createCheckoutSession, transitionCheckoutSession, type CheckoutShipping
 import { completeFromCapture, recordCapture, type CaptureFacts, type CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { dispatchPending, enqueue, OUTBOX_ZOMBIE_AFTER_MS } from "@/lib/payment/outbox";
 import { handleWebhook } from "@/lib/payment/webhook/handle";
+import { createMockWebhookPipeline } from "@/lib/payment/webhook/mock-pipeline";
 import type { VoidExecutor, VoidExecutorInput, VoidExecutorResult } from "@/lib/payment/void";
 import { createVoidHandler } from "@/lib/payment/void";
 
@@ -241,7 +242,9 @@ describe.sequential("C1-core payment concurrency harness", () => {
 
       const [confirmResult, webhookResult] = await Promise.all([
         confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey }),
-        handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload)),
+        handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload), {
+          testOnlyPipeline: createMockWebhookPipeline(PaymentProvider.TOSS),
+        }),
       ]);
 
       if (!confirmResult.success) expect(confirmResult.errorCode).toBe("PAYMENT_UNAVAILABLE");

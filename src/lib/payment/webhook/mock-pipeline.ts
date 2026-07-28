@@ -14,7 +14,7 @@ import {
   isTerminalEventStatus,
   rawBodyFromEvent,
 } from "./record";
-import { rawBodyHash, recordWebhookRejection } from "./rejections";
+import { recordWebhookRejection, utf8StringBodyHash } from "./rejections";
 import { createMockWebhookVerifier, inspectWebhookMetadata } from "./verify";
 import type { RawWebhookRequest, WebhookMetadata } from "./verify";
 import {
@@ -51,7 +51,13 @@ async function resolveMockDuplicateReplay(
   provider: PaymentProvider,
   input: DuplicateReplayInput,
 ): Promise<DuplicateReplayDecision> {
-  const { client, event, incomingRawBody, receivedAt } = input;
+  const {
+    client,
+    event,
+    incomingBodyEvidence,
+    incomingRawBody,
+    receivedAt,
+  } = input;
   if (!event) return { kind: "handled", result: { kind: "retryable", status: 500 } };
   if (isTerminalEventStatus(event.status)) {
     return { kind: "handled", result: { kind: "duplicate", status: 200, eventId: event.id } };
@@ -61,13 +67,14 @@ async function resolveMockDuplicateReplay(
   if (!storedRawBody || !metadata) {
     return { kind: "handled", result: { kind: "retryable", status: 500, eventId: event.id } };
   }
-  if (rawBodyHash(storedRawBody) !== rawBodyHash(incomingRawBody)) {
+  if (utf8StringBodyHash(storedRawBody) !== utf8StringBodyHash(incomingRawBody)) {
     await recordWebhookRejection(client, {
       provider,
       receivedAt,
       stage: WebhookIngressRejectionStage.VERIFY,
       code: "VERIFY.RAW_MISMATCH",
       rawBody: incomingRawBody,
+      completeBodyEvidence: incomingBodyEvidence,
       candidateTransmissionId: metadata.transmissionId,
       candidateEventType: metadata.eventType,
       lastError: "Duplicate webhook raw body did not match stored authenticated event",

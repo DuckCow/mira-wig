@@ -8,6 +8,21 @@ import type { ProviderEnv } from "@/lib/payment/providers/credentials";
 import type { SandboxExternalCodeRegistryEntry } from "@/lib/payment/providers/factory";
 import type { TossLookupFetch } from "@/lib/payment/providers/toss/lookup-http";
 import type { RecordedEvent } from "./record";
+import type { RawWebhookRequest } from "./verify";
+
+export interface CompleteWebhookBodyEvidence {
+  readonly kind: "complete";
+  readonly rawBodyBytes: number;
+  readonly rawBodyHash: string;
+}
+
+export type WebhookHandleInput = RawWebhookRequest & {
+  completeBodyEvidence?: CompleteWebhookBodyEvidence;
+};
+
+export type AcquiredWebhookRequest = RawWebhookRequest & {
+  completeBodyEvidence: CompleteWebhookBodyEvidence;
+};
 
 export interface WebhookHandleResult {
   kind: "processed" | "duplicate" | "ignored" | "retryable" | "verifyFailed" | "failed";
@@ -22,10 +37,11 @@ export interface WebhookHandleOptions {
   tossLookupTimeoutMs?: number;
   now?: () => Date;
   sandboxExternalCodeRegistry?: readonly SandboxExternalCodeRegistryEntry[];
+  testOnlyPipeline?: WebhookProviderPipeline;
 }
 
 export interface WebhookProviderPipeline {
-  kind: "mock" | "verified";
+  kind: "mock" | "verified" | "unavailable";
   verifier: ProviderWebhookVerifier;
   parser: ProviderWebhookParser;
   resolveDuplicate(input: DuplicateReplayInput): Promise<DuplicateReplayDecision>;
@@ -36,6 +52,7 @@ export interface DuplicateReplayInput {
   provider: PaymentProvider;
   event: RecordedEvent | null;
   incomingRawBody: string;
+  incomingBodyEvidence?: CompleteWebhookBodyEvidence;
   receivedAt: Date;
 }
 

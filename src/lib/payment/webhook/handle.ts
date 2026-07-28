@@ -20,11 +20,13 @@ import {
 } from "./pipeline";
 import {
   WebhookParseError,
+  type CompleteWebhookBodyEvidence,
   type WebhookHandleOptions,
+  type WebhookHandleInput,
   type WebhookHandleResult,
   type WebhookProviderPipeline,
 } from "./pipeline-types";
-import type { RawWebhookRequest, WebhookMetadata } from "./verify";
+import type { WebhookMetadata } from "./verify";
 
 export type { WebhookHandleOptions, WebhookHandleResult } from "./pipeline-types";
 
@@ -35,22 +37,30 @@ type VerifiedInboundResult =
 export async function handleWebhook(
   client: PrismaClient,
   provider: PaymentProvider,
-  raw: RawWebhookRequest,
+  raw: WebhookHandleInput,
   options: WebhookHandleOptions = {},
 ): Promise<WebhookHandleResult> {
   const receivedAt = raw.receivedAt ?? new Date();
   const receivedRaw = { ...raw, receivedAt };
-  const pipeline = resolveWebhookPipeline(client, provider, options);
+  const pipeline = options.testOnlyPipeline ?? resolveWebhookPipeline(client, provider, options);
   const verified = await verifyInbound(client, provider, pipeline, receivedRaw);
   if (verified.kind === "handled") return verified.result;
-  return recordAndProcess(client, provider, pipeline, raw.body, verified, receivedAt);
+  return recordAndProcess(
+    client,
+    provider,
+    pipeline,
+    raw.body,
+    raw.completeBodyEvidence,
+    verified,
+    receivedAt,
+  );
 }
 
 async function verifyInbound(
   client: PrismaClient,
   provider: PaymentProvider,
   pipeline: WebhookProviderPipeline,
-  receivedRaw: RawWebhookRequest & { receivedAt: Date },
+  receivedRaw: WebhookHandleInput & { receivedAt: Date },
 ): Promise<VerifiedInboundResult> {
   const inspected = pipeline.verifier.extractCandidateMetadata(receivedRaw);
   if (inspected.kind === "rejected") {
@@ -60,6 +70,7 @@ async function verifyInbound(
       stage: WebhookIngressRejectionStage.METADATA_EXTRACT,
       code: inspected.code,
       rawBody: receivedRaw.body,
+      completeBodyEvidence: receivedRaw.completeBodyEvidence,
       candidateTransmissionId: inspected.metadata.transmissionId,
       candidateEventType: inspected.metadata.eventType,
       lastError: inspected.safeMessage,
@@ -69,7 +80,17 @@ async function verifyInbound(
 
   const metadata = requiredMetadata(inspected.metadata);
   if (!metadata) {
-    return { kind: "handled", result: await metadataFailure(client, provider, receivedRaw.body, inspected.metadata, receivedRaw.receivedAt) };
+    return {
+      kind: "handled",
+      result: await metadataFailure(
+        client,
+        provider,
+        receivedRaw.body,
+        receivedRaw.completeBodyEvidence,
+        inspected.metadata,
+        receivedRaw.receivedAt,
+      ),
+    };
   }
   const verified = await pipeline.verifier.verify(receivedRaw);
   if (verified.kind === "rejected") {
@@ -79,6 +100,7 @@ async function verifyInbound(
       stage: WebhookIngressRejectionStage.VERIFY,
       code: verified.code,
       rawBody: receivedRaw.body,
+      completeBodyEvidence: receivedRaw.completeBodyEvidence,
       candidateTransmissionId: metadata.transmissionId,
       candidateEventType: metadata.eventType,
       lastError: verified.safeMessage,
@@ -93,6 +115,7 @@ async function recordAndProcess(
   provider: PaymentProvider,
   pipeline: WebhookProviderPipeline,
   rawBody: string,
+  completeBodyEvidence: CompleteWebhookBodyEvidence | undefined,
   verified: { input: ProviderVerifiedWebhookInput; metadata: WebhookMetadata },
   receivedAt: Date,
 ): Promise<WebhookHandleResult> {
@@ -109,6 +132,7 @@ async function recordAndProcess(
       provider,
       event: recorded.event,
       incomingRawBody: rawBody,
+      incomingBodyEvidence: completeBodyEvidence,
       receivedAt,
     });
     if (replay.kind === "handled") return replay.result;
@@ -250,6 +274,7 @@ async function metadataFailure(
   client: PrismaClient,
   provider: PaymentProvider,
   rawBody: string,
+  completeBodyEvidence: CompleteWebhookBodyEvidence | undefined,
   metadata: { transmissionId?: string; eventType?: string },
   receivedAt: Date,
 ): Promise<WebhookHandleResult> {
@@ -259,6 +284,7 @@ async function metadataFailure(
     stage: WebhookIngressRejectionStage.METADATA_EXTRACT,
     code: "METADATA.MISSING_REQUIRED",
     rawBody,
+    completeBodyEvidence,
     candidateTransmissionId: metadata.transmissionId,
     candidateEventType: metadata.eventType,
     lastError: "Webhook metadata result is missing required metadata.",
