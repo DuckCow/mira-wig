@@ -18,6 +18,14 @@ export const TB1_COMMAND_TIMEOUT_MS = 30_000;
 export const TB1_MAX_READ_ATTEMPTS = 3;
 export const TB1_MAX_CANONICAL_DEPTH = 64;
 export const TB1_MAX_CANONICAL_NODES = 10_000;
+const TYPED_ARRAY_PROTOTYPE =
+  Reflect.getPrototypeOf(Uint8Array.prototype);
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = TYPED_ARRAY_PROTOTYPE
+  ? Reflect.getOwnPropertyDescriptor(
+    TYPED_ARRAY_PROTOTYPE,
+    "byteLength",
+  )?.get
+  : undefined;
 export const TB1_JSON_SCHEMA_ROLE =
   "STRUCTURAL_PREFILTER_ONLY_NOT_READINESS_AUTHORITY";
 export const TB1_EVIDENCE_WRITER = "DEFERRED";
@@ -1731,6 +1739,8 @@ export const TB2A_BOOTSTRAP_API_ACTIVATION_DISPOSITION_REAL_REACHABILITY =
   "UNREACHABLE_WITH_METHOD_A";
 export const TB2A_PROJECT_BINDING_SOURCE =
   "gcloud.projects.describe:json(projectId,projectNumber,lifecycleState)";
+export const TB2A_INTRINSIC_VALIDATION_TRUTH =
+  "INTRINSIC_ONLY_NOT_FRESHNESS_NOT_PROVIDER_TRUTH" as const;
 export const TB2A_COMMAND_KINDS = Object.freeze([
   "EFFECTIVE_CONFIG_GET",
   "GCLOUD_VERSION",
@@ -1855,6 +1865,39 @@ export type Tb2aEvidenceEvaluation =
   | Readonly<{
     ok: false;
     reason: "EVIDENCE_INVALID";
+  }>;
+
+export type Tb2aIntrinsicEvidenceValidationResult =
+  | Readonly<{ ok: true }>
+  | Readonly<{
+    ok: false;
+    reason:
+      | "VERSION_MISMATCH"
+      | "STRUCTURE_INVALID"
+      | "CANONICAL_MISMATCH"
+      | "DIGEST_MISMATCH"
+      | "SEMANTIC_INVALID";
+  }>;
+
+type AdmittedTb2aIntrinsicInput =
+  | Readonly<{
+    kind: "BYTES";
+    raw: string;
+    bytes: Uint8Array;
+  }>
+  | Readonly<{
+    kind: "STRING";
+    raw: string;
+  }>;
+
+type ParsedTb2aIntrinsicCandidate =
+  | Readonly<{
+    ok: true;
+    root: Record<string, unknown>;
+  }>
+  | Readonly<{
+    ok: false;
+    reason: "STRUCTURE_INVALID" | "VERSION_MISMATCH";
   }>;
 
 const TB2A_CONFIGURATION_NAME_PATTERN =
@@ -2515,6 +2558,145 @@ function buildTb2aEvidence(
   };
 }
 
+export function validateTb2aIntrinsicEvidence(
+  input: Uint8Array | string,
+): Tb2aIntrinsicEvidenceValidationResult {
+  try {
+    return validateTb2aIntrinsicEvidenceBoundary(input);
+  } catch {
+    return tb2aIntrinsicEvidenceFailure("STRUCTURE_INVALID");
+  }
+}
+
+function validateTb2aIntrinsicEvidenceBoundary(
+  input: unknown,
+): Tb2aIntrinsicEvidenceValidationResult {
+  const admitted = admitTb2aIntrinsicInput(input);
+  if (!admitted) return tb2aIntrinsicEvidenceFailure("STRUCTURE_INVALID");
+  const candidate = parseTb2aIntrinsicEvidenceCandidate(admitted.raw);
+  if (!candidate.ok) return tb2aIntrinsicEvidenceFailure(candidate.reason);
+  return classifyTb2aIntrinsicEvidence(admitted, candidate.root);
+}
+
+function parseTb2aIntrinsicEvidenceCandidate(
+  raw: string,
+): ParsedTb2aIntrinsicCandidate {
+  const parsed = parseRestrictedJson(raw);
+  const root = plainDataRecord(parsed);
+  if (!root) return Object.freeze({
+    ok: false,
+    reason: "STRUCTURE_INVALID",
+  });
+  const version = Reflect.getOwnPropertyDescriptor(root, "contractVersion");
+  if (!version || !("value" in version)
+    || typeof version.value !== "string") {
+    return Object.freeze({ ok: false, reason: "STRUCTURE_INVALID" });
+  }
+  if (version.value !== TB2A_EVIDENCE_VERSION) {
+    return Object.freeze({ ok: false, reason: "VERSION_MISMATCH" });
+  }
+  return Object.freeze({ ok: true, root });
+}
+
+function classifyTb2aIntrinsicEvidence(
+  admitted: AdmittedTb2aIntrinsicInput,
+  root: Record<string, unknown>,
+): Tb2aIntrinsicEvidenceValidationResult {
+  const evidence = exactRecord(root, TB2A_OUTER_KEYS);
+  if (!evidence || containsSensitiveDecodedValue(evidence)
+    || !structuralTb2aEvidenceSections(evidence)) {
+    return tb2aIntrinsicEvidenceFailure("STRUCTURE_INVALID");
+  }
+  const canonical = canonicalizeTb1Restricted(evidence);
+  if (!tb2aIntrinsicCanonicalRepresentationMatches(admitted, canonical)) {
+    return tb2aIntrinsicEvidenceFailure("CANONICAL_MISMATCH");
+  }
+  if (!validTb2aEvidenceDigest(evidence)) {
+    return tb2aIntrinsicEvidenceFailure("DIGEST_MISMATCH");
+  }
+  return validTb2aIntrinsicSemantics(evidence)
+    ? Object.freeze({ ok: true })
+    : tb2aIntrinsicEvidenceFailure("SEMANTIC_INVALID");
+}
+
+function admitTb2aIntrinsicInput(
+  input: unknown,
+): AdmittedTb2aIntrinsicInput | null {
+  if (typeof input === "string") return admitTb2aIntrinsicString(input);
+  if (!(input instanceof Uint8Array)) return null;
+  const byteLength = nativeUint8ArrayByteLength(input);
+  if (byteLength === null
+    || byteLength > TB1_MAX_EVIDENCE_BYTES) return null;
+  const bytes = new Uint8Array(byteLength);
+  bytes.set(input);
+  if (tb2aIntrinsicBytesHaveBom(bytes)) return null;
+  const raw = fatalUtf8Decode(bytes);
+  if (raw === null
+    || !sameBytes(bytes, new TextEncoder().encode(raw))) return null;
+  return Object.freeze({ kind: "BYTES", raw, bytes });
+}
+
+function nativeUint8ArrayByteLength(input: Uint8Array): number | null {
+  if (!TYPED_ARRAY_BYTE_LENGTH_GETTER) return null;
+  const value: unknown = Reflect.apply(
+    TYPED_ARRAY_BYTE_LENGTH_GETTER,
+    input,
+    [],
+  );
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function admitTb2aIntrinsicString(
+  input: string,
+): AdmittedTb2aIntrinsicInput | null {
+  if (input.length > TB1_MAX_EVIDENCE_BYTES
+    || input.startsWith("\uFEFF")
+    || !wellFormedUnicode(input)
+    || Buffer.byteLength(input, "utf8") > TB1_MAX_EVIDENCE_BYTES) return null;
+  const encoded = new TextEncoder().encode(input);
+  const decoded = fatalUtf8Decode(encoded);
+  return decoded === input
+    ? Object.freeze({ kind: "STRING", raw: input })
+    : null;
+}
+
+function fatalUtf8Decode(value: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(value);
+  } catch {
+    return null;
+  }
+}
+
+function tb2aIntrinsicBytesHaveBom(value: Uint8Array): boolean {
+  return value[0] === 0xef && value[1] === 0xbb && value[2] === 0xbf;
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength
+    && left.every((value, index) => value === right[index]);
+}
+
+function tb2aIntrinsicCanonicalRepresentationMatches(
+  input: AdmittedTb2aIntrinsicInput,
+  canonical: string,
+): boolean {
+  return input.kind === "STRING"
+    ? input.raw === canonical
+    : sameBytes(input.bytes, new TextEncoder().encode(canonical));
+}
+
+function tb2aIntrinsicEvidenceFailure(
+  reason: Extract<
+    Tb2aIntrinsicEvidenceValidationResult,
+    { ok: false }
+  >["reason"],
+): Tb2aIntrinsicEvidenceValidationResult {
+  return Object.freeze({ ok: false, reason });
+}
+
 export function parseAndEvaluateTb2aEvidence(
   raw: string,
   authoritativeNowMs: number,
@@ -2618,11 +2800,24 @@ function validTb2aEvidence(
   evidence: Record<string, unknown>,
   authoritativeNowMs: number,
 ): boolean {
-  if (!structuralTb2aEvidenceSections(evidence)
-    || !validProjectObservationBindingV2(
-      evidence.project,
-      evidence.bootstrapApis,
-    )) return false;
+  return structuralTb2aEvidenceSections(evidence)
+    && validTb2aIntrinsicSemantics(evidence)
+    && validTb2aEvidenceFreshness(evidence, authoritativeNowMs);
+}
+
+function validTb2aIntrinsicSemantics(
+  evidence: Record<string, unknown>,
+): boolean {
+  return validProjectObservationBindingV2(
+    evidence.project,
+    evidence.bootstrapApis,
+  );
+}
+
+function validTb2aEvidenceFreshness(
+  evidence: Record<string, unknown>,
+  authoritativeNowMs: number,
+): boolean {
   const collection = exactRecord(evidence.collection, TB2A_COLLECTION_KEYS);
   if (!collection) return false;
   const completedAt = utcTimestampMs(collection.completedAt);
