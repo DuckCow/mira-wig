@@ -3,6 +3,7 @@ import type {
   AttributeBand,
   ConstraintValue,
   Contradiction,
+  D5DecisionProfile,
   ExactIdentityRecognition,
   InterpretedConstraint,
   LanguageTag,
@@ -10,6 +11,7 @@ import type {
   ParserDiagnostic,
   ParserResult,
   QueryLexiconEntry,
+  QueryLexiconMatchPolicy,
   QuerySpan,
   QuerySpanOwner,
   QueryUnitEntry,
@@ -23,6 +25,7 @@ interface ExactCandidate {
   readonly normalizedRange: TextRange;
   readonly rawRange: TextRange;
   readonly namespace: string;
+  readonly canonicalValue: string;
   readonly recognizerId: string;
 }
 
@@ -78,7 +81,9 @@ function isValidRecognition(
     recognition.normalizedRange.startInclusive >= 0 &&
     recognition.normalizedRange.endExclusive > recognition.normalizedRange.startInclusive &&
     recognition.normalizedRange.endExclusive <= comparisonText.length &&
-    recognition.namespace.trim().length > 0
+    recognition.namespace.trim().length > 0 &&
+    recognition.canonicalValue.length > 0 &&
+    recognition.canonicalValue.trim() === recognition.canonicalValue
   );
 }
 
@@ -106,12 +111,65 @@ function collectExactCandidates(input: ParseQueryInput): ExactCandidate[] {
         normalizedRange: recognition.normalizedRange,
         rawRange,
         namespace: recognition.namespace,
+        canonicalValue: recognition.canonicalValue,
         recognizerId: recognizer.recognizerId,
       });
     }
   }
 
   return candidates;
+}
+
+function exactCandidateOrder(
+  left: ExactCandidate,
+  right: ExactCandidate,
+): number {
+  return (
+    left.normalizedRange.startInclusive -
+      right.normalizedRange.startInclusive ||
+    left.normalizedRange.endExclusive - right.normalizedRange.endExclusive ||
+    left.namespace.localeCompare(right.namespace) ||
+    left.canonicalValue.localeCompare(right.canonicalValue) ||
+    left.recognizerId.localeCompare(right.recognizerId)
+  );
+}
+
+function resolveExactCandidateConflicts(
+  candidates: readonly ExactCandidate[],
+): ExactCandidate[] {
+  const grouped = new Map<string, ExactCandidate[]>();
+
+  for (const candidate of [...candidates].sort(exactCandidateOrder)) {
+    const rangeKey = JSON.stringify([
+      candidate.normalizedRange.startInclusive,
+      candidate.normalizedRange.endExclusive,
+    ]);
+    const group = grouped.get(rangeKey) ?? [];
+    group.push(candidate);
+    grouped.set(rangeKey, group);
+  }
+
+  return [...grouped.values()].map((group) => {
+    const semanticKeys = new Set(
+      group.map((candidate) =>
+        JSON.stringify([candidate.namespace, candidate.canonicalValue]),
+      ),
+    );
+    const representative = group[0];
+    if (representative === undefined) {
+      throw new TypeError("Exact identity recognition group must not be empty");
+    }
+    if (semanticKeys.size > 1) {
+      const { startInclusive, endExclusive } = representative.normalizedRange;
+      throw new TypeError(
+        `Conflicting exact identity recognitions at normalized range ${startInclusive}:${endExclusive}`,
+      );
+    }
+
+    return [...group].sort((left, right) =>
+      left.recognizerId.localeCompare(right.recognizerId),
+    )[0] ?? representative;
+  });
 }
 
 function selectStableNonOverlapping<T extends { readonly normalizedRange: TextRange }>(
@@ -139,7 +197,34 @@ function selectStableNonOverlapping<T extends { readonly normalizedRange: TextRa
   return selected;
 }
 
-function findSurfaceRanges(comparisonText: string, surface: string): TextRange[] {
+function codePointBefore(value: string, index: number): string | undefined {
+  return [...value.slice(0, index)].at(-1);
+}
+
+function codePointAt(value: string, index: number): string | undefined {
+  return [...value.slice(index)].at(0);
+}
+
+function rangeMatchesPolicy(
+  comparisonText: string,
+  range: TextRange,
+  matchPolicy: QueryLexiconMatchPolicy,
+): boolean {
+  if (matchPolicy === "SUBSTRING") {
+    return true;
+  }
+
+  return (
+    !hasWordLikeCharacter(codePointBefore(comparisonText, range.startInclusive)) &&
+    !hasWordLikeCharacter(codePointAt(comparisonText, range.endExclusive))
+  );
+}
+
+function findSurfaceRanges(
+  comparisonText: string,
+  surface: string,
+  matchPolicy: QueryLexiconMatchPolicy,
+): TextRange[] {
   const ranges: TextRange[] = [];
   let cursor = 0;
 
@@ -149,10 +234,13 @@ function findSurfaceRanges(comparisonText: string, surface: string): TextRange[]
       break;
     }
 
-    ranges.push({
+    const range = {
       startInclusive,
       endExclusive: startInclusive + surface.length,
-    });
+    };
+    if (rangeMatchesPolicy(comparisonText, range, matchPolicy)) {
+      ranges.push(range);
+    }
     cursor = startInclusive + 1;
   }
 
@@ -171,6 +259,7 @@ function collectLexiconCandidates(input: ParseQueryInput): LexiconCandidate[] {
     for (const normalizedRange of findSurfaceRanges(
       input.normalizedQuery.comparisonText,
       normalizedSurface,
+      entry.matchPolicy,
     )) {
       const rawRange = mapNormalizedRangeToRaw(input.normalizedQuery, normalizedRange);
       if (rawRange !== null) {
@@ -359,9 +448,13 @@ function candidateOwner(candidate: SelectedCandidate): QuerySpanOwner {
   return candidate.entry.owner;
 }
 
-function candidateValue(candidate: SelectedCandidate, rawText: string): ConstraintValue {
+function candidateValue(candidate: SelectedCandidate): ConstraintValue {
   if (candidate.kind === "EXACT") {
-    return { kind: "EXACT_IDENTITY", namespace: candidate.namespace, value: rawText };
+    return {
+      kind: "EXACT_IDENTITY",
+      namespace: candidate.namespace,
+      value: candidate.canonicalValue,
+    };
   }
   if (candidate.kind === "CONTINUOUS") {
     return {
@@ -387,6 +480,12 @@ function candidateAttributeBand(candidate: SelectedCandidate): AttributeBand {
     return candidate.attributeBand;
   }
   return candidate.entry.attributeBand;
+}
+
+function candidateDecisionProfile(
+  candidate: SelectedCandidate,
+): D5DecisionProfile | null {
+  return candidate.kind === "LEXICON" ? candidate.entry.decisionProfile : null;
 }
 
 function candidateInterpretation(candidate: SelectedCandidate): InterpretedConstraint["interpretationState"] {
@@ -451,7 +550,7 @@ function buildConstraintRecords(
       },
       constraint: {
         constraintId,
-        value: candidateValue(candidate, rawText),
+        value: candidateValue(candidate),
         source: {
           kind: "QUERY_SPAN",
           spanId,
@@ -460,6 +559,7 @@ function buildConstraintRecords(
         },
         interpretationState,
         attributeBand: candidateAttributeBand(candidate),
+        decisionProfile: candidateDecisionProfile(candidate),
       },
       mutualExclusionGroup,
     };
@@ -492,35 +592,63 @@ function constraintValuesEqual(left: ConstraintValue, right: ConstraintValue): b
   return constraintValueKey(left) === constraintValueKey(right);
 }
 
+interface ConfirmationApplication {
+  readonly records: readonly ConstraintRecord[];
+  readonly diagnostics: readonly ParserDiagnostic[];
+}
+
+function confirmedRecord(record: ConstraintRecord): ConstraintRecord {
+  return {
+    ...record,
+    span: { ...record.span, interpretationState: "DECLARED" },
+    constraint: {
+      ...record.constraint,
+      source: {
+        kind: "USER_CONFIRMATION",
+        priorConstraintId: record.constraint.constraintId,
+      },
+      interpretationState: "DECLARED",
+    },
+  };
+}
+
 function applyConfirmations(
   records: readonly ConstraintRecord[],
   input: ParseQueryInput,
-): ConstraintRecord[] {
+): ConfirmationApplication {
   const confirmations = input.confirmations ?? [];
+  const confirmedById = new Map<string, ConstraintRecord>();
+  const diagnostics: ParserDiagnostic[] = [];
 
-  return records.map((record) => {
-    const confirmed = confirmations.some(
-      (confirmation) =>
-        confirmation.confirmed &&
-        constraintValuesEqual(confirmation.value, record.constraint.value),
-    );
-    if (!confirmed) {
-      return record;
+  for (const confirmation of confirmations) {
+    if (!confirmation.confirmed) {
+      continue;
     }
 
-    return {
-      ...record,
-      span: { ...record.span, interpretationState: "DECLARED" },
-      constraint: {
-        ...record.constraint,
-        source: {
-          kind: "USER_CONFIRMATION",
-          priorConstraintId: record.constraint.constraintId,
-        },
-        interpretationState: "DECLARED",
-      },
-    };
-  });
+    const target = records.find(
+      (record) =>
+        record.constraint.constraintId === confirmation.targetConstraintId,
+    );
+    if (
+      target === undefined ||
+      !constraintValuesEqual(confirmation.value, target.constraint.value)
+    ) {
+      diagnostics.push({
+        code: "CONFIRMATION_TARGET_OR_VALUE_MISMATCH",
+        spanIds: target === undefined ? [] : [target.span.spanId],
+      });
+      continue;
+    }
+
+    confirmedById.set(target.constraint.constraintId, confirmedRecord(target));
+  }
+
+  return {
+    records: records.map(
+      (record) => confirmedById.get(record.constraint.constraintId) ?? record,
+    ),
+    diagnostics,
+  };
 }
 
 function detectContradictions(records: readonly ConstraintRecord[]): Contradiction[] {
@@ -580,7 +708,11 @@ function buildUnsupported(records: readonly ConstraintRecord[]): UnsupportedConc
   });
 }
 
-function buildDiagnostics(records: readonly ConstraintRecord[], empty: boolean): ParserDiagnostic[] {
+function buildDiagnostics(
+  records: readonly ConstraintRecord[],
+  empty: boolean,
+  confirmationDiagnostics: readonly ParserDiagnostic[],
+): ParserDiagnostic[] {
   const diagnostics: ParserDiagnostic[] = [];
 
   if (empty) {
@@ -613,11 +745,13 @@ function buildDiagnostics(records: readonly ConstraintRecord[], empty: boolean):
     });
   }
 
-  return diagnostics;
+  return [...diagnostics, ...confirmationDiagnostics];
 }
 
 export function parseQuery(input: ParseQueryInput): ParserResult {
-  const exactCandidates = selectStableNonOverlapping(collectExactCandidates(input));
+  const exactCandidates = selectStableNonOverlapping(
+    resolveExactCandidateConflicts(collectExactCandidates(input)),
+  );
   const exactRanges = exactCandidates.map((candidate) => candidate.normalizedRange);
   const lexiconCandidates = selectLexiconCandidates(
     collectLexiconCandidates(input),
@@ -642,7 +776,11 @@ export function parseQuery(input: ParseQueryInput): ParserResult {
     (left, right) =>
       left.normalizedRange.startInclusive - right.normalizedRange.startInclusive,
   );
-  const records = applyConfirmations(buildConstraintRecords(selected, input), input);
+  const confirmationApplication = applyConfirmations(
+    buildConstraintRecords(selected, input),
+    input,
+  );
+  const records = confirmationApplication.records;
 
   return {
     normalizedQuery: input.normalizedQuery,
@@ -653,6 +791,7 @@ export function parseQuery(input: ParseQueryInput): ParserResult {
     diagnostics: buildDiagnostics(
       records,
       input.normalizedQuery.inputState === "EMPTY",
+      confirmationApplication.diagnostics,
     ),
     parserVersion: DISCOVERY_COMPONENT_VERSIONS.parser,
     lexiconVersion: input.lexicon.version,

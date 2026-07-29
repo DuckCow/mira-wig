@@ -11,10 +11,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:material-human-ko",
     surface: "인모",
+    matchPolicy: "SUBSTRING",
     languageTag: KOREAN,
     owner: "CONCEPT",
     conceptId: "fixture:material:human-hair",
     attributeBand: "CLAIM_BEARING",
+    decisionProfile: "CLAIM_BEARING_MATERIAL",
     interpretationState: "DERIVED",
     value: {
       kind: "CATEGORICAL",
@@ -26,10 +28,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:material-synthetic-ko",
     surface: "합성모",
+    matchPolicy: "SUBSTRING",
     languageTag: KOREAN,
     owner: "CONCEPT",
     conceptId: "fixture:material:synthetic",
     attributeBand: "CLAIM_BEARING",
+    decisionProfile: "CLAIM_BEARING_MATERIAL",
     interpretationState: "DERIVED",
     value: {
       kind: "CATEGORICAL",
@@ -41,10 +45,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:material-human-en-long",
     surface: "human hair",
+    matchPolicy: "WORD_LIKE_BOUNDARIES",
     languageTag: ENGLISH,
     owner: "CONCEPT",
     conceptId: "fixture:material:human-hair",
     attributeBand: "CLAIM_BEARING",
+    decisionProfile: "CLAIM_BEARING_MATERIAL",
     interpretationState: "DERIVED",
     value: {
       kind: "CATEGORICAL",
@@ -56,10 +62,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:material-human-en-short",
     surface: "human",
+    matchPolicy: "WORD_LIKE_BOUNDARIES",
     languageTag: ENGLISH,
     owner: "CONCEPT",
     conceptId: "fixture:material:human-hair",
     attributeBand: "CLAIM_BEARING",
+    decisionProfile: "CLAIM_BEARING_MATERIAL",
     interpretationState: "DERIVED",
     value: {
       kind: "CATEGORICAL",
@@ -71,10 +79,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:oncology-use-context-ko",
     surface: "항암 치료 중",
+    matchPolicy: "SUBSTRING",
     languageTag: KOREAN,
     owner: "OUTCOME_INTENT",
     conceptId: "fixture:sensitive-use-context:oncology-treatment",
     attributeBand: "OUTCOME_INTENT",
+    decisionProfile: "SENSITIVE_USE_CONTEXT",
     interpretationState: "BRIDGED",
     value: {
       kind: "OUTCOME_INTENT",
@@ -85,10 +95,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:unsupported-see-through-bangs-ko",
     surface: "시스루뱅",
+    matchPolicy: "SUBSTRING",
     languageTag: KOREAN,
     owner: "UNSUPPORTED",
     conceptId: "fixture:style:bangs:see-through",
     attributeBand: "STYLISTIC",
+    decisionProfile: null,
     interpretationState: "UNRESOLVED",
     value: {
       kind: "UNKNOWN_OR_UNSUPPORTED",
@@ -100,10 +112,12 @@ const entries: readonly QueryLexiconEntry[] = [
   {
     entryId: "fixture:lexicon:alternate-audience-route-en",
     surface: "humanoid",
+    matchPolicy: "WORD_LIKE_BOUNDARIES",
     languageTag: ENGLISH,
     owner: "AUDIENCE_ROUTE",
     conceptId: "fixture:alternate-audience-route",
     attributeBand: "AUTHORITY_ROUTE",
+    decisionProfile: null,
     interpretationState: "UNRESOLVED",
     value: {
       kind: "AUTHORITY_ROUTE",
@@ -114,8 +128,8 @@ const entries: readonly QueryLexiconEntry[] = [
 ];
 
 export const TEST_QUERY_LEXICON: QueryLexicon = {
-  version: "fixture:test-lexicon/v0.1",
-  ontologyVersion: "fixture:test-ontology/v0.1",
+  version: "fixture:test-lexicon/v0.2",
+  ontologyVersion: "fixture:test-ontology/v0.2",
   entries,
   units: [
     {

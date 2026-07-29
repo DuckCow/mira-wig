@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "d5-golden-cases/v0.1-provisional",
+  "schemaVersion": "d5-golden-cases/v0.2-provisional",
   "taskClassification": "SOURCE_ONLY",
   "productionActivationAuthorized": false,
   "fixtureOnly": true,
@@ -804,6 +804,7 @@
       },
       "confirmation": {
         "confirmed": true,
+        "targetConstraintId": "constraint:0",
         "value": {
           "kind": "CATEGORICAL",
           "attributeId": "material",

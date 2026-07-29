@@ -410,6 +410,10 @@ function parseConfirmation(value: unknown, path: string): QueryConfirmation {
 
   return {
     confirmed: record.confirmed,
+    targetConstraintId: readString(
+      record.targetConstraintId,
+      `${path}.targetConstraintId`,
+    ),
     value: parseConstraintValue(record.value, `${path}.value`),
   };
 }
@@ -443,6 +447,7 @@ function parseCase(value: unknown, path: string): GoldenCase {
 export function parseGoldenCasesFixture(parsed: unknown): GoldenCasesFixture {
   const record = readRecord(parsed, "$");
   if (
+    record.schemaVersion !== "d5-golden-cases/v0.2-provisional" ||
     record.taskClassification !== "SOURCE_ONLY" ||
     record.productionActivationAuthorized !== false ||
     record.fixtureOnly !== true ||
@@ -457,7 +462,7 @@ export function parseGoldenCasesFixture(parsed: unknown): GoldenCasesFixture {
   }
 
   return {
-    schemaVersion: readString(record.schemaVersion, "$.schemaVersion"),
+    schemaVersion: "d5-golden-cases/v0.2-provisional",
     taskClassification: "SOURCE_ONLY",
     productionActivationAuthorized: false,
     fixtureOnly: true,

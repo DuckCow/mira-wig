@@ -5,72 +5,150 @@ import type {
   TextRange,
 } from "./types";
 
-interface RawSegment {
+interface RawRun {
   readonly text: string;
   readonly rawRange: TextRange;
   readonly whitespace: boolean;
 }
 
-function isCombiningMark(value: string): boolean {
-  return /^\p{Mark}$/u.test(value);
+interface MappedCodePoint {
+  readonly text: string;
+  readonly rawRange: TextRange;
 }
 
-function toRawSegments(rawText: string): RawSegment[] {
-  const segments: RawSegment[] = [];
+function toRawRuns(rawText: string): RawRun[] {
+  const runs: RawRun[] = [];
   let cursor = 0;
 
   for (const codePoint of rawText) {
     const startInclusive = cursor;
     cursor += codePoint.length;
     const whitespace = /^\s$/u.test(codePoint);
-    const previous = segments.at(-1);
+    const previous = runs.at(-1);
 
-    if (previous !== undefined && whitespace && previous.whitespace) {
-      segments[segments.length - 1] = {
+    if (previous !== undefined && whitespace === previous.whitespace) {
+      runs[runs.length - 1] = {
         text: previous.text + codePoint,
         rawRange: {
           startInclusive: previous.rawRange.startInclusive,
           endExclusive: cursor,
         },
-        whitespace: true,
+        whitespace,
       };
       continue;
     }
 
-    if (previous !== undefined && !whitespace && !previous.whitespace && isCombiningMark(codePoint)) {
-      segments[segments.length - 1] = {
-        text: previous.text + codePoint,
-        rawRange: {
-          startInclusive: previous.rawRange.startInclusive,
-          endExclusive: cursor,
-        },
-        whitespace: false,
-      };
-      continue;
-    }
-
-    segments.push({
+    runs.push({
       text: codePoint,
       rawRange: { startInclusive, endExclusive: cursor },
       whitespace,
     });
   }
 
-  return segments;
+  return runs;
 }
 
-function appendNormalizedSegment(
+function comparisonForm(value: string): string {
+  return value.toLowerCase().normalize("NFC");
+}
+
+function mergeRawRanges(
+  mapped: readonly MappedCodePoint[],
+  addedRange: TextRange,
+): TextRange {
+  return {
+    startInclusive: Math.min(
+      addedRange.startInclusive,
+      ...mapped.map((entry) => entry.rawRange.startInclusive),
+    ),
+    endExclusive: Math.max(
+      addedRange.endExclusive,
+      ...mapped.map((entry) => entry.rawRange.endExclusive),
+    ),
+  };
+}
+
+function reconcileMappedPrefix(
+  previous: readonly MappedCodePoint[],
+  nextText: string,
+  addedRange: TextRange,
+): MappedCodePoint[] {
+  const nextCodePoints = [...nextText];
+  let commonPrefixLength = 0;
+
+  while (
+    commonPrefixLength < previous.length &&
+    commonPrefixLength < nextCodePoints.length &&
+    previous[commonPrefixLength]?.text === nextCodePoints[commonPrefixLength]
+  ) {
+    commonPrefixLength += 1;
+  }
+
+  let commonSuffixLength = 0;
+  while (
+    commonSuffixLength < previous.length - commonPrefixLength &&
+    commonSuffixLength < nextCodePoints.length - commonPrefixLength &&
+    previous[previous.length - commonSuffixLength - 1]?.text ===
+      nextCodePoints[nextCodePoints.length - commonSuffixLength - 1]
+  ) {
+    commonSuffixLength += 1;
+  }
+
+  const replacedPrevious = previous.slice(
+    commonPrefixLength,
+    previous.length - commonSuffixLength,
+  );
+  const contributingRawRange = mergeRawRanges(replacedPrevious, addedRange);
+  const replacement = nextCodePoints
+    .slice(commonPrefixLength, nextCodePoints.length - commonSuffixLength)
+    .map((text) => ({ text, rawRange: contributingRawRange }));
+  const suffix =
+    commonSuffixLength === 0
+      ? []
+      : previous.slice(previous.length - commonSuffixLength);
+
+  return [
+    ...previous.slice(0, commonPrefixLength),
+    ...replacement,
+    ...suffix,
+  ];
+}
+
+function normalizeRawRun(run: RawRun): MappedCodePoint[] {
+  const mapped: MappedCodePoint[] = [];
+  let rawPrefix = "";
+  let rawCursor = run.rawRange.startInclusive;
+
+  for (const codePoint of run.text) {
+    const rawRange = {
+      startInclusive: rawCursor,
+      endExclusive: rawCursor + codePoint.length,
+    };
+    rawCursor = rawRange.endExclusive;
+    rawPrefix += codePoint;
+    const reconciled = reconcileMappedPrefix(
+      mapped,
+      comparisonForm(rawPrefix),
+      rawRange,
+    );
+    mapped.splice(0, mapped.length, ...reconciled);
+  }
+
+  return mapped;
+}
+
+function appendMappedCodePoint(
   comparisonParts: string[],
   offsetMap: NormalizedOffsetMapEntry[],
-  normalizedText: string,
+  mappedCodePoint: MappedCodePoint,
   rawRange: TextRange,
 ): void {
   const startInclusive = comparisonParts.join("").length;
-  comparisonParts.push(normalizedText);
+  comparisonParts.push(mappedCodePoint.text);
   offsetMap.push({
     normalizedRange: {
       startInclusive,
-      endExclusive: startInclusive + normalizedText.length,
+      endExclusive: startInclusive + mappedCodePoint.text.length,
     },
     rawRange,
   });
@@ -81,33 +159,43 @@ export function normalizeQuery(input: RawQueryInput): NormalizedQuery {
   const offsetMap: NormalizedOffsetMapEntry[] = [];
   let pendingWhitespace: TextRange | null = null;
 
-  for (const segment of toRawSegments(input.text)) {
-    if (segment.whitespace) {
+  for (const run of toRawRuns(input.text)) {
+    if (run.whitespace) {
       const whitespaceStart: number =
         pendingWhitespace === null
-          ? segment.rawRange.startInclusive
+          ? run.rawRange.startInclusive
           : pendingWhitespace.startInclusive;
       pendingWhitespace = {
         startInclusive: whitespaceStart,
-        endExclusive: segment.rawRange.endExclusive,
+        endExclusive: run.rawRange.endExclusive,
       };
       continue;
     }
 
     if (pendingWhitespace !== null && comparisonParts.length > 0) {
-      appendNormalizedSegment(comparisonParts, offsetMap, " ", pendingWhitespace);
+      appendMappedCodePoint(
+        comparisonParts,
+        offsetMap,
+        { text: " ", rawRange: pendingWhitespace },
+        pendingWhitespace,
+      );
     }
 
     pendingWhitespace = null;
-    appendNormalizedSegment(
-      comparisonParts,
-      offsetMap,
-      segment.text.normalize("NFC").toLowerCase(),
-      segment.rawRange,
-    );
+    for (const mappedCodePoint of normalizeRawRun(run)) {
+      appendMappedCodePoint(
+        comparisonParts,
+        offsetMap,
+        mappedCodePoint,
+        mappedCodePoint.rawRange,
+      );
+    }
   }
 
   const comparisonText = comparisonParts.join("");
+  if (comparisonText !== comparisonText.normalize("NFC")) {
+    throw new Error("Comparison text normalization invariant failed");
+  }
 
   return {
     rawText: input.text,

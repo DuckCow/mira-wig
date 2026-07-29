@@ -1,15 +1,22 @@
 import type { MarketCode } from "@/lib/market/types";
 
+const localeCodeBrand: unique symbol = Symbol("LocaleCode");
+const languageTagBrand: unique symbol = Symbol("LanguageTag");
+const audienceNamespaceBrand: unique symbol = Symbol("AudienceNamespace");
+
 export interface LocaleCode {
   readonly value: string;
+  readonly [localeCodeBrand]: true;
 }
 
 export interface LanguageTag {
   readonly value: string;
+  readonly [languageTagBrand]: true;
 }
 
 export interface AudienceNamespace {
   readonly value: string;
+  readonly [audienceNamespaceBrand]: true;
 }
 
 export type QueryLanguage =
@@ -23,24 +30,47 @@ export interface DiscoveryContext {
   readonly audienceNamespace: AudienceNamespace;
 }
 
-function createOpaqueToken(value: string, fieldName: string): { readonly value: string } {
+function validateOpaqueToken(value: string, fieldName: string): string {
   if (value.length === 0 || value.trim() !== value) {
     throw new RangeError(`${fieldName} must be a nonblank token without surrounding whitespace`);
   }
 
-  return { value };
+  return value;
+}
+
+function hideOpaqueBrand<T extends object>(token: T, brand: symbol): T {
+  Object.defineProperty(token, brand, { enumerable: false });
+  return token;
 }
 
 export function createLocaleCode(value: string): LocaleCode {
-  return createOpaqueToken(value, "locale");
+  return hideOpaqueBrand(
+    {
+      value: validateOpaqueToken(value, "locale"),
+      [localeCodeBrand]: true,
+    },
+    localeCodeBrand,
+  );
 }
 
 export function createLanguageTag(value: string): LanguageTag {
-  return createOpaqueToken(value, "languageTag");
+  return hideOpaqueBrand(
+    {
+      value: validateOpaqueToken(value, "languageTag"),
+      [languageTagBrand]: true,
+    },
+    languageTagBrand,
+  );
 }
 
 export function createAudienceNamespace(value: string): AudienceNamespace {
-  return createOpaqueToken(value, "audienceNamespace");
+  return hideOpaqueBrand(
+    {
+      value: validateOpaqueToken(value, "audienceNamespace"),
+      [audienceNamespaceBrand]: true,
+    },
+    audienceNamespaceBrand,
+  );
 }
 
 export function createAutoQueryLanguage(): QueryLanguage {
@@ -85,6 +115,10 @@ export type AttributeBand =
   | "STYLISTIC"
   | "OUTCOME_INTENT"
   | "AUTHORITY_ROUTE";
+
+export type D5DecisionProfile =
+  | "CLAIM_BEARING_MATERIAL"
+  | "SENSITIVE_USE_CONTEXT";
 
 export interface ExactIdentityConstraint {
   readonly kind: "EXACT_IDENTITY";
@@ -149,6 +183,7 @@ export interface InterpretedConstraint {
   readonly source: ConstraintSource;
   readonly interpretationState: InterpretationState;
   readonly attributeBand: AttributeBand;
+  readonly decisionProfile: D5DecisionProfile | null;
 }
 
 export type QuerySpanOwner =
@@ -192,6 +227,7 @@ export interface Contradiction {
 export type ParserDiagnosticCode =
   | "EMPTY_QUERY"
   | "AMBIGUOUS_SAME_PRECEDENCE_OVERLAP"
+  | "CONFIRMATION_TARGET_OR_VALUE_MISMATCH"
   | "MIXED_LANGUAGE_SPANS_RESOLVED";
 
 export interface ParserDiagnostic {
@@ -214,10 +250,12 @@ export interface ParserResult {
 export interface QueryLexiconEntry {
   readonly entryId: string;
   readonly surface: string;
+  readonly matchPolicy: QueryLexiconMatchPolicy;
   readonly languageTag: LanguageTag | null;
   readonly owner: "CONCEPT" | "OUTCOME_INTENT" | "AUDIENCE_ROUTE" | "UNSUPPORTED";
   readonly conceptId: string;
   readonly attributeBand: AttributeBand;
+  readonly decisionProfile: D5DecisionProfile | null;
   readonly interpretationState: InterpretationState;
   readonly value:
     | CategoricalConstraint
@@ -226,6 +264,10 @@ export interface QueryLexiconEntry {
     | AuthorityRouteConstraint;
   readonly mutualExclusionGroup: string | null;
 }
+
+export type QueryLexiconMatchPolicy =
+  | "SUBSTRING"
+  | "WORD_LIKE_BOUNDARIES";
 
 export interface QueryUnitEntry {
   readonly entryId: string;
@@ -245,6 +287,7 @@ export interface QueryLexicon {
 export interface ExactIdentityRecognition {
   readonly normalizedRange: TextRange;
   readonly namespace: string;
+  readonly canonicalValue: string;
 }
 
 export interface ExactIdentityRecognizer {
@@ -255,6 +298,7 @@ export interface ExactIdentityRecognizer {
 
 export interface QueryConfirmation {
   readonly confirmed: boolean;
+  readonly targetConstraintId: string;
   readonly value: ConstraintValue;
 }
 
@@ -333,8 +377,37 @@ export type DecisionSubject =
   | { readonly kind: "FIXTURE_PRODUCT"; readonly fixtureProductId: string };
 
 export type ConstraintDecisionTarget =
-  | { readonly kind: "INTERPRETED_CONSTRAINT"; readonly constraint: InterpretedConstraint }
+  | {
+      readonly kind: "INTERPRETED_CONSTRAINT";
+      readonly decisionLevel: "QUERY";
+      readonly constraint: InterpretedConstraint;
+    }
+  | {
+      readonly kind: "INTERPRETED_CONSTRAINT";
+      readonly decisionLevel: "FIXTURE_PRODUCT";
+      readonly constraint: InterpretedConstraint;
+    }
   | { readonly kind: "CONTRADICTION"; readonly contradiction: Contradiction };
+
+export type QueryInterpretedConstraintDecisionTarget = Extract<
+  ConstraintDecisionTarget,
+  {
+    readonly kind: "INTERPRETED_CONSTRAINT";
+    readonly decisionLevel: "QUERY";
+  }
+>;
+
+export type FixtureProductConstraintDecisionTarget = Extract<
+  ConstraintDecisionTarget,
+  {
+    readonly kind: "INTERPRETED_CONSTRAINT";
+    readonly decisionLevel: "FIXTURE_PRODUCT";
+  }
+>;
+
+export type QueryConstraintDecisionTarget =
+  | QueryInterpretedConstraintDecisionTarget
+  | Extract<ConstraintDecisionTarget, { readonly kind: "CONTRADICTION" }>;
 
 export type AuthorityOutcome =
   | {
@@ -383,6 +456,7 @@ export type ProvisionalReasonCode =
   | "PRODUCT_EVIDENCE_CONFLICT"
   | "CLAIM_AUTHORITY_UNAVAILABLE_ROUTE"
   | "CONTINUOUS_WITHIN_SYNTHETIC_TOLERANCE"
+  | "CONTINUOUS_OUTSIDE_SYNTHETIC_TOLERANCE"
   | "SYNTHETIC_TOLERANCE_REQUIRED"
   | "UNSUPPORTED_CONCEPT"
   | "CONTRADICTORY_QUERY"
@@ -408,13 +482,24 @@ export interface ConstraintDecision {
   readonly diagnostics: readonly DecisionDiagnostic[];
 }
 
-export interface DecideConstraintInput {
-  readonly target: ConstraintDecisionTarget;
-  readonly subject: DecisionSubject;
+interface DecideConstraintInputBase {
   readonly context: DiscoveryContext;
   readonly evidence?: ProductEvidenceFixture;
   readonly policies?: readonly DecisionPolicyFixture[];
 }
+
+export type DecideConstraintInput =
+  | (DecideConstraintInputBase & {
+      readonly target: QueryConstraintDecisionTarget;
+      readonly subject: Extract<DecisionSubject, { readonly kind: "QUERY" }>;
+    })
+  | (DecideConstraintInputBase & {
+      readonly target: FixtureProductConstraintDecisionTarget;
+      readonly subject: Extract<
+        DecisionSubject,
+        { readonly kind: "FIXTURE_PRODUCT" }
+      >;
+    });
 
 export interface DiscoveryComponentVersions {
   readonly requestSchema: string;

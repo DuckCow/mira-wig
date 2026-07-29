@@ -14,6 +14,7 @@ function recognizeFixtureSku(comparisonText: string): ExactIdentityRecognition[]
         endExclusive: match.index + match[0].length,
       },
       namespace: "SKU",
+      canonicalValue: match[0].toUpperCase(),
     });
   }
 
@@ -23,7 +24,7 @@ function recognizeFixtureSku(comparisonText: string): ExactIdentityRecognition[]
 export const TEST_IDENTITY_RECOGNIZERS: readonly ExactIdentityRecognizer[] = [
   {
     recognizerId: "fixture:identity-recognizer:sku",
-    version: "fixture:identity-recognizer:sku/v0.1",
+    version: "fixture:identity-recognizer:sku/v0.2",
     recognize: recognizeFixtureSku,
   },
 ];

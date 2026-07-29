@@ -74,7 +74,12 @@ function resolveTarget(
         `Missing golden constraint ${targetRef.constraintId}`,
       );
     }
-    return { kind: "INTERPRETED_CONSTRAINT", constraint };
+    return {
+      kind: "INTERPRETED_CONSTRAINT",
+      decisionLevel:
+        decisionCase.subject.kind === "QUERY" ? "QUERY" : "FIXTURE_PRODUCT",
+      constraint,
+    };
   }
 
   const contradiction = result.contradictions.find(
@@ -88,10 +93,51 @@ function resolveTarget(
   return { kind: "CONTRADICTION", contradiction };
 }
 
+function decideGoldenCase(
+  result: ParserResult,
+  goldenCase: GoldenCase,
+  decisionCase: GoldenDecisionCase,
+) {
+  const target = resolveTarget(result, decisionCase);
+  const optionalEvidence =
+    decisionCase.evidence === undefined
+      ? {}
+      : { evidence: decisionCase.evidence };
+
+  if (
+    target.kind === "CONTRADICTION" ||
+    target.decisionLevel === "QUERY"
+  ) {
+    if (decisionCase.subject.kind !== "QUERY") {
+      throw new TypeError("Golden query target requires a query subject");
+    }
+    return decideConstraint({
+      target,
+      subject: decisionCase.subject,
+      context: goldenCase.context,
+      ...optionalEvidence,
+      policies: decisionCase.policies,
+    });
+  }
+
+  if (decisionCase.subject.kind !== "FIXTURE_PRODUCT") {
+    throw new TypeError(
+      "Golden fixture-product target requires a fixture-product subject",
+    );
+  }
+  return decideConstraint({
+    target,
+    subject: decisionCase.subject,
+    context: goldenCase.context,
+    ...optionalEvidence,
+    policies: decisionCase.policies,
+  });
+}
+
 describe("D5 source-only golden cases", () => {
   it("keeps the fixture explicitly synthetic and production-disabled", () => {
     expect(fixture).toMatchObject({
-      schemaVersion: "d5-golden-cases/v0.1-provisional",
+      schemaVersion: "d5-golden-cases/v0.2-provisional",
       taskClassification: "SOURCE_ONLY",
       productionActivationAuthorized: false,
       fixtureOnly: true,
@@ -116,15 +162,7 @@ describe("D5 source-only golden cases", () => {
     ).toBe(true);
 
     for (const decisionCase of goldenCase.decisions) {
-      const decision = decideConstraint({
-        target: resolveTarget(first, decisionCase),
-        subject: decisionCase.subject,
-        context: goldenCase.context,
-        ...(decisionCase.evidence === undefined
-          ? {}
-          : { evidence: decisionCase.evidence }),
-        policies: decisionCase.policies,
-      });
+      const decision = decideGoldenCase(first, goldenCase, decisionCase);
 
       expect(decision).toEqual(decisionCase.expected);
       expect(decision.constraintId).not.toBe("");
@@ -205,6 +243,16 @@ describe("D5 source-only golden cases", () => {
         fixtureOnly: true,
         cases: [{ caseId: 123 }],
       }),
+    ).toThrow(TypeError);
+
+    const unsupportedAuthorityStatus: unknown = JSON.parse(
+      JSON.stringify(fixture).replace(
+        '"status":"UNAVAILABLE"',
+        '"status":"AVAILABLE"',
+      ),
+    );
+    expect(() =>
+      parseGoldenCasesFixture(unsupportedAuthorityStatus),
     ).toThrow(TypeError);
   });
 });

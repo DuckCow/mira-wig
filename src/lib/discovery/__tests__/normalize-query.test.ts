@@ -69,6 +69,46 @@ describe("normalizeQuery", () => {
     ).toBe(" \t\n ");
   });
 
+  it("normalizes a complete decomposed Hangul run to NFC with exact raw mapping", () => {
+    const decomposed = "\u1100\u1161\u1107\u1161\u11AF";
+    expect(normalizeQuery({ text: decomposed }).comparisonText).toBe("가발");
+
+    const rawText = `x${decomposed}l`;
+    const normalized = normalizeQuery({ text: rawText });
+
+    expect(normalized.comparisonText).toBe("x가발l");
+    expect(normalized.comparisonText).toBe(
+      normalized.comparisonText.normalize("NFC"),
+    );
+
+    const rawRange = mapNormalizedRangeToRaw(normalized, {
+      startInclusive: 1,
+      endExclusive: 3,
+    });
+    expect(rawRange).toEqual({ startInclusive: 1, endExclusive: 6 });
+    expect(
+      rawRange === null
+        ? null
+        : rawText.slice(rawRange.startInclusive, rawRange.endExclusive),
+    ).toBe(decomposed);
+  });
+
+  it("maps a lowercasing expansion conservatively without widening to its run", () => {
+    const rawText = "AİB";
+    const normalized = normalizeQuery({ text: rawText });
+
+    expect(normalized.comparisonText).toBe("ai\u0307b");
+    expect(normalized.comparisonText).toBe(
+      normalized.comparisonText.normalize("NFC"),
+    );
+    expect(
+      mapNormalizedRangeToRaw(normalized, {
+        startInclusive: 1,
+        endExclusive: 3,
+      }),
+    ).toEqual({ startInclusive: 1, endExclusive: 2 });
+  });
+
   it("is deterministic across repeated normalization", () => {
     const input = { text: "  인모  12 INCH  " };
 
