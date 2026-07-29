@@ -1,0 +1,13 @@
+term_or_concept,language_or_locale,path_or_table,symbol_or_record_class,usage_type,structured_or_free_text,market_scope,customer_visible,affects_filter,affects_rank,affects_commerce,evidence_reference_present,risk_note
+MEDICAL,code,prisma/schema.prisma,WigCategory,STRUCTURED_ATTRIBUTE,structured,all,no,yes,no,no,no,"Category is a product-family/use-context label, not certification."
+의료용,ko,src/lib/catalog.types.ts,CATEGORY_LABELS,ADMIN_LABEL,static UI copy,all,yes,yes,no,no,no,"Customer-facing category wording can be read as a claim; no authority/evidence owner is linked."
+의료용,ko,prisma/seed.ts,"2 seeded style names and tags",MARKETING_COPY,free text plus structured category,KR|US|JP,yes,yes,no,no,no,"Committed demo copy becomes searchable/displayed if seed runs; not certification evidence."
+항암,ko,prisma/seed.ts,"1 seeded MEDICAL style description/tag",MARKETING_COPY,free text,KR|US|JP,yes,yes,no,no,no,"Exact tag query can retrieve the demo style; description also asserts intended treatment context."
+저자극,ko,prisma/seed.ts,"1 seeded MEDICAL style description/tag",MARKETING_COPY,free text,KR|US|JP,yes,yes,no,no,no,"Low-irritation wording has no substantiation or provenance."
+편안함,ko,prisma/seed.ts,"1 seeded MEDICAL style description/tag",MARKETING_COPY,free text,KR|US|JP,yes,yes,no,no,no,"Outcome wording is searchable via exact tag and displayed in detail copy."
+착용감,ko,prisma/seed.ts,"1 seeded MEDICAL style tag",MARKETING_COPY,free text,KR|US|JP,not directly displayed,yes,no,no,no,"Exact tag query acts as retrieval authority despite no structured outcome bridge."
+탈모,ko,src/lib/catalog.types.ts,CATEGORY_LABELS,ADMIN_LABEL,static UI copy,all,yes,yes,no,no,no,"Use-context category; not physical product evidence."
+탈모,ko,prisma/seed.ts,"2 seeded HAIR_LOSS style descriptions/tags",MARKETING_COPY,free text,KR|US|JP,yes,yes,no,no,no,"Searchable/demo merchandising text; no product evidence relation."
+자연스러움,ko,prisma/seed.ts,"seeded style tag",MARKETING_COPY,free text,KR|US|JP,not directly displayed,yes,no,no,no,"Exact tag query influences inclusion; it is not a structured naturalness or hairline fact."
+자연스러운,ko,prisma/seed.ts,"multiple seeded descriptions",MARKETING_COPY,free text,KR|US|JP,yes,no,no,no,no,"Displayed descriptive copy only; no measured naturalness definition."
+최적,ko,prisma/seed.ts,"seeded MEDICAL description",MARKETING_COPY,free text,KR|US|JP,yes,no,no,no,no,"Optimization/suitability wording has no evidence reference."
