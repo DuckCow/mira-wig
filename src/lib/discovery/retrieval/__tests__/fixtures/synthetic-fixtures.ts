@@ -169,14 +169,14 @@ export function eligibilitySummary(
   return {
     fixtureOnly: true,
     synthetic: true,
-    version: D6_EXACT_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot,
+    fixtureSnapshotVersion:
+      D6_EXACT_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot,
     variantId: EXACT_VARIANT_ID,
     marketCode: "KR",
     outcome: "ADMISSIBLE_FIXTURE",
-    reason: "synthetic-fixture-admissible",
+    fixtureReason: "synthetic-fixture-admissible",
     selectedVariantAmount: 85000,
     currency: "KRW",
-    fulfillmentClass: "SYNTHETIC_MTO",
     ...overrides,
   };
 }

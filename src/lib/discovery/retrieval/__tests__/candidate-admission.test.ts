@@ -9,6 +9,7 @@ import type {
   AdmitExactCandidateInput,
   ApplicableExactSliceRequest,
   EligibilitySummaryFixture,
+  ExactAdmissionRejectionReason,
 } from "../types";
 import {
   candidateSnapshot,
@@ -21,6 +22,14 @@ import {
   parserResult,
   syntheticContext,
 } from "./fixtures/synthetic-fixtures";
+
+type RemovedAdmissionReason = Extract<
+  ExactAdmissionRejectionReason,
+  "D5_EXACT_DECISION_REJECTED" | "LANDING_INTEGRITY_MISMATCH"
+>;
+const REMOVED_ADMISSION_REASONS_ARE_ABSENT: RemovedAdmissionReason extends never
+  ? true
+  : false = true;
 
 function applicableRequest(): ApplicableExactSliceRequest {
   const request = assessExactSliceRequest(parserResult());
@@ -45,7 +54,8 @@ function admissionInput(
     request: applicableRequest(),
     context: syntheticContext(),
     candidate: lookup.candidate,
-    candidateSetFingerprint: lookup.candidateSetFingerprint,
+    exactLookupAccountabilityKey:
+      lookup.exactLookupAccountabilityKey,
     catalogProofs: [catalogProof()],
     eligibilitySummaries: [eligibilitySummary()],
     d5Versions: {
@@ -137,6 +147,10 @@ describe("exact request applicability", () => {
 });
 
 describe("mandatory exact candidate admission", () => {
+  it("excludes unreachable serialized admission reasons", () => {
+    expect(REMOVED_ADMISSION_REASONS_ARE_ABSENT).toBe(true);
+  });
+
   it("uses the frozen D5 exact decision and selected-variant price", () => {
     const result = admitExactCandidate(admissionInput());
 
@@ -156,7 +170,9 @@ describe("mandatory exact candidate admission", () => {
         priceBasis: "SELECTED_VARIANT",
         amount: 85000,
         currency: "KRW",
+        eligibilityFixtureReason: "synthetic-fixture-admissible",
       });
+      expect(result).not.toHaveProperty("landingVerification");
     }
   });
 
@@ -240,7 +256,9 @@ describe("mandatory exact candidate admission", () => {
         admissionInput({
           eligibilitySummaries: [
             eligibilitySummary(),
-            eligibilitySummary({ reason: "synthetic-duplicate" }),
+            eligibilitySummary({
+              fixtureReason: "synthetic-duplicate",
+            }),
           ],
         }),
       ),
@@ -264,7 +282,7 @@ describe("mandatory exact candidate admission", () => {
       admitExactCandidate(
         admissionInput({
           eligibilitySummaries: [
-            eligibilitySummary({ version: "synthetic-stale-snapshot" }),
+            eligibilitySummary({ variantId: "variant-other" }),
           ],
         }),
       ),
@@ -272,6 +290,64 @@ describe("mandatory exact candidate admission", () => {
       status: "ADMISSION_REJECTED",
       reason: "ELIGIBILITY_IDENTITY_MISMATCH",
     });
+    expect(
+      admitExactCandidate(
+        admissionInput({
+          eligibilitySummaries: [
+            eligibilitySummary({
+              fixtureSnapshotVersion: "synthetic-stale-snapshot",
+            }),
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      status: "ADMISSION_REJECTED",
+      reason: "ELIGIBILITY_SUMMARY_PROVENANCE_INVALID",
+    });
+  });
+
+  it("rejects invalid eligibility provenance and preserves a valid fixture reason", () => {
+    const falseFixtureOnly = eligibilitySummary();
+    Object.defineProperty(falseFixtureOnly, "fixtureOnly", {
+      value: false,
+    });
+    const falseSynthetic = eligibilitySummary();
+    Object.defineProperty(falseSynthetic, "synthetic", {
+      value: false,
+    });
+
+    for (const summary of [
+      falseFixtureOnly,
+      falseSynthetic,
+      eligibilitySummary({ fixtureReason: "" }),
+      eligibilitySummary({ fixtureReason: " surrounded " }),
+    ]) {
+      expect(
+        admitExactCandidate(
+          admissionInput({ eligibilitySummaries: [summary] }),
+        ),
+      ).toMatchObject({
+        status: "ADMISSION_REJECTED",
+        reason: "ELIGIBILITY_SUMMARY_PROVENANCE_INVALID",
+      });
+    }
+
+    const admitted = admitExactCandidate(
+      admissionInput({
+        eligibilitySummaries: [
+          eligibilitySummary({
+            fixtureReason: "synthetic-fixture-reason-exact",
+          }),
+        ],
+      }),
+    );
+    expect(admitted.status).toBe("ADMITTED");
+    if (admitted.status === "ADMITTED") {
+      expect(admitted.result.eligibilityFixtureReason).toBe(
+        "synthetic-fixture-reason-exact",
+      );
+    }
+    expect(eligibilitySummary()).not.toHaveProperty("fulfillmentClass");
   });
 
   it("keeps unknown and ineligible fixture outcomes distinct", () => {

@@ -68,14 +68,13 @@ export type FixtureEligibilityOutcome =
 export interface EligibilitySummaryFixture {
   readonly fixtureOnly: true;
   readonly synthetic: true;
-  readonly version: string;
+  readonly fixtureSnapshotVersion: string;
   readonly variantId: string;
   readonly marketCode: DiscoveryContext["marketCode"];
   readonly outcome: FixtureEligibilityOutcome;
-  readonly reason: string;
+  readonly fixtureReason: string;
   readonly selectedVariantAmount: number | null;
   readonly currency: string | null;
-  readonly fulfillmentClass: string;
 }
 
 export type ExactIdentityInterpretedConstraint = InterpretedConstraint & {
@@ -104,7 +103,8 @@ export type ExactSliceRequestRejection =
         | "MULTIPLE_EXACT_IDENTITIES"
         | "BLANK_EXACT_IDENTITY"
         | "EXACT_IDENTITY_UNRESOLVED"
-        | "EXACT_IDENTITY_CONTRADICTED";
+        | "EXACT_IDENTITY_CONTRADICTED"
+        | "INCOMPATIBLE_D5_PARSER_VERSION";
     }
   | {
       readonly status: "UNSUPPORTED_EXACT_NAMESPACE";
@@ -118,19 +118,20 @@ export type ExactSliceRequestAssessment =
 export type CandidateFixtureFailureReason =
   | "CANDIDATE_SNAPSHOT_PROVENANCE_INVALID"
   | "CANDIDATE_FIXTURE_PROVENANCE_INVALID"
-  | "DUPLICATE_CANONICAL_SKU";
+  | "DUPLICATE_CANONICAL_SKU"
+  | "DUPLICATE_VARIANT_ID";
 
 export type ExactCandidateLookup =
   | {
       readonly status: "MATCH";
       readonly candidate: ExactCandidateFixture;
-      readonly candidateSetFingerprint: string;
+      readonly exactLookupAccountabilityKey: string;
     }
   | {
       readonly status: "EXACT_NOT_FOUND";
       readonly reasons: readonly DiscoveryReasonCode[];
       readonly fallbackRoutes: readonly FallbackRoute[];
-      readonly candidateSetFingerprint: string;
+      readonly exactLookupAccountabilityKey: string;
     }
   | {
       readonly status: "FIXTURE_INVALID";
@@ -147,14 +148,13 @@ export type ExactAdmissionRejectionReason =
   | "CATALOG_PROOF_MISSING"
   | "CATALOG_PROOF_DUPLICATE"
   | "CANDIDATE_IDENTITY_INTEGRITY_MISMATCH"
-  | "D5_EXACT_DECISION_REJECTED"
   | "ELIGIBILITY_SUMMARY_MISSING"
   | "ELIGIBILITY_SUMMARY_DUPLICATE"
   | "ELIGIBILITY_IDENTITY_MISMATCH"
+  | "ELIGIBILITY_SUMMARY_PROVENANCE_INVALID"
   | "ELIGIBILITY_SUMMARY_UNKNOWN"
   | "ELIGIBILITY_SUMMARY_INELIGIBLE"
-  | "SELECTED_VARIANT_PRICE_INVALID"
-  | "LANDING_INTEGRITY_MISMATCH";
+  | "SELECTED_VARIANT_PRICE_INVALID";
 
 export interface ExactVariantResult {
   readonly displayedStyleId: string;
@@ -164,7 +164,7 @@ export interface ExactVariantResult {
   readonly amount: number;
   readonly currency: string;
   readonly optionFacts: Readonly<Record<string, FixtureOptionFact>>;
-  readonly candidateSetFingerprint: string;
+  readonly exactLookupAccountabilityKey: string;
   readonly candidateSourceVersion: string;
   readonly fixtureSnapshotVersion: string;
   readonly admissionVersion: string;
@@ -181,7 +181,7 @@ export interface ExactLandingIntent {
   readonly exactIdentity: ExactFixtureIdentity;
   readonly fallbackRoutes: readonly FallbackRoute[];
   readonly speechRequirements: readonly SpeechRequirement[];
-  readonly candidateSetFingerprint: string;
+  readonly exactLookupAccountabilityKey: string;
   readonly candidateSourceVersion: string;
   readonly fixtureSnapshotVersion: string;
   readonly admissionVersion: string;
@@ -201,15 +201,11 @@ export type ExactAdmissionResult =
       readonly status: "ADMITTED";
       readonly result: ExactVariantResult;
       readonly landingIntent: ExactLandingIntent;
-      readonly landingVerification: Extract<
-        ExactLandingVerification,
-        { readonly status: "VERIFIED" }
-      >;
     }
   | {
       readonly status: "ADMISSION_REJECTED";
       readonly reason: ExactAdmissionRejectionReason;
-      readonly candidateSetFingerprint: string;
+      readonly exactLookupAccountabilityKey: string;
     };
 
 export type ExactSliceCoreOutcome =
@@ -224,7 +220,7 @@ export interface ExactSliceEventPayload {
   readonly marketCode: DiscoveryContext["marketCode"];
   readonly d5Versions: D5RetrievalAttributionVersions;
   readonly d6Versions: D6ExactRetrievalComponentVersions;
-  readonly candidateSetFingerprint: string | null;
+  readonly exactLookupAccountabilityKey: string | null;
   readonly displayedStyleId: string | null;
   readonly displayedVariantId: string | null;
 }
@@ -241,7 +237,8 @@ export type ExactSliceEventSeam =
 
 export type ExactSliceEventDelivery =
   | { readonly status: "DISABLED" }
-  | { readonly status: "DELIVERED_TO_IN_MEMORY_SINK" };
+  | { readonly status: "INJECTED_SINK_RETURNED" }
+  | { readonly status: "INJECTED_SINK_THREW" };
 
 interface EventDeliveryFields {
   readonly eventDelivery: ExactSliceEventDelivery;
@@ -265,7 +262,7 @@ export interface AdmitExactCandidateInput {
   readonly request: ApplicableExactSliceRequest;
   readonly context: DiscoveryContext;
   readonly candidate: ExactCandidateFixture;
-  readonly candidateSetFingerprint: string;
+  readonly exactLookupAccountabilityKey: string;
   readonly catalogProofs: readonly CatalogIdentityProofFixture[];
   readonly eligibilitySummaries: readonly EligibilitySummaryFixture[];
   readonly d5Versions: D5RetrievalAttributionVersions;

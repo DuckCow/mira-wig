@@ -32,6 +32,53 @@ describe("D6-A1 exact SKU fixture slice", () => {
       expect(result.result.amount).toBe(85000);
       expect(result.result.displayedVariantId).toBe("variant-exact-001");
       expect(result.result.displayedStyleId).toBe("style-exact-001");
+      expect(result.result.d5Versions).toMatchObject({
+        parser: "d5-injected-span-parser/v0.1",
+      });
+      expect(result.result).not.toHaveProperty("candidateSetFingerprint");
+      expect(result).not.toHaveProperty("landingVerification");
+    }
+  });
+
+  it("rejects an incompatible frozen D5 parser before candidate lookup", () => {
+    const result = runExactSkuFixtureSlice(
+      exactSliceInput({
+        parserResult: {
+          ...parserResult(),
+          parserVersion: "d5-incompatible-parser/v9",
+        },
+        candidateSnapshot: candidateSnapshot([
+          candidateFixture({ variantId: "variant-duplicate-a" }),
+          candidateFixture({ variantId: "variant-duplicate-b" }),
+        ]),
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "REQUEST_INVALID",
+      reason: "INCOMPATIBLE_D5_PARSER_VERSION",
+      eventDelivery: { status: "DISABLED" },
+    });
+  });
+
+  it("attributes provisional lexicon and ontology versions without rejecting them", () => {
+    const result = runExactSkuFixtureSlice(
+      exactSliceInput({
+        parserResult: {
+          ...parserResult(),
+          lexiconVersion: "synthetic-lexicon/custom",
+          ontologyVersion: "synthetic-ontology/custom",
+        },
+      }),
+    );
+
+    expect(result.status).toBe("ADMITTED");
+    if (result.status === "ADMITTED") {
+      expect(result.result.d5Versions).toMatchObject({
+        parser: "d5-injected-span-parser/v0.1",
+        lexicon: "synthetic-lexicon/custom",
+        ontology: "synthetic-ontology/custom",
+      });
     }
   });
 
@@ -154,7 +201,7 @@ describe("D6-A1 exact SKU fixture slice", () => {
     const exactEligibility = eligibilitySummary();
     const unrelatedEligibility = eligibilitySummary({
       variantId: "variant-unrelated",
-      reason: "synthetic-unrelated",
+      fixtureReason: "synthetic-unrelated",
     });
     const firstInput = exactSliceInput({
       candidateSnapshot: candidateSnapshot([

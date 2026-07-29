@@ -17,7 +17,7 @@ describe("exact fixture retriever", () => {
     expect(result.status).toBe("MATCH");
     if (result.status === "MATCH") {
       expect(result.candidate.identity.canonicalValue).toBe(EXACT_SKU);
-      expect(result.candidateSetFingerprint).toBe(
+      expect(result.exactLookupAccountabilityKey).toBe(
         JSON.stringify([
           "d6-exact-retrieval-fixture/v0.1-provisional",
           "d6-exact-fixture-retriever/v0.1-provisional",
@@ -27,6 +27,7 @@ describe("exact fixture retriever", () => {
           "style-exact-001",
         ]),
       );
+      expect(result).not.toHaveProperty("candidateSetFingerprint");
     }
 
     expect(
@@ -78,6 +79,68 @@ describe("exact fixture retriever", () => {
     expect(reverse).toEqual(forward);
   });
 
+  it("rejects duplicate variant identities independently of input order", () => {
+    const first = candidateFixture({
+      identity: {
+        namespace: "SKU",
+        canonicalValue: "SKU-VARIANT-ALIAS-A",
+      },
+    });
+    const second = candidateFixture({
+      identity: {
+        namespace: "SKU",
+        canonicalValue: "SKU-VARIANT-ALIAS-B",
+      },
+    });
+    const forward = retrieveExactCandidateFixture(
+      candidateSnapshot([first, second]),
+      first.identity,
+    );
+    const reverse = retrieveExactCandidateFixture(
+      candidateSnapshot([second, first]),
+      first.identity,
+    );
+
+    expect(forward).toEqual({
+      status: "FIXTURE_INVALID",
+      reason: "DUPLICATE_VARIANT_ID",
+    });
+    expect(reverse).toEqual(forward);
+  });
+
+  it("gives duplicate canonical SKU deterministic precedence", () => {
+    const sharedVariantA = candidateFixture({
+      identity: { namespace: "SKU", canonicalValue: "SKU-PRECEDENCE-A" },
+    });
+    const sharedVariantB = candidateFixture({
+      identity: { namespace: "SKU", canonicalValue: "SKU-PRECEDENCE-B" },
+    });
+    const duplicateSku = candidateFixture({
+      variantId: "variant-precedence-other",
+      identity: { namespace: "SKU", canonicalValue: "SKU-PRECEDENCE-A" },
+    });
+    const permutations = [
+      [sharedVariantA, sharedVariantB, duplicateSku],
+      [sharedVariantA, duplicateSku, sharedVariantB],
+      [sharedVariantB, sharedVariantA, duplicateSku],
+      [sharedVariantB, duplicateSku, sharedVariantA],
+      [duplicateSku, sharedVariantA, sharedVariantB],
+      [duplicateSku, sharedVariantB, sharedVariantA],
+    ];
+
+    for (const candidates of permutations) {
+      expect(
+        retrieveExactCandidateFixture(
+          candidateSnapshot(candidates),
+          sharedVariantA.identity,
+        ),
+      ).toEqual({
+        status: "FIXTURE_INVALID",
+        reason: "DUPLICATE_CANONICAL_SKU",
+      });
+    }
+  });
+
   it("rejects inconsistent snapshot and candidate provenance", () => {
     const invalidSnapshot = {
       ...candidateSnapshot(),
@@ -107,7 +170,7 @@ describe("exact fixture retriever", () => {
     });
   });
 
-  it("keeps unrelated input order out of candidate accountability", () => {
+  it("keeps unrelated membership and order out of exact lookup accountability", () => {
     const exact = candidateFixture();
     const unrelated = candidateFixture({
       variantId: "variant-unrelated",
@@ -126,8 +189,70 @@ describe("exact fixture retriever", () => {
       candidateSnapshot([unrelated, exact]),
       { namespace: "SKU", canonicalValue: EXACT_SKU },
     );
+    const withoutUnrelated = retrieveExactCandidateFixture(
+      candidateSnapshot([exact]),
+      { namespace: "SKU", canonicalValue: EXACT_SKU },
+    );
 
     expect(first).toEqual(second);
+    expect(first.status).toBe("MATCH");
+    expect(withoutUnrelated.status).toBe("MATCH");
+    if (first.status === "MATCH" && withoutUnrelated.status === "MATCH") {
+      expect(first.exactLookupAccountabilityKey).toBe(
+        withoutUnrelated.exactLookupAccountabilityKey,
+      );
+    }
     expect(JSON.stringify([exact, unrelated])).toBe(before);
+  });
+
+  it("changes exact lookup accountability with request and matched identity", () => {
+    const baseline = retrieveExactCandidateFixture(candidateSnapshot(), {
+      namespace: "SKU",
+      canonicalValue: EXACT_SKU,
+    });
+    const changedRequest = retrieveExactCandidateFixture(
+      candidateSnapshot(),
+      {
+        namespace: "SKU",
+        canonicalValue: "SKU-REQUEST-CHANGED",
+      },
+    );
+    const changedVariant = retrieveExactCandidateFixture(
+      candidateSnapshot([
+        candidateFixture({
+          variantId: "variant-changed",
+        }),
+      ]),
+      { namespace: "SKU", canonicalValue: EXACT_SKU },
+    );
+    const changedStyle = retrieveExactCandidateFixture(
+      candidateSnapshot([
+        candidateFixture({
+          canonicalStyleId: "style-changed",
+        }),
+      ]),
+      { namespace: "SKU", canonicalValue: EXACT_SKU },
+    );
+
+    expect(baseline.status).toBe("MATCH");
+    expect(changedRequest.status).toBe("EXACT_NOT_FOUND");
+    expect(changedVariant.status).toBe("MATCH");
+    expect(changedStyle.status).toBe("MATCH");
+    if (
+      baseline.status === "MATCH" &&
+      changedRequest.status === "EXACT_NOT_FOUND" &&
+      changedVariant.status === "MATCH" &&
+      changedStyle.status === "MATCH"
+    ) {
+      expect(changedRequest.exactLookupAccountabilityKey).not.toBe(
+        baseline.exactLookupAccountabilityKey,
+      );
+      expect(changedVariant.exactLookupAccountabilityKey).not.toBe(
+        baseline.exactLookupAccountabilityKey,
+      );
+      expect(changedStyle.exactLookupAccountabilityKey).not.toBe(
+        baseline.exactLookupAccountabilityKey,
+      );
+    }
   });
 });

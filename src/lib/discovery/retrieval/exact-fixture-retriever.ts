@@ -52,6 +52,9 @@ function validateSnapshot(
   }
 
   const identities = new Set<string>();
+  const variantIdentities = new Map<string, string>();
+  let duplicateCanonicalSku = false;
+  let duplicateVariantId = false;
   for (const candidate of snapshot.candidates) {
     if (!candidateProvenanceIsValid(candidate, snapshot)) {
       return "CANDIDATE_FIXTURE_PROVENANCE_INVALID";
@@ -59,15 +62,31 @@ function validateSnapshot(
 
     const key = identityKey(candidate.identity);
     if (identities.has(key)) {
-      return "DUPLICATE_CANONICAL_SKU";
+      duplicateCanonicalSku = true;
     }
     identities.add(key);
+
+    const existingVariantIdentity = variantIdentities.get(candidate.variantId);
+    if (
+      existingVariantIdentity !== undefined &&
+      existingVariantIdentity !== key
+    ) {
+      duplicateVariantId = true;
+    }
+    variantIdentities.set(candidate.variantId, key);
+  }
+
+  if (duplicateCanonicalSku) {
+    return "DUPLICATE_CANONICAL_SKU";
+  }
+  if (duplicateVariantId) {
+    return "DUPLICATE_VARIANT_ID";
   }
 
   return null;
 }
 
-function candidateSetFingerprint(
+function exactLookupAccountabilityKey(
   snapshot: ExactCandidateFixtureSnapshot,
   identity: ExactFixtureIdentity,
   candidate: ExactCandidateFixture | undefined,
@@ -96,20 +115,24 @@ export function retrieveExactCandidateFixture(
       entry.identity.namespace === identity.namespace &&
       entry.identity.canonicalValue === identity.canonicalValue,
   );
-  const fingerprint = candidateSetFingerprint(snapshot, identity, candidate);
+  const accountabilityKey = exactLookupAccountabilityKey(
+    snapshot,
+    identity,
+    candidate,
+  );
 
   if (candidate === undefined) {
     return {
       status: "EXACT_NOT_FOUND",
       reasons: ["EXACT_IDENTITY_NO_SUBSTITUTION"],
       fallbackRoutes: ["EXACT_IDENTITY_NOT_FOUND"],
-      candidateSetFingerprint: fingerprint,
+      exactLookupAccountabilityKey: accountabilityKey,
     };
   }
 
   return {
     status: "MATCH",
     candidate,
-    candidateSetFingerprint: fingerprint,
+    exactLookupAccountabilityKey: accountabilityKey,
   };
 }

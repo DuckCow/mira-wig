@@ -235,6 +235,18 @@ type EligibilityResolution =
       readonly reason: ExactAdmissionRejectionReason;
     };
 
+function eligibilitySummaryProvenanceIsValid(
+  summary: EligibilitySummaryFixture,
+  candidate: ExactCandidateFixture,
+): boolean {
+  return (
+    summary.fixtureOnly &&
+    summary.synthetic &&
+    summary.fixtureSnapshotVersion === candidate.fixtureSnapshotVersion &&
+    isNonblankToken(summary.fixtureReason)
+  );
+}
+
 function resolveEligibilitySummary(
   input: AdmitExactCandidateInput,
 ): EligibilityResolution {
@@ -253,9 +265,12 @@ function resolveEligibilitySummary(
     const variantSummaryExists = input.eligibilitySummaries.some(
       (summary) => summary.variantId === input.candidate.variantId,
     );
+    const marketSummaryExists = input.eligibilitySummaries.some(
+      (summary) => summary.marketCode === input.context.marketCode,
+    );
     return {
       status: "REJECTED",
-      reason: variantSummaryExists
+      reason: variantSummaryExists || marketSummaryExists
         ? "ELIGIBILITY_IDENTITY_MISMATCH"
         : "ELIGIBILITY_SUMMARY_MISSING",
     };
@@ -265,14 +280,10 @@ function resolveEligibilitySummary(
   if (summary === undefined) {
     throw new TypeError("Eligibility summary count invariant failed");
   }
-  if (
-    !summary.fixtureOnly ||
-    !summary.synthetic ||
-    summary.version !== input.candidate.fixtureSnapshotVersion
-  ) {
+  if (!eligibilitySummaryProvenanceIsValid(summary, input.candidate)) {
     return {
       status: "REJECTED",
-      reason: "ELIGIBILITY_IDENTITY_MISMATCH",
+      reason: "ELIGIBILITY_SUMMARY_PROVENANCE_INVALID",
     };
   }
   if (summary.outcome === "UNKNOWN_FIXTURE") {
@@ -313,7 +324,7 @@ function rejected(
   return {
     status: "ADMISSION_REJECTED",
     reason,
-    candidateSetFingerprint: input.candidateSetFingerprint,
+    exactLookupAccountabilityKey: input.exactLookupAccountabilityKey,
   };
 }
 
@@ -334,7 +345,7 @@ function buildExactResult(
     amount: summary.selectedVariantAmount,
     currency: summary.currency,
     optionFacts: { ...proof.optionFacts },
-    candidateSetFingerprint: input.candidateSetFingerprint,
+    exactLookupAccountabilityKey: input.exactLookupAccountabilityKey,
     candidateSourceVersion: input.candidate.candidateSourceVersion,
     fixtureSnapshotVersion: input.candidate.fixtureSnapshotVersion,
     admissionVersion:
@@ -343,7 +354,7 @@ function buildExactResult(
       D6_EXACT_RETRIEVAL_COMPONENT_VERSIONS.landingContract,
     d5Versions: { ...input.d5Versions },
     d5Decision,
-    eligibilityFixtureReason: summary.reason,
+    eligibilityFixtureReason: summary.fixtureReason,
   };
 }
 
@@ -364,7 +375,7 @@ export function admitExactCandidate(
 
   const d5Decision = decideExactCandidate(input, proofResolution.proof);
   if (!d5DecisionAdmits(d5Decision)) {
-    return rejected(input, "D5_EXACT_DECISION_REJECTED");
+    throw new TypeError("Frozen D5 exact decision invariant failed");
   }
 
   const eligibilityResolution = resolveEligibilitySummary(input);
@@ -387,13 +398,12 @@ export function admitExactCandidate(
     proofResolution.proof,
   );
   if (landingVerification.status !== "VERIFIED") {
-    return rejected(input, "LANDING_INTEGRITY_MISMATCH");
+    throw new TypeError("Exact landing construction invariant failed");
   }
 
   return {
     status: "ADMITTED",
     result,
     landingIntent,
-    landingVerification,
   };
 }

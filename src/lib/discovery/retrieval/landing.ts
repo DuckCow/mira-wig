@@ -15,7 +15,7 @@ export function buildExactLandingIntent(
     exactIdentity: { ...result.exactIdentity },
     fallbackRoutes: [...result.d5Decision.fallbackRoutes],
     speechRequirements: [...result.d5Decision.speechRequirements],
-    candidateSetFingerprint: result.candidateSetFingerprint,
+    exactLookupAccountabilityKey: result.exactLookupAccountabilityKey,
     candidateSourceVersion: result.candidateSourceVersion,
     fixtureSnapshotVersion: result.fixtureSnapshotVersion,
     admissionVersion: result.admissionVersion,

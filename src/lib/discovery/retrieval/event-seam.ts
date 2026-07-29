@@ -9,7 +9,7 @@ import type {
 import { D6_EXACT_RETRIEVAL_COMPONENT_VERSIONS } from "./versions";
 
 interface EventOutcomeFields {
-  readonly candidateSetFingerprint: string | null;
+  readonly exactLookupAccountabilityKey: string | null;
   readonly displayedStyleId: string | null;
   readonly displayedVariantId: string | null;
 }
@@ -17,7 +17,8 @@ interface EventOutcomeFields {
 function eventOutcomeFields(outcome: ExactSliceCoreOutcome): EventOutcomeFields {
   if (outcome.status === "ADMITTED") {
     return {
-      candidateSetFingerprint: outcome.result.candidateSetFingerprint,
+      exactLookupAccountabilityKey:
+        outcome.result.exactLookupAccountabilityKey,
       displayedStyleId: outcome.result.displayedStyleId,
       displayedVariantId: outcome.result.displayedVariantId,
     };
@@ -28,14 +29,14 @@ function eventOutcomeFields(outcome: ExactSliceCoreOutcome): EventOutcomeFields 
     outcome.status === "ADMISSION_REJECTED"
   ) {
     return {
-      candidateSetFingerprint: outcome.candidateSetFingerprint,
+      exactLookupAccountabilityKey: outcome.exactLookupAccountabilityKey,
       displayedStyleId: null,
       displayedVariantId: null,
     };
   }
 
   return {
-    candidateSetFingerprint: null,
+    exactLookupAccountabilityKey: null,
     displayedStyleId: null,
     displayedVariantId: null,
   };
@@ -68,6 +69,11 @@ export function deliverExactSliceEvent(
     return { status: "DISABLED" };
   }
 
-  seam.sink(buildPayload(outcome, context, d5Versions));
-  return { status: "DELIVERED_TO_IN_MEMORY_SINK" };
+  const payload = buildPayload(outcome, context, d5Versions);
+  try {
+    seam.sink(payload);
+    return { status: "INJECTED_SINK_RETURNED" };
+  } catch {
+    return { status: "INJECTED_SINK_THREW" };
+  }
 }

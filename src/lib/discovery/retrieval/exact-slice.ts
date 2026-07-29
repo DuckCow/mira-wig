@@ -44,6 +44,16 @@ export function runExactSkuFixtureSlice(
   input: RunExactSkuFixtureSliceInput,
 ): ExactSliceRunResult {
   const d5Versions = d5AttributionVersions(input);
+  if (
+    input.parserResult.parserVersion !==
+    DISCOVERY_COMPONENT_VERSIONS.parser
+  ) {
+    return finishExactSlice(input, d5Versions, {
+      status: "REQUEST_INVALID",
+      reason: "INCOMPATIBLE_D5_PARSER_VERSION",
+    });
+  }
+
   const request = assessExactSliceRequest(input.parserResult);
   if (request.status !== "APPLICABLE") {
     return finishExactSlice(input, d5Versions, request);
@@ -61,7 +71,8 @@ export function runExactSkuFixtureSlice(
     request,
     context: input.context,
     candidate: lookup.candidate,
-    candidateSetFingerprint: lookup.candidateSetFingerprint,
+    exactLookupAccountabilityKey:
+      lookup.exactLookupAccountabilityKey,
     catalogProofs: input.catalogProofs,
     eligibilitySummaries: input.eligibilitySummaries,
     d5Versions,
