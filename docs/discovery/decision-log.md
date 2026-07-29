@@ -153,3 +153,40 @@ activation.
 The next planned sequence is a D6 source-only deterministic retrieval vertical
 slice, subject to a separate task authorization. This freeze-installation task
 does not authorize or implement D6.
+
+## 2026-07-30 — D6-A0 exact vertical-slice contract
+
+### Baseline and evidence
+
+- observed main baseline:
+  `2cbdfe3af7e333c28da66ebb588984a4428089ec`;
+- immutable reconnaissance evidence:
+  `WIG-COM-DSC-R7-COD-D6-A0-v0.1`;
+- relevant catalog, route, cart, checkout, fitting, admin-price, schema, and
+  market paths have no source changes from the B0 observed commit to this
+  baseline;
+- B0 database population counts remain historical evidence and were not
+  refreshed.
+
+### Exact source-only slice
+
+- `WigVariant` is the exact result unit and carries its canonical `WigStyle`
+  parent;
+- D6-A1 scope is exactly one canonical `SKU` identity constraint;
+- the candidate source, catalog identity proof, and eligibility summary are
+  injected synthetic fixtures;
+- every candidate must pass one pure admission choke point;
+- any displayed price uses the selected variant amount, never a style minimum;
+- landing preserves the exact style/variant pair and rejects mismatch without
+  rewrite, replacement, redirect, or repair;
+- the existing cart style/variant identity blocker remains outside D6-A1;
+- the event seam is injected, disabled by default, and performs no emission,
+  collection, or storage;
+- structured retrieval remains deferred to a separately contracted D6-A2
+  task.
+
+### Authorization
+
+D6-A1 requires a separate explicit source task. This documentation decision
+authorizes no source implementation, production adapter, route or UI work,
+cart repair, event collection, or production activation.

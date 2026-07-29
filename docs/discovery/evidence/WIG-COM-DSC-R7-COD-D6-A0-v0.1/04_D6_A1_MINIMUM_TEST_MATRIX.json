@@ -1,0 +1,137 @@
+{
+  "id": "WIG-COM-DSC-R7-D6-A1-MINIMUM-TEST-MATRIX-v0.1",
+  "classification": "SOURCE_ONLY_TEST_CONTRACT",
+  "productionActivationAuthorized": false,
+  "cases": [
+    {
+      "id": "E01",
+      "name": "exact SKU admitted",
+      "expected": [
+        "one exact variant candidate",
+        "D5 EXACT_IDENTITY_MATCH",
+        "D5 EXACT_IDENTITY_NO_SUBSTITUTION",
+        "selected-variant price basis",
+        "exact landing intent"
+      ]
+    },
+    {
+      "id": "E02",
+      "name": "exact SKU absent",
+      "expected": [
+        "zero admitted results",
+        "explicit exact-not-found outcome",
+        "no sibling or alternative candidates"
+      ]
+    },
+    {
+      "id": "E03",
+      "name": "duplicate canonical SKU in fixture",
+      "expected": [
+        "fixture rejected before result construction",
+        "input order does not select a winner"
+      ]
+    },
+    {
+      "id": "E04",
+      "name": "unsupported exact namespace",
+      "expected": [
+        "explicit unsupported namespace outcome",
+        "no lookup by SKU field"
+      ]
+    },
+    {
+      "id": "E05",
+      "name": "multiple exact identity constraints",
+      "expected": [
+        "explicit invalid or unsupported request outcome",
+        "no candidate lookup"
+      ]
+    },
+    {
+      "id": "E06",
+      "name": "candidate and catalog proof variant mismatch",
+      "expected": [
+        "identity integrity failure",
+        "zero admitted results",
+        "no repair"
+      ]
+    },
+    {
+      "id": "E07",
+      "name": "candidate canonical style mismatch",
+      "expected": [
+        "identity or landing integrity failure",
+        "displayed style not rewritten"
+      ]
+    },
+    {
+      "id": "E08",
+      "name": "eligibility summary market mismatch",
+      "expected": [
+        "non-admitted outcome",
+        "no price or orderability assertion"
+      ]
+    },
+    {
+      "id": "E09",
+      "name": "eligibility summary missing, unknown, or ineligible",
+      "expected": [
+        "zero admitted results",
+        "distinct explicit outcome",
+        "no derivation from price/publication/stock fields"
+      ]
+    },
+    {
+      "id": "E10",
+      "name": "selected variant price preserved",
+      "fixture": "same style has a lower-priced sibling",
+      "expected": [
+        "result amount is exact variant amount",
+        "style minimum price is never substituted"
+      ]
+    },
+    {
+      "id": "E11",
+      "name": "landing success",
+      "expected": [
+        "displayedStyleId equals canonicalStyleId",
+        "displayedVariantId equals canonical variantId",
+        "exact variant remains selected"
+      ]
+    },
+    {
+      "id": "E12",
+      "name": "landing mismatch",
+      "expected": [
+        "LANDING_INTEGRITY_MISMATCH or adjudicated equivalent",
+        "no redirect, rewrite, replacement, or cart call"
+      ]
+    },
+    {
+      "id": "E13",
+      "name": "default-off event seam",
+      "expected": [
+        "sink not called",
+        "no event persistence",
+        "no raw query or personal identifier"
+      ]
+    },
+    {
+      "id": "E14",
+      "name": "determinism and immutability",
+      "expected": [
+        "repeated outputs deep-equal",
+        "candidate fingerprint stable",
+        "inputs not mutated"
+      ]
+    },
+    {
+      "id": "E15",
+      "name": "dependency boundary",
+      "expected": [
+        "no Prisma, DB, Next, route, catalog reader, cart, payment, fitting, storage, or network imports",
+        "D5 frozen modules unchanged"
+      ]
+    }
+  ]
+}
