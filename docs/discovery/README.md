@@ -46,19 +46,22 @@ Model agreement is not evidence.
 1. [`discovery-foundation-contract-v0.2.md`](./discovery-foundation-contract-v0.2.md)
    Scope boundaries, work that may be proposed or implemented in source, staged gates, visual-track separation, and D4–D6 sequence.
 
-2. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
+2. [`d5-source-vocabulary-contract-v0.1.md`](./d5-source-vocabulary-contract-v0.1.md)
+   Freezes the reviewed D5 source-only module responsibilities, primary entrypoints, serialized output fields and literals, durable reasons, component versions, and provisional, fixture, and internal boundaries.
+
+3. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
    Interpretation/evidence separation, authority constraints, filtering, ranking, partitions, relaxation, clarification, education, consultation, and unsupported states.
 
-3. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
+4. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-4. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+5. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-5. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+6. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-6. [`decision-log.md`](./decision-log.md)
+7. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 ## Required reading by task
