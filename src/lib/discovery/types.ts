@@ -109,9 +109,7 @@ export type InterpretationState = "DECLARED" | "DERIVED" | "BRIDGED" | "UNRESOLV
 export type AttributeBand =
   | "IDENTITY"
   | "CLAIM_BEARING"
-  | "STRUCTURAL_FUNCTIONAL"
   | "DIMENSIONAL_CONTINUOUS"
-  | "DIMENSIONAL_CATEGORICAL"
   | "STYLISTIC"
   | "OUTCOME_INTENT"
   | "AUTHORITY_ROUTE";
@@ -430,7 +428,6 @@ export type SpeechRequirement =
   | "NO_PRODUCT_ASSERTION"
   | "DISCLOSE_EVIDENCE_BASIS"
   | "DISCLOSE_UNKNOWN"
-  | "DISCLOSE_RELAXATION"
   | "DISCLOSE_ROUTE_LIMITATION";
 
 export type EvidencePartition = "ASSERTED" | "UNKNOWN" | "VIOLATING" | "WITHHELD" | "NOT_APPLICABLE";
@@ -438,7 +435,6 @@ export type EvidencePartition = "ASSERTED" | "UNKNOWN" | "VIOLATING" | "WITHHELD
 export type RelaxationDecision =
   | "NEVER"
   | "CONFIRMATION_REQUIRED"
-  | "DISCLOSED_AUTOMATIC"
   | "NOT_APPLICABLE";
 
 export type FallbackRoute =
@@ -448,7 +444,7 @@ export type FallbackRoute =
   | "EXPLICIT_UNSUPPORTED"
   | "EXACT_IDENTITY_NOT_FOUND";
 
-export type ProvisionalReasonCode =
+export type DiscoveryReasonCode =
   | "EXACT_IDENTITY_MATCH"
   | "EXACT_IDENTITY_NO_SUBSTITUTION"
   | "EVIDENCE_QUALIFIED_MATCH"
@@ -456,16 +452,20 @@ export type ProvisionalReasonCode =
   | "PRODUCT_EVIDENCE_UNKNOWN"
   | "PRODUCT_EVIDENCE_CONFLICT"
   | "CLAIM_AUTHORITY_UNAVAILABLE_ROUTE"
-  | "CONTINUOUS_WITHIN_SYNTHETIC_TOLERANCE"
-  | "CONTINUOUS_OUTSIDE_SYNTHETIC_TOLERANCE"
-  | "SYNTHETIC_TOLERANCE_REQUIRED"
   | "UNSUPPORTED_CONCEPT"
   | "CONTRADICTORY_QUERY"
   | "CONFIRMATION_CHANGED_INTENT_ONLY"
   | "AUDIENCE_NAMESPACE_PRESERVED"
   | "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY";
 
-export type DecisionDiagnostic =
+export type FixtureReasonCode =
+  | "CONTINUOUS_WITHIN_SYNTHETIC_TOLERANCE"
+  | "CONTINUOUS_OUTSIDE_SYNTHETIC_TOLERANCE"
+  | "SYNTHETIC_TOLERANCE_REQUIRED";
+
+export type ConstraintReasonCode = DiscoveryReasonCode | FixtureReasonCode;
+
+export type FixtureDecisionDiagnostic =
   | "SYNTHETIC_TOLERANCE_APPLIED"
   | "SYNTHETIC_VENDOR_ATTESTATION_POLICY_APPLIED";
 
@@ -479,8 +479,8 @@ export interface ConstraintDecision {
   readonly partition: EvidencePartition;
   readonly relaxation: RelaxationDecision;
   readonly fallbackRoutes: readonly FallbackRoute[];
-  readonly reasons: readonly ProvisionalReasonCode[];
-  readonly diagnostics: readonly DecisionDiagnostic[];
+  readonly reasons: readonly ConstraintReasonCode[];
+  readonly diagnostics: readonly FixtureDecisionDiagnostic[];
 }
 
 interface DecideConstraintInputBase {

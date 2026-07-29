@@ -1,19 +1,19 @@
 import type {
   AuthorityOutcome,
   ConstraintDecision,
+  ConstraintReasonCode,
   ConstraintDecisionTarget,
   ConstraintValue,
   ContinuousTolerancePolicyFixture,
   DecideConstraintInput,
-  DecisionDiagnostic,
   DecisionPolicyFixture,
   DecisionSubject,
   EvidencePartition,
   FallbackRoute,
+  FixtureDecisionDiagnostic,
   GateDecision,
   InterpretedConstraint,
   ProductEvidenceFixture,
-  ProvisionalReasonCode,
   RelaxationDecision,
   ScoreDecision,
   SpeechRequirement,
@@ -27,8 +27,8 @@ interface DecisionFields {
   readonly partition: EvidencePartition;
   readonly relaxation: RelaxationDecision;
   readonly fallbackRoutes: readonly FallbackRoute[];
-  readonly reasons: readonly ProvisionalReasonCode[];
-  readonly diagnostics: readonly DecisionDiagnostic[];
+  readonly reasons: readonly ConstraintReasonCode[];
+  readonly diagnostics: readonly FixtureDecisionDiagnostic[];
 }
 
 interface RuntimeDecideConstraintInput {
@@ -85,7 +85,7 @@ function notApplicableAuthority(): AuthorityOutcome {
   return { kind: "NOT_APPLICABLE" };
 }
 
-function confirmationReasons(constraint: InterpretedConstraint): ProvisionalReasonCode[] {
+function confirmationReasons(constraint: InterpretedConstraint): ConstraintReasonCode[] {
   return constraint.source.kind === "USER_CONFIRMATION"
     ? ["CONFIRMATION_CHANGED_INTENT_ONLY"]
     : [];
@@ -186,7 +186,7 @@ function evidenceHasAssertionAuthority(
 function vendorPolicyDiagnostics(
   evidence: ProductEvidenceFixture,
   policies: readonly DecisionPolicyFixture[],
-): DecisionDiagnostic[] {
+): FixtureDecisionDiagnostic[] {
   return evidence.state === "APPROVED_VENDOR_ATTESTED" &&
     vendorAttestationPermitted(policies)
     ? ["SYNTHETIC_VENDOR_ATTESTATION_POLICY_APPLIED"]
@@ -211,7 +211,7 @@ function evidenceForSubject(
 function unknownEvidenceDecision(
   input: RuntimeDecideConstraintInput,
   constraint: InterpretedConstraint,
-  reasons: readonly ProvisionalReasonCode[],
+  reasons: readonly ConstraintReasonCode[],
   speechRequirements: readonly SpeechRequirement[] = ["DISCLOSE_UNKNOWN"],
 ): ConstraintDecision {
   return makeDecision(input.target, input.subject, {

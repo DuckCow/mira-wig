@@ -482,7 +482,7 @@ describe("decideConstraint", () => {
     };
     const continuousWrongBand: InterpretedConstraint = {
       ...firstConstraint("12 inch wig"),
-      attributeBand: "DIMENSIONAL_CATEGORICAL",
+      attributeBand: "STYLISTIC",
     };
     const resolvedUnsupported: InterpretedConstraint = {
       ...firstConstraint("시스루뱅 가발"),
@@ -490,7 +490,7 @@ describe("decideConstraint", () => {
     };
     const unsupportedWrongBand: InterpretedConstraint = {
       ...firstConstraint("시스루뱅 가발"),
-      attributeBand: "STRUCTURAL_FUNCTIONAL",
+      attributeBand: "AUTHORITY_ROUTE",
     };
 
     expect(() =>
