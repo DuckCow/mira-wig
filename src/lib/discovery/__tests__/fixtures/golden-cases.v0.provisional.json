@@ -1,0 +1,993 @@
+{
+  "schemaVersion": "d5-golden-cases/v0.1-provisional",
+  "taskClassification": "SOURCE_ONLY",
+  "productionActivationAuthorized": false,
+  "fixtureOnly": true,
+  "cases": [
+    {
+      "caseId": "D5-G01-EXACT-SKU",
+      "query": "SKU-EXACT-001",
+      "context": {
+        "marketCode": "KR",
+        "locale": "ko-KR",
+        "queryLanguage": { "mode": "AUTO" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "EXACT_IDENTITY",
+            "rawText": "SKU-EXACT-001",
+            "languageTag": null,
+            "interpretationState": "DECLARED",
+            "value": {
+              "kind": "EXACT_IDENTITY",
+              "namespace": "SKU",
+              "value": "SKU-EXACT-001"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:sku-match"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:sku-match",
+            "attributeId": "identity:sku",
+            "value": {
+              "kind": "EXACT_IDENTITY",
+              "namespace": "SKU",
+              "value": "SKU-EXACT-001"
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:sku-owner"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:sku-match"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": [
+              "EXACT_IDENTITY_MATCH",
+              "EXACT_IDENTITY_NO_SUBSTITUTION"
+            ],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G02-MATERIAL-EVIDENCE-SEPARATION",
+      "query": "인모 가발",
+      "context": {
+        "marketCode": "KR",
+        "locale": "ko-KR",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "ko" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "CONCEPT",
+            "rawText": "인모",
+            "languageTag": "ko",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CATEGORICAL",
+              "attributeId": "material",
+              "valueId": "fixture:material:human-hair"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:material-verified"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:material-verified",
+            "attributeId": "material",
+            "value": {
+              "kind": "CATEGORICAL",
+              "valueId": "fixture:material:human-hair"
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:material-measurement"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:material-verified"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["EVIDENCE_QUALIFIED_MATCH"],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:material-curated"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:material-curated",
+            "attributeId": "material",
+            "value": {
+              "kind": "CATEGORICAL",
+              "valueId": "fixture:material:human-hair"
+            },
+            "state": "HUMAN_CURATED_FROM_EVIDENCE",
+            "syntheticEvidenceRef": "fixture:evidence:material-curation"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:material-curated"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["EVIDENCE_QUALIFIED_MATCH"],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:material-missing"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:material-missing",
+            "attributeId": "material",
+            "value": null,
+            "state": "MISSING",
+            "syntheticEvidenceRef": null
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:material-missing"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "DO_NOT_GATE",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_UNKNOWN"],
+            "partition": "UNKNOWN",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["PRODUCT_EVIDENCE_UNKNOWN"],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:material-unapproved-vendor"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:material-unapproved-vendor",
+            "attributeId": "material",
+            "value": {
+              "kind": "CATEGORICAL",
+              "valueId": "fixture:material:human-hair"
+            },
+            "state": "UNAPPROVED_VENDOR_DECLARATION",
+            "syntheticEvidenceRef": "fixture:evidence:unapproved-vendor"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:material-unapproved-vendor"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "DO_NOT_GATE",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_UNKNOWN"],
+            "partition": "UNKNOWN",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["PRODUCT_EVIDENCE_UNKNOWN"],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:material-synthetic"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:material-synthetic",
+            "attributeId": "material",
+            "value": {
+              "kind": "CATEGORICAL",
+              "valueId": "fixture:material:synthetic"
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:material-measurement"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:material-synthetic"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "DO_NOT_GATE",
+            "score": "NONE",
+            "speechRequirements": ["NO_PRODUCT_ASSERTION"],
+            "partition": "VIOLATING",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": [],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:material-conflict"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:material-conflict",
+            "attributeId": "material",
+            "value": null,
+            "state": "CONFLICTING",
+            "syntheticEvidenceRef": "fixture:evidence:material-conflict"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:material-conflict"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "DO_NOT_GATE",
+            "score": "NONE",
+            "speechRequirements": [
+              "NO_PRODUCT_ASSERTION",
+              "DISCLOSE_UNKNOWN"
+            ],
+            "partition": "WITHHELD",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["PRODUCT_EVIDENCE_CONFLICT"],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G03-MEDICAL-USE-CONTEXT",
+      "query": "항암 치료 중 쓸 가발",
+      "context": {
+        "marketCode": "KR",
+        "locale": "ko-KR",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "ko" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "OUTCOME_INTENT",
+            "rawText": "항암 치료 중",
+            "languageTag": "ko",
+            "interpretationState": "BRIDGED",
+            "value": {
+              "kind": "OUTCOME_INTENT",
+              "conceptId": "fixture:sensitive-use-context:oncology-treatment"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": { "kind": "QUERY" },
+          "policies": [
+            {
+              "kind": "CLAIM_AUTHORITY",
+              "synthetic": true,
+              "status": "UNAVAILABLE"
+            }
+          ],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": { "kind": "QUERY" },
+            "authorityOutcome": { "kind": "OUTSIDE_DISCOVERY_AUTHORITY" },
+            "gate": "ROUTE_ONLY",
+            "score": "NONE",
+            "speechRequirements": [
+              "DISCLOSE_ROUTE_LIMITATION",
+              "NO_PRODUCT_ASSERTION"
+            ],
+            "partition": "NOT_APPLICABLE",
+            "relaxation": "NEVER",
+            "fallbackRoutes": ["EDUCATION_OR_CONSULTATION"],
+            "reasons": ["CLAIM_AUTHORITY_UNAVAILABLE_ROUTE"],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G04-CONTINUOUS-LENGTH",
+      "query": "12 inch wig",
+      "context": {
+        "marketCode": "US",
+        "locale": "en-US",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "en" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "NUMBER_WITH_UNIT",
+            "rawText": "12 inch",
+            "languageTag": "en",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CONTINUOUS",
+              "dimensionId": "hair-length",
+              "quantity": { "value": 12, "unitId": "inch" }
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:length-near"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:length-near",
+            "attributeId": "hair-length",
+            "value": {
+              "kind": "MEASURED_QUANTITY",
+              "quantity": { "value": 11.75, "unitId": "inch" }
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:length-measurement"
+          },
+          "policies": [
+            {
+              "kind": "CONTINUOUS_TOLERANCE",
+              "synthetic": true,
+              "dimensionId": "hair-length",
+              "unitId": "inch",
+              "lowerDelta": 0.5,
+              "upperDelta": 0.5,
+              "policyVersion": "fixture:policy:length-tolerance/v0"
+            }
+          ],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:length-near"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "PREFERENCE_ALLOWED",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NOT_APPLICABLE",
+            "fallbackRoutes": [],
+            "reasons": ["CONTINUOUS_WITHIN_SYNTHETIC_TOLERANCE"],
+            "diagnostics": ["SYNTHETIC_TOLERANCE_APPLIED"]
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G05-UNSUPPORTED-BANGS",
+      "query": "시스루뱅 가발",
+      "context": {
+        "marketCode": "KR",
+        "locale": "ko-KR",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "ko" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "UNSUPPORTED",
+            "rawText": "시스루뱅",
+            "languageTag": "ko",
+            "interpretationState": "UNRESOLVED",
+            "value": {
+              "kind": "UNKNOWN_OR_UNSUPPORTED",
+              "conceptId": "fixture:style:bangs:see-through",
+              "state": "UNSUPPORTED"
+            }
+          }
+        ],
+        "unsupported": [
+          {
+            "constraintId": "constraint:0",
+            "conceptId": "fixture:style:bangs:see-through",
+            "state": "UNRESOLVED"
+          }
+        ],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": { "kind": "QUERY" },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": { "kind": "QUERY" },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "UNSUPPORTED",
+            "score": "NONE",
+            "speechRequirements": [
+              "DISCLOSE_ROUTE_LIMITATION",
+              "NO_PRODUCT_ASSERTION"
+            ],
+            "partition": "UNKNOWN",
+            "relaxation": "NOT_APPLICABLE",
+            "fallbackRoutes": ["EXPLICIT_UNSUPPORTED"],
+            "reasons": ["UNSUPPORTED_CONCEPT"],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:bangs-not-representable"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:bangs-not-representable",
+            "attributeId": "bangs",
+            "value": null,
+            "state": "NOT_REPRESENTABLE",
+            "syntheticEvidenceRef": null
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:bangs-not-representable"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "UNSUPPORTED",
+            "score": "NONE",
+            "speechRequirements": [
+              "DISCLOSE_ROUTE_LIMITATION",
+              "NO_PRODUCT_ASSERTION"
+            ],
+            "partition": "UNKNOWN",
+            "relaxation": "NOT_APPLICABLE",
+            "fallbackRoutes": ["EXPLICIT_UNSUPPORTED"],
+            "reasons": ["UNSUPPORTED_CONCEPT"],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G06-MIXED-LANGUAGE-MULTI-SEGMENT",
+      "query": "인모 12 inch SKU-ML-001",
+      "context": {
+        "marketCode": "US",
+        "locale": "en-US",
+        "queryLanguage": { "mode": "AUTO" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "CONCEPT",
+            "rawText": "인모",
+            "languageTag": "ko",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CATEGORICAL",
+              "attributeId": "material",
+              "valueId": "fixture:material:human-hair"
+            }
+          },
+          {
+            "constraintId": "constraint:1",
+            "owner": "NUMBER_WITH_UNIT",
+            "rawText": "12 inch",
+            "languageTag": "en",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CONTINUOUS",
+              "dimensionId": "hair-length",
+              "quantity": { "value": 12, "unitId": "inch" }
+            }
+          },
+          {
+            "constraintId": "constraint:2",
+            "owner": "EXACT_IDENTITY",
+            "rawText": "SKU-ML-001",
+            "languageTag": null,
+            "interpretationState": "DECLARED",
+            "value": {
+              "kind": "EXACT_IDENTITY",
+              "namespace": "SKU",
+              "value": "SKU-ML-001"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": ["MIXED_LANGUAGE_SPANS_RESOLVED"]
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:mixed-match"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:mixed-match",
+            "attributeId": "material",
+            "value": {
+              "kind": "CATEGORICAL",
+              "valueId": "fixture:material:human-hair"
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:mixed-material"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:mixed-match"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["EVIDENCE_QUALIFIED_MATCH"],
+            "diagnostics": []
+          }
+        },
+        {
+          "targetConstraintId": "constraint:1",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:mixed-match"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:mixed-match",
+            "attributeId": "hair-length",
+            "value": {
+              "kind": "MEASURED_QUANTITY",
+              "quantity": { "value": 12, "unitId": "inch" }
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:mixed-length"
+          },
+          "policies": [
+            {
+              "kind": "CONTINUOUS_TOLERANCE",
+              "synthetic": true,
+              "dimensionId": "hair-length",
+              "unitId": "inch",
+              "lowerDelta": 0,
+              "upperDelta": 0,
+              "policyVersion": "fixture:policy:exact-length/v0"
+            }
+          ],
+          "expected": {
+            "constraintId": "constraint:1",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:mixed-match"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "PREFERENCE_ALLOWED",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NOT_APPLICABLE",
+            "fallbackRoutes": [],
+            "reasons": ["CONTINUOUS_WITHIN_SYNTHETIC_TOLERANCE"],
+            "diagnostics": ["SYNTHETIC_TOLERANCE_APPLIED"]
+          }
+        },
+        {
+          "targetConstraintId": "constraint:2",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:mixed-match"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:mixed-match",
+            "attributeId": "identity:sku",
+            "value": {
+              "kind": "EXACT_IDENTITY",
+              "namespace": "SKU",
+              "value": "SKU-ML-001"
+            },
+            "state": "VERIFIED_OR_MEASURED",
+            "syntheticEvidenceRef": "fixture:evidence:mixed-sku"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:2",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:mixed-match"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "ASSERT_MATCH",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_EVIDENCE_BASIS"],
+            "partition": "ASSERTED",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": [
+              "EXACT_IDENTITY_MATCH",
+              "EXACT_IDENTITY_NO_SUBSTITUTION"
+            ],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G07-CONTRADICTORY-QUERY",
+      "query": "인모 합성모 가발",
+      "context": {
+        "marketCode": "KR",
+        "locale": "ko-KR",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "ko" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "CONCEPT",
+            "rawText": "인모",
+            "languageTag": "ko",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CATEGORICAL",
+              "attributeId": "material",
+              "valueId": "fixture:material:human-hair"
+            }
+          },
+          {
+            "constraintId": "constraint:1",
+            "owner": "CONCEPT",
+            "rawText": "합성모",
+            "languageTag": "ko",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CATEGORICAL",
+              "attributeId": "material",
+              "valueId": "fixture:material:synthetic"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [
+          {
+            "constraintId": "contradiction:0",
+            "leftConstraintId": "constraint:0",
+            "rightConstraintId": "constraint:1",
+            "attributeId": "material",
+            "kind": "MUTUALLY_EXCLUSIVE_VALUES"
+          }
+        ],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetContradictionId": "contradiction:0",
+          "subject": { "kind": "QUERY" },
+          "policies": [],
+          "expected": {
+            "constraintId": "contradiction:0",
+            "subject": { "kind": "QUERY" },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "REQUIRE_CLARIFICATION",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_ROUTE_LIMITATION"],
+            "partition": "NOT_APPLICABLE",
+            "relaxation": "NOT_APPLICABLE",
+            "fallbackRoutes": ["CLARIFICATION"],
+            "reasons": ["CONTRADICTORY_QUERY"],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G08-CONFIRMATION-CHANGES-INTENT-NOT-EVIDENCE",
+      "query": "human hair wig",
+      "context": {
+        "marketCode": "US",
+        "locale": "en-US",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "en" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "confirmation": {
+        "confirmed": true,
+        "value": {
+          "kind": "CATEGORICAL",
+          "attributeId": "material",
+          "valueId": "fixture:material:human-hair"
+        }
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "CONCEPT",
+            "rawText": "human hair",
+            "languageTag": "en",
+            "interpretationState": "DECLARED",
+            "value": {
+              "kind": "CATEGORICAL",
+              "attributeId": "material",
+              "valueId": "fixture:material:human-hair"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:confirmed-intent-missing"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:confirmed-intent-missing",
+            "attributeId": "material",
+            "value": null,
+            "state": "MISSING",
+            "syntheticEvidenceRef": null
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:confirmed-intent-missing"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "DO_NOT_GATE",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_UNKNOWN"],
+            "partition": "UNKNOWN",
+            "relaxation": "CONFIRMATION_REQUIRED",
+            "fallbackRoutes": [],
+            "reasons": [
+              "CONFIRMATION_CHANGED_INTENT_ONLY",
+              "PRODUCT_EVIDENCE_UNKNOWN"
+            ],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G09-AUDIENCE-CANNOT-SWITCH",
+      "query": "humanoid wig",
+      "context": {
+        "marketCode": "US",
+        "locale": "en-US",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "en" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "AUDIENCE_ROUTE",
+            "rawText": "humanoid",
+            "languageTag": "en",
+            "interpretationState": "UNRESOLVED",
+            "value": {
+              "kind": "AUTHORITY_ROUTE",
+              "conceptId": "fixture:alternate-audience-route"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": { "kind": "QUERY" },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": { "kind": "QUERY" },
+            "authorityOutcome": {
+              "kind": "PRESERVE_CALLER_CONTEXT",
+              "audienceNamespace": { "value": "fixture:audience-current" }
+            },
+            "gate": "ROUTE_ONLY",
+            "score": "NONE",
+            "speechRequirements": ["DISCLOSE_ROUTE_LIMITATION"],
+            "partition": "NOT_APPLICABLE",
+            "relaxation": "NEVER",
+            "fallbackRoutes": ["AUDIENCE_SWITCH_OFFER"],
+            "reasons": ["AUDIENCE_NAMESPACE_PRESERVED"],
+            "diagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D5-G10-MODEL-INFERRED-CLAIM-NO-AUTHORITY",
+      "query": "human hair wig",
+      "context": {
+        "marketCode": "US",
+        "locale": "en-US",
+        "queryLanguage": { "mode": "DECLARED", "languageTag": "en" },
+        "audienceNamespace": "fixture:audience-current"
+      },
+      "expectedParser": {
+        "spans": [
+          {
+            "constraintId": "constraint:0",
+            "owner": "CONCEPT",
+            "rawText": "human hair",
+            "languageTag": "en",
+            "interpretationState": "DERIVED",
+            "value": {
+              "kind": "CATEGORICAL",
+              "attributeId": "material",
+              "valueId": "fixture:material:human-hair"
+            }
+          }
+        ],
+        "unsupported": [],
+        "contradictions": [],
+        "diagnostics": []
+      },
+      "decisions": [
+        {
+          "targetConstraintId": "constraint:0",
+          "subject": {
+            "kind": "FIXTURE_PRODUCT",
+            "fixtureProductId": "fixture:product:model-inferred-material"
+          },
+          "evidence": {
+            "fixtureOnly": true,
+            "synthetic": true,
+            "fixtureProductId": "fixture:product:model-inferred-material",
+            "attributeId": "material",
+            "value": {
+              "kind": "CATEGORICAL",
+              "valueId": "fixture:material:human-hair"
+            },
+            "state": "MODEL_INFERRED",
+            "syntheticEvidenceRef": "fixture:evidence:model-output"
+          },
+          "policies": [],
+          "expected": {
+            "constraintId": "constraint:0",
+            "subject": {
+              "kind": "FIXTURE_PRODUCT",
+              "fixtureProductId": "fixture:product:model-inferred-material"
+            },
+            "authorityOutcome": { "kind": "NOT_APPLICABLE" },
+            "gate": "DO_NOT_GATE",
+            "score": "NONE",
+            "speechRequirements": [
+              "NO_PRODUCT_ASSERTION",
+              "DISCLOSE_UNKNOWN"
+            ],
+            "partition": "UNKNOWN",
+            "relaxation": "NEVER",
+            "fallbackRoutes": [],
+            "reasons": ["MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY"],
+            "diagnostics": []
+          }
+        }
+      ]
+    }
+  ]
+}
