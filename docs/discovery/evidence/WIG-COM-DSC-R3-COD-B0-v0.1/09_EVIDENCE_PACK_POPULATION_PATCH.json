@@ -1,0 +1,295 @@
+{
+  "repository": {
+    "path": "/Users/duckcow/workspace/mira",
+    "branch": "main",
+    "head": "a963af6aea6c01c1ac4d2041d6140e664418f78b",
+    "origin_main": "a963af6aea6c01c1ac4d2041d6140e664418f78b",
+    "baseline_clean": true,
+    "latest_commit": "a963af6 fix(payment): harden public webhook ingress",
+    "external_web_accessed": false,
+    "external_service_contacted": false
+  },
+  "data_sources": [
+    {
+      "source": "prisma/schema.prisma",
+      "class": "CANONICAL_SCHEMA",
+      "observed": "Catalog identity is WigStyle plus WigVariant; market publication is style-level; price is variant-by-market."
+    },
+    {
+      "source": "prisma/seed.ts",
+      "class": "COMMITTED_SEED",
+      "observed": "Destructive demo seed defines 3 markets, 10 styles, 108 variants, 30 publication rows, 324 price rows, 10 cover keys, and no gallery keys."
+    },
+    {
+      "source": "wig_platform",
+      "class": "SEED_OR_DEMO",
+      "observed": "Read-only local development census exactly matches committed seed names, SKU prefixes, cover keys, and aggregate counts.",
+      "representative_for_planning": false
+    },
+    {
+      "source": "wig_platform_test",
+      "class": "EMPTY",
+      "observed": "Read-only test census found 3 active markets and zero styles, variants, publications, and prices.",
+      "representative_for_planning": false
+    },
+    {
+      "source": "public/demo-catalog",
+      "class": "COMMITTED_FIXTURE",
+      "observed": "10 demo image files exist; no explicit discovery image role is encoded."
+    }
+  ],
+  "schema_capabilities": [
+    {
+      "concept": "market_publication",
+      "status": "REPRESENTED_AND_USED",
+      "owner": "WigStyleMarket"
+    },
+    {
+      "concept": "variant_belongs_to_style",
+      "status": "REPRESENTED_AND_USED",
+      "owner": "WigVariant.wigStyleId"
+    },
+    {
+      "concept": "variant_price",
+      "status": "REPRESENTED_AND_USED",
+      "owner": "VariantMarketPrice"
+    },
+    {
+      "concept": "length",
+      "status": "PARTIALLY_REPRESENTED",
+      "owner": "WigVariant.length",
+      "limitation": "free-form categorical string; no quantity, unit, method, or tolerance"
+    },
+    {
+      "concept": "texture",
+      "status": "REPRESENTED_AND_USED",
+      "owner": "WigVariant.curl",
+      "limitation": "free-form string without ontology or provenance"
+    },
+    {
+      "concept": "colour_family",
+      "status": "PARTIALLY_REPRESENTED",
+      "owner": "WigVariant.color and colorHex"
+    },
+    {
+      "concept": "fulfillment_class",
+      "status": "REPRESENTED_AND_USED",
+      "owner": "WigVariant.fulfillmentType"
+    },
+    {
+      "concept": "medical_or_certified_claim",
+      "status": "AMBIGUOUS_OR_OVERLOADED",
+      "owner": "WigStyle.category=MEDICAL",
+      "limitation": "category/use context is not certification evidence"
+    },
+    {
+      "concept": "attribute_provenance",
+      "status": "NOT_REPRESENTED"
+    },
+    {
+      "concept": "claim_evidence_reference",
+      "status": "NOT_REPRESENTED"
+    },
+    {
+      "concept": "image_role",
+      "status": "PARTIALLY_REPRESENTED",
+      "owner": "WigStyle.coverImageKey and imageKeys",
+      "limitation": "no FRONT/SIDE/BACK/TOP/PART/HAIRLINE/BASE/PRODUCT_ONLY/MODEL_WORN/COLOUR_REFERENCE metadata"
+    },
+    {
+      "concept": "localized_product_text",
+      "status": "NOT_REPRESENTED"
+    }
+  ],
+  "population_metrics": [
+    {
+      "source": "wig_platform",
+      "metric": "active_markets",
+      "value": 3,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "active_styles",
+      "value": 10,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "active_variants",
+      "value": 108,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "active_publications",
+      "value": 30,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "variant_market_prices",
+      "value": 324,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "MTO_variants",
+      "value": 108,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "STOCKED_variants",
+      "value": 0,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "styles_with_cover_key",
+      "value": 10,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform",
+      "metric": "gallery_image_keys",
+      "value": 0,
+      "population_class": "SEED_OR_DEMO"
+    },
+    {
+      "source": "wig_platform_test",
+      "metric": "catalog_styles",
+      "value": 0,
+      "population_class": "EMPTY"
+    }
+  ],
+  "attribute_evidence": [
+    {
+      "attributes": [
+        "hair_material",
+        "remy_grade",
+        "virgin_grade",
+        "medical_certification",
+        "heat_tolerance",
+        "hypoallergenic",
+        "claim_evidence_reference",
+        "attribute_provenance"
+      ],
+      "state": "NOT_REPRESENTABLE",
+      "population": "108 demo variants",
+      "hard_filter_safe_now": false
+    },
+    {
+      "attribute": "length",
+      "state": "UNKNOWN_AUTHORITY",
+      "represented_count": 108,
+      "hard_filter_safe_now": false,
+      "reason": "No measurement method, unit, tolerance, or provenance."
+    },
+    {
+      "attribute": "texture",
+      "state": "UNKNOWN_AUTHORITY",
+      "represented_count": 108,
+      "hard_filter_safe_now": false
+    },
+    {
+      "attribute": "color_family",
+      "state": "UNKNOWN_AUTHORITY",
+      "represented_count": 108,
+      "hard_filter_safe_now": false,
+      "reason": "Stored color is not a governed canonical family."
+    }
+  ],
+  "claim_authority_updates": [
+    {
+      "markets": [
+        "KR",
+        "US",
+        "JP"
+      ],
+      "claim_classes": [
+        "hair_material",
+        "remy_grade",
+        "virgin_grade",
+        "medical_certification",
+        "heat_tolerance",
+        "hypoallergenic",
+        "comfort_breathability"
+      ],
+      "authority_status": "UNRESOLVED",
+      "review_status": "NOT_REVIEWED",
+      "reason": "No current repository product/legal authority or approved evidence owner was found."
+    }
+  ],
+  "truth_table_observations": [
+    {
+      "observation": "Current catalog query searches style name substring and exact tag membership only.",
+      "desired_contract_status": "not inferred from current behavior"
+    },
+    {
+      "observation": "MEDICAL category and claim-bearing Korean seed copy affect customer-visible filtering or retrieval without evidence records.",
+      "desired_contract_status": "gap only; frozen contract unchanged"
+    },
+    {
+      "observation": "A length/colour-specific result cannot land on an exact variant because list/detail URLs carry only style ID.",
+      "desired_contract_status": "gap only"
+    },
+    {
+      "observation": "CartItem style/variant coherence is not structurally or behaviorally enforced.",
+      "desired_contract_status": "known gap; no fix authorized"
+    },
+    {
+      "observation": "Logical image roles cannot be reconstructed from current metadata.",
+      "desired_contract_status": "gap only"
+    }
+  ],
+  "blocked_questions": [
+    {
+      "question": "What catalog source is representative of products intended for launch?",
+      "owner": "Catalog/Product",
+      "status": "UNRESOLVED"
+    },
+    {
+      "question": "May any vendor attestation support customer-facing claim assertions per market and attribute?",
+      "owner": "Product/Legal/QC",
+      "status": "UNRESOLVED"
+    },
+    {
+      "question": "Does MEDICAL category mean use context, merchandising family, certification, or another authority?",
+      "owner": "Product/Legal",
+      "status": "UNRESOLVED"
+    },
+    {
+      "question": "What physical or certification evidence exists for current claim-bearing copy?",
+      "owner": "Catalog QA/Product/Legal",
+      "status": "UNRESOLVED"
+    },
+    {
+      "question": "Which image role and product/variant ownership metadata can Content Ops provide?",
+      "owner": "Content Ops",
+      "status": "UNRESOLVED"
+    }
+  ],
+  "next_samples": [
+    {
+      "priority": 1,
+      "sample": "Authority-approved immutable export of a representative active catalog with product/variant IDs, market publication, source system, and provenance fields."
+    },
+    {
+      "priority": 2,
+      "sample": "Physical/QC truth sample for material category, stratified by market, vendor, family, and missingness."
+    },
+    {
+      "priority": 3,
+      "sample": "Product/legal review of all claim-bearing MEDICAL/항암/저자극/편안함 copy and market claim-authority rows."
+    },
+    {
+      "priority": 4,
+      "sample": "Variant landing and CartItem style/variant coherence cases using representative products."
+    },
+    {
+      "priority": 5,
+      "sample": "Content Ops image-role inventory tied explicitly to product or variant."
+    }
+  ]
+}

@@ -23,6 +23,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **STRICT(§4)·되돌리기 비싼 변경은 빌드 전 read-only 정찰부터** — 코드 변경 없이 현 사실·시그니처·기존 패턴·무엇이 비었는지 먼저 보고한다. 가정하고 빌드하지 않는다.
 - **기본 동작: 변경 후 `npm run verify`(§5) 초록을 확인하면 거기서 멈춘다. `git add`/`commit`/`push` 하지 마라** — 사람이 검토하고 직접 커밋한다. 프롬프트가 명시적으로 커밋을 지시할 때만 예외.
 
+### Discovery / search / recommendation preflight
+
+Before search, discovery, recommendation, item-to-item, visual-search, query-parser, catalog-similarity, or related UI/schema work:
+
+- Read `docs/discovery/README.md`, the task-relevant current contract, and `docs/discovery/catalog-evidence-status-v0.2.md`.
+- Read raw evidence when asserting current-state facts.
+- State `SOURCE_ONLY`, `TEST_ONLY`, `EVIDENCE_COLLECTION`, or `PRODUCTION_ACTIVATION`; state task-level authorization; do not cross an unresolved production gate.
+
 ## 1. 기술 스택 (현행)
 
 | 영역 | 선택 | 비고 |

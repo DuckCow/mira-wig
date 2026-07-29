@@ -1,0 +1,52 @@
+metric_id,source_database_or_fixture,market,locale,audience,product_family,metric,value,population_class,representative_for_planning,notes
+DEV-001,wig_platform,ALL,none,"implicit human",ALL,markets,3,SEED_OR_DEMO,no,"Verified inside a read-only transaction; exact seed fingerprint."
+DEV-002,wig_platform,ALL,none,"implicit human",ALL,active_markets,3,SEED_OR_DEMO,no,
+DEV-003,wig_platform,ALL,Korean product text,"implicit human",ALL,styles,10,SEED_OR_DEMO,no,"10 of 10 names match committed seed."
+DEV-004,wig_platform,ALL,Korean product text,"implicit human",ALL,active_styles,10,SEED_OR_DEMO,no,
+DEV-005,wig_platform,ALL,Korean product text,"implicit human",ALL,variants,108,SEED_OR_DEMO,no,"108 of 108 SKUs match committed seed prefixes."
+DEV-006,wig_platform,ALL,Korean product text,"implicit human",ALL,active_variants,108,SEED_OR_DEMO,no,
+DEV-007,wig_platform,ALL,none,"implicit human",ALL,style_market_publication_rows,30,SEED_OR_DEMO,no,
+DEV-008,wig_platform,ALL,none,"implicit human",ALL,active_publication_rows,30,SEED_OR_DEMO,no,
+DEV-009,wig_platform,KR,none,"implicit human",ALL,variant_market_price_rows,108,SEED_OR_DEMO,no,"KRW minor units; range 54000–142000."
+DEV-010,wig_platform,US,none,"implicit human",ALL,variant_market_price_rows,108,SEED_OR_DEMO,no,"USD cents; range 4999–12999."
+DEV-011,wig_platform,JP,none,"implicit human",ALL,variant_market_price_rows,108,SEED_OR_DEMO,no,"JPY minor units; range 6200–16200."
+DEV-012,wig_platform,KR,none,"implicit human",ALL,active_published_variants_missing_price,0,SEED_OR_DEMO,no,"Exact zero: every active seeded variant has a KR price."
+DEV-013,wig_platform,US,none,"implicit human",ALL,active_published_variants_missing_price,0,SEED_OR_DEMO,no,"Exact zero: every active seeded variant has a US price."
+DEV-014,wig_platform,JP,none,"implicit human",ALL,active_published_variants_missing_price,0,SEED_OR_DEMO,no,"Exact zero: every active seeded variant has a JP price."
+DEV-015,wig_platform,ALL,none,"implicit human",ALL,MTO_variants,108,SEED_OR_DEMO,no,"All active; fulfillmentType comes from schema default because seed omits it."
+DEV-016,wig_platform,ALL,none,"implicit human",ALL,STOCKED_variants,0,SEED_OR_DEMO,no,"Exact zero in this demo population."
+DEV-017,wig_platform,ALL,none,"implicit human",ALL,stock_min,50,SEED_OR_DEMO,no,
+DEV-018,wig_platform,ALL,none,"implicit human",ALL,stock_max,50,SEED_OR_DEMO,no,
+DEV-019,wig_platform,ALL,none,"implicit human",ALL,stock_average,50.00,SEED_OR_DEMO,no,"MTO items still use stock/quantity guards."
+DEV-020,wig_platform,KR,none,"implicit human",ALL,active_styles,10,SEED_OR_DEMO,no,
+DEV-021,wig_platform,KR,none,"implicit human",ALL,active_variants,108,SEED_OR_DEMO,no,
+DEV-022,wig_platform,US,none,"implicit human",ALL,active_styles,10,SEED_OR_DEMO,no,
+DEV-023,wig_platform,US,none,"implicit human",ALL,active_variants,108,SEED_OR_DEMO,no,
+DEV-024,wig_platform,JP,none,"implicit human",ALL,active_styles,10,SEED_OR_DEMO,no,
+DEV-025,wig_platform,JP,none,"implicit human",ALL,active_variants,108,SEED_OR_DEMO,no,
+DEV-026,wig_platform,ALL,Korean product text,"implicit human",HAIR_LOSS,styles,2,SEED_OR_DEMO,no,
+DEV-027,wig_platform,ALL,Korean product text,"implicit human",HAIR_LOSS,variants,24,SEED_OR_DEMO,no,
+DEV-028,wig_platform,ALL,Korean product text,"implicit human",FASHION,styles,2,SEED_OR_DEMO,no,
+DEV-029,wig_platform,ALL,Korean product text,"implicit human",FASHION,variants,24,SEED_OR_DEMO,no,
+DEV-030,wig_platform,ALL,Korean product text,"implicit human",COSPLAY,styles,2,SEED_OR_DEMO,no,
+DEV-031,wig_platform,ALL,Korean product text,"implicit human",COSPLAY,variants,24,SEED_OR_DEMO,no,
+DEV-032,wig_platform,ALL,Korean product text,"implicit human",TOPPER,styles,2,SEED_OR_DEMO,no,
+DEV-033,wig_platform,ALL,Korean product text,"implicit human",TOPPER,variants,12,SEED_OR_DEMO,no,
+DEV-034,wig_platform,ALL,Korean product text,"implicit human",MEDICAL,styles,2,SEED_OR_DEMO,no,"Category is not certification evidence."
+DEV-035,wig_platform,ALL,Korean product text,"implicit human",MEDICAL,variants,24,SEED_OR_DEMO,no,"Category is not certification evidence."
+DEV-036,wig_platform,ALL,none,"implicit human",ALL,styles_with_cover_key,10,SEED_OR_DEMO,no,"All 10 are demo-catalog keys."
+DEV-037,wig_platform,ALL,none,"implicit human",ALL,styles_with_gallery_keys,0,SEED_OR_DEMO,no,"Exact zero gallery-bearing styles."
+DEV-038,wig_platform,ALL,none,"implicit human",ALL,gallery_image_key_rows,0,SEED_OR_DEMO,no,
+DEV-039,wig_platform,ALL,none,"implicit human",ALL,localized_title_coverage,,SEED_OR_DEMO,no,"Blank, not zero: localized product title storage is not representable."
+DEV-040,wig_platform,ALL,none,"implicit human",ALL,localized_description_coverage,,SEED_OR_DEMO,no,"Blank, not zero: localized product description storage is not representable."
+TEST-001,wig_platform_test,ALL,none,test,ALL,markets,3,TEST_FIXTURE,no,"Verified inside a read-only transaction."
+TEST-002,wig_platform_test,ALL,none,test,ALL,active_markets,3,TEST_FIXTURE,no,
+TEST-003,wig_platform_test,ALL,none,test,ALL,styles,0,EMPTY,no,"Exact zero catalog rows at census time."
+TEST-004,wig_platform_test,ALL,none,test,ALL,variants,0,EMPTY,no,
+TEST-005,wig_platform_test,ALL,none,test,ALL,publication_rows,0,EMPTY,no,
+TEST-006,wig_platform_test,ALL,none,test,ALL,price_rows,0,EMPTY,no,
+FIX-001,prisma/seed.ts,ALL,Korean product text,"implicit human",ALL,declared_styles,10,SEED_OR_DEMO,no,"Committed source definition; matches wig_platform exactly."
+FIX-002,prisma/seed.ts,ALL,Korean product text,"implicit human",ALL,declared_variants,108,SEED_OR_DEMO,no,
+FIX-003,prisma/seed.ts,ALL,none,"implicit human",ALL,declared_publication_rows,30,SEED_OR_DEMO,no,
+FIX-004,prisma/seed.ts,ALL,none,"implicit human",ALL,declared_price_rows,324,SEED_OR_DEMO,no,
+FIX-005,public/demo-catalog/*,ALL,none,"implicit human",ALL,committed_catalog_image_files,10,SEED_OR_DEMO,no,"No image role inferred from filenames or pixels."
