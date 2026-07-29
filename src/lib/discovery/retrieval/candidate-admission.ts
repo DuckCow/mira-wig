@@ -265,12 +265,9 @@ function resolveEligibilitySummary(
     const variantSummaryExists = input.eligibilitySummaries.some(
       (summary) => summary.variantId === input.candidate.variantId,
     );
-    const marketSummaryExists = input.eligibilitySummaries.some(
-      (summary) => summary.marketCode === input.context.marketCode,
-    );
     return {
       status: "REJECTED",
-      reason: variantSummaryExists || marketSummaryExists
+      reason: variantSummaryExists
         ? "ELIGIBILITY_IDENTITY_MISMATCH"
         : "ELIGIBILITY_SUMMARY_MISSING",
     };

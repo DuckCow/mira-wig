@@ -244,7 +244,7 @@ describe("mandatory exact candidate admission", () => {
     });
   });
 
-  it("distinguishes missing, duplicate, and market-mismatched summaries", () => {
+  it("distinguishes missing, duplicate, and candidate-variant market mismatches", () => {
     expect(
       admitExactCandidate(admissionInput({ eligibilitySummaries: [] })),
     ).toMatchObject({
@@ -288,7 +288,7 @@ describe("mandatory exact candidate admission", () => {
       ),
     ).toMatchObject({
       status: "ADMISSION_REJECTED",
-      reason: "ELIGIBILITY_IDENTITY_MISMATCH",
+      reason: "ELIGIBILITY_SUMMARY_MISSING",
     });
     expect(
       admitExactCandidate(
@@ -304,6 +304,63 @@ describe("mandatory exact candidate admission", () => {
       status: "ADMISSION_REJECTED",
       reason: "ELIGIBILITY_SUMMARY_PROVENANCE_INVALID",
     });
+  });
+
+  it("ignores unrelated eligibility summary membership and order when the candidate summary is missing", () => {
+    const unrelatedCallerMarket = eligibilitySummary({
+      variantId: "variant-unrelated-kr",
+    });
+    const unrelatedOtherMarket = eligibilitySummary({
+      variantId: "variant-unrelated-us",
+      marketCode: "US",
+    });
+    const baseline = admitExactCandidate(
+      admissionInput({ eligibilitySummaries: [] }),
+    );
+
+    expect(baseline).toMatchObject({
+      status: "ADMISSION_REJECTED",
+      reason: "ELIGIBILITY_SUMMARY_MISSING",
+    });
+    for (const summaries of [
+      [unrelatedCallerMarket],
+      [unrelatedOtherMarket],
+      [unrelatedCallerMarket, unrelatedOtherMarket],
+      [unrelatedOtherMarket, unrelatedCallerMarket],
+    ]) {
+      expect(
+        admitExactCandidate(
+          admissionInput({ eligibilitySummaries: summaries }),
+        ),
+      ).toEqual(baseline);
+    }
+  });
+
+  it("reports a candidate-variant wrong-market summary despite unrelated caller-market summaries", () => {
+    const candidateOtherMarket = eligibilitySummary({ marketCode: "US" });
+    const unrelatedCallerMarket = eligibilitySummary({
+      variantId: "variant-unrelated-kr",
+    });
+    const baseline = admitExactCandidate(
+      admissionInput({
+        eligibilitySummaries: [candidateOtherMarket],
+      }),
+    );
+
+    expect(baseline).toMatchObject({
+      status: "ADMISSION_REJECTED",
+      reason: "ELIGIBILITY_IDENTITY_MISMATCH",
+    });
+    for (const summaries of [
+      [candidateOtherMarket, unrelatedCallerMarket],
+      [unrelatedCallerMarket, candidateOtherMarket],
+    ]) {
+      expect(
+        admitExactCandidate(
+          admissionInput({ eligibilitySummaries: summaries }),
+        ),
+      ).toEqual(baseline);
+    }
   });
 
   it("rejects invalid eligibility provenance and preserves a valid fixture reason", () => {
@@ -399,23 +456,36 @@ describe("mandatory exact candidate admission", () => {
     },
   );
 
-  it("never substitutes a lower sibling price", () => {
-    const result = admitExactCandidate(
-      admissionInput({
-        eligibilitySummaries: [
-          eligibilitySummary(),
-          eligibilitySummary({
-            variantId: "variant-lower-sibling",
-            selectedVariantAmount: 10000,
-          }),
-        ],
-      }),
+  it("lets the exact summary dominate unrelated summary membership and order", () => {
+    const exact = eligibilitySummary();
+    const lowerSibling = eligibilitySummary({
+      variantId: "variant-lower-sibling",
+      selectedVariantAmount: 10000,
+    });
+    const otherMarketSibling = eligibilitySummary({
+      variantId: "variant-other-market-sibling",
+      marketCode: "US",
+    });
+    const baseline = admitExactCandidate(
+      admissionInput({ eligibilitySummaries: [exact] }),
     );
 
-    expect(result.status).toBe("ADMITTED");
-    if (result.status === "ADMITTED") {
-      expect(result.result.amount).toBe(85000);
-      expect(result.result).not.toHaveProperty("styleMinimumPrice");
+    expect(baseline.status).toBe("ADMITTED");
+    for (const summaries of [
+      [exact, lowerSibling],
+      [lowerSibling, exact],
+      [otherMarketSibling, exact, lowerSibling],
+      [lowerSibling, exact, otherMarketSibling],
+    ]) {
+      expect(
+        admitExactCandidate(
+          admissionInput({ eligibilitySummaries: summaries }),
+        ),
+      ).toEqual(baseline);
+    }
+    if (baseline.status === "ADMITTED") {
+      expect(baseline.result.amount).toBe(85000);
+      expect(baseline.result).not.toHaveProperty("styleMinimumPrice");
     }
   });
 });
