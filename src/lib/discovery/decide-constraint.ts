@@ -365,6 +365,22 @@ function exactOrCategoricalMatches(
   return false;
 }
 
+function exactOrCategoricalEvidenceComparable(
+  constraint: ConstraintValue,
+  evidence: ProductEvidenceFixture,
+): boolean {
+  if (constraint.kind === "EXACT_IDENTITY") {
+    return (
+      evidence.value?.kind === "EXACT_IDENTITY" &&
+      evidence.value.namespace === constraint.namespace
+    );
+  }
+  if (constraint.kind === "CATEGORICAL") {
+    return evidence.value?.kind === "CATEGORICAL";
+  }
+  return false;
+}
+
 function exactOrCategoricalDecision(
   input: RuntimeDecideConstraintInput,
   constraint: InterpretedConstraint,
@@ -381,6 +397,9 @@ function exactOrCategoricalDecision(
   }
   if (exactIdentity) {
     reasons.push("EXACT_IDENTITY_NO_SUBSTITUTION");
+  }
+  if (!matches) {
+    reasons.push("EVIDENCE_QUALIFIED_MISMATCH");
   }
 
   return makeDecision(input.target, input.subject, {
@@ -523,6 +542,11 @@ function authoritativeEvidenceDecision(
 
   if (constraint.value.kind === "CONTINUOUS") {
     return continuousDecision(input, constraint, evidence, policies);
+  }
+  if (!exactOrCategoricalEvidenceComparable(constraint.value, evidence)) {
+    return unknownEvidenceDecision(input, constraint, [
+      "PRODUCT_EVIDENCE_UNKNOWN",
+    ]);
   }
 
   return exactOrCategoricalDecision(input, constraint, evidence, policies);

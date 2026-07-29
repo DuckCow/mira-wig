@@ -289,6 +289,101 @@ describe("decideConstraint", () => {
     }
   });
 
+  it("explains an authoritative claim-bearing categorical mismatch", () => {
+    const constraint = firstConstraint("human hair wig");
+    const evidence: ProductEvidenceFixture = {
+      fixtureOnly: true,
+      synthetic: true,
+      fixtureProductId: "fixture:product:verified-synthetic-hair",
+      attributeId: "material",
+      value: {
+        kind: "CATEGORICAL",
+        valueId: "fixture:material:synthetic",
+      },
+      state: "VERIFIED_OR_MEASURED",
+      syntheticEvidenceRef: "fixture:evidence:verified-synthetic-hair",
+    };
+
+    expect(
+      decideConstraint({
+        target: fixtureTarget(constraint),
+        subject: {
+          kind: "FIXTURE_PRODUCT",
+          fixtureProductId: evidence.fixtureProductId,
+        },
+        context: CONTEXT,
+        evidence,
+      }),
+    ).toMatchObject({
+      gate: "DO_NOT_GATE",
+      partition: "VIOLATING",
+      reasons: ["EVIDENCE_QUALIFIED_MISMATCH"],
+    });
+  });
+
+  it("explains an authoritative canonical exact-identity mismatch without substitution", () => {
+    const constraint = firstConstraint("SKU-EXACT-001");
+    const evidence: ProductEvidenceFixture = {
+      fixtureOnly: true,
+      synthetic: true,
+      fixtureProductId: "fixture:product:different-canonical-sku",
+      attributeId: "identity:sku",
+      value: {
+        kind: "EXACT_IDENTITY",
+        namespace: "SKU",
+        value: "SKU-EXACT-002",
+      },
+      state: "VERIFIED_OR_MEASURED",
+      syntheticEvidenceRef: "fixture:evidence:different-canonical-sku",
+    };
+
+    expect(
+      decideConstraint({
+        target: fixtureTarget(constraint),
+        subject: {
+          kind: "FIXTURE_PRODUCT",
+          fixtureProductId: evidence.fixtureProductId,
+        },
+        context: CONTEXT,
+        evidence,
+      }),
+    ).toMatchObject({
+      gate: "DO_NOT_GATE",
+      partition: "VIOLATING",
+      fallbackRoutes: ["EXACT_IDENTITY_NOT_FOUND"],
+      reasons: [
+        "EXACT_IDENTITY_NO_SUBSTITUTION",
+        "EVIDENCE_QUALIFIED_MISMATCH",
+      ],
+    });
+  });
+
+  it.each([
+    "MISSING",
+    "CONFLICTING",
+    "MODEL_INFERRED",
+    "NOT_REPRESENTABLE",
+  ] satisfies readonly ProductEvidenceFixtureState[])(
+    "does not label %s evidence as an evidence-qualified mismatch",
+    (state) => {
+      const constraint = firstConstraint("human hair wig");
+      const evidence = materialEvidence(state);
+      const decision = decideConstraint({
+        target: fixtureTarget(constraint),
+        subject: {
+          kind: "FIXTURE_PRODUCT",
+          fixtureProductId: evidence.fixtureProductId,
+        },
+        context: CONTEXT,
+        evidence,
+      });
+
+      expect(decision.reasons).not.toContain(
+        "EVIDENCE_QUALIFIED_MISMATCH",
+      );
+    },
+  );
+
   it("rejects a contradiction decision for a fixture-product subject", () => {
     const contradiction = parse("인모 합성모").contradictions[0];
     if (contradiction === undefined) {

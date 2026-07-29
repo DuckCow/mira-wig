@@ -8,6 +8,7 @@ import {
   type ParseQueryInput,
   type QueryConfirmation,
   type QueryLexicon,
+  type QueryLexiconEntry,
 } from "../types";
 import { TEST_IDENTITY_RECOGNIZERS } from "./fixtures/test-identity-recognizers";
 import { TEST_QUERY_LEXICON } from "./fixtures/test-lexicon";
@@ -22,6 +23,35 @@ function parse(
     lexicon,
     identityRecognizers,
   });
+}
+
+const AMBIGUITY_METADATA_BASE_ENTRY: QueryLexiconEntry = {
+  entryId: "fixture:ambiguity-metadata:a",
+  surface: "policy",
+  matchPolicy: "WORD_LIKE_BOUNDARIES",
+  languageTag: createLanguageTag("en"),
+  owner: "CONCEPT",
+  conceptId: "fixture:concept:policy",
+  attributeBand: "CLAIM_BEARING",
+  decisionProfile: "CLAIM_BEARING_MATERIAL",
+  interpretationState: "DERIVED",
+  value: {
+    kind: "CATEGORICAL",
+    attributeId: "material",
+    valueId: "fixture:material:human-hair",
+  },
+  mutualExclusionGroup: "fixture:mutex:material",
+};
+
+function ambiguityMetadataLexicon(
+  entries: readonly QueryLexiconEntry[],
+): QueryLexicon {
+  return {
+    version: "fixture:ambiguity-metadata-lexicon/v0",
+    ontologyVersion: "fixture:ambiguity-metadata-ontology/v0",
+    entries,
+    units: [],
+  };
 }
 
 describe("parseQuery", () => {
@@ -113,6 +143,97 @@ describe("parseQuery", () => {
         spanIds: ["span:0"],
       },
     ]);
+  });
+
+  it.each([
+    {
+      label: "decision profile",
+      changedEntry: {
+        ...AMBIGUITY_METADATA_BASE_ENTRY,
+        entryId: "fixture:ambiguity-metadata:b-profile",
+        decisionProfile: null,
+      },
+    },
+    {
+      label: "attribute band",
+      changedEntry: {
+        ...AMBIGUITY_METADATA_BASE_ENTRY,
+        entryId: "fixture:ambiguity-metadata:b-band",
+        attributeBand: "STYLISTIC",
+      },
+    },
+    {
+      label: "mutual-exclusion group",
+      changedEntry: {
+        ...AMBIGUITY_METADATA_BASE_ENTRY,
+        entryId: "fixture:ambiguity-metadata:b-mutex",
+        mutualExclusionGroup: null,
+      },
+    },
+  ] satisfies ReadonlyArray<{
+    readonly label: string;
+    readonly changedEntry: QueryLexiconEntry;
+  }>)(
+    "makes equal-value overlap unresolved when $label differs",
+    ({ changedEntry }) => {
+      const result = parse(
+        "policy",
+        ambiguityMetadataLexicon([
+          AMBIGUITY_METADATA_BASE_ENTRY,
+          changedEntry,
+        ]),
+        [],
+      );
+
+      expect(result.constraints).toHaveLength(1);
+      expect(result.constraints[0]).toMatchObject({
+        interpretationState: "UNRESOLVED",
+        value: {
+          kind: "UNKNOWN_OR_UNSUPPORTED",
+          state: "AMBIGUOUS",
+        },
+      });
+      expect(result.diagnostics).toEqual([
+        {
+          code: "AMBIGUOUS_SAME_PRECEDENCE_OVERLAP",
+          spanIds: ["span:0"],
+        },
+      ]);
+    },
+  );
+
+  it("deduplicates semantically identical lexicon entries independently of input order", () => {
+    const duplicate: QueryLexiconEntry = {
+      ...AMBIGUITY_METADATA_BASE_ENTRY,
+      entryId: "fixture:ambiguity-metadata:b",
+    };
+    const forward = parse(
+      "policy",
+      ambiguityMetadataLexicon([
+        AMBIGUITY_METADATA_BASE_ENTRY,
+        duplicate,
+      ]),
+      [],
+    );
+    const reverse = parse(
+      "policy",
+      ambiguityMetadataLexicon([
+        duplicate,
+        AMBIGUITY_METADATA_BASE_ENTRY,
+      ]),
+      [],
+    );
+
+    expect(forward).toEqual(reverse);
+    expect(forward.constraints[0]).toMatchObject({
+      interpretationState: "DERIVED",
+      decisionProfile: "CLAIM_BEARING_MATERIAL",
+      value: AMBIGUITY_METADATA_BASE_ENTRY.value,
+    });
+    expect(forward.spans[0]?.lexiconEntryId).toBe(
+      "fixture:ambiguity-metadata:a",
+    );
+    expect(forward.diagnostics).toEqual([]);
   });
 
   it("gives an injected exact identity recognizer precedence over lexicon content", () => {

@@ -283,6 +283,21 @@ function constraintSemanticKey(value: QueryLexiconEntry["value"]): string {
   }
 }
 
+function lexiconEntrySemanticKey(entry: QueryLexiconEntry): string {
+  return JSON.stringify([
+    normalizeQuery({ text: entry.surface }).comparisonText,
+    entry.owner,
+    entry.conceptId,
+    entry.attributeBand,
+    entry.decisionProfile,
+    entry.interpretationState,
+    constraintSemanticKey(entry.value),
+    entry.mutualExclusionGroup,
+    entry.languageTag?.value ?? null,
+    entry.matchPolicy,
+  ]);
+}
+
 function lexiconCandidateOrder(left: LexiconCandidate, right: LexiconCandidate): number {
   const lengthDifference =
     rangeLength(right.normalizedRange) - rangeLength(left.normalizedRange);
@@ -334,7 +349,9 @@ function selectLexiconCandidates(
         rangesOverlap(candidate.normalizedRange, best.normalizedRange),
     );
     const semanticKeys = new Set(
-      samePrecedence.map((candidate) => constraintSemanticKey(candidate.entry.value)),
+      samePrecedence.map((candidate) =>
+        lexiconEntrySemanticKey(candidate.entry),
+      ),
     );
     const ambiguous = semanticKeys.size > 1;
     const selectedRange = ambiguous ? mergeRanges(samePrecedence) : best.normalizedRange;
@@ -346,7 +363,12 @@ function selectLexiconCandidates(
           kind: "AMBIGUOUS",
           normalizedRange: selectedRange,
           rawRange,
-          attributeBand: best.entry.attributeBand,
+          attributeBand:
+            new Set(
+              samePrecedence.map((candidate) => candidate.entry.attributeBand),
+            ).size === 1
+              ? best.entry.attributeBand
+              : "STYLISTIC",
         });
       }
     } else {
