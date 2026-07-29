@@ -20,7 +20,7 @@ describe("exact fixture retriever", () => {
       expect(result.exactLookupAccountabilityKey).toBe(
         JSON.stringify([
           "d6-exact-retrieval-fixture/v0.1-provisional",
-          "d6-exact-fixture-retriever/v0.1-provisional",
+          "d6-exact-fixture-retriever/v0.1",
           "SKU",
           EXACT_SKU,
           "variant-exact-001",

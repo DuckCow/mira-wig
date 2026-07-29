@@ -180,7 +180,7 @@ describe("default-off provisional event seam", () => {
   it("attributes request, miss, rejection, and admitted event outcomes exactly", () => {
     const exactKey = JSON.stringify([
       "d6-exact-retrieval-fixture/v0.1-provisional",
-      "d6-exact-fixture-retriever/v0.1-provisional",
+      "d6-exact-fixture-retriever/v0.1",
       "SKU",
       "SKU-EXACT-001",
       "variant-exact-001",
@@ -188,7 +188,7 @@ describe("default-off provisional event seam", () => {
     ]);
     const missKey = JSON.stringify([
       "d6-exact-retrieval-fixture/v0.1-provisional",
-      "d6-exact-fixture-retriever/v0.1-provisional",
+      "d6-exact-fixture-retriever/v0.1",
       "SKU",
       "SKU-EXACT-001",
       null,
@@ -202,11 +202,9 @@ describe("default-off provisional event seam", () => {
       ontology: "synthetic-ontology/v0.1-provisional",
     };
     const d6Versions = {
-      candidateSource:
-        "d6-exact-fixture-retriever/v0.1-provisional",
-      admissionRules:
-        "d6-exact-candidate-admission/v0.1-provisional",
-      landingContract: "d6-exact-landing/v0.1-provisional",
+      candidateSource: "d6-exact-fixture-retriever/v0.1",
+      admissionRules: "d6-exact-candidate-admission/v0.1",
+      landingContract: "d6-exact-landing/v0.1",
       eventSchema: "d6-discovery-events/v0.1-provisional",
       fixtureSnapshot:
         "d6-exact-retrieval-fixture/v0.1-provisional",
