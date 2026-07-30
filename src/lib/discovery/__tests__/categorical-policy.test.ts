@@ -635,7 +635,7 @@ describe("D5-S1 required-only fixture-product evidence", () => {
     expect(model).toMatchObject({
       gate: "DO_NOT_GATE",
       partition: "UNKNOWN",
-      reasons: ["MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY"],
+      reasons: ["MODEL_INFERRED_STYLISTIC_HAS_NO_ASSERTION_AUTHORITY"],
     });
   });
 

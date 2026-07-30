@@ -197,7 +197,7 @@ describe("default-off provisional event seam", () => {
     const d5Versions = {
       normalizer: "d5-conservative-normalizer/v0.1",
       parser: "d5-injected-span-parser/v0.1",
-      constraintRules: "d5-constraint-decisions/v0.2-provisional",
+      constraintRules: "d5-constraint-decisions/v0.2",
       lexicon: "synthetic-lexicon/v0.1-provisional",
       ontology: "synthetic-ontology/v0.1-provisional",
     };

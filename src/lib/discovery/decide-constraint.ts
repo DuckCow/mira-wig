@@ -778,7 +778,7 @@ function stylisticCategoricalProductDecision(
     return unknownEvidenceDecision(
       input,
       constraint,
-      ["MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY"],
+      ["MODEL_INFERRED_STYLISTIC_HAS_NO_ASSERTION_AUTHORITY"],
       ["NO_PRODUCT_ASSERTION", "DISCLOSE_UNKNOWN"],
     );
   }
