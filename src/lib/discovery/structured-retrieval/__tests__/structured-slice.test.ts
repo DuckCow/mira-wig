@@ -298,6 +298,105 @@ describe("D6-B1 structured categorical fixture slice", () => {
     }
   });
 
+  it("rejects malformed categorical evidence runtime states and values", () => {
+    const color = governedConstraint();
+    const selectedCandidate = candidateFixture();
+    const malformed = [
+      evidenceFixture(selectedCandidate, color),
+      evidenceFixture(selectedCandidate, color),
+      evidenceFixture(selectedCandidate, color),
+      evidenceFixture(selectedCandidate, color),
+      evidenceFixture(selectedCandidate, color),
+      evidenceFixture(selectedCandidate, color),
+    ];
+    Object.defineProperty(malformed[0], "state", {
+      value: "INVALID_RUNTIME_STATE",
+    });
+    Object.defineProperty(malformed[1], "value", {
+      value: {
+        kind: "MEASURED_QUANTITY",
+        quantity: { value: 12, unitId: "fixture:inch" },
+      },
+    });
+    Object.defineProperty(malformed[2], "value", {
+      value: { valueId: "fixture:color-family:dark" },
+    });
+    Object.defineProperty(malformed[3], "value", {
+      value: "fixture:color-family:dark",
+    });
+    Object.defineProperty(malformed[4], "value", {
+      value: [],
+    });
+    Object.defineProperty(malformed[5], "value", {
+      value: { kind: "CATEGORICAL", valueId: " " },
+    });
+    const authoritativeNull = evidenceFixture(
+      selectedCandidate,
+      color,
+    );
+    Object.defineProperty(authoritativeNull, "value", { value: null });
+
+    for (const evidence of [...malformed, authoritativeNull]) {
+      const result = runStructuredCategoricalFixtureSlice(
+        structuredInput({
+          parserResult: parserResult([color]),
+          policies: [categoricalPolicy(color)],
+          stage0Proof: stage0Proof(pairsFor([selectedCandidate])),
+          candidateSnapshot: candidateSnapshot([selectedCandidate]),
+          evidenceFixtures: [evidence],
+          eligibilitySummaries: [
+            eligibilitySummary(selectedCandidate),
+          ],
+        }),
+      );
+
+      expect(result.status).toBe("COMPLETED");
+      if (result.status === "COMPLETED") {
+        expect(result.admissionRejections[0]?.reason).toBe(
+          "EVIDENCE_PROVENANCE_INVALID",
+        );
+        expect(result.counts.unknown).toBe(0);
+      }
+    }
+  });
+
+  it("keeps absent and explicit MISSING evidence on the valid UNKNOWN path", () => {
+    const color = governedConstraint();
+    const selectedCandidate = candidateFixture();
+    const evidenceCases = [
+      [],
+      [
+        evidenceFixture(selectedCandidate, color, "MISSING", {
+          value: null,
+        }),
+      ],
+    ];
+
+    for (const evidenceFixtures of evidenceCases) {
+      const result = runStructuredCategoricalFixtureSlice(
+        structuredInput({
+          parserResult: parserResult([color]),
+          policies: [categoricalPolicy(color)],
+          stage0Proof: stage0Proof(pairsFor([selectedCandidate])),
+          candidateSnapshot: candidateSnapshot([selectedCandidate]),
+          evidenceFixtures,
+          eligibilitySummaries: [
+            eligibilitySummary(selectedCandidate),
+          ],
+        }),
+      );
+
+      expect(result.status).toBe("COMPLETED");
+      if (result.status === "COMPLETED") {
+        expect(result.counts.unknown).toBe(1);
+        expect(result.counts.admissionRejected).toBe(0);
+        expect(
+          result.unknownCandidates[0]?.productDecisions[0]?.reasons,
+        ).toEqual(["PRODUCT_EVIDENCE_UNKNOWN"]);
+      }
+    }
+  });
+
   it("uses WITHHELD then VIOLATING then UNKNOWN then ASSERTED precedence for pairs", () => {
     const color = governedConstraint(COLOR_ATTRIBUTE_ID);
     const texture = governedConstraint(TEXTURE_ATTRIBUTE_ID);
@@ -438,5 +537,68 @@ describe("D6-B1 structured categorical fixture slice", () => {
     );
     expect(JSON.stringify(input)).toBe(before);
     expect(JSON.stringify(permuted)).toBe(permutedBefore);
+  });
+
+  it("detaches completed outputs from constraint, policy, evidence, and eligibility inputs", () => {
+    const color = governedConstraint();
+    const policy = categoricalPolicy(color);
+    const selectedCandidate = candidateFixture();
+    const evidence = evidenceFixture(selectedCandidate, color);
+    const eligibility = eligibilitySummary(selectedCandidate);
+    const input = structuredInput({
+      parserResult: parserResult([color]),
+      policies: [policy],
+      stage0Proof: stage0Proof(pairsFor([selectedCandidate])),
+      candidateSnapshot: candidateSnapshot([selectedCandidate]),
+      evidenceFixtures: [evidence],
+      eligibilitySummaries: [eligibility],
+    });
+    const result = runStructuredCategoricalFixtureSlice(input);
+    if (result.status !== "COMPLETED") {
+      throw new TypeError("Synthetic structured run must complete");
+    }
+    const before = JSON.stringify(result);
+    const queryDecisionsBefore = JSON.stringify(
+      result.requestPlan.queryDecisions,
+    );
+    const productDecisionsBefore = JSON.stringify(
+      result.assertedCandidates[0]?.productDecisions,
+    );
+
+    Object.defineProperty(color.value, "valueId", {
+      value: "fixture:color-family:mutated",
+    });
+    Object.defineProperty(color.source, "lexiconEntryId", {
+      value: "fixture:lexicon:mutated",
+    });
+    Object.defineProperty(policy, "disposition", {
+      value: "PREFERENCE",
+    });
+    Object.defineProperty(policy, "policyVersion", {
+      value: "fixture:policy:mutated",
+    });
+    Object.defineProperty(evidence, "state", {
+      value: "CONFLICTING",
+    });
+    Object.defineProperty(evidence, "value", { value: null });
+    Object.defineProperty(evidence, "syntheticEvidenceRef", {
+      value: "fixture:evidence:mutated",
+    });
+    Object.defineProperty(eligibility, "selectedVariantAmount", {
+      value: 1,
+    });
+    Object.defineProperty(eligibility, "fixtureReason", {
+      value: "fixture:eligibility:mutated",
+    });
+
+    expect(JSON.stringify(result.requestPlan.queryDecisions)).toBe(
+      queryDecisionsBefore,
+    );
+    expect(
+      JSON.stringify(
+        result.assertedCandidates[0]?.productDecisions,
+      ),
+    ).toBe(productDecisionsBefore);
+    expect(JSON.stringify(result)).toBe(before);
   });
 });

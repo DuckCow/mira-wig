@@ -21,6 +21,73 @@ function isNonblankRuntimeString(value: unknown): value is string {
   );
 }
 
+function isRuntimeObject(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
+}
+
+function evidenceStateIsValid(value: unknown): boolean {
+  switch (value) {
+    case "VERIFIED_OR_MEASURED":
+    case "APPROVED_VENDOR_ATTESTED":
+    case "UNAPPROVED_VENDOR_DECLARATION":
+    case "HUMAN_CURATED_FROM_EVIDENCE":
+    case "MODEL_INFERRED":
+    case "MISSING":
+    case "CONFLICTING":
+    case "NOT_REPRESENTABLE":
+    case "UNKNOWN_AUTHORITY":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function nullEvidenceValueIsValid(
+  state: StructuredProductEvidenceFixture["state"],
+): boolean {
+  return (
+    state === "MISSING" ||
+    state === "CONFLICTING" ||
+    state === "NOT_REPRESENTABLE" ||
+    state === "UNKNOWN_AUTHORITY"
+  );
+}
+
+function categoricalEvidenceValueIsValid(value: unknown): boolean {
+  return (
+    isRuntimeObject(value) &&
+    !Array.isArray(value) &&
+    value.kind === "CATEGORICAL" &&
+    isNonblankRuntimeString(value.valueId)
+  );
+}
+
+function evidenceValueIsValid(
+  evidence: StructuredProductEvidenceFixture,
+): boolean {
+  return evidence.value === null
+    ? nullEvidenceValueIsValid(evidence.state)
+    : categoricalEvidenceValueIsValid(evidence.value);
+}
+
+function evidenceFixtureIdentityIsValid(
+  evidence: StructuredProductEvidenceFixture,
+): boolean {
+  return (
+    evidence.fixtureOnly === true &&
+    evidence.synthetic === true &&
+    evidence.fixtureSnapshotVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot &&
+    isNonblankRuntimeString(evidence.fixtureProductId) &&
+    isNonblankRuntimeString(evidence.targetConstraintId) &&
+    isNonblankRuntimeString(evidence.attributeId) &&
+    (evidence.syntheticEvidenceRef === null ||
+      isNonblankRuntimeString(evidence.syntheticEvidenceRef))
+  );
+}
+
 function relatedEvidence(
   fixtures: readonly StructuredProductEvidenceFixture[],
   candidate: StructuredCandidateFixture,
@@ -36,17 +103,13 @@ function relatedEvidence(
 function evidenceProvenanceIsValid(
   evidence: StructuredProductEvidenceFixture,
 ): boolean {
-  return (
-    evidence.fixtureOnly === true &&
-    evidence.synthetic === true &&
-    evidence.fixtureSnapshotVersion ===
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot &&
-    isNonblankRuntimeString(evidence.fixtureProductId) &&
-    isNonblankRuntimeString(evidence.targetConstraintId) &&
-    isNonblankRuntimeString(evidence.attributeId) &&
-    (evidence.syntheticEvidenceRef === null ||
-      isNonblankRuntimeString(evidence.syntheticEvidenceRef))
-  );
+  if (!evidenceStateIsValid(evidence.state)) {
+    return false;
+  }
+  if (!evidenceValueIsValid(evidence)) {
+    return false;
+  }
+  return evidenceFixtureIdentityIsValid(evidence);
 }
 
 function productDecisionIsCompatible(

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { InterpretedConstraint } from "../../types";
+import { normalizeQuery } from "../../normalize-query";
+import { parseQuery } from "../../parse-query";
+import type {
+  CategoricalPolicyFixture,
+  InterpretedConstraint,
+  QueryLexicon,
+} from "../../types";
 import { buildStructuredRequestPlan } from "../request-plan";
 import {
   categoricalPolicy,
@@ -130,6 +136,68 @@ function claimConstraint(): InterpretedConstraint {
 }
 
 describe("D6-B1 structured request plan", () => {
+  it("accepts an actual frozen parser span whose concept differs from its categorical attribute", () => {
+    const lexicon: QueryLexicon = {
+      version: "fixture:d6-b1-distinct-concept-lexicon/v0.1",
+      ontologyVersion: "fixture:d6-b1-distinct-concept-ontology/v0.1",
+      entries: [
+        {
+          entryId: "fixture:lexicon:dark-color",
+          surface: "dark",
+          matchPolicy: "WORD_LIKE_BOUNDARIES",
+          languageTag: null,
+          owner: "CONCEPT",
+          conceptId: "fixture:concept:dark-color",
+          attributeBand: "STYLISTIC",
+          decisionProfile: "GOVERNED_STYLISTIC_CATEGORICAL",
+          interpretationState: "DECLARED",
+          value: {
+            kind: "CATEGORICAL",
+            attributeId: COLOR_ATTRIBUTE_ID,
+            valueId: "fixture:color-family:dark",
+          },
+          mutualExclusionGroup: null,
+        },
+      ],
+      units: [],
+    };
+    const parsed = parseQuery({
+      normalizedQuery: normalizeQuery({ text: "dark" }),
+      lexicon,
+      identityRecognizers: [],
+    });
+    const constraint = parsed.constraints[0];
+    if (
+      constraint === undefined ||
+      constraint.value.kind !== "CATEGORICAL"
+    ) {
+      throw new TypeError("Frozen parser must emit the categorical fixture");
+    }
+    const policy: CategoricalPolicyFixture = {
+      kind: "CATEGORICAL_POLICY",
+      fixtureOnly: true,
+      synthetic: true,
+      targetConstraintId: constraint.constraintId,
+      attributeId: constraint.value.attributeId,
+      disposition: "REQUIRED",
+      policyVersion: "fixture:policy:distinct-concept/v0.1",
+    };
+
+    expect(parsed.spans[0]?.conceptId).toBe(
+      "fixture:concept:dark-color",
+    );
+    expect(parsed.spans[0]?.conceptId).not.toBe(
+      constraint.value.attributeId,
+    );
+    expect(
+      buildStructuredRequestPlan(
+        parsed,
+        syntheticContext(),
+        [policy],
+      ).status,
+    ).toBe("APPLICABLE");
+  });
+
   it.each([
     {
       name: "color",
@@ -380,5 +448,47 @@ describe("D6-B1 structured request plan", () => {
       status: "REQUEST_REJECTED",
       reason: "AFFECTING_CONTRADICTION",
     });
+  });
+
+  it("detaches accepted constraints, nested values, sources, and policies", () => {
+    const constraint = governedConstraint();
+    const policy = categoricalPolicy(constraint);
+    const plan = buildStructuredRequestPlan(
+      parserResult([constraint]),
+      syntheticContext(),
+      [policy],
+    );
+    if (plan.status !== "APPLICABLE") {
+      throw new TypeError("Synthetic structured request must apply");
+    }
+    const plannedConstraint = plan.constraints[0];
+    const plannedPolicy = plan.policies[0];
+
+    expect(plannedConstraint).not.toBe(constraint);
+    expect(plannedConstraint?.value).not.toBe(constraint.value);
+    expect(plannedConstraint?.source).not.toBe(constraint.source);
+    expect(plannedPolicy).not.toBe(policy);
+
+    Object.defineProperty(constraint.value, "valueId", {
+      value: "fixture:color-family:mutated",
+    });
+    Object.defineProperty(constraint.source, "lexiconEntryId", {
+      value: "fixture:lexicon:mutated",
+    });
+    Object.defineProperty(policy, "policyVersion", {
+      value: "fixture:policy:mutated",
+    });
+
+    expect(plannedConstraint?.value.valueId).toBe(
+      "fixture:color-family:dark",
+    );
+    expect(
+      plannedConstraint?.source.kind === "QUERY_SPAN"
+        ? plannedConstraint.source.lexiconEntryId
+        : null,
+    ).toBe("fixture:lexicon:color");
+    expect(plannedPolicy?.policyVersion).toBe(
+      "fixture:d6-b1-categorical-policy/v0.1-provisional",
+    );
   });
 });

@@ -1,4 +1,7 @@
-import type { ConstraintDecision } from "../types";
+import type {
+  CategoricalPolicyFixture,
+  ConstraintDecision,
+} from "../types";
 import {
   buildStructuredLandingIntent,
   verifyStructuredLanding,
@@ -11,6 +14,7 @@ import type {
   StructuredAdmissionResult,
   StructuredCandidatePartition,
   StructuredCandidateResultCore,
+  StructuredCandidateSourceAttribution,
   StructuredEligibilityAttribution,
   StructuredEligibilitySummaryFixture,
 } from "./types";
@@ -26,6 +30,33 @@ function isNonblankRuntimeString(value: unknown): value is string {
 
 function requestPlanIsValid(input: AdmitStructuredCandidateInput): boolean {
   const plan = input.requestPlan;
+  if (!requestPlanShapeIsValid(plan)) {
+    return false;
+  }
+
+  for (const [index, constraint] of plan.constraints.entries()) {
+    const policy = plan.policies[index];
+    const decision = plan.queryDecisions[index];
+    if (
+      policy === undefined ||
+      decision === undefined ||
+      !requestPlanEntryIsValid(
+        plan.constraints[index - 1],
+        constraint,
+        policy,
+        decision,
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function requestPlanShapeIsValid(
+  plan: AdmitStructuredCandidateInput["requestPlan"],
+): boolean {
   return (
     plan.status === "APPLICABLE" &&
     plan.requestPlanVersion ===
@@ -33,87 +64,289 @@ function requestPlanIsValid(input: AdmitStructuredCandidateInput): boolean {
     plan.constraints.length >= 1 &&
     plan.constraints.length <= 2 &&
     plan.constraints.length === plan.policies.length &&
-    plan.constraints.length === plan.queryDecisions.length &&
-    plan.queryDecisions.every(
-      (decision, index) =>
-        decision.constraintId === plan.constraints[index]?.constraintId &&
-        decision.subject.kind === "QUERY" &&
-        decision.gate === "REQUIRE_MATCH" &&
-        decision.score === "NONE" &&
-        decision.partition === "NOT_APPLICABLE",
-    )
+    plan.constraints.length === plan.queryDecisions.length
   );
 }
 
-function candidateIsInStage0Scope(
-  input: AdmitStructuredCandidateInput,
-): boolean {
-  return input.stage0Proof.allowedCanonicalPairs.some(
-    (pair) =>
-      pair.variantId === input.candidate.variantId &&
-      pair.canonicalStyleId === input.candidate.canonicalStyleId,
-  );
-}
-
-function candidateIsInSourceAttribution(
-  input: AdmitStructuredCandidateInput,
-): boolean {
-  return input.candidateSourceAttribution.enumeratedCandidateIdentities.some(
-    (identity) =>
-      identity.variantId === input.candidate.variantId &&
-      identity.canonicalStyleId === input.candidate.canonicalStyleId,
-  );
-}
-
-function productDecisionMatchesConstraint(
-  decision: ConstraintDecision,
+function requestPlanEntryIsValid(
+  priorConstraint: GovernedCategoricalConstraint | undefined,
   constraint: GovernedCategoricalConstraint,
-  candidateVariantId: string,
+  policy: CategoricalPolicyFixture,
+  decision: ConstraintDecision,
 ): boolean {
   if (
-    !productDecisionIdentityMatches(
-      decision,
-      constraint,
-      candidateVariantId,
-    )
+    !governedConstraintIsValid(constraint) ||
+    !policyMatchesConstraint(policy, constraint)
   ) {
     return false;
   }
-  return productDecisionPartitionIsValid(decision);
-}
-
-function productDecisionIdentityMatches(
-  decision: ConstraintDecision,
-  constraint: GovernedCategoricalConstraint,
-  candidateVariantId: string,
-): boolean {
   if (
-    decision.constraintId !== constraint.constraintId ||
-    decision.subject.kind !== "FIXTURE_PRODUCT" ||
-    decision.subject.fixtureProductId !== candidateVariantId ||
-    decision.score !== "NONE" ||
-    decision.gate === "REQUIRE_MATCH" ||
-    decision.partition === "NOT_APPLICABLE"
+    priorConstraint !== undefined &&
+    canonicalConstraintOrder(priorConstraint, constraint) >= 0
   ) {
     return false;
   }
-  return true;
+  return constraintDecisionsEqual(
+    decision,
+    expectedRequiredQueryDecision(constraint),
+  );
 }
 
-function productDecisionPartitionIsValid(
-  decision: ConstraintDecision,
+function expectedRequiredQueryDecision(
+  constraint: GovernedCategoricalConstraint,
+): ConstraintDecision {
+  const confirmationReasons =
+    constraint.source.kind === "USER_CONFIRMATION"
+      ? ["CONFIRMATION_CHANGED_INTENT_ONLY" as const]
+      : [];
+  return {
+    constraintId: constraint.constraintId,
+    subject: { kind: "QUERY" },
+    authorityOutcome: { kind: "NOT_APPLICABLE" },
+    gate: "REQUIRE_MATCH",
+    score: "NONE",
+    speechRequirements: ["NO_PRODUCT_ASSERTION"],
+    partition: "NOT_APPLICABLE",
+    relaxation: "NEVER",
+    fallbackRoutes: [],
+    reasons: [
+      ...confirmationReasons,
+      "CATEGORICAL_REQUIRED_BY_POLICY",
+    ],
+    diagnostics: [],
+  };
+}
+
+function governedConstraintIsValid(
+  constraint: GovernedCategoricalConstraint,
 ): boolean {
-  if (decision.partition === "ASSERTED") {
-    return decision.gate === "ASSERT_MATCH";
+  if (!isNonblankRuntimeString(constraint.constraintId)) {
+    return false;
   }
-  if (
-    decision.partition === "UNKNOWN" ||
-    decision.partition === "VIOLATING" ||
-    decision.partition === "WITHHELD"
-  ) {
-    return decision.gate === "DO_NOT_GATE";
+  return (
+    governedConstraintSemanticsAreValid(constraint) &&
+    governedConstraintSourceIsValid(constraint)
+  );
+}
+
+function governedConstraintSemanticsAreValid(
+  constraint: GovernedCategoricalConstraint,
+): boolean {
+  const governedAttribute =
+    constraint.value.attributeId ===
+      "fixture:governed-color-family" ||
+    constraint.value.attributeId ===
+      "fixture:governed-texture-family";
+  return (
+    constraint.value.kind === "CATEGORICAL" &&
+    governedAttribute &&
+    isNonblankRuntimeString(constraint.value.valueId) &&
+    constraint.interpretationState === "DECLARED" &&
+    constraint.attributeBand === "STYLISTIC" &&
+    constraint.decisionProfile ===
+      "GOVERNED_STYLISTIC_CATEGORICAL"
+  );
+}
+
+function governedConstraintSourceIsValid(
+  constraint: GovernedCategoricalConstraint,
+): boolean {
+  if (constraint.source.kind === "USER_CONFIRMATION") {
+    return (
+      isNonblankRuntimeString(constraint.source.priorConstraintId) &&
+      constraint.source.priorConstraintId === constraint.constraintId
+    );
   }
-  return false;
+  return (
+    isNonblankRuntimeString(constraint.source.spanId) &&
+    isNonblankRuntimeString(constraint.source.lexiconEntryId) &&
+    constraint.source.identityRecognizerId === null
+  );
+}
+
+function policyMatchesConstraint(
+  policy: CategoricalPolicyFixture,
+  constraint: GovernedCategoricalConstraint,
+): boolean {
+  return (
+    policy.kind === "CATEGORICAL_POLICY" &&
+    policy.fixtureOnly === true &&
+    policy.synthetic === true &&
+    isNonblankRuntimeString(policy.policyVersion) &&
+    isNonblankRuntimeString(policy.targetConstraintId) &&
+    isNonblankRuntimeString(policy.attributeId) &&
+    policy.targetConstraintId === constraint.constraintId &&
+    policy.attributeId === constraint.value.attributeId &&
+    policy.disposition === "REQUIRED"
+  );
+}
+
+function canonicalConstraintOrder(
+  left: GovernedCategoricalConstraint,
+  right: GovernedCategoricalConstraint,
+): number {
+  const attributeOrder = left.value.attributeId.localeCompare(
+    right.value.attributeId,
+  );
+  return attributeOrder !== 0
+    ? attributeOrder
+    : left.constraintId.localeCompare(right.constraintId);
+}
+
+function stringArraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function subjectsEqual(
+  left: ConstraintDecision["subject"],
+  right: ConstraintDecision["subject"],
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  return (
+    left.kind === "QUERY" ||
+    (right.kind === "FIXTURE_PRODUCT" &&
+      left.fixtureProductId === right.fixtureProductId)
+  );
+}
+
+function authorityOutcomesEqual(
+  left: ConstraintDecision["authorityOutcome"],
+  right: ConstraintDecision["authorityOutcome"],
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  return (
+    left.kind !== "PRESERVE_CALLER_CONTEXT" ||
+    (right.kind === "PRESERVE_CALLER_CONTEXT" &&
+      left.audienceNamespace.value === right.audienceNamespace.value)
+  );
+}
+
+function constraintDecisionsEqual(
+  left: ConstraintDecision,
+  right: ConstraintDecision,
+): boolean {
+  return (
+    constraintDecisionScalarFieldsEqual(left, right) &&
+    constraintDecisionArrayFieldsEqual(left, right)
+  );
+}
+
+function constraintDecisionScalarFieldsEqual(
+  left: ConstraintDecision,
+  right: ConstraintDecision,
+): boolean {
+  return (
+    left.constraintId === right.constraintId &&
+    subjectsEqual(left.subject, right.subject) &&
+    authorityOutcomesEqual(
+      left.authorityOutcome,
+      right.authorityOutcome,
+    ) &&
+    left.gate === right.gate &&
+    left.score === right.score &&
+    left.partition === right.partition &&
+    left.relaxation === right.relaxation
+  );
+}
+
+function constraintDecisionArrayFieldsEqual(
+  left: ConstraintDecision,
+  right: ConstraintDecision,
+): boolean {
+  return (
+    stringArraysEqual(
+      left.speechRequirements,
+      right.speechRequirements,
+    ) &&
+    stringArraysEqual(left.fallbackRoutes, right.fallbackRoutes) &&
+    stringArraysEqual(left.reasons, right.reasons) &&
+    stringArraysEqual(left.diagnostics, right.diagnostics)
+  );
+}
+
+function expectedProductDecisions(
+  constraint: GovernedCategoricalConstraint,
+  candidateVariantId: string,
+): readonly ConstraintDecision[] {
+  const confirmationReasons =
+    constraint.source.kind === "USER_CONFIRMATION"
+      ? ["CONFIRMATION_CHANGED_INTENT_ONLY" as const]
+      : [];
+  const relaxation =
+    constraint.source.kind === "USER_CONFIRMATION"
+      ? "CONFIRMATION_REQUIRED" as const
+      : "NEVER" as const;
+  const common = {
+    constraintId: constraint.constraintId,
+    subject: {
+      kind: "FIXTURE_PRODUCT" as const,
+      fixtureProductId: candidateVariantId,
+    },
+    authorityOutcome: { kind: "NOT_APPLICABLE" as const },
+    score: "NONE" as const,
+    relaxation,
+    fallbackRoutes: [],
+    diagnostics: [],
+  };
+  return [
+    {
+      ...common,
+      gate: "ASSERT_MATCH",
+      speechRequirements: ["DISCLOSE_EVIDENCE_BASIS"],
+      partition: "ASSERTED",
+      reasons: [...confirmationReasons, "EVIDENCE_QUALIFIED_MATCH"],
+    },
+    {
+      ...common,
+      gate: "DO_NOT_GATE",
+      speechRequirements: ["NO_PRODUCT_ASSERTION"],
+      partition: "VIOLATING",
+      reasons: [
+        ...confirmationReasons,
+        "EVIDENCE_QUALIFIED_MISMATCH",
+      ],
+    },
+    {
+      ...common,
+      gate: "DO_NOT_GATE",
+      speechRequirements: ["DISCLOSE_UNKNOWN"],
+      partition: "UNKNOWN",
+      reasons: [...confirmationReasons, "PRODUCT_EVIDENCE_UNKNOWN"],
+    },
+    {
+      ...common,
+      gate: "DO_NOT_GATE",
+      speechRequirements: [
+        "NO_PRODUCT_ASSERTION",
+        "DISCLOSE_UNKNOWN",
+      ],
+      partition: "UNKNOWN",
+      reasons: [
+        ...confirmationReasons,
+        "MODEL_INFERRED_STYLISTIC_HAS_NO_ASSERTION_AUTHORITY",
+      ],
+    },
+    {
+      ...common,
+      gate: "DO_NOT_GATE",
+      speechRequirements: [
+        "NO_PRODUCT_ASSERTION",
+        "DISCLOSE_UNKNOWN",
+      ],
+      partition: "WITHHELD",
+      reasons: [...confirmationReasons, "PRODUCT_EVIDENCE_CONFLICT"],
+    },
+  ];
 }
 
 function productDecisionSetIsValid(
@@ -127,13 +360,192 @@ function productDecisionSetIsValid(
       const constraint = input.requestPlan.constraints[index];
       return (
         constraint !== undefined &&
-        productDecisionMatchesConstraint(
-          decision,
+        expectedProductDecisions(
           constraint,
           input.candidate.variantId,
+        ).some((expected) =>
+          constraintDecisionsEqual(decision, expected),
         )
       );
     })
+  );
+}
+
+function canonicalPairOrder(
+  left: {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  },
+  right: {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  },
+): number {
+  const variantOrder = left.variantId.localeCompare(right.variantId);
+  return variantOrder !== 0
+    ? variantOrder
+    : left.canonicalStyleId.localeCompare(right.canonicalStyleId);
+}
+
+function canonicalPairsAreValid(
+  pairs: readonly {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  }[],
+): boolean {
+  return pairs.every(
+    (pair, index) =>
+      isNonblankRuntimeString(pair.variantId) &&
+      isNonblankRuntimeString(pair.canonicalStyleId) &&
+      (index === 0 ||
+        canonicalPairOrder(pairs[index - 1] ?? pair, pair) < 0),
+  );
+}
+
+function canonicalPairArraysEqual(
+  left: readonly {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  }[],
+  right: readonly {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  }[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (pair, index) =>
+        pair.variantId === right[index]?.variantId &&
+        pair.canonicalStyleId === right[index]?.canonicalStyleId,
+    )
+  );
+}
+
+function pairIsIn(
+  pair: {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  },
+  pairs: readonly {
+    readonly variantId: string;
+    readonly canonicalStyleId: string;
+  }[],
+): boolean {
+  return pairs.some(
+    (candidate) =>
+      candidate.variantId === pair.variantId &&
+      candidate.canonicalStyleId === pair.canonicalStyleId,
+  );
+}
+
+function candidateIsInStage0Scope(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  return pairIsIn(
+    input.candidate,
+    input.stage0Proof.allowedCanonicalPairs,
+  );
+}
+
+function candidateSourceAccountabilityIsValid(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  return (
+    stage0ProofIsAccountable(input) &&
+    candidateProvenanceIsValid(input) &&
+    attributionVersionsAreValid(input) &&
+    attributionMembershipIsValid(input) &&
+    enumeratedIdentitiesAreValid(input) &&
+    accountabilityKeyIsValid(input.candidateSourceAttribution)
+  );
+}
+
+function stage0ProofIsAccountable(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  return (
+    input.stage0Proof.status === "VALIDATED" &&
+    input.stage0Proof.stage0ScopeVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.stage0Scope &&
+    input.stage0Proof.fixtureSnapshotVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot &&
+    canonicalPairsAreValid(input.stage0Proof.allowedCanonicalPairs)
+  );
+}
+
+function candidateProvenanceIsValid(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  return (
+    input.candidate.fixtureOnly === true &&
+    input.candidate.synthetic === true &&
+    input.candidate.fixtureSnapshotVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot &&
+    input.candidate.candidateSourceVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.candidateSource &&
+    isNonblankRuntimeString(input.candidate.variantId) &&
+    isNonblankRuntimeString(input.candidate.canonicalStyleId)
+  );
+}
+
+function attributionVersionsAreValid(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  const attribution = input.candidateSourceAttribution;
+  return (
+    attribution.fixtureSnapshotVersion ===
+      input.candidate.fixtureSnapshotVersion &&
+    attribution.candidateSourceVersion ===
+      input.candidate.candidateSourceVersion
+  );
+}
+
+function attributionMembershipIsValid(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  const scoped = input.candidateSourceAttribution.scopedMembership;
+  return (
+    canonicalPairsAreValid(scoped) &&
+    canonicalPairArraysEqual(
+      scoped,
+      input.stage0Proof.allowedCanonicalPairs,
+    )
+  );
+}
+
+function enumeratedIdentitiesAreValid(
+  input: AdmitStructuredCandidateInput,
+): boolean {
+  const enumerated =
+    input.candidateSourceAttribution.enumeratedCandidateIdentities;
+  const stage0Pairs = input.stage0Proof.allowedCanonicalPairs;
+  if (
+    !canonicalPairsAreValid(enumerated) ||
+    enumerated.some((identity) => !pairIsIn(identity, stage0Pairs))
+  ) {
+    return false;
+  }
+  return (
+    enumerated.filter(
+      (identity) =>
+        identity.variantId === input.candidate.variantId &&
+        identity.canonicalStyleId === input.candidate.canonicalStyleId,
+    ).length === 1
+  );
+}
+
+function accountabilityKeyIsValid(
+  attribution: StructuredCandidateSourceAttribution,
+): boolean {
+  return (
+    attribution.accountabilityKey ===
+    JSON.stringify([
+      attribution.fixtureSnapshotVersion,
+      attribution.candidateSourceVersion,
+      attribution.scopedMembership,
+      attribution.enumeratedCandidateIdentities,
+    ])
   );
 }
 
@@ -141,9 +553,7 @@ function relatedEligibilitySummaries(
   input: AdmitStructuredCandidateInput,
 ): readonly StructuredEligibilitySummaryFixture[] {
   return input.eligibilitySummaries.filter(
-    (summary) =>
-      summary.variantId === input.candidate.variantId ||
-      summary.canonicalStyleId === input.candidate.canonicalStyleId,
+    (summary) => summary.variantId === input.candidate.variantId,
   );
 }
 
@@ -244,9 +654,6 @@ function eligibilityIdentityFailure(
   input: AdmitStructuredCandidateInput,
   summary: StructuredEligibilitySummaryFixture,
 ): StructuredAdmissionRejectionReason | null {
-  if (summary.variantId !== input.candidate.variantId) {
-    return "ELIGIBILITY_VARIANT_MISMATCH";
-  }
   if (summary.canonicalStyleId !== input.candidate.canonicalStyleId) {
     return "ELIGIBILITY_STYLE_MISMATCH";
   }
@@ -382,11 +789,14 @@ export function admitStructuredCandidate(
   if (!requestPlanIsValid(input)) {
     return rejected(input, "REQUEST_PLAN_INVARIANT_FAILED");
   }
-  if (
-    !candidateIsInStage0Scope(input) ||
-    !candidateIsInSourceAttribution(input)
-  ) {
+  if (!candidateIsInStage0Scope(input)) {
     return rejected(input, "CANDIDATE_OUTSIDE_STAGE0_SCOPE");
+  }
+  if (!candidateSourceAccountabilityIsValid(input)) {
+    return rejected(
+      input,
+      "CANDIDATE_SOURCE_ACCOUNTABILITY_INVALID",
+    );
   }
   if (input.evidenceEvaluation.status === "EVIDENCE_REJECTED") {
     return rejected(input, input.evidenceEvaluation.reason);

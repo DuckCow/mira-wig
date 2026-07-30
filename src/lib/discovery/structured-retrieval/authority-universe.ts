@@ -1,7 +1,6 @@
 import type { DiscoveryContext } from "../types";
 import type {
   Stage0AllowedCanonicalPair,
-  Stage0AuthorityUniverseFixture,
   Stage0ContextBinding,
   Stage0Validation,
 } from "./types";
@@ -31,7 +30,22 @@ function contextBinding(context: DiscoveryContext): Stage0ContextBinding {
   };
 }
 
-function contextBindingIsValid(binding: Stage0ContextBinding): boolean {
+function isRuntimeObject(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
+}
+
+function contextBindingIsValid(
+  binding: unknown,
+): binding is Stage0ContextBinding {
+  if (!isRuntimeObject(binding)) {
+    return false;
+  }
+  const queryLanguage = binding.queryLanguage;
+  if (!isRuntimeObject(queryLanguage)) {
+    return false;
+  }
   if (
     !isNonblankRuntimeString(binding.marketCode) ||
     !isNonblankRuntimeString(binding.locale) ||
@@ -41,9 +55,9 @@ function contextBindingIsValid(binding: Stage0ContextBinding): boolean {
   }
 
   return (
-    binding.queryLanguage.mode === "AUTO" ||
-    (binding.queryLanguage.mode === "DECLARED" &&
-      isNonblankRuntimeString(binding.queryLanguage.languageTag))
+    queryLanguage.mode === "AUTO" ||
+    (queryLanguage.mode === "DECLARED" &&
+      isNonblankRuntimeString(queryLanguage.languageTag))
   );
 }
 
@@ -67,11 +81,18 @@ function sameContext(
   );
 }
 
-function pairIsValid(pair: Stage0AllowedCanonicalPair): boolean {
+function pairIsValid(
+  pair: unknown,
+): pair is Stage0AllowedCanonicalPair {
   return (
+    isRuntimeObject(pair) &&
     isNonblankRuntimeString(pair.variantId) &&
     isNonblankRuntimeString(pair.canonicalStyleId)
   );
+}
+
+function isRuntimeArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
 }
 
 function canonicalPairOrder(
@@ -135,13 +156,6 @@ function analyzeStage0Membership(
 function membershipRejection(
   pairs: readonly Stage0AllowedCanonicalPair[],
 ): Stage0Validation | null {
-  if (!pairs.every(pairIsValid)) {
-    return {
-      status: "STAGE0_REJECTED",
-      reason: "STAGE0_MEMBERSHIP_INVALID",
-    };
-  }
-
   const analysis = analyzeStage0Membership(pairs);
   if (analysis.conflictingParent) {
     return {
@@ -157,25 +171,49 @@ function membershipRejection(
     : null;
 }
 
+interface RuntimeStage0ProofContainer {
+  readonly fixtureOnly: true;
+  readonly synthetic: true;
+  readonly stage0ScopeVersion: string;
+  readonly fixtureSnapshotVersion: string;
+  readonly context: Stage0ContextBinding;
+  readonly allowedCanonicalPairs: readonly unknown[];
+}
+
+function proofContainerIsValid(
+  proof: unknown,
+): proof is RuntimeStage0ProofContainer {
+  return (
+    isRuntimeObject(proof) &&
+    proof.fixtureOnly === true &&
+    proof.synthetic === true &&
+    proof.stage0ScopeVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.stage0Scope &&
+    proof.fixtureSnapshotVersion ===
+      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot &&
+    contextBindingIsValid(proof.context) &&
+    isRuntimeArray(proof.allowedCanonicalPairs)
+  );
+}
+
 export function validateStage0AuthorityUniverse(
-  proof: Stage0AuthorityUniverseFixture,
+  proof: unknown,
   callerContext: DiscoveryContext,
 ): Stage0Validation {
-  if (
-    proof.fixtureOnly !== true ||
-    proof.synthetic !== true ||
-    proof.stage0ScopeVersion !==
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.stage0Scope ||
-    proof.fixtureSnapshotVersion !==
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot ||
-    !contextBindingIsValid(proof.context)
-  ) {
+  if (!proofContainerIsValid(proof)) {
     return {
       status: "STAGE0_REJECTED",
       reason: "STAGE0_PROVENANCE_INVALID",
     };
   }
 
+  const validPairs = proof.allowedCanonicalPairs.filter(pairIsValid);
+  if (validPairs.length !== proof.allowedCanonicalPairs.length) {
+    return {
+      status: "STAGE0_REJECTED",
+      reason: "STAGE0_MEMBERSHIP_INVALID",
+    };
+  }
   const expectedContext = contextBinding(callerContext);
   if (!sameContext(proof.context, expectedContext)) {
     return {
@@ -183,14 +221,12 @@ export function validateStage0AuthorityUniverse(
       reason: "STAGE0_CONTEXT_MISMATCH",
     };
   }
-  const rejectedMembership = membershipRejection(
-    proof.allowedCanonicalPairs,
-  );
+  const rejectedMembership = membershipRejection(validPairs);
   if (rejectedMembership !== null) {
     return rejectedMembership;
   }
 
-  const allowedCanonicalPairs = [...proof.allowedCanonicalPairs]
+  const allowedCanonicalPairs = [...validPairs]
     .sort(canonicalPairOrder)
     .map((pair) => ({
       variantId: pair.variantId,

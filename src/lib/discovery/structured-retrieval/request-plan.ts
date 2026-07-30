@@ -144,7 +144,7 @@ function querySpanSourceIsValid(
   const span = matchingSpans[0];
   return (
     span !== undefined &&
-    spanMatchesSource(span, source, constraint) &&
+    spanMatchesSource(span, source) &&
     querySpanRangeIsValid(parserResult, span)
   );
 }
@@ -155,11 +155,10 @@ function spanMatchesSource(
     GovernedCategoricalConstraint["source"],
     { readonly kind: "QUERY_SPAN" }
   >,
-  constraint: GovernedCategoricalConstraint,
 ): boolean {
   return (
     span.owner === "CONCEPT" &&
-    span.conceptId === constraint.value.attributeId &&
+    isNonblankRuntimeString(span.conceptId) &&
     span.interpretationState === "DECLARED" &&
     span.lexiconEntryId === source.lexiconEntryId &&
     span.identityRecognizerId === null
@@ -288,9 +287,51 @@ function applicablePlan(
     status: "APPLICABLE",
     requestPlanVersion:
       D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.requestPlan,
-    constraints,
-    policies,
+    constraints: constraints.map(copyGovernedConstraint),
+    policies: policies.map(copyCategoricalPolicy),
     queryDecisions,
+  };
+}
+
+function copyGovernedConstraint(
+  constraint: GovernedCategoricalConstraint,
+): GovernedCategoricalConstraint {
+  return {
+    constraintId: constraint.constraintId,
+    value: {
+      kind: "CATEGORICAL",
+      attributeId: constraint.value.attributeId,
+      valueId: constraint.value.valueId,
+    },
+    source:
+      constraint.source.kind === "QUERY_SPAN"
+        ? {
+            kind: "QUERY_SPAN",
+            spanId: constraint.source.spanId,
+            lexiconEntryId: constraint.source.lexiconEntryId,
+            identityRecognizerId: constraint.source.identityRecognizerId,
+          }
+        : {
+            kind: "USER_CONFIRMATION",
+            priorConstraintId: constraint.source.priorConstraintId,
+          },
+    interpretationState: constraint.interpretationState,
+    attributeBand: constraint.attributeBand,
+    decisionProfile: constraint.decisionProfile,
+  };
+}
+
+function copyCategoricalPolicy(
+  policy: CategoricalPolicyFixture,
+): CategoricalPolicyFixture {
+  return {
+    kind: "CATEGORICAL_POLICY",
+    fixtureOnly: true,
+    synthetic: true,
+    targetConstraintId: policy.targetConstraintId,
+    attributeId: policy.attributeId,
+    disposition: policy.disposition,
+    policyVersion: policy.policyVersion,
   };
 }
 

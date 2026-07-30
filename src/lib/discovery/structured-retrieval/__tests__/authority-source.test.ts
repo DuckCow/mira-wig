@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { validateStage0AuthorityUniverse } from "../authority-universe";
 import { enumerateStructuredCandidateFixtures } from "../fixture-candidate-source";
+import { runStructuredCategoricalFixtureSlice } from "../structured-slice";
 import type {
   StructuredCandidateFixture,
   ValidatedStage0AuthorityUniverse,
@@ -13,6 +14,7 @@ import {
   STYLE_A,
   STYLE_B,
   syntheticContext,
+  structuredInput,
   VARIANT_A,
   VARIANT_B,
 } from "./fixtures";
@@ -81,6 +83,90 @@ describe("D6-B1 Stage-0 authority-universe proof", () => {
       status: "STAGE0_REJECTED",
       reason: "STAGE0_CONTEXT_MISMATCH",
     });
+  });
+
+  it("rejects malformed runtime proof containers deterministically before candidate access", () => {
+    const valid = stage0Proof();
+    const malformedCases: readonly {
+      readonly name: string;
+      readonly proof: unknown;
+      readonly reason:
+        | "STAGE0_PROVENANCE_INVALID"
+        | "STAGE0_MEMBERSHIP_INVALID";
+    }[] = [
+      {
+        name: "null proof",
+        proof: null,
+        reason: "STAGE0_PROVENANCE_INVALID",
+      },
+      {
+        name: "null context",
+        proof: { ...valid, context: null },
+        reason: "STAGE0_PROVENANCE_INVALID",
+      },
+      {
+        name: "null query language",
+        proof: {
+          ...valid,
+          context: { ...valid.context, queryLanguage: null },
+        },
+        reason: "STAGE0_PROVENANCE_INVALID",
+      },
+      {
+        name: "null membership array",
+        proof: {
+          ...valid,
+          allowedCanonicalPairs: null,
+        },
+        reason: "STAGE0_PROVENANCE_INVALID",
+      },
+      {
+        name: "null membership pair",
+        proof: {
+          ...valid,
+          allowedCanonicalPairs: [null],
+        },
+        reason: "STAGE0_MEMBERSHIP_INVALID",
+      },
+    ];
+
+    for (const malformed of malformedCases) {
+      const inaccessibleSnapshot = candidateSnapshot();
+      Object.defineProperty(
+        inaccessibleSnapshot,
+        "candidatesByVariantId",
+        {
+          get: (): never => {
+            throw new Error(
+              `candidate source accessed for ${malformed.name}`,
+            );
+          },
+        },
+      );
+      expect(
+        validateStage0AuthorityUniverse(
+          malformed.proof,
+          syntheticContext(),
+        ),
+      ).toEqual({
+        status: "STAGE0_REJECTED",
+        reason: malformed.reason,
+      });
+      expect(
+        (() => {
+          const runtimeInput = structuredInput({
+            candidateSnapshot: inaccessibleSnapshot,
+          });
+          Object.defineProperty(runtimeInput, "stage0Proof", {
+            value: malformed.proof,
+          });
+          return runStructuredCategoricalFixtureSlice(runtimeInput);
+        })(),
+      ).toMatchObject({
+        status: "STAGE0_REJECTED",
+        reason: malformed.reason,
+      });
+    }
   });
 
   it("rejects duplicate membership and conflicting canonical parents deterministically", () => {
