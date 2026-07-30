@@ -670,13 +670,18 @@ production activation
 
 ## 20. Change control and sequence
 
-The required sequence is:
+The required fork/join sequence is:
 
 ```text
 MG1 v0.1 documentation-only governance foundation
--> MGP1 physical method-selection and repeatability pilot
--> UR1 bounded unit-registry and exact-conversion source slice
--> MG1 v0.2 or method addendum freezing the selected method parameters
+-> independent post-MG1 gates:
+    |- MGP1 physical method-selection and repeatability pilot
+    |  -> MG1 v0.2 or method addendum freezing the selected method parameters
+    `- UR1 bounded unit-registry and exact-conversion source slice
+
+MGP1 completed
++ reviewed UR1
++ later method freeze merged
 -> D5-S2 representation reconnaissance
 -> D5-S2 source implementation and vocabulary freeze
 -> D6-B2 reconnaissance
@@ -684,8 +689,12 @@ MG1 v0.1 documentation-only governance foundation
 -> later production catalog and storage governance
 ```
 
-MGP1 and UR1 may be prepared independently after MG1, but D5-S2 implementation
-requires both and the later method freeze.
+MGP1 and UR1 may be prepared independently after MG1. Neither is a prerequisite
+for beginning the other. D5-S2 implementation requires completed MGP1, reviewed
+UR1, and the later method freeze.
+
+The currently selected next project task is MGP1. That project-order choice does
+not normatively gate UR1 behind MGP1.
 
 Any change to frozen MG1 semantics requires:
 
