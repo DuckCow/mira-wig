@@ -34,6 +34,7 @@ function categoricalConstraint(
     readonly constraintId?: string;
     readonly attributeId?: string;
     readonly confirmed?: boolean;
+    readonly priorConstraintId?: string;
   } = {},
 ): InterpretedConstraint {
   const constraintId = options.constraintId ?? CONSTRAINT_ID;
@@ -48,7 +49,7 @@ function categoricalConstraint(
       options.confirmed === true
         ? {
             kind: "USER_CONFIRMATION",
-            priorConstraintId: constraintId,
+            priorConstraintId: options.priorConstraintId ?? constraintId,
           }
         : {
             kind: "QUERY_SPAN",
@@ -60,6 +61,15 @@ function categoricalConstraint(
     attributeBand: "STYLISTIC",
     decisionProfile: "GOVERNED_STYLISTIC_CATEGORICAL",
   };
+}
+
+function setRuntimeValue<T extends object>(
+  target: T,
+  property: keyof T,
+  value: unknown,
+): T {
+  Object.defineProperty(target, property, { value });
+  return target;
 }
 
 function categoricalPolicy(
@@ -116,16 +126,20 @@ function categoricalEvidence(
 function productInput(
   disposition: CategoricalPolicyDisposition,
   evidence?: ProductEvidenceFixture,
+  options: {
+    readonly constraint?: InterpretedConstraint;
+    readonly policies?: readonly CategoricalPolicyFixture[];
+  } = {},
 ): DecideConstraintInput {
   return {
     target: {
       kind: "INTERPRETED_CONSTRAINT",
       decisionLevel: "FIXTURE_PRODUCT",
-      constraint: categoricalConstraint(),
+      constraint: options.constraint ?? categoricalConstraint(),
     },
     subject: { kind: "FIXTURE_PRODUCT", fixtureProductId: PRODUCT_ID },
     context,
-    policies: [categoricalPolicy(disposition)],
+    policies: options.policies ?? [categoricalPolicy(disposition)],
     ...(evidence === undefined ? {} : { evidence }),
   };
 }
@@ -265,6 +279,19 @@ describe("D5-S1 query categorical policy", () => {
       ],
     });
   });
+
+  it("rejects a confirmation for a different request-local constraint", () => {
+    expect(() =>
+      decideConstraint(
+        queryInput("REQUIRED", {
+          constraint: categoricalConstraint({
+            confirmed: true,
+            priorConstraintId: "constraint:prior",
+          }),
+        }),
+      ),
+    ).toThrow(TypeError);
+  });
 });
 
 describe("D5-S1 request-local categorical policy validation", () => {
@@ -312,7 +339,27 @@ describe("D5-S1 request-local categorical policy validation", () => {
     }
   });
 
-  it("rejects unexpected policy kinds and invalid fixture markers", () => {
+  it("rejects non-string and blank policy identity fields", () => {
+    const invalidValues: readonly unknown[] = ["", " ", 0, 1, false, null, {}];
+    for (const property of [
+      "policyVersion",
+      "targetConstraintId",
+      "attributeId",
+    ] as const) {
+      for (const value of invalidValues) {
+        const policy = setRuntimeValue(
+          categoricalPolicy("REQUIRED"),
+          property,
+          value,
+        );
+        expect(() =>
+          decideConstraint(queryInput("REQUIRED", { policies: [policy] })),
+        ).toThrow(TypeError);
+      }
+    }
+  });
+
+  it("rejects unexpected policy kinds", () => {
     expect(() =>
       decideConstraint({
         ...queryInput("REQUIRED"),
@@ -326,16 +373,52 @@ describe("D5-S1 request-local categorical policy validation", () => {
         ],
       }),
     ).toThrow(TypeError);
+  });
 
-    const falseFixtureOnly = categoricalPolicy("REQUIRED");
-    Object.defineProperty(falseFixtureOnly, "fixtureOnly", { value: false });
-    const falseSynthetic = categoricalPolicy("REQUIRED");
-    Object.defineProperty(falseSynthetic, "synthetic", { value: false });
-    for (const policy of [falseFixtureOnly, falseSynthetic]) {
-      expect(() =>
-        decideConstraint(queryInput("REQUIRED", { policies: [policy] })),
-      ).toThrow(TypeError);
+  it("requires policy fixture markers to be exactly boolean true", () => {
+    const invalidValues: readonly unknown[] = [false, 0, 1, "", "yes"];
+    for (const property of ["fixtureOnly", "synthetic"] as const) {
+      for (const value of invalidValues) {
+        const policy = setRuntimeValue(
+          categoricalPolicy("REQUIRED"),
+          property,
+          value,
+        );
+        expect(() =>
+          decideConstraint(queryInput("REQUIRED", { policies: [policy] })),
+        ).toThrow(TypeError);
+      }
     }
+  });
+
+  it("rejects unknown runtime dispositions before query or product dispatch", () => {
+    const queryPolicy = setRuntimeValue(
+      categoricalPolicy("REQUIRED"),
+      "disposition",
+      "INVALID",
+    );
+    const productPolicy = setRuntimeValue(
+      categoricalPolicy("REQUIRED"),
+      "disposition",
+      "INVALID",
+    );
+
+    expect(() =>
+      decideConstraint(
+        queryInput("REQUIRED", {
+          policies: [queryPolicy],
+        }),
+      ),
+    ).toThrow(TypeError);
+    expect(() =>
+      decideConstraint(
+        productInput(
+          "REQUIRED",
+          categoricalEvidence("VERIFIED_OR_MEASURED"),
+          { policies: [productPolicy] },
+        ),
+      ),
+    ).toThrow(TypeError);
   });
 
   it("allows separate request targets to govern the same attribute independently", () => {
@@ -432,6 +515,105 @@ describe("D5-S1 required-only fixture-product evidence", () => {
         productInput("REQUIRED", categoricalEvidence("NOT_REPRESENTABLE")),
       ),
     ).toThrow(TypeError);
+  });
+
+  it("requires matching-product evidence markers to be exactly boolean true", () => {
+    const invalidValues: readonly unknown[] = [
+      false,
+      0,
+      1,
+      "",
+      "yes",
+      [],
+      {},
+    ];
+    for (const property of ["fixtureOnly", "synthetic"] as const) {
+      for (const value of invalidValues) {
+        const evidence = setRuntimeValue(
+          categoricalEvidence("VERIFIED_OR_MEASURED"),
+          property,
+          value,
+        );
+        expect(() =>
+          decideConstraint(productInput("REQUIRED", evidence)),
+        ).toThrow(TypeError);
+      }
+    }
+  });
+
+  it("treats evidence for another fixture product as absent", () => {
+    expect(
+      decideConstraint(
+        productInput(
+          "REQUIRED",
+          categoricalEvidence("VERIFIED_OR_MEASURED", {
+            fixtureProductId: "fixture-product:other",
+          }),
+        ),
+      ),
+    ).toMatchObject({
+      gate: "DO_NOT_GATE",
+      partition: "UNKNOWN",
+      reasons: ["PRODUCT_EVIDENCE_UNKNOWN"],
+    });
+  });
+
+  it("rejects confirmation continuity mismatch for fixture-product decisions", () => {
+    expect(() =>
+      decideConstraint(
+        productInput(
+          "REQUIRED",
+          categoricalEvidence("VERIFIED_OR_MEASURED"),
+          {
+            constraint: categoricalConstraint({
+              confirmed: true,
+              priorConstraintId: "constraint:prior",
+            }),
+          },
+        ),
+      ),
+    ).toThrow(TypeError);
+  });
+
+  it("keeps confirmed required-product outcomes confirmation-required", () => {
+    const confirmedConstraint = categoricalConstraint({ confirmed: true });
+    const cases = [
+      {
+        evidence: categoricalEvidence("VERIFIED_OR_MEASURED"),
+        expected: { gate: "ASSERT_MATCH", partition: "ASSERTED" },
+      },
+      {
+        evidence: categoricalEvidence("VERIFIED_OR_MEASURED", {
+          value: { kind: "CATEGORICAL", valueId: "style:pixie" },
+        }),
+        expected: { gate: "DO_NOT_GATE", partition: "VIOLATING" },
+      },
+      {
+        evidence: undefined,
+        expected: { gate: "DO_NOT_GATE", partition: "UNKNOWN" },
+      },
+      {
+        evidence: categoricalEvidence("CONFLICTING"),
+        expected: { gate: "DO_NOT_GATE", partition: "WITHHELD" },
+      },
+      {
+        evidence: categoricalEvidence("MODEL_INFERRED"),
+        expected: { gate: "DO_NOT_GATE", partition: "UNKNOWN" },
+      },
+    ] as const;
+
+    for (const { evidence, expected } of cases) {
+      expect(
+        decideConstraint(
+          productInput("REQUIRED", evidence, {
+            constraint: confirmedConstraint,
+          }),
+        ),
+      ).toMatchObject({
+        ...expected,
+        relaxation: "CONFIRMATION_REQUIRED",
+      });
+    }
   });
 
   it("does not grant assertion authority to vendor or model evidence", () => {

@@ -133,16 +133,35 @@ function validateContinuousPolicy(
   }
 }
 
+function isCategoricalPolicyDisposition(
+  value: unknown,
+): value is CategoricalPolicyFixture["disposition"] {
+  switch (value) {
+    case "REQUIRED":
+    case "PREFERENCE":
+    case "ROUTE":
+    case "CLARIFICATION":
+    case "UNSUPPORTED":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function validateCategoricalPolicy(
   policy: CategoricalPolicyFixture,
   semanticKey: string,
 ): void {
   if (
-    !policy.fixtureOnly ||
-    !policy.synthetic ||
+    policy.fixtureOnly !== true ||
+    policy.synthetic !== true ||
+    typeof policy.policyVersion !== "string" ||
     policy.policyVersion.trim().length === 0 ||
+    typeof policy.targetConstraintId !== "string" ||
     policy.targetConstraintId.trim().length === 0 ||
-    policy.attributeId.trim().length === 0
+    typeof policy.attributeId !== "string" ||
+    policy.attributeId.trim().length === 0 ||
+    !isCategoricalPolicyDisposition(policy.disposition)
   ) {
     invalidD5Input(`invalid categorical policy ${semanticKey}`);
   }
@@ -442,6 +461,8 @@ function categoricalQueryDecision(
         reasons: [...commonReasons, "CATEGORICAL_UNSUPPORTED_BY_POLICY"],
         diagnostics: [],
       });
+    default:
+      return invalidD5Input("categorical policy has an invalid disposition");
   }
 }
 
@@ -830,6 +851,14 @@ function validateStylisticCategoricalConstraint(
       "categorical constraint lacks the governed stylistic profile",
     );
   }
+  if (
+    constraint.source.kind === "USER_CONFIRMATION" &&
+    constraint.source.priorConstraintId !== constraint.constraintId
+  ) {
+    invalidD5Input(
+      "categorical confirmation targets a different request-local constraint",
+    );
+  }
   categoricalPolicyFor(constraint, policies);
 }
 
@@ -899,7 +928,7 @@ function validateStylisticCategoricalProductConstraint(
   if (evidence === undefined) {
     return;
   }
-  if (!evidence.fixtureOnly || !evidence.synthetic) {
+  if (evidence.fixtureOnly !== true || evidence.synthetic !== true) {
     invalidD5Input("categorical evidence must be a synthetic fixture");
   }
   if (evidence.attributeId !== policy.attributeId) {
