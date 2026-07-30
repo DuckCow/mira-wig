@@ -260,3 +260,63 @@ authority.
 
 D6-A completes only when this contract, README pointer, and decision-log entry
 merge. D6-B requires a separate versioned contract and explicit work order.
+
+## 2026-07-30 — D6-B0 structured retrieval gate
+
+### Baseline and evidence
+
+- observed main baseline:
+  `85d0b49b5e3eec3af6a604caaf3580c07d76a281`;
+- immutable current-repository evidence:
+  `WIG-COM-DSC-R11-COD-D6-B0-v0.1`;
+- the older catalog census remains historical and was not used as current
+  database population evidence.
+
+### Governed structured retrieval
+
+- D6-B is structured relational retrieval, separate from exact identity,
+  free-text search, ranking, recommendation, and production catalog
+  integration;
+- the candidate unit is `WigVariant` with an explicit canonical `WigStyle`
+  parent and selected-variant price basis;
+- all candidates pass one structured admission choke point;
+- D6-B preserves per-constraint gate, score, partition, speech, relaxation,
+  route, reason, and evidence semantics without a weighted scalar;
+- D6-A remains exact-only; exact-plus-structured composition is deferred;
+- the first provisional attributes are generic governed color-family and
+  texture-family concepts; exact ontology IDs are deferred to D5-S1, and
+  evidence remains variant-scoped and storage-neutral;
+- a versioned Stage-0 authority-universe scope/proof gates participation before
+  enumeration, while candidate-specific commerce eligibility is independently
+  mandatory inside admission; neither input substitutes for the other;
+- cap/base/lace, attachment, fulfillment, and lead time are conceptually
+  structural/functional even where their evidence and commerce admission facts
+  remain externally owned; stock is eligibility, and this contract does not
+  assign price a final conceptual band;
+- numeric length, claims, category/tag assertion, ranking, relaxation, events,
+  and production adapters remain deferred.
+
+### Blocking dependency and sequence
+
+Adversarial reconnaissance confirmed that D5-S1 is required for categorical
+D6-B1. Current D5 source rejects query-level categorical constraints and
+permits fixture-product categorical evidence only through the claim-bearing
+material profile. D6-B cannot bypass that boundary without inventing policy
+locally. Current continuous fixture tolerance does not justify query-level
+continuous policy before the categorical-only B1 slice.
+
+The authorized sequence is:
+
+```text
+D5-S1 categorical policy extension and vocabulary freeze
+→ D6-B1 unranked categorical fixture slice and freeze
+→ measurement method/unit/evidence/tolerance governance
+→ D5-S2 continuous query policy
+→ D6-B2 governed numeric length fixture retrieval
+→ D6-B3 exact-plus-structured composition
+→ D6-C production governed adapters
+```
+
+This documentation decision authorizes no D5-S1 or D6-B source work, schema or
+catalog change, event collection, commerce integration, or production
+activation.
