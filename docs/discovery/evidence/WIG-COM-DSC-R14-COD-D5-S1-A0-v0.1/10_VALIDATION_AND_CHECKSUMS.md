@@ -30,8 +30,8 @@ Before commit:
 3. verify the evidence directory contains exactly the eleven required files;
 4. verify documentation links;
 5. inspect `git diff --check`;
-6. confirm changed paths are limited to the authorized contract, evidence,
-   README, and decision log;
+6. confirm changed paths are limited to the authorized contract, evidence, and
+   decision log;
 7. run `npm run verify`;
 8. confirm the committed worktree is clean.
 
@@ -44,11 +44,23 @@ this immutable snapshot.
 | --- | --- |
 | Query intent is represented as product evidence | NO |
 | Interpretation state determines hardness | NO |
+| Policy behaves as a global attribute default | NO |
+| Request-local constraint identity is a durable global policy key | NO |
+| Sibling constraints reuse policy by attribute alone | NO |
 | Confirmation creates product evidence | NO |
 | Route, clarification, or unsupported invokes retrieval | NO |
+| Categorical route uses ambiguous or inapplicable authority | NO |
+| Categorical route reuses the claim-specific route reason | NO |
 | Preference excludes or ranks in D6-B1 | NO |
+| Fixture-product preference evaluation remains in D5-S1 | NO |
 | Vendor attestation gains stylistic authority | NO |
 | Model inference gains stylistic assertion authority | NO |
+| Categorical `NOT_REPRESENTABLE` produces a candidate decision | NO |
+| Explicitly wrong-attribute evidence becomes candidate unknown | NO |
+| Absent required-attribute evidence fails instead of unknown | NO |
+| Same-attribute wrong-value evidence fails instead of violating | NO |
+| `REQUIRE_MATCH` appears on a fixture-product decision | NO |
+| Mixed requests partially enumerate or silently drop constraints | NO |
 | Claim or continuous semantics are weakened | NO |
 | `ConstraintDecision` field set changes | NO |
 | Ontology IDs or storage ownership are frozen | NO |

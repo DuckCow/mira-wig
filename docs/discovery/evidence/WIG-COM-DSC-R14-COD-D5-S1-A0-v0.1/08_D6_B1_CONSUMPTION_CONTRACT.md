@@ -6,7 +6,7 @@ The current D6-B contract requires D5 to own:
 
 - query-level categorical policy;
 - required/preference/route/clarification/unsupported effects;
-- non-claim stylistic fixture-product evidence decisions;
+- required-policy non-claim stylistic fixture-product evidence decisions;
 - stable per-product partitions, reasons, disclosure, and relaxation output.
 
 D6-B1 remains blocked until D5-S1 source and its v0.2 vocabulary freeze are
@@ -27,8 +27,13 @@ score:      NONE
 partition:  NOT_APPLICABLE
 ```
 
-The future D6-B1 slice must preserve the complete query decision for
+The future D6-B1 slice must preserve every complete query decision for
 accountability.
+
+The predicate applies to the entire structured-only request: every interpreted
+constraint must be eligible and resolve to `REQUIRED + REQUIRE_MATCH`.
+`REQUIRED + REQUIRED` may proceed only when there is no contradiction,
+duplicate attribute, or other invalid condition.
 
 ## Stop-before-enumeration outcomes
 
@@ -43,6 +48,15 @@ D6-B1 must not enumerate candidates for:
 Preference is not silently upgraded to required behavior. B1 has no preference
 ranking, preference filtering, preference exclusion, weighted score, or
 automatic relaxation.
+
+Any non-required or out-of-scope sibling stops the entire request before
+enumeration. No constraint is silently dropped, upgraded, relaxed, or consumed
+according to order. All per-constraint decisions remain preserved. Aggregate
+D6-B1 result fields and precedence remain deferred to D6-B1.
+
+Query-level preference remains a D5 stop decision. Fixture-product preference
+evidence decisions are deferred to a future preference/ranking contract with an
+actual consumer.
 
 ## Candidate assertion
 
@@ -59,6 +73,11 @@ reason:     EVIDENCE_QUALIFIED_MATCH
 Candidate-specific commerce eligibility remains a separate mandatory admission
 input and cannot substitute for the D5 evidence decision.
 
+No evidence for the required attribute produces `UNKNOWN`. Same-attribute
+wrong-value evidence produces `VIOLATING`. Explicitly wrong-attribute evidence
+and categorical `NOT_REPRESENTABLE` are invalid S1 fixture inputs and produce
+no candidate decision.
+
 ## Non-authority
 
 D6-B1 may not:
@@ -67,6 +86,7 @@ D6-B1 may not:
   catalog recall;
 - invent a parallel structured plan or local policy enum;
 - treat query `REQUIRE_MATCH` as proof of a product match;
+- return `REQUIRE_MATCH` for a fixture-product decision;
 - assert vendor, model, missing, conflicting, or ungoverned evidence;
 - alter D6-A exact behavior;
 - handle exact-plus-structured composition;

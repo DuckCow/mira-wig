@@ -33,7 +33,7 @@
     },
     {
       "vocabulary": "DecisionPolicyFixture",
-      "semantic": "versioned attribute-bound categorical policy disposition"
+      "semantic": "versioned categorical policy bound to one request-local interpreted-constraint target and matching governed attribute identity"
     },
     {
       "vocabulary": "DiscoveryReasonCode",
@@ -45,7 +45,7 @@
     },
     {
       "vocabulary": "DiscoveryReasonCode",
-      "semantic": "categorical policy route"
+      "semantic": "categorical policy route outside active discovery authority"
     },
     {
       "vocabulary": "DiscoveryReasonCode",
@@ -94,6 +94,10 @@
       "EDUCATION_OR_CONSULTATION",
       "EXPLICIT_UNSUPPORTED"
     ],
+    "AuthorityOutcome": [
+      "NOT_APPLICABLE",
+      "OUTSIDE_DISCOVERY_AUTHORITY"
+    ],
     "DiscoveryReasonCode": [
       "EVIDENCE_QUALIFIED_MATCH",
       "EVIDENCE_QUALIFIED_MISMATCH",
@@ -108,9 +112,30 @@
       "prohibition": "must not represent QUERY required intent"
     },
     {
+      "literal": "REQUIRE_MATCH",
+      "prohibition": "must not appear on a FIXTURE_PRODUCT decision"
+    },
+    {
+      "literal": "CLAIM_AUTHORITY_UNAVAILABLE_ROUTE",
+      "prohibition": "must not represent the non-claim S1 categorical route"
+    },
+    {
+      "literal": "UNSUPPORTED_CONCEPT",
+      "prohibition": "must not be broadened to categorical product representability"
+    },
+    {
       "literal": "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY",
       "prohibition": "must not be broadened to non-claim stylistic evidence"
     }
+  ],
+  "invalidS1FixtureInputs": [
+    "categorical NOT_REPRESENTABLE",
+    "explicit evidence record under a different governed attribute identity",
+    "policy not bound to the request-local interpreted-constraint target",
+    "policy with a mismatched governed attribute identity"
+  ],
+  "deferredSemantics": [
+    "fixture-product preference evidence decisions and ranking consumption"
   ],
   "unchangedComponents": [
     "d5-conservative-normalizer/v0.1",

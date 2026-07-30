@@ -107,8 +107,26 @@ normalizer change is expected.
 
 - exhaustive gate list includes `REQUIRE_MATCH`;
 - exact `ConstraintDecision` key set remains unchanged;
-- every query and product truth-table row is behavior-tested;
-- invalid policy multiplicity, identity, and version are tested;
+- every query and required-product truth-table row is behavior-tested;
+- `REQUIRE_MATCH` is accepted only for `QUERY` and rejected for
+  `FIXTURE_PRODUCT`;
+- policy applicability requires one request-local target plus matching governed
+  attribute identity;
+- a sibling cannot reuse a policy by attribute alone, while the same attribute
+  may receive different dispositions in different requests;
+- request-local constraint identity is never treated as a durable global key;
+- invalid policy multiplicity, target identity, attribute identity, and version
+  are tested;
+- query preference remains non-gating and stops before enumeration;
+- no fixture-product preference evaluation branch or test exists in S1;
+- route uses `OUTSIDE_DISCOVERY_AUTHORITY`, the consultation fallback, and a
+  new categorical-route reason rather than the claim-specific route reason;
+- absent required-attribute evidence produces `UNKNOWN`;
+- explicitly wrong-attribute evidence and categorical `NOT_REPRESENTABLE` are
+  rejected as invalid S1 fixture input;
+- same-attribute wrong-value evidence produces `VIOLATING`;
+- an entire mixed-disposition or otherwise out-of-scope B1 request stops before
+  enumeration without dropping any per-constraint decision;
 - current D5 golden cases remain semantically unchanged;
 - D6-A exact admission remains `ASSERT_MATCH + ASSERTED` with exact reasons;
 - D5 and D6-A import-boundary tests remain green;
@@ -119,3 +137,7 @@ normalizer change is expected.
 The later source task must not modify D6-A or D6-B to accommodate D5-S1, add a
 barrel or forwarding module, import catalog/Prisma/route/UI code, or introduce
 runtime I/O, time, randomness, storage, or events.
+
+Product preference evidence evaluation remains outside this source boundary
+until a separately governed preference/ranking contract supplies an actual
+consumer.

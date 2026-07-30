@@ -7,41 +7,38 @@ stylistic categorical match. Attribute identity and categorical value kind
 must be comparable; the value ID must match for an assertion.
 
 `APPROVED_VENDOR_ATTESTED`, `UNAPPROVED_VENDOR_DECLARATION`,
-`MODEL_INFERRED`, `MISSING`, `UNKNOWN_AUTHORITY`, `NOT_REPRESENTABLE`, and
-`CONFLICTING` cannot assert. Vendor policy used by the current claim-bearing
-profile does not transfer to S1.
+`MODEL_INFERRED`, `MISSING`, `UNKNOWN_AUTHORITY`, and `CONFLICTING` cannot
+assert. Vendor policy used by the current claim-bearing profile does not
+transfer to S1.
 
-## Required policy
+D5-S1 fixture-product evaluation occurs only after the query constraint has
+resolved to `REQUIRED + REQUIRE_MATCH`.
 
 | Evidence state/result | Gate | Score | Partition | Speech | Reason semantic | Required-set effect |
 | --- | --- | --- | --- | --- | --- | --- |
-| authoritative comparable match | `ASSERT_MATCH` | `NONE` | `ASSERTED` | `DISCLOSE_EVIDENCE_BASIS` | reuse `EVIDENCE_QUALIFIED_MATCH` | satisfies |
-| authoritative comparable mismatch | `DO_NOT_GATE` | `NONE` | `VIOLATING` | `NO_PRODUCT_ASSERTION` | reuse `EVIDENCE_QUALIFIED_MISMATCH` | exclude |
-| missing, unknown, vendor, noncomparable, or wrong attribute | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` as applicable | reuse `PRODUCT_EVIDENCE_UNKNOWN` | does not satisfy |
-| model inferred | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` | new stylistic non-authority semantic | does not satisfy |
-| conflicting | `DO_NOT_GATE` | `NONE` | `WITHHELD` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` | reuse `PRODUCT_EVIDENCE_CONFLICT` | does not satisfy |
-| not representable | `UNSUPPORTED` | `NONE` | `UNKNOWN` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_ROUTE_LIMITATION` | reuse only if `UNSUPPORTED_CONCEPT` meaning is unchanged; otherwise new provisional semantic | does not satisfy |
+| authoritative same-attribute, same-value match | `ASSERT_MATCH` | `NONE` | `ASSERTED` | `DISCLOSE_EVIDENCE_BASIS` | reuse `EVIDENCE_QUALIFIED_MATCH` | satisfies |
+| authoritative same-attribute, different-value evidence | `DO_NOT_GATE` | `NONE` | `VIOLATING` | `NO_PRODUCT_ASSERTION` | reuse `EVIDENCE_QUALIFIED_MISMATCH` | exclude |
+| no evidence for the required attribute | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` | reuse `PRODUCT_EVIDENCE_UNKNOWN` | does not satisfy |
+| matching-attribute unknown, vendor, or otherwise non-authoritative evidence | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` | reuse `PRODUCT_EVIDENCE_UNKNOWN` or a narrower new non-authority semantic | does not satisfy |
+| matching-attribute model inference | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` | new stylistic non-authority semantic | does not satisfy |
+| conflicting matching-attribute evidence | `DO_NOT_GATE` | `NONE` | `WITHHELD` | `NO_PRODUCT_ASSERTION`, `DISCLOSE_UNKNOWN` | reuse `PRODUCT_EVIDENCE_CONFLICT` | does not satisfy |
 
-## Preference policy
+## Invalid fixture evidence
 
-| Evidence state/result | Gate | Score | Partition | Candidate effect |
-| --- | --- | --- | --- | --- |
-| authoritative comparable match | `DO_NOT_GATE` | `PREFERENCE_ALLOWED` | `ASSERTED` | preserves a non-gating future signal |
-| authoritative comparable mismatch | `DO_NOT_GATE` | `NONE` | `VIOLATING` | does not exclude |
-| missing, unknown, vendor, noncomparable, or wrong attribute | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | does not exclude |
-| model inferred | `DO_NOT_GATE` | `NONE` | `UNKNOWN` | does not exclude |
-| conflicting | `DO_NOT_GATE` | `NONE` | `WITHHELD` | does not exclude |
-| not representable | `UNSUPPORTED` | `NONE` | `UNKNOWN` | stops assertion; does not create preference authority |
+| Input | Result |
+| --- | --- |
+| explicitly supplied evidence record under another attribute identity | deterministic invalid S1 fixture input |
+| categorical `NOT_REPRESENTABLE` | deterministic invalid S1 fixture input; no candidate decision |
 
-The same evidence and speech reasons apply as in the required table. Only an
-authoritative matching product fact may be `ASSERTED`; preference policy changes
-gating/scoring, not evidence truth.
+Wrong-attribute evidence is not candidate `UNKNOWN`. `UNSUPPORTED_CONCEPT` is
+not reused or broadened for categorical product representability.
 
 ## Separation invariants
 
 - Query `REQUIRE_MATCH` is not a product assertion.
+- Fixture-product `REQUIRE_MATCH` is invalid.
 - Product `ASSERT_MATCH` requires authoritative evidence.
-- A preference match may be `ASSERTED` while remaining non-gating.
-- A preference mismatch is `VIOLATING` but never excludes.
 - Confirmation never upgrades evidence state or partition.
-- D6-B1 consumes none of the preference product path for ranking.
+- Product evidence truth remains independent of query policy.
+- Product preference evidence decisions are deferred to a future
+  preference/ranking contract with an actual consumer.

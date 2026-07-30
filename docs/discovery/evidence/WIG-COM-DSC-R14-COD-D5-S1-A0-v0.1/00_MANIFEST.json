@@ -19,33 +19,33 @@
     },
     {
       "path": "03_REPRESENTATION_ALTERNATIVES_AND_ADJUDICATION.md",
-      "sha256": "84edc4655f856da9c604c53b019aa1ad11414e679387a4443f654ddf1838b11e",
-      "byteSize": 5328
+      "sha256": "00207c4bc80aea512950d50be9c73b2401eeb7a5d2ce54dd7628087a81846475",
+      "byteSize": 6697
     },
     {
       "path": "04_QUERY_POLICY_TRUTH_TABLE.md",
-      "sha256": "db900adb137a46940a44ec7eea8e70e9a9b89a3300a3fc5844c3c806f9040f55",
-      "byteSize": 2968
+      "sha256": "58aabd8aa5309f12f0bb082ad25171e7154f2fcfd9ed97d19ab3ac05bacb42a4",
+      "byteSize": 4373
     },
     {
       "path": "05_PRODUCT_EVIDENCE_TRUTH_TABLE.md",
-      "sha256": "40c1dd403c1826c34e9f267c9985ea625356e1c3ecad76e8a8dac225107d810a",
-      "byteSize": 3054
+      "sha256": "6bebba263f4fafe3643a5740af67fa224410c56bdbec9eb11cf182e5c5174660",
+      "byteSize": 2741
     },
     {
       "path": "06_REASON_AND_LITERAL_CHANGE_MAP.json",
-      "sha256": "f247a99833ef4bbc285abd4c5422ac0dc894135a7f6916b0b24450973bd1e69c",
-      "byteSize": 3207
+      "sha256": "3c5997dd39387af5f078d028e668f9dd8f452f2eca932935613190087fc0b8e5",
+      "byteSize": 4193
     },
     {
       "path": "07_SOURCE_TEST_AND_IMPORT_BOUNDARY.md",
-      "sha256": "e2e643f3b3c28d0cb59ebccbafee61fe44f4e7dd4c8f69a0d47de5d0a7016023",
-      "byteSize": 4197
+      "sha256": "dcc353c844ec97f8cebfad9e3b64cc7037f44396084ee4b00ff88e4b9d69e5ec",
+      "byteSize": 5469
     },
     {
       "path": "08_D6_B1_CONSUMPTION_CONTRACT.md",
-      "sha256": "61134d1aac71c17e0cada58f778b2b50363a7cf478d24081c689f656c81cda56",
-      "byteSize": 2295
+      "sha256": "c2878808b91c50f4957c3be40ac68fb5b42c09fb1b7de0764384ff75ce34f84d",
+      "byteSize": 3363
     },
     {
       "path": "09_STAGE_VERSIONING_AND_FREEZE_PLAN.md",
@@ -54,8 +54,8 @@
     },
     {
       "path": "10_VALIDATION_AND_CHECKSUMS.md",
-      "sha256": "0c9a4b6c44df9203b1b8b4ca500f6324042614bdf698da66dd17d9c8b5919f48",
-      "byteSize": 3333
+      "sha256": "6a1f0e76b7f90fc2ff221a5272e4aa504fc4b941954dcee2b0e72e0678324853",
+      "byteSize": 4131
     }
   ]
 }

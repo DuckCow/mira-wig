@@ -7,7 +7,8 @@ The comparison tested whether each representation:
 - separates unevaluated query intent from evidence-qualified product assertion;
 - preserves policy ownership in D5;
 - separates policy disposition from interpretation state;
-- preserves required versus preference product behavior;
+- preserves required product behavior without prematurely freezing preference
+  product evaluation;
 - avoids changing the frozen `ConstraintDecision` shape;
 - remains compatible with D6-A and the D6-B0 dependency;
 - minimizes new invalid states and migration work.
@@ -45,6 +46,22 @@ preference query DO_NOT_GATE + PREFERENCE_ALLOWED
 Adding another field would not resolve a missing semantic; it would merely
 create a second encoding that could disagree.
 
+`REQUIRE_MATCH` is legal only for `QUERY`. Fixture-product decisions use the
+existing evidence decisions and may never return `REQUIRE_MATCH`.
+
+## Request-local policy binding
+
+One categorical policy applies to one interpreted-constraint decision target
+inside one decision request. Applicability requires both the request-local
+constraint identity and matching governed attribute identity. It is not a
+global attribute default, sibling constraints cannot reuse it by attribute
+alone, and the same attribute may receive different dispositions in different
+requests. The request-local constraint identity is not a durable cross-request
+policy key.
+
+Confirmation retains the same request-local target and categorical value
+identity. It cannot select another policy.
+
 ## Downstream compatibility
 
 The only current non-test source consumer outside D5 is D6-A exact admission:
@@ -59,10 +76,17 @@ admission predicate. Preserving the field set prevents a D6-A shape change.
 
 ## Refinements to supplied rulings
 
-- `ROUTE` is fixed to `EDUCATION_OR_CONSULTATION` for S1; a provisional
-  fixture cannot invent arbitrary route vocabulary.
+- `ROUTE` means D5 is outside active discovery authority for the governed
+  categorical concept, uses `OUTSIDE_DISCOVERY_AUTHORITY`, and is fixed to
+  `EDUCATION_OR_CONSULTATION`; it does not reuse the claim-specific route
+  reason.
 - `UNSUPPORTED` keeps the current `UNKNOWN` partition.
 - every policy disposition has an inspectable reason semantic.
+- fixture-product preference evaluation is deferred to a future governed
+  preference/ranking contract because D6-B1 stops before enumeration for a
+  query preference.
+- categorical `NOT_REPRESENTABLE` and explicitly wrong-attribute evidence are
+  invalid S1 fixture inputs.
 - exact new reason/profile/policy spellings remain provisional until source
   review.
 - invalid policy fixture configuration throws deterministically rather than
@@ -78,18 +102,18 @@ No supplied ruling was materially rejected or left unresolved.
 | `S1-R02` | `CONFIRMED` | The D6-B1 target is governed non-claim stylistic categorical only. |
 | `S1-R03` | `CONFIRMED` | `DECLARED` is the contracted B1 input; derived free-text preferences remain deferred. |
 | `S1-R04` | `CONFIRMED` | Interpretation state describes meaning; injected decision policy must own hardness. |
-| `S1-R05` | `REFINED` | The five dispositions stand; `ROUTE` is narrowed to the existing consultation fallback for S1. |
+| `S1-R05` | `REFINED` | The five dispositions stand; `ROUTE` is outside active discovery authority and narrows to the existing consultation fallback for S1. |
 | `S1-R06` | `CONFIRMED` | `REQUIRE_MATCH` is necessary to avoid query-level product assertion and preserves the field set. |
 | `S1-R07` | `CONFIRMED` | Neither another use field nor a parallel plan supplies missing semantics without duplication. |
-| `S1-R08` | `REFINED` | The supplied required/preference tuples stand; route/clarification tuples are completed and unsupported keeps `UNKNOWN`. |
+| `S1-R08` | `REFINED` | Query required/preference tuples stand; fixture-product evaluation is required-only, route authority is explicit, and unsupported keeps `UNKNOWN`. |
 | `S1-R09` | `CONFIRMED` | B1 is required-only and unranked; all other dispositions stop before enumeration. |
-| `S1-R10` | `REFINED` | Existing evidence partitions/reasons are reused, but preference changes gate/score without changing evidence truth. |
+| `S1-R10` | `REFINED` | Existing evidence truth remains independent of query policy, but preference-specific product decisions are deferred until a governed ranker consumes them. |
 | `S1-R11` | `CONFIRMED` | Only verified/measured and evidence-curated inputs may assert; vendor authority does not transfer from claims. |
-| `S1-R12` | `CONFIRMED` | An authoritative preference match is an asserted fact but not a gate; mismatch cannot exclude. |
+| `S1-R12` | `REFINED` | Product evidence truth remains policy-independent, but D5-S1 does not produce a fixture-product preference decision. |
 | `S1-R13` | `CONFIRMED` | Current confirmation mechanics change intent only and retain the existing reason. |
 | `S1-R14` | `CONFIRMED` | Exact IDs, fixture shape, profile spelling, and new reason spellings remain provisional. |
 | `S1-R15` | `CONFIRMED` | Existing ownership/import boundaries require no parser, normalizer, or D6 change. |
 | `S1-R16` | `CONFIRMED` | Constraint rules advance provisionally; promotion waits for source review and a v0.2 vocabulary contract. |
 
-The refinements narrow or complete the supplied behavior without reversing a
-material human ruling.
+The refinements narrow or complete the supplied behavior without changing the
+selected `REQUIRE_MATCH` representation or the eleven-field decision shape.

@@ -330,7 +330,10 @@ activation.
 - immutable source reconnaissance:
   `WIG-COM-DSC-R14-COD-D5-S1-A0-v0.1`;
 - all sixteen supplied human rulings were confirmed or refined against current
-  source and contracts; none remained rejected or unresolved.
+  source and contracts;
+- the later C1 adjudication narrowed request-local policy binding, product
+  preference scope, route authority, product evidence validity, and the
+  whole-request B1 predicate without changing the selected representation.
 
 ### Representation decision
 
@@ -351,16 +354,30 @@ from product evidence while preserving D6-A exact behavior.
 
 - S1 is limited to `DECLARED`, governed, non-claim `STYLISTIC`
   `CATEGORICAL` constraints with a dedicated provisional profile;
-- required/preference behavior comes from exactly one matching injected,
-  versioned categorical policy, not interpretation state;
+- required/preference behavior comes from exactly one injected, versioned
+  categorical policy bound to one request-local interpreted-constraint target
+  plus matching governed attribute identity, not interpretation state;
+- request-local constraint identity is not a durable global key, policy is not
+  a global attribute default, and sibling constraints cannot reuse policy by
+  attribute alone;
 - dispositions are `REQUIRED`, `PREFERENCE`, `ROUTE`, `CLARIFICATION`, and
   `UNSUPPORTED`;
-- D6-B1 may consume only required decisions and has no preference ranking,
-  preference exclusion, or relaxation;
-- route, clarification, and unsupported stop before candidate enumeration;
+- D6-B1 may consume a request only when every constraint is eligible
+  `REQUIRED + REQUIRE_MATCH`; any non-required or out-of-scope sibling stops
+  the whole request before enumeration without silently dropping a decision;
+- query preference remains non-gating, while fixture-product preference
+  evaluation is deferred to a future preference/ranking contract;
+- route means outside active discovery authority, uses
+  `OUTSIDE_DISCOVERY_AUTHORITY` plus `EDUCATION_OR_CONSULTATION`, and does not
+  reuse the claim-specific route reason;
+- clarification and unsupported also stop before candidate enumeration;
 - only verified/measured and human-curated-from-evidence stylistic evidence may
   assert; vendor-attested, model-inferred, missing, conflicting, and unknown
   evidence may not;
+- absent required-attribute evidence is `UNKNOWN`, same-attribute wrong-value
+  evidence is `VIOLATING`, and explicitly wrong-attribute evidence plus
+  categorical `NOT_REPRESENTABLE` are invalid S1 fixture inputs;
+- `REQUIRE_MATCH` is legal only for `QUERY`;
 - confirmation changes intent only and reuses
   `CONFIRMATION_CHANGED_INTENT_ONLY`;
 - exact profile, fixture-policy, and new reason spellings remain provisional.
