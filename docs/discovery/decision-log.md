@@ -190,3 +190,73 @@ does not authorize or implement D6.
 D6-A1 requires a separate explicit source task. This documentation decision
 authorizes no source implementation, production adapter, route or UI work,
 cart repair, event collection, or production activation.
+
+## 2026-07-30 — D6-A1 source-vocabulary freeze
+
+### Bound implementation
+
+- D6-A1 source merge:
+  `80c98ad54e9f3409c57fcf71a277db584242047e`;
+- reviewed D6-A1 source head:
+  `bb90e747b3bd0c052ba6cd33714ca8d54c5def5f`;
+- freeze-preparation head:
+  `872ad2fec669bd71d42c2362a32276489e44fa63`;
+- freeze-preparation merge:
+  `bb8f6e1e5d2a4c13f58c7daf60ed6333806f2d71`.
+
+### Frozen source boundary
+
+- `runExactSkuFixtureSlice` is the sole primary entrypoint;
+- every matched candidate passes one mandatory admission choke point;
+- `verifyExactLanding` is the one frozen durable supporting export;
+- module export does not by itself establish a supported entrypoint;
+- the seven D6-A1 module responsibilities are frozen, but the subtree is not
+  permanently closed.
+
+Exactly three component values are frozen:
+
+- candidate source: `d6-exact-fixture-retriever/v0.1`;
+- admission rules: `d6-exact-candidate-admission/v0.1`;
+- landing contract: `d6-exact-landing/v0.1`.
+
+Exactly two component values remain provisional:
+
+- event schema: `d6-discovery-events/v0.1-provisional`;
+- fixture snapshot: `d6-exact-retrieval-fixture/v0.1-provisional`.
+
+The exact-SKU namespace, selected-variant price basis, reviewed result and
+landing field sets, escaping run-result branch fields, request and admission
+statuses/reasons, landing verification literals, fixture-failure reasons, and
+injected event-delivery statuses are frozen at v0.1.
+
+### Reused and provisional boundaries
+
+D6-A1 reuses the frozen D5 values `EXACT_IDENTITY_MATCH`,
+`EXACT_IDENTITY_NO_SUBSTITUTION`, and `EXACT_IDENTITY_NOT_FOUND` without
+redefining them.
+
+Fixture input types and values, the exact request input shape, event name and
+payload schema, event-seam shape, helper names other than
+`verifyExactLanding`, internal statuses/helpers, invariant text, and
+accountability-key JSON encoding remain provisional. Exhaustive conformance
+records for provisional shapes do not freeze them.
+
+### Removed vocabulary
+
+- `candidateSetFingerprint`;
+- `DELIVERED_TO_IN_MEMORY_SINK`;
+- `D5_EXACT_DECISION_REJECTED`;
+- `admission-level LANDING_INTEGRITY_MISMATCH`;
+- `ExactAdmissionResult.landingVerification`;
+- `EligibilitySummaryFixture.version`;
+- `EligibilitySummaryFixture.reason`;
+- `EligibilitySummaryFixture.fulfillmentClass`.
+
+### Authority and next sequence
+
+This docs-only freeze grants no production catalog, sellability, orderability,
+adapter, route, UI, cart, checkout, payment, event collection, or activation
+authority.
+
+D6-A completes only when this contract, README pointer, and decision-log entry
+merge. D6-B requires a separate versioned contract and explicit work order.
