@@ -52,19 +52,22 @@ Model agreement is not evidence.
 3. [`d6-exact-vertical-slice-contract-v0.1.md`](./d6-exact-vertical-slice-contract-v0.1.md)
    Freezes the exact-SKU source-only D6 slice: variant result identity, injected fixture and eligibility boundaries, one admission choke point, exact landing integrity, and a default-off event seam.
 
-4. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
+4. [`d6-a1-source-vocabulary-contract-v0.1.md`](./d6-a1-source-vocabulary-contract-v0.1.md)
+   Installs the normative D6-A1 exact-SKU source freeze for result, landing, escaping status/reason, component-version, and event-delivery boundaries while fixture inputs and the event name/payload schema remain provisional.
+
+5. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
    Interpretation/evidence separation, authority constraints, filtering, ranking, partitions, relaxation, clarification, education, consultation, and unsupported states.
 
-5. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
+6. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-6. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+7. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-7. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+8. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-8. [`decision-log.md`](./decision-log.md)
+9. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 ## Required reading by task
