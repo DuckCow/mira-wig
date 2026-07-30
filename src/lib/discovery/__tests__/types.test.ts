@@ -9,8 +9,13 @@ import {
   type AttributeBand,
   type AudienceNamespace,
   type AuthorityOutcome,
+  type CategoricalPolicyDisposition,
+  type CategoricalPolicyFixture,
+  type ConstraintDecision,
   type ConstraintReasonCode,
   type ConstraintValue,
+  type D5DecisionProfile,
+  type DecisionPolicyFixture,
   type DiscoveryReasonCode,
   type EvidencePartition,
   type FallbackRoute,
@@ -86,8 +91,33 @@ const AUTHORITY_OUTCOMES = exhaustiveValues<AuthorityOutcome["kind"]>()([
   "NOT_APPLICABLE",
 ]);
 
+const D5_DECISION_PROFILES = exhaustiveValues<D5DecisionProfile>()([
+  "CLAIM_BEARING_MATERIAL",
+  "SENSITIVE_USE_CONTEXT",
+  "GOVERNED_STYLISTIC_CATEGORICAL",
+]);
+
+const CATEGORICAL_POLICY_DISPOSITIONS =
+  exhaustiveValues<CategoricalPolicyDisposition>()([
+    "REQUIRED",
+    "PREFERENCE",
+    "ROUTE",
+    "CLARIFICATION",
+    "UNSUPPORTED",
+  ]);
+
+const DECISION_POLICY_KINDS = exhaustiveValues<
+  DecisionPolicyFixture["kind"]
+>()([
+  "CONTINUOUS_TOLERANCE",
+  "CLAIM_AUTHORITY",
+  "VENDOR_ATTESTATION",
+  "CATEGORICAL_POLICY",
+]);
+
 const GATE_DECISIONS = exhaustiveValues<GateDecision>()([
   "ASSERT_MATCH",
+  "REQUIRE_MATCH",
   "DO_NOT_GATE",
   "REQUIRE_CLARIFICATION",
   "ROUTE_ONLY",
@@ -141,6 +171,12 @@ const DISCOVERY_REASON_CODES = exhaustiveValues<DiscoveryReasonCode>()([
   "CONFIRMATION_CHANGED_INTENT_ONLY",
   "AUDIENCE_NAMESPACE_PRESERVED",
   "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY",
+  "CATEGORICAL_REQUIRED_BY_POLICY",
+  "CATEGORICAL_PREFERENCE_BY_POLICY",
+  "CATEGORICAL_OUTSIDE_DISCOVERY_AUTHORITY_ROUTE",
+  "CATEGORICAL_CLARIFICATION_REQUIRED",
+  "CATEGORICAL_UNSUPPORTED_BY_POLICY",
+  "MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY",
 ]);
 
 const FIXTURE_REASON_CODES = exhaustiveValues<FixtureReasonCode>()([
@@ -186,8 +222,8 @@ describe("opaque discovery context tokens", () => {
   });
 });
 
-describe("D5 freeze-ready source vocabulary", () => {
-  it("exhaustively retains the adjudicated durable serialized literals", () => {
+describe("D5 source vocabulary", () => {
+  it("exhaustively retains frozen and provisional serialized literals", () => {
     expect([
       ATTRIBUTE_BANDS.length,
       INTERPRETATION_STATES.length,
@@ -197,6 +233,9 @@ describe("D5 freeze-ready source vocabulary", () => {
       COORDINATE_SYSTEMS.length,
       NORMALIZED_INPUT_STATES.length,
       AUTHORITY_OUTCOMES.length,
+      D5_DECISION_PROFILES.length,
+      CATEGORICAL_POLICY_DISPOSITIONS.length,
+      DECISION_POLICY_KINDS.length,
       GATE_DECISIONS.length,
       SCORE_DECISIONS.length,
       EVIDENCE_PARTITIONS.length,
@@ -204,10 +243,55 @@ describe("D5 freeze-ready source vocabulary", () => {
       SPEECH_REQUIREMENTS.length,
       RELAXATION_DECISIONS.length,
       DISCOVERY_REASON_CODES.length,
-    ]).toEqual([6, 4, 6, 6, 1, 1, 2, 3, 5, 2, 5, 5, 4, 3, 12]);
+    ]).toEqual([
+      6, 4, 6, 6, 1, 1, 2, 3, 3, 5, 4, 6, 2, 5, 5, 4, 3, 18,
+    ]);
   });
 
-  it("keeps fixture reasons and diagnostics separate from durable vocabulary", () => {
+  it("keeps the categorical policy provisional and the decision shape fixed", () => {
+    type DecisionFields = keyof ConstraintDecision;
+    type ExpectedDecisionFields =
+      | "constraintId"
+      | "subject"
+      | "authorityOutcome"
+      | "gate"
+      | "score"
+      | "speechRequirements"
+      | "partition"
+      | "relaxation"
+      | "fallbackRoutes"
+      | "reasons"
+      | "diagnostics";
+    const decisionShapeIsExact: [DecisionFields] extends [
+      ExpectedDecisionFields,
+    ]
+      ? [ExpectedDecisionFields] extends [DecisionFields]
+        ? true
+        : false
+      : false = true;
+    const policy: CategoricalPolicyFixture = {
+      kind: "CATEGORICAL_POLICY",
+      fixtureOnly: true,
+      synthetic: true,
+      targetConstraintId: "constraint:style",
+      attributeId: "style:shape",
+      disposition: "REQUIRED",
+      policyVersion: "fixture:categorical-policy/v0.1-provisional",
+    };
+
+    expect(decisionShapeIsExact).toBe(true);
+    expect(Object.keys(policy).sort()).toEqual([
+      "attributeId",
+      "disposition",
+      "fixtureOnly",
+      "kind",
+      "policyVersion",
+      "synthetic",
+      "targetConstraintId",
+    ]);
+  });
+
+  it("keeps fixture reasons and diagnostics separate from discovery reasons", () => {
     const combinedReasons: readonly ConstraintReasonCode[] = [
       ...DISCOVERY_REASON_CODES,
       ...FIXTURE_REASON_CODES,
@@ -217,7 +301,7 @@ describe("D5 freeze-ready source vocabulary", () => {
     // @ts-expect-error Parser diagnostics are not fixture decision diagnostics.
     const parserDiagnosticAsFixture: FixtureDecisionDiagnostic = "EMPTY_QUERY";
 
-    expect(combinedReasons).toHaveLength(15);
+    expect(combinedReasons).toHaveLength(21);
     expect(FIXTURE_DECISION_DIAGNOSTICS).toEqual([
       "SYNTHETIC_TOLERANCE_APPLIED",
       "SYNTHETIC_VENDOR_ATTESTATION_POLICY_APPLIED",
@@ -256,7 +340,7 @@ describe("D5 freeze-ready source vocabulary", () => {
       requestSchema: "d5-source-only-request/v0.2-provisional",
       normalizer: "d5-conservative-normalizer/v0.1",
       parser: "d5-injected-span-parser/v0.1",
-      constraintRules: "d5-constraint-decisions/v0.1",
+      constraintRules: "d5-constraint-decisions/v0.2-provisional",
       fixtureSnapshot: "d5-golden-cases/v0.2-provisional",
     });
 
