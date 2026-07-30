@@ -6,14 +6,21 @@ import { StyleEditForm } from "./StyleEditForm";
 import { VariantSection } from "./VariantSection";
 import { MarketAvailabilitySection } from "./MarketAvailabilitySection";
 import { MarketPriceSection } from "./MarketPriceSection";
+import {
+  getAdminManualStyleRelations,
+  getManualRelationTargetChoices,
+} from "@/lib/manual-item-relations/admin";
+import { ManualItemRelationsSection } from "./ManualItemRelationsSection";
 
 type Params = Promise<{ id: string }>;
 
 export default async function StyleDetailPage({ params }: { params: Params }) {
   const { id } = await params;
-  const [style, marketData] = await Promise.all([
+  const [style, marketData, relations, targetChoices] = await Promise.all([
     getStyleDetail(id),
     getStyleMarketData(id),
+    getAdminManualStyleRelations(id, "KR"),
+    getManualRelationTargetChoices(id, "KR"),
   ]);
   if (!style) notFound();
   const initialCoverUrl = style.coverImageKey
@@ -30,6 +37,11 @@ export default async function StyleDetailPage({ params }: { params: Params }) {
       <VariantSection variants={style.variants} wigStyleId={style.id} />
       <MarketAvailabilitySection wigStyleId={style.id} markets={marketData.markets} />
       <MarketPriceSection variantPrices={marketData.variantPrices} />
+      <ManualItemRelationsSection
+        sourceStyleId={style.id}
+        relations={relations}
+        targetChoices={targetChoices}
+      />
     </div>
   );
 }

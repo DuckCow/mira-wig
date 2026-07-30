@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getAdminCustomerRefundIntakeErrorMessage } from "./admin-messages";
+import {
+  getAdminCustomerRefundIntakeErrorMessage,
+  getAdminErrorMessage,
+} from "./admin-messages";
 
 describe("administrator customer refund intake messages", () => {
   it.each([
@@ -14,5 +17,24 @@ describe("administrator customer refund intake messages", () => {
 
   it("uses the existing safe administrator fallback without raw diagnostics", () => {
     expect(getAdminCustomerRefundIntakeErrorMessage("UNAUTHENTICATED")).toBe("로그인이 필요합니다.");
+  });
+});
+
+describe("manual item relation administrator messages", () => {
+  it.each([
+    "RELATION_DUPLICATE",
+    "SELF_RELATION",
+    "INVALID_RELATION_PURPOSE",
+    "INVALID_PRIORITY",
+    "RATIONALE_REQUIRED",
+    "RATIONALE_TOO_LONG",
+    "RATIONALE_INVALID",
+    "SOURCE_STYLE_NOT_FOUND",
+    "TARGET_STYLE_NOT_FOUND",
+    "SOURCE_NOT_PUBLISHED",
+    "TARGET_NOT_PUBLISHED",
+    "TARGET_NO_ACTIVE_PRICED_VARIANT",
+  ])("provides central Korean copy for %s", (code) => {
+    expect(getAdminErrorMessage(code)).not.toContain(`(${code})`);
   });
 });

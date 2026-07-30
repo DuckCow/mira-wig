@@ -20,7 +20,7 @@ afterAll(async () => {
 });
 
 describe("refund worker migration readiness integration", () => {
-  it("matches all 29 committed migrations without changing any selected ledger content", async () => {
+  it("matches all 30 committed migrations without changing any selected ledger content", async () => {
     const database = currentClient();
     const before = await migrationLedgerSnapshot(database);
     const repository = await loadRefundWorkerRepositoryMigrations();
@@ -29,8 +29,8 @@ describe("refund worker migration readiness integration", () => {
 
     expect(compareRefundWorkerMigrations(repository, ledger))
       .toEqual({ ok: true, status: "READY" });
-    expect(repository).toHaveLength(29);
-    expect(before).toHaveLength(29);
+    expect(repository).toHaveLength(30);
+    expect(before).toHaveLength(30);
     expect(after).toEqual(before);
   });
 });

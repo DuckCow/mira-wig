@@ -9,6 +9,7 @@ import { catalogStorage } from "@/lib/storage";
 import type { WigStyleDetail } from "@/lib/catalog.types";
 import type { MarketCode } from "@/lib/market/types";
 import { VariantSelector } from "./VariantSelector";
+import { RelatedStylesSection } from "./RelatedStylesSection";
 
 // ── 내부 헬퍼 ────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ export default async function StyleDetailPage({
         </div>
         <StyleInfo style={style} coverUrl={coverUrl} marketCode={marketCode} />
       </div>
+      <RelatedStylesSection sourceStyleId={style.id} marketCode={marketCode} />
     </main>
   );
 }

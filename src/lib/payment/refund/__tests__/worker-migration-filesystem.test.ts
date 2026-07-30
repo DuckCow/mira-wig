@@ -136,7 +136,7 @@ describe("refund worker fixed migration filesystem authority", () => {
     process.chdir(alternateCwd);
     try {
       const migrations = await loadRefundWorkerRepositoryMigrations();
-      expect(migrations).toHaveLength(29);
+      expect(migrations).toHaveLength(30);
       expect(migrations[0]?.name).toBe("20260609111830_init");
     } finally {
       process.chdir(originalCwd);

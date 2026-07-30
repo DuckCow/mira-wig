@@ -180,7 +180,7 @@ async function exactMigrationAssets(): Promise<readonly string[]> {
     }
     assets.push(`prisma/migrations/${directory.name}/migration.sql`);
   }
-  if (assets.length !== 29) throw new Error("REFUND_WORKER_MIGRATION_COUNT_INVALID");
+  if (assets.length !== 30) throw new Error("REFUND_WORKER_MIGRATION_COUNT_INVALID");
   return assets.sort((left, right) => left.localeCompare(right));
 }
 
