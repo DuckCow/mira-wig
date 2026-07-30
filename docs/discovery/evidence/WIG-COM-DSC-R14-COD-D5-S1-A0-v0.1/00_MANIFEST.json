@@ -1,0 +1,61 @@
+{
+  "snapshotId": "WIG-COM-DSC-R14-COD-D5-S1-A0-v0.1",
+  "observedCommit": "32b8cd7aef2c6f6302ee835e154ec3b6a3b559cb",
+  "observedDate": "2026-07-30",
+  "evidenceType": "IMMUTABLE_DESCRIPTIVE_SOURCE_RECONNAISSANCE",
+  "taskClassification": "SOURCE_ONLY_DOCUMENTATION_AND_READ_ONLY_SOURCE_EVIDENCE",
+  "taskAuthorization": "D5_S1_A0_RECONNAISSANCE_AND_CONTRACT_ONLY",
+  "manifestSelfChecksum": "EXCLUDED_TO_AVOID_SELF_REFERENCE",
+  "files": [
+    {
+      "path": "01_BASELINE_SCOPE_AND_AUTHORITY.md",
+      "sha256": "7c9fff58c1a784cae7301f4045bb9cbe12f74518e3c1e321775ed7afcad514cd",
+      "byteSize": 2209
+    },
+    {
+      "path": "02_FROZEN_VOCABULARY_IMPACT_MATRIX.md",
+      "sha256": "6f25228a08a88cd60d3d7e3f2523df6a8d5ecfe8676cacbb334114b9d0e36687",
+      "byteSize": 2895
+    },
+    {
+      "path": "03_REPRESENTATION_ALTERNATIVES_AND_ADJUDICATION.md",
+      "sha256": "00207c4bc80aea512950d50be9c73b2401eeb7a5d2ce54dd7628087a81846475",
+      "byteSize": 6697
+    },
+    {
+      "path": "04_QUERY_POLICY_TRUTH_TABLE.md",
+      "sha256": "58aabd8aa5309f12f0bb082ad25171e7154f2fcfd9ed97d19ab3ac05bacb42a4",
+      "byteSize": 4373
+    },
+    {
+      "path": "05_PRODUCT_EVIDENCE_TRUTH_TABLE.md",
+      "sha256": "6bebba263f4fafe3643a5740af67fa224410c56bdbec9eb11cf182e5c5174660",
+      "byteSize": 2741
+    },
+    {
+      "path": "06_REASON_AND_LITERAL_CHANGE_MAP.json",
+      "sha256": "3c5997dd39387af5f078d028e668f9dd8f452f2eca932935613190087fc0b8e5",
+      "byteSize": 4193
+    },
+    {
+      "path": "07_SOURCE_TEST_AND_IMPORT_BOUNDARY.md",
+      "sha256": "dcc353c844ec97f8cebfad9e3b64cc7037f44396084ee4b00ff88e4b9d69e5ec",
+      "byteSize": 5469
+    },
+    {
+      "path": "08_D6_B1_CONSUMPTION_CONTRACT.md",
+      "sha256": "c2878808b91c50f4957c3be40ac68fb5b42c09fb1b7de0764384ff75ce34f84d",
+      "byteSize": 3363
+    },
+    {
+      "path": "09_STAGE_VERSIONING_AND_FREEZE_PLAN.md",
+      "sha256": "b66a492c8e671aae69a16ad83b60c7a8ee2febfcb8037e0f647db15f673f6ef0",
+      "byteSize": 2418
+    },
+    {
+      "path": "10_VALIDATION_AND_CHECKSUMS.md",
+      "sha256": "6a1f0e76b7f90fc2ff221a5272e4aa504fc4b941954dcee2b0e72e0678324853",
+      "byteSize": 4131
+    }
+  ]
+}
