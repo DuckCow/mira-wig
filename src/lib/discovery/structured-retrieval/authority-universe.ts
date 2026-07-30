@@ -6,6 +6,10 @@ import type {
 } from "./types";
 import { D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS } from "./versions";
 
+function compareUtf16CodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function isNonblankRuntimeString(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -99,10 +103,16 @@ function canonicalPairOrder(
   left: Stage0AllowedCanonicalPair,
   right: Stage0AllowedCanonicalPair,
 ): number {
-  const variantOrder = left.variantId.localeCompare(right.variantId);
+  const variantOrder = compareUtf16CodeUnits(
+    left.variantId,
+    right.variantId,
+  );
   return variantOrder !== 0
     ? variantOrder
-    : left.canonicalStyleId.localeCompare(right.canonicalStyleId);
+    : compareUtf16CodeUnits(
+        left.canonicalStyleId,
+        right.canonicalStyleId,
+      );
 }
 
 function copyContext(binding: Stage0ContextBinding): Stage0ContextBinding {

@@ -67,6 +67,7 @@ const PROHIBITED_SOURCE: readonly RegExp[] = [
   /\bevent-seam\b/iu,
   /\.\.\/retrieval\//u,
   /\bprocess\.env\b/u,
+  /\.localeCompare\s*\(/u,
 ];
 
 function importSpecifiers(source: string): string[] {
@@ -110,33 +111,30 @@ describe("D6-B1 source boundary", () => {
     }
   });
 
-  it("keeps every new component name explicitly provisional", () => {
+  it("promotes five behavioral components and keeps two snapshots provisional", () => {
     expect(D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS).toEqual({
-      requestPlan: "d6-b1-structured-request-plan/v0.1-provisional",
+      requestPlan: "d6-b1-structured-request-plan/v0.1",
       stage0Scope:
-        "d6-b1-stage-0-authority-universe/v0.1-provisional",
+        "d6-b1-stage-0-authority-universe/v0.1",
       candidateSource:
-        "d6-b1-categorical-fixture-candidate-source/v0.1-provisional",
+        "d6-b1-categorical-fixture-candidate-source/v0.1",
       admissionRules:
-        "d6-b1-structured-candidate-admission/v0.1-provisional",
-      landingContract: "d6-b1-structured-landing/v0.1-provisional",
+        "d6-b1-structured-candidate-admission/v0.1",
+      landingContract: "d6-b1-structured-landing/v0.1",
       fixtureSnapshot:
         "d6-b1-categorical-retrieval-fixture/v0.1-provisional",
       eligibilitySnapshot:
         "d6-b1-eligibility-fixture/v0.1-provisional",
     });
-    const versions: readonly string[] = [
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.requestPlan,
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.stage0Scope,
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.candidateSource,
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.admissionRules,
-      D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.landingContract,
+    const provisionalSnapshots: readonly string[] = [
       D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.fixtureSnapshot,
       D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS.eligibilitySnapshot,
     ];
-    expect(versions.every((value) => value.endsWith("-provisional"))).toBe(
-      true,
-    );
+    expect(
+      provisionalSnapshots.every((value) =>
+        value.endsWith("-provisional"),
+      ),
+    ).toBe(true);
   });
 
   it("produces no event field or delivery claim", () => {
