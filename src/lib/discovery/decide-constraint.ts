@@ -1,5 +1,6 @@
 import type {
   AuthorityOutcome,
+  CategoricalPolicyFixture,
   ConstraintDecision,
   ConstraintReasonCode,
   ConstraintDecisionTarget,
@@ -107,8 +108,63 @@ function policySemanticKey(policy: DecisionPolicyFixture): string {
   if (policy.kind === "CONTINUOUS_TOLERANCE") {
     return JSON.stringify([policy.kind, policy.dimensionId, policy.unitId]);
   }
+  if (policy.kind === "CATEGORICAL_POLICY") {
+    return JSON.stringify([
+      policy.kind,
+      policy.targetConstraintId,
+      policy.attributeId,
+    ]);
+  }
 
   return policy.kind;
+}
+
+function validateContinuousPolicy(
+  policy: ContinuousTolerancePolicyFixture,
+  semanticKey: string,
+): void {
+  if (
+    !Number.isFinite(policy.lowerDelta) ||
+    policy.lowerDelta < 0 ||
+    !Number.isFinite(policy.upperDelta) ||
+    policy.upperDelta < 0
+  ) {
+    invalidD5Input(`invalid continuous tolerance policy ${semanticKey}`);
+  }
+}
+
+function isCategoricalPolicyDisposition(
+  value: unknown,
+): value is CategoricalPolicyFixture["disposition"] {
+  switch (value) {
+    case "REQUIRED":
+    case "PREFERENCE":
+    case "ROUTE":
+    case "CLARIFICATION":
+    case "UNSUPPORTED":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function validateCategoricalPolicy(
+  policy: CategoricalPolicyFixture,
+  semanticKey: string,
+): void {
+  if (
+    policy.fixtureOnly !== true ||
+    policy.synthetic !== true ||
+    typeof policy.policyVersion !== "string" ||
+    policy.policyVersion.trim().length === 0 ||
+    typeof policy.targetConstraintId !== "string" ||
+    policy.targetConstraintId.trim().length === 0 ||
+    typeof policy.attributeId !== "string" ||
+    policy.attributeId.trim().length === 0 ||
+    !isCategoricalPolicyDisposition(policy.disposition)
+  ) {
+    invalidD5Input(`invalid categorical policy ${semanticKey}`);
+  }
 }
 
 function validatePolicies(
@@ -123,14 +179,11 @@ function validatePolicies(
     }
     keys.add(key);
 
-    if (
-      policy.kind === "CONTINUOUS_TOLERANCE" &&
-      (!Number.isFinite(policy.lowerDelta) ||
-        policy.lowerDelta < 0 ||
-        !Number.isFinite(policy.upperDelta) ||
-        policy.upperDelta < 0)
-    ) {
-      invalidD5Input(`invalid continuous tolerance policy ${key}`);
+    if (policy.kind === "CONTINUOUS_TOLERANCE") {
+      validateContinuousPolicy(policy, key);
+    }
+    if (policy.kind === "CATEGORICAL_POLICY") {
+      validateCategoricalPolicy(policy, key);
     }
   }
 
@@ -206,6 +259,35 @@ function evidenceForSubject(
   }
 
   return evidence;
+}
+
+function categoricalPolicyFor(
+  constraint: InterpretedConstraint,
+  policies: readonly DecisionPolicyFixture[],
+): CategoricalPolicyFixture {
+  assertAllowedPolicyKinds(policies, ["CATEGORICAL_POLICY"]);
+  if (constraint.value.kind !== "CATEGORICAL" || policies.length !== 1) {
+    return invalidD5Input(
+      "stylistic categorical constraint requires exactly one categorical policy",
+    );
+  }
+
+  const policy = policies[0];
+  if (policy?.kind !== "CATEGORICAL_POLICY") {
+    return invalidD5Input("categorical policy invariant failed");
+  }
+  if (policy.targetConstraintId !== constraint.constraintId) {
+    return invalidD5Input(
+      "categorical policy targets a different request-local constraint",
+    );
+  }
+  if (policy.attributeId !== constraint.value.attributeId) {
+    return invalidD5Input(
+      "categorical policy targets a different governed attribute",
+    );
+  }
+
+  return policy;
 }
 
 function unknownEvidenceDecision(
@@ -293,6 +375,95 @@ function unsupportedDecision(
     reasons: ambiguous ? [] : ["UNSUPPORTED_CONCEPT"],
     diagnostics: [],
   });
+}
+
+function categoricalQueryDecision(
+  input: RuntimeDecideConstraintInput,
+  constraint: InterpretedConstraint,
+  policies: readonly DecisionPolicyFixture[],
+): ConstraintDecision {
+  const policy = categoricalPolicyFor(constraint, policies);
+  const commonReasons = confirmationReasons(constraint);
+
+  switch (policy.disposition) {
+    case "REQUIRED":
+      return makeDecision(input.target, input.subject, {
+        authorityOutcome: notApplicableAuthority(),
+        gate: "REQUIRE_MATCH",
+        score: "NONE",
+        speechRequirements: ["NO_PRODUCT_ASSERTION"],
+        partition: "NOT_APPLICABLE",
+        relaxation: "NEVER",
+        fallbackRoutes: [],
+        reasons: [...commonReasons, "CATEGORICAL_REQUIRED_BY_POLICY"],
+        diagnostics: [],
+      });
+    case "PREFERENCE":
+      return makeDecision(input.target, input.subject, {
+        authorityOutcome: notApplicableAuthority(),
+        gate: "DO_NOT_GATE",
+        score: "PREFERENCE_ALLOWED",
+        speechRequirements: ["NO_PRODUCT_ASSERTION"],
+        partition: "NOT_APPLICABLE",
+        relaxation: "NOT_APPLICABLE",
+        fallbackRoutes: [],
+        reasons: [...commonReasons, "CATEGORICAL_PREFERENCE_BY_POLICY"],
+        diagnostics: [],
+      });
+    case "ROUTE":
+      return makeDecision(input.target, input.subject, {
+        authorityOutcome: { kind: "OUTSIDE_DISCOVERY_AUTHORITY" },
+        gate: "ROUTE_ONLY",
+        score: "NONE",
+        speechRequirements: [
+          "NO_PRODUCT_ASSERTION",
+          "DISCLOSE_ROUTE_LIMITATION",
+        ],
+        partition: "NOT_APPLICABLE",
+        relaxation: "NOT_APPLICABLE",
+        fallbackRoutes: ["EDUCATION_OR_CONSULTATION"],
+        reasons: [
+          ...commonReasons,
+          "CATEGORICAL_OUTSIDE_DISCOVERY_AUTHORITY_ROUTE",
+        ],
+        diagnostics: [],
+      });
+    case "CLARIFICATION":
+      return makeDecision(input.target, input.subject, {
+        authorityOutcome: notApplicableAuthority(),
+        gate: "REQUIRE_CLARIFICATION",
+        score: "NONE",
+        speechRequirements: [
+          "NO_PRODUCT_ASSERTION",
+          "DISCLOSE_ROUTE_LIMITATION",
+        ],
+        partition: "NOT_APPLICABLE",
+        relaxation: "NOT_APPLICABLE",
+        fallbackRoutes: ["CLARIFICATION"],
+        reasons: [
+          ...commonReasons,
+          "CATEGORICAL_CLARIFICATION_REQUIRED",
+        ],
+        diagnostics: [],
+      });
+    case "UNSUPPORTED":
+      return makeDecision(input.target, input.subject, {
+        authorityOutcome: notApplicableAuthority(),
+        gate: "UNSUPPORTED",
+        score: "NONE",
+        speechRequirements: [
+          "NO_PRODUCT_ASSERTION",
+          "DISCLOSE_ROUTE_LIMITATION",
+        ],
+        partition: "UNKNOWN",
+        relaxation: "NOT_APPLICABLE",
+        fallbackRoutes: ["EXPLICIT_UNSUPPORTED"],
+        reasons: [...commonReasons, "CATEGORICAL_UNSUPPORTED_BY_POLICY"],
+        diagnostics: [],
+      });
+    default:
+      return invalidD5Input("categorical policy has an invalid disposition");
+  }
 }
 
 function conflictingEvidenceDecision(
@@ -582,6 +753,44 @@ function productEvidenceDecision(
   return authoritativeEvidenceDecision(input, constraint, evidence, policies);
 }
 
+function stylisticCategoricalProductDecision(
+  input: RuntimeDecideConstraintInput,
+  constraint: InterpretedConstraint,
+  policies: readonly DecisionPolicyFixture[],
+): ConstraintDecision {
+  const policy = categoricalPolicyFor(constraint, policies);
+  if (policy.disposition !== "REQUIRED") {
+    return invalidD5Input(
+      `categorical disposition ${policy.disposition} has no fixture-product evaluation`,
+    );
+  }
+
+  const evidence = evidenceForSubject(input.subject, input.evidence);
+  if (evidence === undefined) {
+    return unknownEvidenceDecision(input, constraint, [
+      "PRODUCT_EVIDENCE_UNKNOWN",
+    ]);
+  }
+  if (evidence.state === "CONFLICTING") {
+    return conflictingEvidenceDecision(input, constraint);
+  }
+  if (evidence.state === "MODEL_INFERRED") {
+    return unknownEvidenceDecision(
+      input,
+      constraint,
+      ["MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY"],
+      ["NO_PRODUCT_ASSERTION", "DISCLOSE_UNKNOWN"],
+    );
+  }
+  if (!evidenceHasAssertionAuthority(evidence, policies)) {
+    return unknownEvidenceDecision(input, constraint, [
+      "PRODUCT_EVIDENCE_UNKNOWN",
+    ]);
+  }
+
+  return authoritativeEvidenceDecision(input, constraint, evidence, policies);
+}
+
 function validateSensitiveUseContextConstraint(
   constraint: InterpretedConstraint,
   policies: readonly DecisionPolicyFixture[],
@@ -629,6 +838,30 @@ function validateUnsupportedQueryConstraint(
   assertAllowedPolicyKinds(policies, []);
 }
 
+function validateStylisticCategoricalConstraint(
+  constraint: InterpretedConstraint,
+  policies: readonly DecisionPolicyFixture[],
+): void {
+  if (
+    constraint.interpretationState !== "DECLARED" ||
+    constraint.attributeBand !== "STYLISTIC" ||
+    constraint.decisionProfile !== "GOVERNED_STYLISTIC_CATEGORICAL"
+  ) {
+    invalidD5Input(
+      "categorical constraint lacks the governed stylistic profile",
+    );
+  }
+  if (
+    constraint.source.kind === "USER_CONFIRMATION" &&
+    constraint.source.priorConstraintId !== constraint.constraintId
+  ) {
+    invalidD5Input(
+      "categorical confirmation targets a different request-local constraint",
+    );
+  }
+  categoricalPolicyFor(constraint, policies);
+}
+
 function validateQueryConstraint(
   constraint: InterpretedConstraint,
   policies: readonly DecisionPolicyFixture[],
@@ -640,8 +873,9 @@ function validateQueryConstraint(
       return validateAudienceRouteConstraint(constraint, policies);
     case "UNKNOWN_OR_UNSUPPORTED":
       return validateUnsupportedQueryConstraint(constraint, policies);
-    case "EXACT_IDENTITY":
     case "CATEGORICAL":
+      return validateStylisticCategoricalConstraint(constraint, policies);
+    case "EXACT_IDENTITY":
     case "CONTINUOUS":
       return invalidD5Input(
         `constraint kind ${constraint.value.kind} is not query-level`,
@@ -675,6 +909,38 @@ function validateClaimBearingMaterialConstraint(
     );
   }
   assertAllowedPolicyKinds(policies, ["VENDOR_ATTESTATION"]);
+}
+
+function validateStylisticCategoricalProductConstraint(
+  input: RuntimeDecideConstraintInput,
+  constraint: InterpretedConstraint,
+  policies: readonly DecisionPolicyFixture[],
+): void {
+  validateStylisticCategoricalConstraint(constraint, policies);
+  const policy = categoricalPolicyFor(constraint, policies);
+  if (policy.disposition !== "REQUIRED") {
+    invalidD5Input(
+      `categorical disposition ${policy.disposition} has no fixture-product evaluation`,
+    );
+  }
+
+  const evidence = evidenceForSubject(input.subject, input.evidence);
+  if (evidence === undefined) {
+    return;
+  }
+  if (evidence.fixtureOnly !== true || evidence.synthetic !== true) {
+    invalidD5Input("categorical evidence must be a synthetic fixture");
+  }
+  if (evidence.attributeId !== policy.attributeId) {
+    invalidD5Input(
+      "categorical evidence targets a different governed attribute",
+    );
+  }
+  if (evidence.state === "NOT_REPRESENTABLE") {
+    invalidD5Input(
+      "categorical NOT_REPRESENTABLE evidence is outside the S1 contract",
+    );
+  }
 }
 
 function validateContinuousConstraint(
@@ -721,7 +987,14 @@ function validateFixtureProductConstraint(
     case "EXACT_IDENTITY":
       return validateExactIdentityConstraint(constraint, policies);
     case "CATEGORICAL":
-      return validateClaimBearingMaterialConstraint(constraint, policies);
+      return constraint.decisionProfile ===
+        "GOVERNED_STYLISTIC_CATEGORICAL"
+        ? validateStylisticCategoricalProductConstraint(
+            input,
+            constraint,
+            policies,
+          )
+        : validateClaimBearingMaterialConstraint(constraint, policies);
     case "CONTINUOUS":
       return validateContinuousConstraint(constraint, policies);
     case "UNKNOWN_OR_UNSUPPORTED":
@@ -765,6 +1038,7 @@ function validateDecisionInput(
 function decideQueryConstraint(
   input: RuntimeDecideConstraintInput,
   constraint: InterpretedConstraint,
+  policies: readonly DecisionPolicyFixture[],
 ): ConstraintDecision {
   switch (constraint.value.kind) {
     case "OUTCOME_INTENT":
@@ -776,8 +1050,9 @@ function decideQueryConstraint(
         input,
         constraint.value.state === "AMBIGUOUS",
       );
-    case "EXACT_IDENTITY":
     case "CATEGORICAL":
+      return categoricalQueryDecision(input, constraint, policies);
+    case "EXACT_IDENTITY":
     case "CONTINUOUS":
       return invalidD5Input(
         `constraint kind ${constraint.value.kind} is not query-level`,
@@ -792,10 +1067,14 @@ function decideFixtureProductConstraint(
 ): ConstraintDecision {
   switch (constraint.value.kind) {
     case "EXACT_IDENTITY":
-    case "CATEGORICAL":
     case "CONTINUOUS":
     case "UNKNOWN_OR_UNSUPPORTED":
       return productEvidenceDecision(input, constraint, policies);
+    case "CATEGORICAL":
+      return constraint.decisionProfile ===
+        "GOVERNED_STYLISTIC_CATEGORICAL"
+        ? stylisticCategoricalProductDecision(input, constraint, policies)
+        : productEvidenceDecision(input, constraint, policies);
     case "OUTCOME_INTENT":
     case "AUTHORITY_ROUTE":
       return invalidD5Input(
@@ -819,7 +1098,7 @@ export function decideConstraint(
 
   const constraint = input.target.constraint;
   if (input.target.decisionLevel === "QUERY") {
-    return decideQueryConstraint(input, constraint);
+    return decideQueryConstraint(input, constraint, policies);
   }
 
   return decideFixtureProductConstraint(input, constraint, policies);

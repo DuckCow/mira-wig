@@ -116,7 +116,8 @@ export type AttributeBand =
 
 export type D5DecisionProfile =
   | "CLAIM_BEARING_MATERIAL"
-  | "SENSITIVE_USE_CONTEXT";
+  | "SENSITIVE_USE_CONTEXT"
+  | "GOVERNED_STYLISTIC_CATEGORICAL";
 
 export interface ExactIdentityConstraint {
   readonly kind: "EXACT_IDENTITY";
@@ -365,10 +366,28 @@ export interface VendorAttestationPolicyFixture {
   readonly policyVersion: string;
 }
 
+export type CategoricalPolicyDisposition =
+  | "REQUIRED"
+  | "PREFERENCE"
+  | "ROUTE"
+  | "CLARIFICATION"
+  | "UNSUPPORTED";
+
+export interface CategoricalPolicyFixture {
+  readonly kind: "CATEGORICAL_POLICY";
+  readonly fixtureOnly: true;
+  readonly synthetic: true;
+  readonly targetConstraintId: string;
+  readonly attributeId: string;
+  readonly disposition: CategoricalPolicyDisposition;
+  readonly policyVersion: string;
+}
+
 export type DecisionPolicyFixture =
   | ContinuousTolerancePolicyFixture
   | ClaimAuthorityPolicyFixture
-  | VendorAttestationPolicyFixture;
+  | VendorAttestationPolicyFixture
+  | CategoricalPolicyFixture;
 
 export type DecisionSubject =
   | { readonly kind: "QUERY" }
@@ -417,6 +436,7 @@ export type AuthorityOutcome =
 
 export type GateDecision =
   | "ASSERT_MATCH"
+  | "REQUIRE_MATCH"
   | "DO_NOT_GATE"
   | "REQUIRE_CLARIFICATION"
   | "ROUTE_ONLY"
@@ -456,7 +476,13 @@ export type DiscoveryReasonCode =
   | "CONTRADICTORY_QUERY"
   | "CONFIRMATION_CHANGED_INTENT_ONLY"
   | "AUDIENCE_NAMESPACE_PRESERVED"
-  | "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY";
+  | "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY"
+  | "CATEGORICAL_REQUIRED_BY_POLICY"
+  | "CATEGORICAL_PREFERENCE_BY_POLICY"
+  | "CATEGORICAL_OUTSIDE_DISCOVERY_AUTHORITY_ROUTE"
+  | "CATEGORICAL_CLARIFICATION_REQUIRED"
+  | "CATEGORICAL_UNSUPPORTED_BY_POLICY"
+  | "MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY";
 
 export type FixtureReasonCode =
   | "CONTINUOUS_WITHIN_SYNTHETIC_TOLERANCE"
