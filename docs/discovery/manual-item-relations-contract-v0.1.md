@@ -233,13 +233,19 @@ editorial ordering, not an algorithmic relevance score.
 
 `internalRationale` is an admin-only editorial explanation.
 
+- Nullable storage supports an inactive editorial draft.
+- An inactive relation may exist without a rationale.
+- Activation requires a governed Unicode-trimmed, nonblank, bounded rationale.
+- Changing purpose on an active relation revalidates the active-state rationale
+  rule.
+- Updating rationale on an active relation may not leave it blank or invalid.
 - When present, it is bounded and Unicode-trimmed.
 - It is never customer copy.
 - It must not enter the public read model.
 - It must not assert unsupported material, construction, performance, medical,
   fit, or commercial claims.
-- The later source task must review existing admin-validation conventions and
-  decide whether rationale is required for either purpose.
+- Exact length and control-character validation belongs to the bounded source
+  contract and must follow repository admin-validation conventions.
 
 ## 6. Invariants and database requirements
 
@@ -279,6 +285,16 @@ The first source slice must support an authenticated admin actor performing:
 
 Hard delete is not required.
 
+Operation behavior is explicit:
+
+- create may create an inactive draft without a rationale;
+- activate must reject a missing, blank, or invalid rationale;
+- changing purpose while active must revalidate the rationale rule;
+- updating rationale while active may not leave it blank or invalid;
+- deactivate preserves the rationale and editorial history.
+
+No operation may silently supply a default rationale.
+
 Admin target choices must:
 
 - exclude the source style;
@@ -296,14 +312,21 @@ A future public read may return a target only when all of the following hold:
 
 ```text
 relation is active
-source style is the requested canonical source style
+relation source equals the requested canonical source style
 relation market exactly equals the active market
+
+source style exists
+source style is globally active
+source style is active/published in the relation market
+
 target style exists
 target style is globally active
-target style is active in the relation market
-target style has at least one active variant
-target style has at least one market price in the active market
+target style is active/published in the relation market
 target style is not the source style
+
+there exists at least one exact target variant such that:
+  variant is active
+  and that same variant has a market price in the active market
 ```
 
 The public read must additionally preserve:
@@ -322,8 +345,15 @@ It must not:
 - treat stock as v0.1 stylistic-relation truth;
 - present the relation as a `COMMERCIAL_ALTERNATIVE`.
 
-Invalid or stale rows are omitted from customer results and remain visible to
-admin diagnostics.
+Separate active-variant and priced-variant witnesses do not satisfy the target
+gate. An inactive priced variant cannot qualify, and an active unpriced variant
+cannot qualify. Invalid source context hides the entire module; invalid or
+stale target rows are omitted from customer results and remain visible to admin
+diagnostics. Neither case may be silently repaired or substituted.
+
+Stock remains outside the v0.1 stylistic-relation truth condition. This remains
+a manual stylistic/editorial relation and not a `COMMERCIAL_ALTERNATIVE`
+assertion.
 
 ## 9. Customer presentation and exact landing
 
@@ -407,6 +437,10 @@ Minimum activation evidence:
 - valid exact target-style landing;
 - market visibility checks;
 - a priced active target variant;
+- every exposed source style is globally active and `KR`-published;
+- every exposed target has at least one same active variant carrying a `KR`
+  price;
+- every active relation has a valid nonblank `internalRationale`;
 - no self relation;
 - no duplicate directed source/target/market tuple;
 - no unsupported customer claim;
@@ -500,6 +534,22 @@ M2M-S1 must remain one bounded vertical slice and preserve the default-off
 customer boundary. It must not begin automatic recommendation, D5 or D6
 production integration, customer events, behavior learning, personalization,
 offer readiness, MTO, payment, shipping, or fulfillment work.
+
+M2M-S1 must include tests for:
+
+- missing source;
+- globally inactive source;
+- source with wrong-market or inactive-market publication;
+- missing target;
+- globally inactive target;
+- target with wrong-market or inactive-market publication;
+- an active variant with no market price plus an inactive priced variant,
+  which must reject or be omitted;
+- an active priced variant, which qualifies;
+- an inactive draft with null rationale, which is allowed;
+- activation with null or blank rationale, which is rejected;
+- an active purpose change that revalidates the rationale;
+- a public read that excludes `internalRationale`.
 
 This contract's merge is a dependency, not source authorization. M2M-S1
 requires its own explicit task-level authorization.

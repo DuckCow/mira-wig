@@ -718,6 +718,11 @@ control rather than an MG1 redefinition.
   requiring `User` foreign keys.
 - Customer links land on the exact canonical target style PDP, where variant
   selection remains.
+- Customer exposure requires a valid source style that exists, is globally
+  active, and is active/published in the relation market.
+- Target eligibility requires one same active variant carrying a price in the
+  active market; separate active-variant and priced-variant witnesses are
+  insufficient.
 
 ### Activation and non-authority
 
@@ -732,6 +737,10 @@ control rather than an MG1 redefinition.
 - No automatic candidate generation, image similarity, behavior reranking,
   personalization, launch-offer readiness, MTO, payment, shipping, or
   fulfillment work is authorized.
+- Inactive draft relations may omit `internalRationale`.
+- Active relations require a governed, Unicode-trimmed, nonblank
+  `internalRationale`, and active purpose or rationale updates revalidate that
+  rule.
 
 ### Later re-entry gates and next task
 
