@@ -997,8 +997,11 @@ describe("D6-B1 source-vocabulary freeze conformance", () => {
         ...direct,
         requestPlan: equalAttributePlan,
         evidenceEvaluation: equalAttributeEvidence,
-      }).status,
-    ).toBe("ADMITTED");
+      }),
+    ).toMatchObject({
+      status: "ADMISSION_REJECTED",
+      reason: "REQUEST_PLAN_INVARIANT_FAILED",
+    });
     expect(
       admitStructuredCandidate({
         ...direct,

@@ -34,7 +34,10 @@ function isNonblankRuntimeString(value: unknown): value is string {
 
 function requestPlanIsValid(input: AdmitStructuredCandidateInput): boolean {
   const plan = input.requestPlan;
-  if (!requestPlanShapeIsValid(plan)) {
+  if (
+    !requestPlanShapeIsValid(plan) ||
+    !requestPlanHasUniqueGovernedAttributes(plan)
+  ) {
     return false;
   }
 
@@ -69,6 +72,18 @@ function requestPlanShapeIsValid(
     plan.constraints.length <= 2 &&
     plan.constraints.length === plan.policies.length &&
     plan.constraints.length === plan.queryDecisions.length
+  );
+}
+
+function requestPlanHasUniqueGovernedAttributes(
+  plan: AdmitStructuredCandidateInput["requestPlan"],
+): boolean {
+  return (
+    new Set(
+      plan.constraints.map(
+        (constraint) => constraint.value.attributeId,
+      ),
+    ).size === plan.constraints.length
   );
 }
 
