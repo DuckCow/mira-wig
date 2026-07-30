@@ -696,3 +696,54 @@ Any later change to frozen MG1 semantics requires a new versioned contract,
 README authority-pointer update, and decision-log entry. Changes to frozen D5,
 D6, or constraint-hardness semantics require those contracts' own change
 control rather than an MG1 redefinition.
+
+## 2026-07-31 — Manual item-relations foundation v0.1
+
+### User decision and selected first slice
+
+- The user confirmed that the launch catalog will contain at least three
+  distinct styles.
+- Physical product development remains in progress.
+- The selected first item-to-item slice is a reusable, manually curated,
+  pre-launch foundation.
+- The relation unit is canonical `WigStyle → WigStyle`.
+- Relations are directional and explicitly market-scoped, beginning with
+  `KR`.
+- Exactly `SIMILAR_STYLE` and `COMPARE_WITH` are authorized purposes.
+- There is one row per directed source/target/market tuple, with purpose as
+  one mutable classification on that row.
+- Priority is manual editorial ordering and not an algorithmic relevance
+  score.
+- Authenticated admin IDs are preserved as immutable actor snapshots without
+  requiring `User` foreign keys.
+- Customer links land on the exact canonical target style PDP, where variant
+  selection remains.
+
+### Activation and non-authority
+
+- The customer module has a separately inspectable, default-off activation
+  boundary.
+- This contract does not authorize production activation.
+- `SAME_FAMILY_OPTION` remains derived from variants under one canonical style
+  and is not persisted.
+- `SIMILAR_CONSTRUCTION` and `COMMERCIAL_ALTERNATIVE` remain blocked.
+- No D5 or D6 runtime integration is introduced.
+- No event emission, collection, persistence, or analytics is authorized.
+- No automatic candidate generation, image similarity, behavior reranking,
+  personalization, launch-offer readiness, MTO, payment, shipping, or
+  fulfillment work is authorized.
+
+### Later re-entry gates and next task
+
+- Deterministic content generation waits for real styles, governed stylistic
+  coverage, and judged relation pairs.
+- Governed image generation waits for image roles, rights, confound controls,
+  and judged image pairs.
+- Behavior reranking waits for reliable exposures, positions, candidate sets,
+  purpose-specific support, deterministic control, privacy approval, and
+  rollback.
+- Personalization waits for repeat usage, privacy and retention governance,
+  evaluation support, and protected-alternative tests.
+- Catalog count alone does not authorize any automatic arm.
+- The exact next task after this contract merges is
+  `M2M-S1 manual style relation persistence + admin curation + default-off PDP read`.

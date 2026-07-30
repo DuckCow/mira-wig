@@ -73,13 +73,16 @@ Model agreement is not evidence.
 10. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-11. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+11. [`manual-item-relations-contract-v0.1.md`](./manual-item-relations-contract-v0.1.md)
+   Bounded manual persistence and pre-launch customer-surface contract for market-scoped directional style relations.
+
+12. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-12. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+13. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-13. [`decision-log.md`](./decision-log.md)
+14. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 ## Required reading by task
