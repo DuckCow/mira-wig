@@ -61,22 +61,25 @@ Model agreement is not evidence.
 6. [`d6-b1-source-vocabulary-contract-v0.1.md`](./d6-b1-source-vocabulary-contract-v0.1.md)
    Installs the normative D6-B1 governed categorical source freeze for the source-only unranked fixture slice: selective entrypoints, module responsibilities, five final component versions, reviewed output/status/reason vocabulary, UTF-16 technical ordering, one admission choke point, landing integrity, and accountability semantics while fixture inputs, snapshot values, compatibility sentinels, helper exports, and production integration remain provisional.
 
-7. [`d5-s1-categorical-policy-contract-v0.1.md`](./d5-s1-categorical-policy-contract-v0.1.md)
+7. [`measurement-governance-contract-v0.1.md`](./measurement-governance-contract-v0.1.md)
+   Freezes the measurement-governance foundation separating measurand, method, units, evidence, uncertainty, manufacturing tolerance, retrieval matching, nominal labels, and display rounding while requiring MGP1 and UR1 before D5-S2.
+
+8. [`d5-s1-categorical-policy-contract-v0.1.md`](./d5-s1-categorical-policy-contract-v0.1.md)
    Freezes the categorical-only D5-S1 design: required query intent remains distinct from evidence-qualified product assertion, policy remains separate from interpretation, and D6-B1 may consume only governed required decisions.
 
-8. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
+9. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
    Interpretation/evidence separation, authority constraints, filtering, ranking, partitions, relaxation, clarification, education, consultation, and unsupported states.
 
-9. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
+10. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-10. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+11. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-11. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+12. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-12. [`decision-log.md`](./decision-log.md)
+13. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 ## Required reading by task

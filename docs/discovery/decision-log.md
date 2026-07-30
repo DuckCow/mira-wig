@@ -546,3 +546,153 @@ D6-B1 completes only when this documentation pull request merges. The later
 sequence of measurement method/unit/evidence/tolerance governance, D5-S2, and
 D6-B2 remains separate and unauthorized. Exact-plus-structured composition
 also remains separate and unauthorized.
+
+## 2026-07-31 — Measurement-governance foundation v0.1
+
+### Baseline and adjudication
+
+- source baseline:
+  `cb11341ca9ed9123c6a92c5eae3e25679da7fe6d`;
+- accepted MG0 reconnaissance:
+  `WIG-COM-DSC-R29-COD-MG0-RECON-v0.1`;
+- binding human adjudication:
+  `WIG-COM-DSC-R30-HUM-MG1-ADJUDICATION-v0.1`;
+- contract type: documentation-only measurement-governance foundation;
+- source correction before MG1: not required;
+- physical method pilot before D5-S2 implementation: required.
+
+### Frozen governance boundary
+
+MG1 v0.1 separates and assigns authority for:
+
+- measurand and measurement method;
+- canonical unit and exact conversion;
+- measurement result, measured quantity, uncertainty information, uncertainty
+  basis, and decision interval;
+- manufacturing/specification tolerance;
+- D5-owned query relation and retrieval match interval;
+- nominal-label evidence;
+- presentation-owned display conversion and rounding;
+- exact-variant product ownership and specimen context.
+
+Measurement uncertainty, manufacturing tolerance, retrieval match interval,
+nominal labels, and display rounding are not interchangeable. No owner may
+silently take or default another owner's decision. D6 consumes D5 decisions and
+does not invent measurement or query policy locally.
+
+### First measurand and method family
+
+The first governed measurand family is variant-scoped, zone-identified,
+installed root-to-tip strand-path length under one versioned standardized
+straightening method.
+
+The reference-point family begins at an installed emergence/root reference and
+ends at the physical strand tip along the strand path.
+
+The method family is dry and conditioned, removes geometric slack or curl by a
+governed light-tension straightening procedure, and does not intentionally
+produce material fiber elongation. Method identity/version and query/evidence
+method compatibility are required.
+
+MG1 v0.1 does not validate or freeze the exact zone, root-reference
+realization, statistic, sample count, repeat count, lot rule, tension/force,
+conditioning procedure, instrument/resolution, or uncertainty procedure.
+
+Nominal marketed length, natural-state strand path, standardized apparent
+vertical drop, and multi-zone/distributional profiles remain separate
+measurands.
+
+### Unit, numeric, and uncertainty boundary
+
+The first bounded length family uses positive safe-integer micrometres for
+canonical comparison. The exact relationships are:
+
+```text
+1 inch = 25.4 millimetres exactly
+1 centimetre = 10 millimetres exactly
+1 millimetre = 1000 micrometres exactly
+```
+
+Initial source/display unit families are inch, centimetre, and millimetre.
+Canonicalization occurs once through a measurement-owned registry, matching
+uses canonical integers, and presentation-owned display rounding never feeds
+matching.
+
+Accepted decimal precision must permit exact conversion. Negative, zero,
+non-finite, overflow, unsafe-integer, excess-precision, unsupported-unit, and
+out-of-bound values fail visibly. The final physical upper bound remains
+provisional.
+
+A measurement result requires a measured value, uncertainty information and
+basis, method/version, specimen context, and provenance. A conservative closed
+decision interval is permitted only with stated derivation and any claimed
+coverage/confidence semantics. Missing or ungoverned uncertainty cannot assert
+in the first slice and never widens retrieval tolerance silently.
+
+### Query and retrieval boundary
+
+The first query relation is `APPROXIMATE_TARGET`. Plain `18 inch` is neither
+exact physical equality nor nominal-label matching.
+
+Minimum, maximum, closed/open ranges, and comparator or range syntax whose
+semantics are not preserved must reject visibly or route to clarification in
+the first D5-S2 slice.
+
+The first inclusive closed-interval model is:
+
+```text
+evidence decision interval wholly inside query match interval -> ASSERTED
+evidence decision interval wholly disjoint from query match interval -> VIOLATING
+partial overlap, boundary ambiguity, missing/ungoverned uncertainty,
+or method incompatibility -> UNKNOWN
+```
+
+Retrieval match deltas remain provisional, D5-owned, and separately versioned.
+MG1 authorizes no ranking or automatic relaxation.
+
+### Current source quarantine
+
+The current `ContinuousConstraint`, direct `QueryUnitEntry` surface binding,
+`MEASURED_QUANTITY`, `ContinuousTolerancePolicyFixture`,
+`lowerDelta`/`upperDelta`, same-unit-only evaluation, and
+`WigVariant.length` string remain provisional and non-authoritative.
+
+The current synthetic tolerance reasons and diagnostic are not promoted.
+Known parser hazards include negative-sign loss, decimal-comma partial parse,
+range-endpoint collapse, comparator and approximation loss, multiple
+unassociated quantities, and unsafe large finite values.
+
+Current query-level continuous rejection remains in force. No current evidence
+state alone establishes assertion-capable method-bound numeric length
+evidence.
+
+### Required downstream gates
+
+MGP1 must select the exact physical method parameters using repeatability,
+cross-texture, uncertainty, and customer-meaning evidence. It must compare at
+least median, upper quantile, and maximum.
+
+UR1 must separately install a bounded source-only unit registry with exact
+conversion, precision/bounds validation, deterministic serialization, and
+visible failure.
+
+D5-S2 implementation requires merged MG1 v0.1, completed MGP1, reviewed UR1,
+and a later MG1 version or method addendum freezing the selected method.
+
+D6-B2 remains a later source-only, synthetic-fixture-only slice that consumes
+frozen D5-S2 decisions without reinterpretation and does not change D6-B1.
+
+### Authority and deferrals
+
+This documentation-only foundation grants no source, test, database, schema,
+catalog, ontology, adapter, route, UI, API, event, analytics, ranking,
+relaxation, composition, commerce, or production authority.
+
+`WigVariant.length` remains presentation/demo-only. Production storage,
+catalog migration/backfill, evidence adapters, thresholds, coverage, and
+activation remain deferred.
+
+Any later change to frozen MG1 semantics requires a new versioned contract,
+README authority-pointer update, and decision-log entry. Changes to frozen D5,
+D6, or constraint-hardness semantics require those contracts' own change
+control rather than an MG1 redefinition.
