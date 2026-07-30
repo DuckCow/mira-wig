@@ -3,17 +3,18 @@
 ## D5-S1 — required dependency
 
 Source scope is separately authorized D5 policy only. Add query-level
-categorical/continuous dispositions, explicit required/preference/route
-effect, non-claim stylistic fixture-product evidence, strict validation, and
-compatibility tests. Preserve current claim-bearing, sensitive-use, reason,
-partition, disclosure, and relaxation semantics. Install a new versioned D5
-source-vocabulary contract after review.
+categorical dispositions, explicit required/preference/route/clarification/
+unsupported effect, non-claim stylistic categorical fixture-product evidence,
+strict validation, and compatibility tests. Preserve current claim-bearing,
+sensitive-use, reason, partition, disclosure, and relaxation semantics.
+Install a new versioned D5 source-vocabulary contract after review.
 
 ## D6-B1 — governed categorical fixture slice
 
-Inputs: one or two declared/user-selected `style.color_family` and/or
-`style.texture_family` constraints; injected immutable candidate, governed
-attribute evidence, and eligibility snapshots.
+Inputs: one or two declared/user-selected governed color-family and/or
+texture-family constraints; injected immutable Stage-0 scope/proof, candidate,
+governed attribute evidence, and candidate-specific eligibility snapshots.
+Exact ontology IDs are assigned only by later D5-S1 review.
 
 Behavior: structured-only, variant + canonical style candidate, one admission
 choke point, per-constraint decisions preserved, selected-variant price,
@@ -29,7 +30,11 @@ Minimum tests:
   requests outside B1;
 - asserted, mismatch, missing, conflicting, and duplicate evidence;
 - unrelated candidate/evidence and input-order independence;
+- Stage-0 exclusions never enter candidate-source membership, accountability,
+  partitions, counts, or exposure;
 - candidate/style mismatch and no admission bypass;
+- candidate-specific eligibility is independently mandatory inside admission
+  and cannot substitute for Stage 0;
 - missing, duplicate, stale, wrong-market eligibility;
 - selected-variant price and landing identity;
 - zero asserted result without relaxation or ranking;
@@ -40,10 +45,24 @@ Minimum tests:
 
 ## Later gated stages
 
-- D6-B2: numeric length only after measurement method, unit, evidence, and
-  tolerance governance.
+- measurement governance: define method, canonical unit, evidence, and
+  tolerance for numeric length;
+- D5-S2: add continuous query policy only after that governance;
+- D6-B2: numeric length fixture retrieval only after D5-S2;
 - D6-B3: exact-plus-structured composition under a separate contract.
 - D6-C: production governed attribute/catalog/eligibility adapter after
   representative evidence and commerce authority.
 
 No later stage is authorized by D6-B0.
+
+The ordered sequence is:
+
+```text
+D5-S1 categorical policy
+→ D6-B1 categorical fixture slice
+→ measurement governance
+→ D5-S2 continuous policy
+→ D6-B2 numeric length
+→ D6-B3 composition
+→ D6-C adapters
+```

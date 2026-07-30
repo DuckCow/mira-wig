@@ -40,8 +40,7 @@ weighted scalar (`src/lib/discovery/decide-constraint.ts:200-224,339-582`).
 
 Before D6-B1, D5 must add:
 
-1. a query-level policy disposition for governed categorical and continuous
-   constraints;
+1. a query-level policy disposition for governed categorical constraints;
 2. an explicit policy-owned required/preference/route/clarification effect;
 3. fixture-product support for non-claim `STYLISTIC` categorical evidence;
 4. validation preserving current claim-bearing and sensitive-use rules;
@@ -51,3 +50,19 @@ Before D6-B1, D5 must add:
 
 D6-B cannot supply these semantics without becoming a competing
 constraint-policy owner.
+
+Current fixture-product continuous support and its optional synthetic
+tolerance policy do not establish query-level continuous policy:
+`validateQueryConstraint` still rejects `CONTINUOUS`, and the fixture
+machinery does not govern measurement method, canonical unit, product
+evidence, or customer-facing tolerance semantics. None of that is needed by
+the categorical-only D6-B1 slice.
+
+The dependency is therefore split:
+
+```text
+D5-S1 = governed categorical query policy + non-claim stylistic categorical evidence
+D5-S2 = continuous query policy after measurement/unit/evidence/tolerance governance
+```
+
+D5-S2 is a later prerequisite for D6-B2, not D6-B1.

@@ -11,9 +11,15 @@ current cart incoherence risk.
 
 ## Source versus admission
 
-The replaceable source may enumerate possible variant candidates and attach
-source/snapshot accountability. It has no authority to call a candidate an
-asserted match.
+Before source invocation, a versioned injected Stage-0 authority-universe
+scope/proof restricts participation for the caller's audience, market
+publication, destination/shipping, and durable legal/safety authority.
+Stage-0-excluded items never enter source membership, source accountability,
+partitions, counts, ordering, or exposure.
+
+The replaceable source may enumerate possible variant candidates only within
+that scope and attach source/snapshot accountability. It has no authority to
+call a candidate an asserted match.
 
 The single structured admission choke point must validate:
 
@@ -22,12 +28,18 @@ The single structured admission choke point must validate:
 3. per-candidate/per-attribute evidence identity, provenance, state, and
    uniqueness;
 4. the D5 policy decision for every constraint;
-5. injected eligibility identity, market, freshness/version, and outcome;
+5. mandatory candidate-specific commerce eligibility identity, market,
+   freshness/version, and outcome;
 6. selected-variant price basis and landing identity;
 7. component attribution and deterministic accountability.
 
 No asserted result, ordering, exposure, landing, or later ranker may bypass
 this point.
+
+Candidate-specific commerce eligibility cannot substitute for Stage-0
+scoping. Discovery consumes and versions both injected inputs and recomputes
+neither. The frozen boundary is their separation and order, not a requirement
+for two particular runtime module names.
 
 ## Partition preservation
 

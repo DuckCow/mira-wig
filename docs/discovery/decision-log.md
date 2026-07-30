@@ -283,25 +283,36 @@ merge. D6-B requires a separate versioned contract and explicit work order.
 - D6-B preserves per-constraint gate, score, partition, speech, relaxation,
   route, reason, and evidence semantics without a weighted scalar;
 - D6-A remains exact-only; exact-plus-structured composition is deferred;
-- the first provisional attributes are governed `style.color_family` and
-  `style.texture_family`, not direct aliases for current free-form database
-  strings;
+- the first provisional attributes are generic governed color-family and
+  texture-family concepts; exact ontology IDs are deferred to D5-S1, and
+  evidence remains variant-scoped and storage-neutral;
+- a versioned Stage-0 authority-universe scope/proof gates participation before
+  enumeration, while candidate-specific commerce eligibility is independently
+  mandatory inside admission; neither input substitutes for the other;
+- cap/base/lace, attachment, fulfillment, and lead time are conceptually
+  structural/functional even where their evidence and commerce admission facts
+  remain externally owned; stock is eligibility, and this contract does not
+  assign price a final conceptual band;
 - numeric length, claims, category/tag assertion, ranking, relaxation, events,
   and production adapters remain deferred.
 
 ### Blocking dependency and sequence
 
-Adversarial reconnaissance confirmed that D5-S1 is required. Current D5 source
-rejects query-level categorical and continuous constraints and permits
-fixture-product categorical evidence only through the claim-bearing material
-profile. D6-B cannot bypass that boundary without inventing policy locally.
+Adversarial reconnaissance confirmed that D5-S1 is required for categorical
+D6-B1. Current D5 source rejects query-level categorical constraints and
+permits fixture-product categorical evidence only through the claim-bearing
+material profile. D6-B cannot bypass that boundary without inventing policy
+locally. Current continuous fixture tolerance does not justify query-level
+continuous policy before the categorical-only B1 slice.
 
 The authorized sequence is:
 
 ```text
-D5-S1 policy extension and vocabulary freeze
+D5-S1 categorical policy extension and vocabulary freeze
 → D6-B1 unranked categorical fixture slice and freeze
-→ D6-B2 governed numeric length
+→ measurement method/unit/evidence/tolerance governance
+→ D5-S2 continuous query policy
+→ D6-B2 governed numeric length fixture retrieval
 → D6-B3 exact-plus-structured composition
 → D6-C production governed adapters
 ```

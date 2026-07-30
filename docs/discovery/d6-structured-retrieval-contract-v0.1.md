@@ -14,6 +14,26 @@ EVIDENCE SNAPSHOT:      WIG-COM-DSC-R11-COD-D6-B0-v0.1
 This contract governs the design boundary for D6-B governed structured
 attribute retrieval. It is not a source work order.
 
+## Scope
+
+This contract owns:
+
+- structured-retrieval ownership boundaries and the variant candidate unit;
+- the ordering and separation of Stage-0 authority-universe scoping and
+  candidate-specific commerce eligibility;
+- candidate-source and admission responsibilities;
+- preservation of per-constraint partitions and decision dimensions;
+- the categorical-only D5-S1 dependency required by D6-B1;
+- the fixture-only D6-B1 target and the gates between later D6-B stages.
+
+It does not authorize or define:
+
+- D5 or D6 source implementation;
+- continuous measurement, unit, evidence, or tolerance policy;
+- production catalog or eligibility adapters;
+- ranking, relaxation, or exact-plus-structured composition;
+- routes, UI, commerce writes, events, or production activation.
+
 ## 1. Objective
 
 D6-B will retrieve variant candidates from governed structured constraints
@@ -99,10 +119,26 @@ Audience, market publication, destination/shipping, and durable safety/legal
 authority define the universe before structured matching. Query text never
 changes them.
 
+D6-B consumes a versioned, injected Stage-0 authority-universe scope/proof
+before candidate enumeration. Items excluded by that proof never enter
+candidate-source membership, accountability, partitions, counts, ordering, or
+exposure.
+
 ## 5. Candidate source and admission
 
-Candidate sources are replaceable, but every source enters one mandatory
-structured candidate-admission choke point.
+The exact ordered boundary is:
+
+1. caller context;
+2. injected versioned Stage-0 authority-universe scope/proof;
+3. candidate enumeration only within that scope;
+4. structured evidence evaluation and D5 decisions;
+5. one candidate-admission choke point, including mandatory
+   candidate-specific commerce eligibility;
+6. partitioned/asserted result formation;
+7. exposure.
+
+Candidate sources are replaceable, but every enumerated candidate enters the
+one mandatory structured candidate-admission choke point.
 
 A source may discover possible candidates. It may not declare a product an
 asserted match.
@@ -113,11 +149,16 @@ Admission receives, at minimum:
 - candidate identity and canonical style parent;
 - per-candidate per-attribute evidence;
 - constraint-policy decisions from the authorized owner;
-- injected eligibility summary;
+- injected candidate-specific commerce eligibility summary;
 - all relevant component and snapshot versions.
 
 No candidate bypasses admission before asserted results, ordering, exposure,
 landing, or future ranking.
+
+Candidate-specific commerce eligibility cannot substitute for Stage-0
+authority-universe scoping. Discovery consumes and versions both injected
+inputs but recomputes neither. This design does not freeze a separate runtime
+module for either boundary.
 
 ## 6. Preserve per-constraint truth
 
@@ -171,12 +212,16 @@ requires a separate contract and tests.
 The provisional first attributes are:
 
 ```text
-style.color_family
-style.texture_family
+governed color-family concept
+governed texture-family concept
 ```
 
 These are governed categorical ontology concepts, not direct aliases for
 `WigVariant.color` and `WigVariant.curl`.
+
+Exact ontology IDs are deferred. D5-S1 may assign provisional IDs under its
+own review. Every evidence instance is variant-scoped and storage-neutral; the
+concept names do not imply `WigStyle`, `WigVariant`, or Prisma ownership.
 
 The first source slice accepts only one or two declared/user-selected
 categorical stylistic constraints. Free-text derived preferences remain
@@ -195,17 +240,25 @@ not satisfy this contract.
 - medical/certified/chemotherapy/hypoallergenic/safety claims;
 - comfort, naturalness, breathability, sensitive-scalp outcomes;
 - category and tags as asserted evidence;
-- stock and fulfillment as query-derived match facts;
+- stock, which is candidate eligibility rather than a D6-B1 query attribute;
+- fulfillment class and lead time, which are structural/functional concepts
+  whose evidence and commerce admission facts may be commerce-owned;
 - bangs, part, silhouette, cap/base, attachment, or fit until represented and
   governed;
-- price and lead time until their policy and authority are separately defined.
+- price, whose future customer-constraint policy is deferred and whose final
+  conceptual band this contract does not assign.
+
+Cap/base/lace construction and attachment are structural/functional
+attributes. Their classification, and the structural/functional
+classification of fulfillment and lead time, does not include any of them in
+D6-B1 or transfer their evidence or admission authority to discovery.
 
 ## 9. Current blocking dependency: D5-S1
 
 D6-B1 source is blocked until a separate versioned D5 structured-constraint
 policy extension provides:
 
-1. query-level decisions for governed categorical and continuous constraints;
+1. query-level decisions for governed categorical constraints;
 2. an explicit policy-owned effect for required, preference, route,
    clarification, or unsupported use;
 3. fixture-product decision support for non-claim stylistic categorical
@@ -218,6 +271,15 @@ policy extension provides:
 
 D6-B may not create an equivalent local enum or heuristic to bypass this
 dependency.
+
+D5-S1 is categorical-only. It does not alter or freeze current D5 continuous
+source semantics. The later numeric-length sequence is:
+
+```text
+measurement method, canonical unit, evidence, and tolerance governance
+→ D5-S2 continuous query-policy extension
+→ D6-B2 numeric length fixture retrieval
+```
 
 ## 10. D6-B1 target after D5-S1
 
@@ -290,6 +352,10 @@ At minimum:
 - asserted candidate, known mismatch, missing evidence, conflicting evidence,
   and duplicate evidence;
 - candidate/style identity mismatch;
+- Stage-0-excluded items never enter candidate membership, accountability,
+  partitions, counts, or exposure;
+- candidate-specific commerce eligibility is independently required inside
+  admission and cannot replace Stage 0;
 - missing/duplicate/stale eligibility summary;
 - unrelated candidate/evidence membership and order independence;
 - no candidate bypasses admission;
@@ -315,11 +381,13 @@ collection; a new dependency; or schema/migration work.
 
 ```text
 D6-B0 reconnaissance and contract
-→ D5-S1 structured-constraint policy contract and source
+→ D5-S1 categorical structured-constraint policy contract and source
 → D5-S1 source-vocabulary freeze
 → D6-B1 categorical stylistic fixture retrieval
 → D6-B1 source review and freeze
-→ D6-B2 numeric length after measurement governance
+→ measurement method/unit/evidence/tolerance governance
+→ D5-S2 continuous query-policy extension
+→ D6-B2 numeric length fixture retrieval
 → D6-B3 exact-plus-structured composition
 → D6-C production governed catalog/eligibility adapter
 ```

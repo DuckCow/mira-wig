@@ -7,10 +7,10 @@ structured-constraint policy extension?
 
 ## Attempts
 
-### Use current `CATEGORICAL` and `CONTINUOUS` shapes directly
+### Use current `CATEGORICAL` shape directly
 
-Rejected. The shapes exist, but `validateQueryConstraint` explicitly rejects
-both at query level (`src/lib/discovery/decide-constraint.ts:632-650`).
+Rejected. The shape exists, but `validateQueryConstraint` explicitly rejects
+it at query level (`src/lib/discovery/decide-constraint.ts:632-650`).
 Retrieval cannot know whether a parsed categorical constraint is required,
 preference-only, route-only, clarification-required, or unsupported.
 
@@ -55,11 +55,22 @@ The D5-S1 dependency is confirmed and material. Bypassing it requires D6 to
 become a competing policy owner or to emit results with no governed assertion
 meaning. The smallest safe sequence is:
 
-1. D5-S1 query policy disposition and non-claim stylistic product evidence;
+1. D5-S1 categorical query policy disposition and non-claim stylistic
+   categorical product evidence;
 2. D5-S1 versioned vocabulary/change-control review;
 3. D6-B1 fixture retrieval consuming those decisions.
 
 No current D5 claim-bearing or sensitive-use rule should be weakened.
+
+The review finding that query-level continuous policy must precede D6-B1 is
+accepted only after narrowing: D6-B1 is categorical-only. Current synthetic
+fixture-product tolerance behavior does not govern query-level continuous
+intent, measurements, units, evidence, or tolerance. Those require later
+measurement governance, then D5-S2, before D6-B2.
+
+Exact ontology IDs are also deferred. D6-B1 targets generic governed
+color-family and texture-family concepts; D5-S1 may assign provisional IDs
+later. Evidence remains variant-scoped and storage-neutral.
 
 ## Supplied ruling dispositions
 
@@ -79,6 +90,15 @@ No current D5 claim-bearing or sensitive-use rule should be weakened.
 | B0-R12 | CONFIRMED | These claims/outcomes lack current evidence and authority. |
 | B0-R13 | CONFIRMED | Category/tags are overloaded and cannot substantiate assertions. |
 | B0-R14 | CONFIRMED | D6-B1 has no ranker or automatic relaxation. |
+
+Adjudicated review dispositions:
+
+| ID | Disposition | Correction |
+| --- | --- | --- |
+| R12-F01 | ACCEPT | Narrow D5-S1 to categorical-only; defer continuous policy to measurement governance and D5-S2 before D6-B2. |
+| R12-F02 | ACCEPT | Separate conceptual band, D5 support, evidence owner, query-policy owner, commerce admission owner, and B1 inclusion. |
+| R12-F03 | PARTIALLY_ACCEPT | Preserve the conceptual distinction and make the two injected gates and their order explicit. |
+| R12-F04 | PARTIALLY_ACCEPT | Defer exact ontology IDs; use governed concepts with variant-scoped, storage-neutral evidence. |
 
 All six supplied current-repository findings B0-F01 through B0-F06 are
 `CONFIRMED`. F02 is limited to the committed seed rather than the database
