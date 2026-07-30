@@ -91,20 +91,32 @@ const AUTHORITY_OUTCOMES = exhaustiveValues<AuthorityOutcome["kind"]>()([
   "NOT_APPLICABLE",
 ]);
 
-const D5_DECISION_PROFILES = exhaustiveValues<D5DecisionProfile>()([
+const INHERITED_V0_1_D5_DECISION_PROFILES = [
   "CLAIM_BEARING_MATERIAL",
   "SENSITIVE_USE_CONTEXT",
+] as const satisfies readonly D5DecisionProfile[];
+
+const FINAL_V0_2_D5_DECISION_PROFILES = [
   "GOVERNED_STYLISTIC_CATEGORICAL",
+] as const satisfies readonly D5DecisionProfile[];
+
+const D5_DECISION_PROFILES = exhaustiveValues<D5DecisionProfile>()([
+  ...INHERITED_V0_1_D5_DECISION_PROFILES,
+  ...FINAL_V0_2_D5_DECISION_PROFILES,
 ]);
 
+const FINAL_V0_2_CATEGORICAL_POLICY_DISPOSITIONS = [
+  "REQUIRED",
+  "PREFERENCE",
+  "ROUTE",
+  "CLARIFICATION",
+  "UNSUPPORTED",
+] as const satisfies readonly CategoricalPolicyDisposition[];
+
 const CATEGORICAL_POLICY_DISPOSITIONS =
-  exhaustiveValues<CategoricalPolicyDisposition>()([
-    "REQUIRED",
-    "PREFERENCE",
-    "ROUTE",
-    "CLARIFICATION",
-    "UNSUPPORTED",
-  ]);
+  exhaustiveValues<CategoricalPolicyDisposition>()(
+    FINAL_V0_2_CATEGORICAL_POLICY_DISPOSITIONS,
+  );
 
 const DECISION_POLICY_KINDS = exhaustiveValues<
   DecisionPolicyFixture["kind"]
@@ -115,13 +127,21 @@ const DECISION_POLICY_KINDS = exhaustiveValues<
   "CATEGORICAL_POLICY",
 ]);
 
-const GATE_DECISIONS = exhaustiveValues<GateDecision>()([
+const INHERITED_V0_1_GATE_DECISIONS = [
   "ASSERT_MATCH",
-  "REQUIRE_MATCH",
   "DO_NOT_GATE",
   "REQUIRE_CLARIFICATION",
   "ROUTE_ONLY",
   "UNSUPPORTED",
+] as const satisfies readonly GateDecision[];
+
+const FINAL_V0_2_GATE_DECISIONS = [
+  "REQUIRE_MATCH",
+] as const satisfies readonly GateDecision[];
+
+const GATE_DECISIONS = exhaustiveValues<GateDecision>()([
+  ...INHERITED_V0_1_GATE_DECISIONS,
+  ...FINAL_V0_2_GATE_DECISIONS,
 ]);
 
 const SCORE_DECISIONS = exhaustiveValues<ScoreDecision>()([
@@ -158,7 +178,7 @@ const RELAXATION_DECISIONS = exhaustiveValues<RelaxationDecision>()([
   "NOT_APPLICABLE",
 ]);
 
-const DISCOVERY_REASON_CODES = exhaustiveValues<DiscoveryReasonCode>()([
+const INHERITED_V0_1_DISCOVERY_REASON_CODES = [
   "EXACT_IDENTITY_MATCH",
   "EXACT_IDENTITY_NO_SUBSTITUTION",
   "EVIDENCE_QUALIFIED_MATCH",
@@ -171,12 +191,20 @@ const DISCOVERY_REASON_CODES = exhaustiveValues<DiscoveryReasonCode>()([
   "CONFIRMATION_CHANGED_INTENT_ONLY",
   "AUDIENCE_NAMESPACE_PRESERVED",
   "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY",
+] as const satisfies readonly DiscoveryReasonCode[];
+
+const FINAL_V0_2_DISCOVERY_REASON_CODES = [
   "CATEGORICAL_REQUIRED_BY_POLICY",
   "CATEGORICAL_PREFERENCE_BY_POLICY",
   "CATEGORICAL_OUTSIDE_DISCOVERY_AUTHORITY_ROUTE",
   "CATEGORICAL_CLARIFICATION_REQUIRED",
   "CATEGORICAL_UNSUPPORTED_BY_POLICY",
-  "MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY",
+  "MODEL_INFERRED_STYLISTIC_HAS_NO_ASSERTION_AUTHORITY",
+] as const satisfies readonly DiscoveryReasonCode[];
+
+const DISCOVERY_REASON_CODES = exhaustiveValues<DiscoveryReasonCode>()([
+  ...INHERITED_V0_1_DISCOVERY_REASON_CODES,
+  ...FINAL_V0_2_DISCOVERY_REASON_CODES,
 ]);
 
 const FIXTURE_REASON_CODES = exhaustiveValues<FixtureReasonCode>()([
@@ -248,7 +276,7 @@ describe("D5 source vocabulary", () => {
     ]);
   });
 
-  it("keeps the categorical policy provisional and the decision shape fixed", () => {
+  it("classifies final v0.2 vocabulary separately from the provisional fixture carrier", () => {
     type DecisionFields = keyof ConstraintDecision;
     type ExpectedDecisionFields =
       | "constraintId"
@@ -279,6 +307,31 @@ describe("D5 source vocabulary", () => {
       policyVersion: "fixture:categorical-policy/v0.1-provisional",
     };
 
+    expect({
+      decisionProfiles: FINAL_V0_2_D5_DECISION_PROFILES,
+      gateDecisions: FINAL_V0_2_GATE_DECISIONS,
+      categoricalPolicyDispositions:
+        FINAL_V0_2_CATEGORICAL_POLICY_DISPOSITIONS,
+      discoveryReasonCodes: FINAL_V0_2_DISCOVERY_REASON_CODES,
+    }).toEqual({
+      decisionProfiles: ["GOVERNED_STYLISTIC_CATEGORICAL"],
+      gateDecisions: ["REQUIRE_MATCH"],
+      categoricalPolicyDispositions: [
+        "REQUIRED",
+        "PREFERENCE",
+        "ROUTE",
+        "CLARIFICATION",
+        "UNSUPPORTED",
+      ],
+      discoveryReasonCodes: [
+        "CATEGORICAL_REQUIRED_BY_POLICY",
+        "CATEGORICAL_PREFERENCE_BY_POLICY",
+        "CATEGORICAL_OUTSIDE_DISCOVERY_AUTHORITY_ROUTE",
+        "CATEGORICAL_CLARIFICATION_REQUIRED",
+        "CATEGORICAL_UNSUPPORTED_BY_POLICY",
+        "MODEL_INFERRED_STYLISTIC_HAS_NO_ASSERTION_AUTHORITY",
+      ],
+    });
     expect(decisionShapeIsExact).toBe(true);
     expect(Object.keys(policy).sort()).toEqual([
       "attributeId",
@@ -335,12 +388,22 @@ describe("D5 source vocabulary", () => {
     ]);
   });
 
-  it("uses the exact stable and provisional component registry identifiers", () => {
+  it("rejects the superseded stylistic model reason at the TypeScript boundary", () => {
+    // @ts-expect-error The v0.2 durable reason names denied assertion authority precisely.
+    const supersededReason: DiscoveryReasonCode =
+      "MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY";
+
+    expect(supersededReason).toBe(
+      "MODEL_INFERRED_STYLISTIC_HAS_NO_AUTHORITY",
+    );
+  });
+
+  it("uses the exact final and provisional component registry identifiers", () => {
     expect(DISCOVERY_COMPONENT_VERSIONS).toEqual({
       requestSchema: "d5-source-only-request/v0.2-provisional",
       normalizer: "d5-conservative-normalizer/v0.1",
       parser: "d5-injected-span-parser/v0.1",
-      constraintRules: "d5-constraint-decisions/v0.2-provisional",
+      constraintRules: "d5-constraint-decisions/v0.2",
       fixtureSnapshot: "d5-golden-cases/v0.2-provisional",
     });
 
