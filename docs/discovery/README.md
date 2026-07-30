@@ -46,8 +46,8 @@ Model agreement is not evidence.
 1. [`discovery-foundation-contract-v0.2.md`](./discovery-foundation-contract-v0.2.md)
    Scope boundaries, work that may be proposed or implemented in source, staged gates, visual-track separation, and D4–D6 sequence.
 
-2. [`d5-source-vocabulary-contract-v0.1.md`](./d5-source-vocabulary-contract-v0.1.md)
-   Freezes the reviewed D5 source-only module responsibilities, primary entrypoints, serialized output fields and literals, durable reasons, component versions, and provisional, fixture, and internal boundaries.
+2. [`d5-source-vocabulary-contract-v0.2.md`](./d5-source-vocabulary-contract-v0.2.md)
+   Current D5 source-vocabulary authority. Supersedes v0.1 while inheriting its frozen foundation; freezes the D5-S1 governed categorical profile, query-only `REQUIRE_MATCH`, policy dispositions, final durable reasons, and `d5-constraint-decisions/v0.2`; keeps the categorical fixture carrier and request/golden schemas provisional.
 
 3. [`d6-exact-vertical-slice-contract-v0.1.md`](./d6-exact-vertical-slice-contract-v0.1.md)
    Freezes the exact-SKU source-only D6 slice: variant result identity, injected fixture and eligibility boundaries, one admission choke point, exact landing integrity, and a default-off event seam.
