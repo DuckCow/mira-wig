@@ -2,6 +2,7 @@ import { StyleCard } from "@/components/features/StyleCard";
 import type { MarketCode } from "@/lib/market/types";
 import {
   ManualItemRelationsActivationConfigError,
+  type ManualItemRelationsActivationEnv,
 } from "@/lib/manual-item-relations/activation";
 import {
   getManualRelatedStyles,
@@ -35,9 +36,10 @@ export interface RelatedStyleViewGroups {
 export async function loadRelatedStylesForPdp(
   sourceStyleId: string,
   marketCode: MarketCode,
+  env?: ManualItemRelationsActivationEnv,
 ): Promise<ManualRelatedStyleGroups> {
   try {
-    return await getManualRelatedStyles(sourceStyleId, marketCode);
+    return await getManualRelatedStyles(sourceStyleId, marketCode, env);
   } catch (error) {
     if (error instanceof ManualItemRelationsActivationConfigError) {
       return { SIMILAR_STYLE: [], COMPARE_WITH: [] };

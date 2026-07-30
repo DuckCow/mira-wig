@@ -3,12 +3,12 @@ import "server-only";
 import { db } from "@/lib/db";
 import {
   getEnabledManualRelationPurposes,
+  type ManualItemRelationsActivationEnv,
 } from "./activation";
 import {
   ManualStyleRelationPurpose,
   type ManualRelatedStyle,
   type ManualRelatedStyleGroups,
-  type ManualStyleRelationPurpose as ManualStyleRelationPurposeValue,
 } from "./types";
 import { compareUtf16CodeUnits } from "./validation";
 
@@ -24,11 +24,9 @@ function emptyGroups(): ManualRelatedStyleGroups {
 export async function getManualRelatedStyles(
   sourceStyleId: string,
   marketCode: string,
-  activation?: readonly ManualStyleRelationPurposeValue[],
+  env?: ManualItemRelationsActivationEnv,
 ): Promise<ManualRelatedStyleGroups> {
-  const enabledPurposes = activation
-    ? [...activation]
-    : getEnabledManualRelationPurposes(marketCode);
+  const enabledPurposes = getEnabledManualRelationPurposes(marketCode, env);
   if (enabledPurposes.length === 0) return emptyGroups();
 
   const source = await db.wigStyle.findFirst({

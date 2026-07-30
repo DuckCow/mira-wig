@@ -74,18 +74,27 @@ describe("manual item relation admin actions", () => {
 
   it("uses only the authenticated actor snapshot and whitelists create fields", async () => {
     mocks.requireAdmin.mockResolvedValue({ success: true, session: adminSession() });
-    mocks.create.mockResolvedValue({ id: "relation-new" });
+    mocks.create.mockResolvedValue({
+      id: "relation-new",
+      sourceStyleId: "source",
+    });
     const clientInput = {
       ...CREATE_INPUT,
+      sourceStyleId: " source ",
       createdByAdminUserId: "forged-creator",
       updatedByAdminUserId: "forged-updater",
       isActive: true,
     };
     const result = await createManualStyleRelationAction(clientInput);
     expect(result).toEqual({ success: true, relationId: "relation-new" });
-    expect(mocks.create).toHaveBeenCalledWith("authenticated-admin", CREATE_INPUT);
+    expect(mocks.create).toHaveBeenCalledWith("authenticated-admin", {
+      ...CREATE_INPUT,
+      sourceStyleId: " source ",
+    });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/admin/styles/source");
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/styles/source");
+    expect(mocks.revalidatePath).not.toHaveBeenCalledWith("/admin/styles/ source ");
+    expect(mocks.revalidatePath).not.toHaveBeenCalledWith("/styles/ source ");
   });
 
   it("whitelists mutable update fields and revalidates the persisted source", async () => {

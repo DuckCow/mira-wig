@@ -65,7 +65,7 @@ async function assertRelationReferences(
 export async function createManualStyleRelation(
   actorUserIdValue: string,
   input: CreateManualStyleRelationInput,
-): Promise<{ id: string }> {
+): Promise<{ id: string; sourceStyleId: string }> {
   const actorUserId = normalizeRequiredIdentifier(actorUserIdValue, "INVALID_ACTOR");
   const sourceStyleId = normalizeRequiredIdentifier(input.sourceStyleId, "SOURCE_STYLE_NOT_FOUND");
   const targetStyleId = normalizeRequiredIdentifier(input.targetStyleId, "TARGET_STYLE_NOT_FOUND");
@@ -102,7 +102,7 @@ export async function createManualStyleRelation(
         createdByAdminUserId: actorUserId,
         updatedByAdminUserId: actorUserId,
       },
-      select: { id: true },
+      select: { id: true, sourceStyleId: true },
     });
   } catch (error) {
     if (isDuplicateRelationError(error)) {

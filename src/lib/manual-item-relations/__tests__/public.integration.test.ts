@@ -1,7 +1,18 @@
 import { randomUUID } from "crypto";
 import { WigCategory } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+} from "vitest";
 import { db } from "@/lib/db";
+import {
+  ManualItemRelationsActivationConfigError,
+  type ManualItemRelationsActivationEnv,
+} from "../activation";
 import { getManualRelatedStyles } from "../public";
 
 interface Fixture {
@@ -9,6 +20,10 @@ interface Fixture {
   sourceStyleId: string;
   targetStyleId: string;
 }
+
+const SIMILAR_STYLE_ENABLED_ENV = {
+  MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "ENABLED",
+} as const;
 
 describe("manual related styles public read", () => {
   let fixture: Fixture;
@@ -38,6 +53,22 @@ describe("manual related styles public read", () => {
       },
     });
     await db.wigStyle.deleteMany({ where: { id: { in: fixture.styleIds } } });
+  });
+
+  it("accepts only activation environment injection at the exported boundary", () => {
+    type PublicReadEnvironment = Parameters<typeof getManualRelatedStyles>[2];
+    expectTypeOf<PublicReadEnvironment>().toEqualTypeOf<
+      ManualItemRelationsActivationEnv | undefined
+    >();
+  });
+
+  it("keeps blank KR configuration off and rejects invalid KR configuration", async () => {
+    await expect(
+      getManualRelatedStyles(fixture.sourceStyleId, "KR", {}),
+    ).resolves.toEqual(emptyGroups());
+    await expect(getManualRelatedStyles(fixture.sourceStyleId, "KR", {
+      MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "invalid",
+    })).rejects.toBeInstanceOf(ManualItemRelationsActivationConfigError);
   });
 
   it("hides missing, globally inactive, and wrong-market source contexts", async () => {
@@ -136,10 +167,21 @@ describe("manual related styles public read", () => {
         "COMPARE_WITH",
       ),
     ]);
+    const similarOnly = await getManualRelatedStyles(
+      fixture.sourceStyleId,
+      "KR",
+      SIMILAR_STYLE_ENABLED_ENV,
+    );
+    expect(similarOnly.SIMILAR_STYLE).toHaveLength(4);
+    expect(similarOnly.COMPARE_WITH).toEqual([]);
+
     const groups = await getManualRelatedStyles(
       fixture.sourceStyleId,
       "KR",
-      ["SIMILAR_STYLE", "COMPARE_WITH"],
+      {
+        MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "ENABLED",
+        MANUAL_ITEM_RELATIONS_KR_COMPARE_WITH_ENABLED: "ENABLED",
+      },
     );
     expect(groups.SIMILAR_STYLE.map((style) => style.id)).toEqual([
       targetIds[0],
@@ -149,6 +191,31 @@ describe("manual related styles public read", () => {
     ]);
     expect(groups.COMPARE_WITH.map((style) => style.id)).toEqual([targetIds[5]]);
   });
+
+  it("cannot activate an eligible US relation with injected KR activation keys", async () => {
+    await ensureMarket("US");
+    await Promise.all([
+      publishStyle(fixture.sourceStyleId, "US"),
+      publishStyle(fixture.targetStyleId, "US"),
+    ]);
+    await createActiveRelation(
+      fixture.sourceStyleId,
+      fixture.targetStyleId,
+      0,
+      "SIMILAR_STYLE",
+      "US",
+    );
+    await makeEligibleTarget(fixture.targetStyleId, {
+      active: true,
+      priced: true,
+      marketCode: "US",
+    });
+    await expect(getManualRelatedStyles(
+      fixture.sourceStyleId,
+      "US",
+      SIMILAR_STYLE_ENABLED_ENV,
+    )).resolves.toEqual(emptyGroups());
+  });
 });
 
 function emptyGroups() {
@@ -156,17 +223,17 @@ function emptyGroups() {
 }
 
 async function read(sourceStyleId: string) {
-  return getManualRelatedStyles(sourceStyleId, "KR", ["SIMILAR_STYLE"]);
+  return getManualRelatedStyles(sourceStyleId, "KR", SIMILAR_STYLE_ENABLED_ENV);
 }
 
-async function ensureMarket(): Promise<void> {
+async function ensureMarket(code = "KR"): Promise<void> {
   await db.market.upsert({
-    where: { code: "KR" },
+    where: { code },
     create: {
-      code: "KR",
-      currency: "KRW",
-      shippableCountries: ["KR"],
-      defaultLocale: "ko",
+      code,
+      currency: code === "KR" ? "KRW" : "USD",
+      shippableCountries: [code],
+      defaultLocale: code === "KR" ? "ko" : "en",
     },
     update: {},
   });
@@ -184,9 +251,9 @@ async function createStyle(id: string): Promise<void> {
   });
 }
 
-async function publishStyle(styleId: string): Promise<void> {
+async function publishStyle(styleId: string, marketCode = "KR"): Promise<void> {
   await db.wigStyleMarket.create({
-    data: { wigStyleId: styleId, marketCode: "KR", isActive: true },
+    data: { wigStyleId: styleId, marketCode, isActive: true },
   });
 }
 
@@ -195,12 +262,13 @@ async function createActiveRelation(
   targetStyleId: string,
   priority: number,
   purpose: "SIMILAR_STYLE" | "COMPARE_WITH" = "SIMILAR_STYLE",
+  marketCode = "KR",
 ): Promise<void> {
   await db.wigStyleRelation.create({
     data: {
       sourceStyleId,
       targetStyleId,
-      marketCode: "KR",
+      marketCode,
       purpose,
       priority,
       isActive: true,
@@ -219,6 +287,7 @@ async function makeEligibleTarget(
     stock?: number;
     legacyPrice?: number;
     marketAmount?: number;
+    marketCode?: string;
   },
 ): Promise<void> {
   await db.wigVariant.create({
@@ -234,7 +303,10 @@ async function makeEligibleTarget(
       isActive: options.active,
       ...(options.priced && {
         marketPrices: {
-          create: { marketCode: "KR", amount: options.marketAmount ?? 85000 },
+          create: {
+            marketCode: options.marketCode ?? "KR",
+            amount: options.marketAmount ?? 85000,
+          },
         },
       }),
     },

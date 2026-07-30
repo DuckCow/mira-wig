@@ -4,7 +4,8 @@ import {
   type ManualStyleRelationPurpose as ManualStyleRelationPurposeValue,
 } from "./types";
 
-type ActivationEnv = Readonly<Record<string, string | undefined>>;
+export type ManualItemRelationsActivationEnv =
+  Readonly<Record<string, string | undefined>>;
 
 const PURPOSE_KEYS: Readonly<Record<ManualStyleRelationPurposeValue, string>> = {
   [ManualStyleRelationPurpose.SIMILAR_STYLE]:
@@ -22,7 +23,7 @@ export class ManualItemRelationsActivationConfigError extends Error {
 
 export function getEnabledManualRelationPurposes(
   marketCode: string,
-  env: ActivationEnv = process.env,
+  env: ManualItemRelationsActivationEnv = process.env,
 ): ManualStyleRelationPurposeValue[] {
   if (marketCode !== "KR") return [];
   return MANUAL_STYLE_RELATION_PURPOSES.filter((purpose) => (
@@ -30,7 +31,10 @@ export function getEnabledManualRelationPurposes(
   ));
 }
 
-function parseActivation(env: ActivationEnv, key: string): boolean {
+function parseActivation(
+  env: ManualItemRelationsActivationEnv,
+  key: string,
+): boolean {
   const value = env[key]?.trim();
   if (!value) return false;
   if (value === "ENABLED") return true;

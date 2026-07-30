@@ -1,6 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/storage", () => ({
   catalogStorage: { getViewUrl: vi.fn() },
@@ -15,11 +15,6 @@ const EMPTY: RelatedStyleViewGroups = {
   SIMILAR_STYLE: [],
   COMPARE_WITH: [],
 };
-
-afterEach(() => {
-  delete process.env.MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED;
-  delete process.env.MANUAL_ITEM_RELATIONS_KR_COMPARE_WITH_ENABLED;
-});
 
 describe("related styles PDP section", () => {
   it("renders nothing for empty groups", () => {
@@ -53,12 +48,13 @@ describe("related styles PDP section", () => {
   });
 
   it("keeps default-off pages empty and fails closed for invalid configuration", async () => {
-    await expect(loadRelatedStylesForPdp("source", "KR")).resolves.toEqual({
+    await expect(loadRelatedStylesForPdp("source", "KR", {})).resolves.toEqual({
       SIMILAR_STYLE: [],
       COMPARE_WITH: [],
     });
-    process.env.MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED = "invalid";
-    await expect(loadRelatedStylesForPdp("source", "KR")).resolves.toEqual({
+    await expect(loadRelatedStylesForPdp("source", "KR", {
+      MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "invalid",
+    })).resolves.toEqual({
       SIMILAR_STYLE: [],
       COMPARE_WITH: [],
     });

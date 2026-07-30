@@ -52,7 +52,7 @@ export async function createManualStyleRelationAction(
       internalRationale: input.internalRationale,
     };
     const result = await createManualStyleRelation(guard.session.user.id, serviceInput);
-    revalidateRelationPaths(input.sourceStyleId);
+    revalidateRelationPaths(result.sourceStyleId);
     return { success: true, relationId: result.id };
   } catch (error) {
     return handleError(error);
