@@ -1,0 +1,51 @@
+{
+  "snapshotId": "WIG-COM-DSC-R11-COD-D6-B0-v0.1",
+  "observedCommit": "85d0b49b5e3eec3af6a604caaf3580c07d76a281",
+  "observedDate": "2026-07-30",
+  "evidenceType": "IMMUTABLE_DESCRIPTIVE_REPOSITORY_SNAPSHOT",
+  "taskClassification": "SOURCE_ONLY_DOCUMENTATION_AND_READ_ONLY_REPOSITORY_EVIDENCE",
+  "taskAuthorization": "D6_B0_RECONNAISSANCE_AND_CONTRACT_ONLY",
+  "manifestSelfChecksum": "EXCLUDED_TO_AVOID_SELF_REFERENCE",
+  "files": [
+    {
+      "path": "01_BASELINE_AND_SCOPE.md",
+      "sha256": "a17089652dde7eb669edd1b8c485a64c14663c0cda954912bde3f871c09bf18f"
+    },
+    {
+      "path": "02_SCHEMA_SEED_AND_ATTRIBUTE_INVENTORY.md",
+      "sha256": "ad7b40dd0c64715fbf4145db0a8f0f81b87f3f9b01d3d41c0603d18fcbecee7e"
+    },
+    {
+      "path": "03_CATALOG_READ_PATH_AND_VARIANT_IDENTITY_MAP.md",
+      "sha256": "7333ddab104b946e0a2159cb85bee4345146692da02c44518eb76ac033735ecd"
+    },
+    {
+      "path": "04_D5_STRUCTURED_DECISION_CAPABILITY_MATRIX.md",
+      "sha256": "e6d3afb88395a4b594fab22083f8b649b906d6d91763b32ef7ec70f5937cc8e7"
+    },
+    {
+      "path": "05_D6_A_COMPATIBILITY_AND_COMPOSITION.md",
+      "sha256": "bfc19826171f077c4ef89d61e590c971c8116e0c404ba58197edf7aefce9316a"
+    },
+    {
+      "path": "06_ATTRIBUTE_AUTHORITY_MATRIX.json",
+      "sha256": "a7712456817064de7eef031ada5119a3b2ad186f0c97aa1f03b16fb3c300ea64"
+    },
+    {
+      "path": "07_CANDIDATE_ADMISSION_AND_PARTITION_ANALYSIS.md",
+      "sha256": "f7ac5bcb4e218e0ab173ecbe1eb4968cfd6b0299c6c917be4913d8d96e3f46e6"
+    },
+    {
+      "path": "08_D5_S1_DEPENDENCY_ANALYSIS.md",
+      "sha256": "32998e6448769ba05675a0a0f42f89b92ff505b4d4c597c0b93ade05afe93b65"
+    },
+    {
+      "path": "09_D6_B_STAGE_AND_TEST_PLAN.md",
+      "sha256": "7f0cce2fc46791e146eebfad819e5c0be332c687aa4944deaca73bd2160cd15d"
+    },
+    {
+      "path": "10_VALIDATION_AND_CHECKSUMS.md",
+      "sha256": "2d4a02435472f1209a5d5aec12605989b53966c4c6f0594ca45a2e1789d7b2e6"
+    }
+  ]
+}
