@@ -20,6 +20,10 @@ import type {
 } from "./types";
 import { D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS } from "./versions";
 
+function compareUtf16CodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function isNonblankRuntimeString(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -30,7 +34,10 @@ function isNonblankRuntimeString(value: unknown): value is string {
 
 function requestPlanIsValid(input: AdmitStructuredCandidateInput): boolean {
   const plan = input.requestPlan;
-  if (!requestPlanShapeIsValid(plan)) {
+  if (
+    !requestPlanShapeIsValid(plan) ||
+    !requestPlanHasUniqueGovernedAttributes(plan)
+  ) {
     return false;
   }
 
@@ -65,6 +72,18 @@ function requestPlanShapeIsValid(
     plan.constraints.length <= 2 &&
     plan.constraints.length === plan.policies.length &&
     plan.constraints.length === plan.queryDecisions.length
+  );
+}
+
+function requestPlanHasUniqueGovernedAttributes(
+  plan: AdmitStructuredCandidateInput["requestPlan"],
+): boolean {
+  return (
+    new Set(
+      plan.constraints.map(
+        (constraint) => constraint.value.attributeId,
+      ),
+    ).size === plan.constraints.length
   );
 }
 
@@ -185,12 +204,13 @@ function canonicalConstraintOrder(
   left: GovernedCategoricalConstraint,
   right: GovernedCategoricalConstraint,
 ): number {
-  const attributeOrder = left.value.attributeId.localeCompare(
+  const attributeOrder = compareUtf16CodeUnits(
+    left.value.attributeId,
     right.value.attributeId,
   );
   return attributeOrder !== 0
     ? attributeOrder
-    : left.constraintId.localeCompare(right.constraintId);
+    : compareUtf16CodeUnits(left.constraintId, right.constraintId);
 }
 
 function stringArraysEqual(
@@ -381,10 +401,16 @@ function canonicalPairOrder(
     readonly canonicalStyleId: string;
   },
 ): number {
-  const variantOrder = left.variantId.localeCompare(right.variantId);
+  const variantOrder = compareUtf16CodeUnits(
+    left.variantId,
+    right.variantId,
+  );
   return variantOrder !== 0
     ? variantOrder
-    : left.canonicalStyleId.localeCompare(right.canonicalStyleId);
+    : compareUtf16CodeUnits(
+        left.canonicalStyleId,
+        right.canonicalStyleId,
+      );
 }
 
 function canonicalPairsAreValid(

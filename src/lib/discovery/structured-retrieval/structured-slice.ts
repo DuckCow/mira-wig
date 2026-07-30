@@ -14,6 +14,10 @@ import type {
 } from "./types";
 import { D6_B1_STRUCTURED_RETRIEVAL_COMPONENT_VERSIONS } from "./versions";
 
+function compareUtf16CodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function d5AttributionVersions(
   input: RunStructuredCategoricalFixtureSliceInput,
 ): D5StructuredRetrievalAttributionVersions {
@@ -30,10 +34,16 @@ function technicalCandidateOrder(
   left: StructuredCandidateFixture,
   right: StructuredCandidateFixture,
 ): number {
-  const variantOrder = left.variantId.localeCompare(right.variantId);
+  const variantOrder = compareUtf16CodeUnits(
+    left.variantId,
+    right.variantId,
+  );
   return variantOrder !== 0
     ? variantOrder
-    : left.canonicalStyleId.localeCompare(right.canonicalStyleId);
+    : compareUtf16CodeUnits(
+        left.canonicalStyleId,
+        right.canonicalStyleId,
+      );
 }
 
 interface CandidatePartitions {

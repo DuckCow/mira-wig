@@ -53,8 +53,30 @@ describe("D6-B1 Stage-0 authority-universe proof", () => {
       { variantId: VARIANT_B, canonicalStyleId: STYLE_B },
     ]);
     expect(result.accountabilityKey).toContain(
-      "d6-b1-stage-0-authority-universe/v0.1-provisional",
+      "d6-b1-stage-0-authority-universe/v0.1",
     );
+  });
+
+  it("uses locale-independent UTF-16 code-unit membership order", () => {
+    const zPair = {
+      variantId: "fixture:variant:z",
+      canonicalStyleId: "fixture:style:z",
+    };
+    const umlautPair = {
+      variantId: "fixture:variant:ä",
+      canonicalStyleId: "fixture:style:ä",
+    };
+    const forward = validatedStage0([zPair, umlautPair]);
+    const reversed = validatedStage0([umlautPair, zPair]);
+
+    expect(forward.allowedCanonicalPairs).toEqual([
+      zPair,
+      umlautPair,
+    ]);
+    expect(reversed.allowedCanonicalPairs).toEqual(
+      forward.allowedCanonicalPairs,
+    );
+    expect(reversed.accountabilityKey).toBe(forward.accountabilityKey);
   });
 
   it("rejects malformed provenance and caller-context mismatch", () => {
