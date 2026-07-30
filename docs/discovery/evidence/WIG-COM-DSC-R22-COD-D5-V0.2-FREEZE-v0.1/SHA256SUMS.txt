@@ -1,0 +1,11 @@
+e1a0cff893f154a397943988224594c4c13b03740a0baa64f95cbded9d2f844d  docs/discovery/d5-source-vocabulary-contract-v0.2.md
+69f2f23bedd56e0a25f64907fdeaab71b689f5f6a5ea4463328d0be175731d1e  docs/discovery/README.md
+3c68bd47239fb5d9a74f501e067c2059f6817185265348c97d184a7938e55bf2  docs/discovery/decision-log.md
+75375af973daaa145dc50d9c5bc8cbc135c1da62ab8c631edaa5473a86b247dd  docs/discovery/evidence/WIG-COM-DSC-R22-COD-D5-V0.2-FREEZE-v0.1/MANIFEST.md
+ee3bfd524d0b1ba0f16903e443185e191c0a10a0076ab185590ac44d68cc7f84  docs/discovery/evidence/WIG-COM-DSC-R22-COD-D5-V0.2-FREEZE-v0.1/SOURCE_FREEZE_EVIDENCE.md
+f018d9cc5a66a7676a787fbcd79783b226779a9ec68f664c37c02b24d3619839  src/lib/discovery/types.ts
+4b25cc76157515a37e4216e86f70420879aca93b726b0948b9895d8ad26f7360  src/lib/discovery/versions.ts
+c57e4ca1a045392819c74acd7b986d0795f0da09081309a984396aff6be348dd  src/lib/discovery/decide-constraint.ts
+5a6abd44c083c28071e35514e5488adfc65bf4df686f60e2e1cd69c5f396fa03  src/lib/discovery/__tests__/types.test.ts
+348632458d2d252121fce4c1675cc992b50b1940a196c0d54435a434cd97b389  src/lib/discovery/__tests__/categorical-policy.test.ts
+38225ebefbc9c9c3ad00b6e9e06fe85f82bfa353545290a84cf099aac27f59b1  src/lib/discovery/retrieval/__tests__/landing-event.test.ts

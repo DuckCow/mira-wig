@@ -393,3 +393,53 @@ source-vocabulary v0.2 contract superseding v0.1.
 D5-S2 continuous query policy remains deferred until measurement governance.
 This decision authorizes no D5-S1 source, D6-B source, existing-contract edit,
 schema, catalog, route, UI, adapter, event, commerce, or production behavior.
+
+## 2026-07-30 — D5 source-vocabulary v0.2 freeze
+
+### Bound implementation
+
+- D5-S1 source merge:
+  `ad45704cc769951c645c97837b6922f5c4f2437d`;
+- reviewed D5-S1 source head:
+  `85c1069212e41f2104b590d9df11e51a037770bf`;
+- D5 v0.2 source freeze-prep head:
+  `a7c3522d14443c45b98c916d037c4ae0bea780c6`;
+- D5 v0.2 source freeze-prep merge:
+  `20ccceb0e8e98d2c8de3e7f87a867ce115a2792a`.
+
+### Frozen additions
+
+- decision profile: `GOVERNED_STYLISTIC_CATEGORICAL`;
+- query-only required-intent gate: `REQUIRE_MATCH`;
+- categorical policy dispositions:
+  `REQUIRED`, `PREFERENCE`, `ROUTE`, `CLARIFICATION`, and `UNSUPPORTED`;
+- categorical-policy reasons:
+  `CATEGORICAL_REQUIRED_BY_POLICY`,
+  `CATEGORICAL_PREFERENCE_BY_POLICY`,
+  `CATEGORICAL_OUTSIDE_DISCOVERY_AUTHORITY_ROUTE`,
+  `CATEGORICAL_CLARIFICATION_REQUIRED`, and
+  `CATEGORICAL_UNSUPPORTED_BY_POLICY`;
+- stylistic model reason:
+  `MODEL_INFERRED_STYLISTIC_HAS_NO_ASSERTION_AUTHORITY`;
+- constraint rules: `d5-constraint-decisions/v0.2`.
+
+### Inherited and provisional boundaries
+
+The eleven-field `ConstraintDecision` is unchanged, and all v0.1 durable
+vocabulary is inherited without semantic change. Fixture carrier names, the
+`CATEGORICAL_POLICY` discriminator, and the exact seven-field carrier shape
+remain provisional and fixture-only. The request schema and golden fixture
+remain `d5-source-only-request/v0.2-provisional` and
+`d5-golden-cases/v0.2-provisional`. No production policy transport,
+persistence, API, database schema, or adapter is frozen.
+
+### Supersession and sequence
+
+The v0.2 contract supersedes v0.1 as the current D5 source-vocabulary
+authority. The v0.1 contract remains historical and unchanged. D5-S1 completes
+only when this documentation freeze merges. D6-B1 is then the next possible
+separately authorized source task; this record does not authorize it. D5-S2,
+ranking, production ontology, adapters, events, commerce, and production work
+remain deferred.
+
+This documentation-only freeze grants no production authority.
