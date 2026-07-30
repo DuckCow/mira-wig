@@ -320,3 +320,59 @@ D5-S1 categorical policy extension and vocabulary freeze
 This documentation decision authorizes no D5-S1 or D6-B source work, schema or
 catalog change, event collection, commerce integration, or production
 activation.
+
+## 2026-07-30 — D5-S1 categorical policy gate
+
+### Baseline and evidence
+
+- observed main baseline:
+  `32b8cd7aef2c6f6302ee835e154ec3b6a3b559cb`;
+- immutable source reconnaissance:
+  `WIG-COM-DSC-R14-COD-D5-S1-A0-v0.1`;
+- all sixteen supplied human rulings were confirmed or refined against current
+  source and contracts; none remained rejected or unresolved.
+
+### Representation decision
+
+D5-S1 preserves the frozen eleven-field `ConstraintDecision` shape and adds the
+provisional query gate `REQUIRE_MATCH` in a later, separately authorized source
+task.
+
+- `QUERY + REQUIRE_MATCH` means a future candidate must receive an
+  evidence-qualified satisfying product decision;
+- `FIXTURE_PRODUCT + ASSERT_MATCH + ASSERTED` remains the product assertion;
+- query-level `ASSERT_MATCH`, a new required/preference output field, and a
+  parallel structured-constraint plan are rejected.
+
+This is the smallest representation that keeps required query intent separate
+from product evidence while preserving D6-A exact behavior.
+
+### Categorical policy boundary
+
+- S1 is limited to `DECLARED`, governed, non-claim `STYLISTIC`
+  `CATEGORICAL` constraints with a dedicated provisional profile;
+- required/preference behavior comes from exactly one matching injected,
+  versioned categorical policy, not interpretation state;
+- dispositions are `REQUIRED`, `PREFERENCE`, `ROUTE`, `CLARIFICATION`, and
+  `UNSUPPORTED`;
+- D6-B1 may consume only required decisions and has no preference ranking,
+  preference exclusion, or relaxation;
+- route, clarification, and unsupported stop before candidate enumeration;
+- only verified/measured and human-curated-from-evidence stylistic evidence may
+  assert; vendor-attested, model-inferred, missing, conflicting, and unknown
+  evidence may not;
+- confirmation changes intent only and reuses
+  `CONFIRMATION_CHANGED_INTENT_ONLY`;
+- exact profile, fixture-policy, and new reason spellings remain provisional.
+
+### Sequence and authority
+
+The expected later source boundary is `types.ts`, `versions.ts`,
+`decide-constraint.ts`, and discovery tests only. Constraint rules move to
+`d5-constraint-decisions/v0.2-provisional` during implementation; parser and
+normalizer remain v0.1. Promotion requires adversarial source review and a D5
+source-vocabulary v0.2 contract superseding v0.1.
+
+D5-S2 continuous query policy remains deferred until measurement governance.
+This decision authorizes no D5-S1 source, D6-B source, existing-contract edit,
+schema, catalog, route, UI, adapter, event, commerce, or production behavior.

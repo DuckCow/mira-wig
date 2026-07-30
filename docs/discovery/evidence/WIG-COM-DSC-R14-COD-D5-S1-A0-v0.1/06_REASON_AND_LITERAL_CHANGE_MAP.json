@@ -1,0 +1,121 @@
+{
+  "snapshotId": "WIG-COM-DSC-R14-COD-D5-S1-A0-v0.1",
+  "observedCommit": "32b8cd7aef2c6f6302ee835e154ec3b6a3b559cb",
+  "classification": "DESIGN_ONLY_PROVISIONAL_CHANGE_MAP",
+  "preservedOutputShape": {
+    "type": "ConstraintDecision",
+    "fields": [
+      "constraintId",
+      "subject",
+      "authorityOutcome",
+      "gate",
+      "score",
+      "speechRequirements",
+      "partition",
+      "relaxation",
+      "fallbackRoutes",
+      "reasons",
+      "diagnostics"
+    ]
+  },
+  "newProvisionalLiterals": [
+    {
+      "vocabulary": "GateDecision",
+      "literal": "REQUIRE_MATCH",
+      "meaning": "A QUERY subject requires later evidence-qualified product satisfaction",
+      "freezeStage": "D5_SOURCE_VOCABULARY_V0_2_AFTER_SOURCE_REVIEW"
+    }
+  ],
+  "newProvisionalSemanticSlots": [
+    {
+      "vocabulary": "D5DecisionProfile",
+      "semantic": "governed non-claim stylistic categorical policy"
+    },
+    {
+      "vocabulary": "DecisionPolicyFixture",
+      "semantic": "versioned attribute-bound categorical policy disposition"
+    },
+    {
+      "vocabulary": "DiscoveryReasonCode",
+      "semantic": "categorical required by policy"
+    },
+    {
+      "vocabulary": "DiscoveryReasonCode",
+      "semantic": "categorical preference by policy"
+    },
+    {
+      "vocabulary": "DiscoveryReasonCode",
+      "semantic": "categorical policy route"
+    },
+    {
+      "vocabulary": "DiscoveryReasonCode",
+      "semantic": "categorical policy clarification required"
+    },
+    {
+      "vocabulary": "DiscoveryReasonCode",
+      "semantic": "categorical policy unsupported"
+    },
+    {
+      "vocabulary": "DiscoveryReasonCode",
+      "semantic": "model-inferred stylistic evidence has no assertion authority"
+    }
+  ],
+  "reusedUnchangedLiterals": {
+    "GateDecision": [
+      "ASSERT_MATCH",
+      "DO_NOT_GATE",
+      "REQUIRE_CLARIFICATION",
+      "ROUTE_ONLY",
+      "UNSUPPORTED"
+    ],
+    "ScoreDecision": [
+      "NONE",
+      "PREFERENCE_ALLOWED"
+    ],
+    "EvidencePartition": [
+      "ASSERTED",
+      "UNKNOWN",
+      "VIOLATING",
+      "WITHHELD",
+      "NOT_APPLICABLE"
+    ],
+    "RelaxationDecision": [
+      "NEVER",
+      "NOT_APPLICABLE"
+    ],
+    "SpeechRequirement": [
+      "NO_PRODUCT_ASSERTION",
+      "DISCLOSE_EVIDENCE_BASIS",
+      "DISCLOSE_UNKNOWN",
+      "DISCLOSE_ROUTE_LIMITATION"
+    ],
+    "FallbackRoute": [
+      "CLARIFICATION",
+      "EDUCATION_OR_CONSULTATION",
+      "EXPLICIT_UNSUPPORTED"
+    ],
+    "DiscoveryReasonCode": [
+      "EVIDENCE_QUALIFIED_MATCH",
+      "EVIDENCE_QUALIFIED_MISMATCH",
+      "PRODUCT_EVIDENCE_UNKNOWN",
+      "PRODUCT_EVIDENCE_CONFLICT",
+      "CONFIRMATION_CHANGED_INTENT_ONLY"
+    ]
+  },
+  "prohibitedSemanticReuse": [
+    {
+      "literal": "ASSERT_MATCH",
+      "prohibition": "must not represent QUERY required intent"
+    },
+    {
+      "literal": "MODEL_INFERRED_CLAIM_HAS_NO_AUTHORITY",
+      "prohibition": "must not be broadened to non-claim stylistic evidence"
+    }
+  ],
+  "unchangedComponents": [
+    "d5-conservative-normalizer/v0.1",
+    "d5-injected-span-parser/v0.1"
+  ],
+  "laterProvisionalComponent": "d5-constraint-decisions/v0.2-provisional",
+  "sourceChangesAuthorizedByThisSnapshot": false
+}

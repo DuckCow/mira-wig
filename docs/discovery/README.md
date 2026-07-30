@@ -58,19 +58,22 @@ Model agreement is not evidence.
 5. [`d6-structured-retrieval-contract-v0.1.md`](./d6-structured-retrieval-contract-v0.1.md)
    Freezes the D6-B governed structured-retrieval design boundary, its variant candidate and admission model, the D5-S1 blocking dependency, and the fixture-only unranked first-slice sequence.
 
-6. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
+6. [`d5-s1-categorical-policy-contract-v0.1.md`](./d5-s1-categorical-policy-contract-v0.1.md)
+   Freezes the categorical-only D5-S1 design: required query intent remains distinct from evidence-qualified product assertion, policy remains separate from interpretation, and D6-B1 may consume only governed required decisions.
+
+7. [`constraint-hardness-contract-v0.2.md`](./constraint-hardness-contract-v0.2.md)
    Interpretation/evidence separation, authority constraints, filtering, ranking, partitions, relaxation, clarification, education, consultation, and unsupported states.
 
-7. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
+8. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-8. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+9. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-9. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+10. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-10. [`decision-log.md`](./decision-log.md)
+11. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 ## Required reading by task
