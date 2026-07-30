@@ -443,3 +443,106 @@ ranking, production ontology, adapters, events, commerce, and production work
 remain deferred.
 
 This documentation-only freeze grants no production authority.
+
+## 2026-07-31 — D6-B1 source-vocabulary v0.1 freeze
+
+### Bound implementation
+
+- D6-B1 source implementation first commit:
+  `844b258d75ecf58a1efd43583af9e6c1be9db686`;
+- D6-B1 reviewed source/C1 head:
+  `d79fffa3bb1198bbe92306ab456026e48b087c46`;
+- D6-B1 source implementation merge:
+  `ac032b524b6f15c366a580997e671b6cf4531b2e`;
+- D6-B1 source freeze-preparation first commit:
+  `d24daf7f185b134cedaa4e892f5090e69d97c124`;
+- D6-B1 freeze-preparation reviewed C1/head:
+  `bb2bf420c5bd6cc0b51f7001199d5acec7f57d31`;
+- D6-B1 freeze-preparation merge/current baseline:
+  `67256e901dc2dcb4eb0b2e75a73d6ba9dca17c73`.
+
+### Frozen source boundary
+
+- `runStructuredCategoricalFixtureSlice` is the sole primary entrypoint;
+- `verifyStructuredLanding` is the one durable supporting entrypoint;
+- all other helper exports remain provisional implementation surfaces;
+- the nine reviewed module responsibilities are frozen: source vocabulary,
+  component registry, whole-request planning, Stage-0 validation, scoped
+  fixture enumeration, exact evidence evaluation, candidate admission,
+  landing integrity, and sole end-to-end orchestration;
+- duplicate governed attributes reject at both the request-plan and direct
+  admission boundaries;
+- a module export does not itself establish a supported entrypoint, and the
+  nine-file subtree is not permanently closed.
+
+### Frozen components and ordering
+
+Exactly five component values are final:
+
+- request plan: `d6-b1-structured-request-plan/v0.1`;
+- Stage 0: `d6-b1-stage-0-authority-universe/v0.1`;
+- candidate source:
+  `d6-b1-categorical-fixture-candidate-source/v0.1`;
+- admission rules: `d6-b1-structured-candidate-admission/v0.1`;
+- landing contract: `d6-b1-structured-landing/v0.1`.
+
+Exactly two component values remain provisional:
+
+- retrieval fixture:
+  `d6-b1-categorical-retrieval-fixture/v0.1-provisional`;
+- eligibility fixture: `d6-b1-eligibility-fixture/v0.1-provisional`.
+
+Canonical request, Stage-0, candidate-source, admission, and completed-result
+ordering uses locale-independent UTF-16 code-unit lexical order.
+`VARIANT_ID_THEN_STYLE_ID` records technical determinism, not ranking.
+
+### Frozen result and failure vocabulary
+
+- the whole request must contain one or two governed constraints and every
+  constraint must satisfy the D5 `REQUIRED + REQUIRE_MATCH` predicate;
+- Stage 0 validates caller context and exact variant/style membership before
+  candidate access or enumeration;
+- complete D5 query and product decisions remain visible;
+- every enumerated candidate reaches one mandatory admission choke point;
+- asserted, unknown, violating, withheld, and admission-rejected outcomes
+  remain separate, with aggregate precedence
+  `WITHHELD > VIOLATING > UNKNOWN > ASSERTED`;
+- reviewed attribution, landing, candidate, admission, counts, completed, and
+  escaping run-result field sets are frozen;
+- reviewed request, Stage-0, candidate-source, evidence, admission, and
+  landing statuses and reasons are frozen;
+- evidence-selection statuses are `SELECTED`, `ABSENT`, and `REJECTED`;
+- landing preserves exact selected variant, canonical style, amount, currency,
+  and `SELECTED_VARIANT` price basis, and a mismatch is visible and never
+  repaired;
+- `ELIGIBILITY_VARIANT_MISMATCH` is removed and remains absent, while
+  `CANDIDATE_SOURCE_ACCOUNTABILITY_INVALID` is frozen and present.
+
+### Reused and provisional boundaries
+
+D6-B1 reuses the D5 v0.2 governed categorical profile, required-query gate,
+required policy disposition, product gate/partitions, categorical and evidence
+reasons, model-inference non-assertion reason, confirmation semantics, and the
+complete eleven-field `ConstraintDecision` without redefining them.
+
+Fixture and request/admission input carriers, fixture IDs and ontology values,
+snapshot contents, synthetic evidence references, amounts, currencies,
+fixture reasons, helper exports other than `verifyStructuredLanding`, internal
+flow types and helper names, and invariant error text remain provisional.
+`INCOMPATIBLE_D5_QUERY_DECISION` and
+`INCOMPATIBLE_D5_PRODUCT_DECISION` remain provisional compatibility
+sentinels. Accountability field names and semantic inputs are frozen, while
+their `JSON.stringify` encoding is provisional and is not a cryptographic
+fingerprint.
+
+### Authority and next sequence
+
+This docs-only freeze grants no production catalog, ontology, eligibility,
+sellability, database, schema, adapter, route, UI, API, cart, checkout,
+payment, fulfillment, order, event, analytics, ranking, recommendation,
+relaxation, composition, or activation authority.
+
+D6-B1 completes only when this documentation pull request merges. The later
+sequence of measurement method/unit/evidence/tolerance governance, D5-S2, and
+D6-B2 remains separate and unauthorized. Exact-plus-structured composition
+also remains separate and unauthorized.
