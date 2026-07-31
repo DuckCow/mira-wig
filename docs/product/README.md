@@ -4,6 +4,16 @@ Product planning documents frame customer and operator decisions. They do not
 authorize source changes, activate features, or replace the design and source
 authority for a feature.
 
+## Product media
+
+- [Product Media Architecture Adjudication v0.1](./product-media-architecture-adjudication-v0.1.md)
+  — records the human disposition of Fable's clean-sheet product-media
+  architecture. It grants no source, migration, media-data,
+  customer-publication, checkout-enforcement, or image-similarity authority.
+  The frozen [Product Media Contract v0.1](../discovery/product-media-contract-v0.1.md)
+  is the design authority, and its next gate is an independent Opus technical
+  architecture audit.
+
 ## Manual item relations
 
 - [Manual Item Relations Product and Operations Adjudication v0.1](./manual-item-relations-product-ops-adjudication-v0.1.md)
