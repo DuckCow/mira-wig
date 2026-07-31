@@ -12,6 +12,7 @@ import {
 } from "./types";
 import {
   assertActiveRationale,
+  assertManualRelationActiveState,
   assertManualRelationPriority,
   assertManualRelationPurpose,
   compareUtf16CodeUnits,
@@ -158,13 +159,14 @@ export async function updateManualStyleRelation(
 }
 
 export async function setManualStyleRelationActive(
-  actorUserIdValue: string,
-  relationIdValue: string,
-  isActive: boolean,
+  actorUserIdValue: unknown,
+  relationIdValue: unknown,
+  isActiveValue: unknown,
 ): Promise<{ sourceStyleId: string }> {
   const actorUserId = normalizeRequiredIdentifier(actorUserIdValue, "INVALID_ACTOR");
   const relationId = normalizeRequiredIdentifier(relationIdValue, "RELATION_NOT_FOUND");
-  if (!isActive) {
+  assertManualRelationActiveState(isActiveValue);
+  if (!isActiveValue) {
     const existing = await db.wigStyleRelation.findUnique({
       where: { id: relationId },
       select: { sourceStyleId: true },

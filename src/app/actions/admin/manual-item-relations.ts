@@ -87,7 +87,7 @@ export async function updateManualStyleRelationAction(
 
 export async function setManualStyleRelationActiveAction(
   relationId: string,
-  isActive: boolean,
+  isActive: unknown,
 ): Promise<ManualStyleRelationActionResult> {
   const guard = await requireAdmin();
   if (!guard.success) return guard;

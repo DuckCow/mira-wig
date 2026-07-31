@@ -64,7 +64,7 @@ describe("manual item relation admin actions", () => {
     const results = await Promise.all([
       createManualStyleRelationAction(CREATE_INPUT),
       updateManualStyleRelationAction("relation", { priority: 20 }),
-      setManualStyleRelationActiveAction("relation", true),
+      setManualStyleRelationActiveAction("relation", "false"),
     ]);
     expect(results).toEqual([guard, guard, guard]);
     expect(mocks.create).not.toHaveBeenCalled();
@@ -140,6 +140,29 @@ describe("manual item relation admin actions", () => {
       "relation",
       false,
     );
+  });
+
+  it("passes raw active state without coercion and skips revalidation on bounded failure", async () => {
+    mocks.requireAdmin.mockResolvedValue({ success: true, session: adminSession() });
+    mocks.setActive.mockRejectedValue(
+      new ManualStyleRelationException(
+        "INVALID_ACTIVE_STATE",
+        "invalid active state",
+      ),
+    );
+
+    await expect(
+      setManualStyleRelationActiveAction("relation", "false"),
+    ).resolves.toEqual({
+      success: false,
+      errorCode: "INVALID_ACTIVE_STATE",
+    });
+    expect(mocks.setActive).toHaveBeenCalledWith(
+      "authenticated-admin",
+      "relation",
+      "false",
+    );
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("maps bounded relation failures and rethrows unknown failures", async () => {

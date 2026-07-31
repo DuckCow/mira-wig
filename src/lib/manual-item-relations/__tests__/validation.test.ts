@@ -5,6 +5,7 @@ import {
 } from "../types";
 import {
   assertActiveRationale,
+  assertManualRelationActiveState,
   assertManualRelationPriority,
   assertManualRelationPurpose,
   compareUtf16CodeUnits,
@@ -47,6 +48,28 @@ describe("manual style relation validation", () => {
       expectCode(() => assertManualRelationPriority(priority), "INVALID_PRIORITY");
     },
   );
+
+  it.each([true, false])("accepts exact active state %j", (isActive) => {
+    expect(() => assertManualRelationActiveState(isActive)).not.toThrow();
+  });
+
+  it.each([
+    "true",
+    "false",
+    "0",
+    "1",
+    0,
+    1,
+    null,
+    undefined,
+    {},
+    [],
+  ])("rejects non-boolean active state %j", (isActive) => {
+    expectCode(
+      () => assertManualRelationActiveState(isActive),
+      "INVALID_ACTIVE_STATE",
+    );
+  });
 
   it("uses ECMAScript Unicode trimming and stores the normalized value", () => {
     expect(normalizeManualRelationRationale("\uFEFF  편집 근거 \u00A0")).toBe("편집 근거");

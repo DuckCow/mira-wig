@@ -21,6 +21,12 @@ describe("administrator customer refund intake messages", () => {
 });
 
 describe("manual item relation administrator messages", () => {
+  it("maps invalid active state to exact Korean administrator copy", () => {
+    expect(getAdminErrorMessage("INVALID_ACTIVE_STATE")).toBe(
+      "활성 상태 값이 올바르지 않습니다.",
+    );
+  });
+
   it.each([
     "RELATION_DUPLICATE",
     "SELF_RELATION",

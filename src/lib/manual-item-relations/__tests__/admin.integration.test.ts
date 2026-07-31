@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { WigCategory } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import {
   createManualStyleRelation,
@@ -141,6 +141,42 @@ describe("manual item relation admin service", () => {
       isActive: false,
       internalRationale: "보존 근거",
       updatedByAdminUserId: "deactivator",
+    });
+  });
+
+  it("rejects invalid active-state inputs before changing relation state or snapshots", async () => {
+    const created = await createDraft(fixture, { internalRationale: "보존 근거" });
+    const before = await db.wigStyleRelation.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    const findRelation = vi.spyOn(db.wigStyleRelation, "findUnique");
+    const updateRelation = vi.spyOn(db.wigStyleRelation, "update");
+    const beginTransaction = vi.spyOn(db, "$transaction");
+
+    try {
+      for (const invalidState of ["false", 1]) {
+        await expectRelationCode(
+          setManualStyleRelationActive("forged-transition-actor", created.id, invalidState),
+          "INVALID_ACTIVE_STATE",
+        );
+      }
+      expect(findRelation).not.toHaveBeenCalled();
+      expect(updateRelation).not.toHaveBeenCalled();
+      expect(beginTransaction).not.toHaveBeenCalled();
+    } finally {
+      findRelation.mockRestore();
+      updateRelation.mockRestore();
+      beginTransaction.mockRestore();
+    }
+
+    const after = await db.wigStyleRelation.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    expect(after).toMatchObject({
+      isActive: false,
+      internalRationale: before.internalRationale,
+      updatedByAdminUserId: before.updatedByAdminUserId,
+      updatedAt: before.updatedAt,
     });
   });
 

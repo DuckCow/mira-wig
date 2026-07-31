@@ -19,6 +19,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   SELF_RELATION: "같은 스타일끼리는 관계를 만들 수 없습니다.",
   INVALID_RELATION_PURPOSE: "유효하지 않은 관계 목적입니다.",
   INVALID_PRIORITY: "우선순위는 0부터 10000 사이의 정수여야 합니다.",
+  INVALID_ACTIVE_STATE: "활성 상태 값이 올바르지 않습니다.",
   RATIONALE_REQUIRED: "활성화하려면 내부 근거를 입력해 주세요.",
   RATIONALE_TOO_LONG: "내부 근거는 유니코드 500자 이내로 입력해 주세요.",
   RATIONALE_INVALID: "내부 근거에 허용되지 않는 문자가 있습니다.",

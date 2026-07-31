@@ -39,6 +39,17 @@ export function assertManualRelationPriority(value: unknown): asserts value is n
   }
 }
 
+export function assertManualRelationActiveState(
+  value: unknown,
+): asserts value is boolean {
+  if (typeof value !== "boolean") {
+    throw new ManualStyleRelationException(
+      "INVALID_ACTIVE_STATE",
+      "Manual style relation active state must be an exact boolean.",
+    );
+  }
+}
+
 export function normalizeManualRelationRationale(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string") {
