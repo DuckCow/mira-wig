@@ -879,3 +879,27 @@ No source, test, schema, migration, dependency, environment value, relation
 data, customer exposure, automatic recommendation, D5/D6 integration, image
 similarity, event, reranking, personalization, commerce, fulfillment, or
 production behavior was changed or activated.
+
+## 2026-07-31 — Product-media architecture and design contract v0.1
+
+- Fable M1 product-media planning completed;
+- the 15-item docket received human adjudication;
+- Product Media Contract v0.1 frozen as design authority;
+- asset + assignment accepted with amendments;
+- style and variant assignment subjects accepted;
+- role, view, and presentation axes remain independent;
+- lifecycle meanings are separated into review, availability, staleness, and
+  approved use;
+- rights and consent default-deny;
+- supplier rights assumed mixed/unverified until evidence exists;
+- launch variants are not assumed color-only;
+- mannequin-led evidence core accepted;
+- strict future style-publication and variant-checkout media floors accepted;
+- base interior promoted to future sellability evidence;
+- representative inheritance requires disclosure;
+- generated media excluded from launch PDP evidence and future similarity;
+- legacy `coverImageKey`/`imageKeys[]` are not semantic authority;
+- source, schema, migration, backfill, customer-publication enforcement,
+  checkout enforcement, embeddings, training, and similarity remain
+  unauthorized;
+- independent Opus technical architecture audit is the next gate.

@@ -73,19 +73,26 @@ Model agreement is not evidence.
 10. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-11. [`manual-item-relations-contract-v0.1.md`](./manual-item-relations-contract-v0.1.md)
+11. [`product-media-contract-v0.1.md`](./product-media-contract-v0.1.md)
+   Frozen media asset/assignment, style and variant ownership, rights, truth,
+   coverage, legacy-migration, privacy-boundary, and non-activation contract.
+   Product planning is complete and design is frozen at v0.1; source, media
+   data, enforcement, image similarity, embeddings, and training remain
+   unauthorized pending independent Opus technical architecture audit.
+
+12. [`manual-item-relations-contract-v0.1.md`](./manual-item-relations-contract-v0.1.md)
    Bounded manual persistence and pre-launch customer-surface contract for market-scoped directional style relations.
 
-12. [`manual-item-relations-source-status-v0.1.md`](./manual-item-relations-source-status-v0.1.md)
+13. [`manual-item-relations-source-status-v0.1.md`](./manual-item-relations-source-status-v0.1.md)
    Reviewed M2M-S1 as-built/source-status record for the installed manual relation source, review corrections, invariant ownership, dormant activation state, and re-entry gates.
 
-13. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+14. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-14. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+15. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-15. [`decision-log.md`](./decision-log.md)
+16. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 ## Related repository documentation
@@ -95,6 +102,11 @@ These are cross-references, not discovery contracts:
 - [`../engineering/feature-documentation-standard-v0.1.md`](../engineering/feature-documentation-standard-v0.1.md)
   defines repository-wide documentation classification, artifacts, lifecycle,
   and default model/tool roles.
+- [`../product/product-media-architecture-adjudication-v0.1.md`](../product/product-media-architecture-adjudication-v0.1.md)
+  records the human disposition of Fable's clean-sheet product-media
+  architecture and is product authority, not a discovery contract. It grants
+  no source, migration, media-data, customer-publication,
+  checkout-enforcement, or image-similarity authority.
 - [`../operations/README.md`](../operations/README.md) indexes operational
   runbooks and their non-design, non-activation boundaries.
 
