@@ -756,3 +756,39 @@ control rather than an MG1 redefinition.
 - Catalog count alone does not authorize any automatic arm.
 - The exact next task after this contract merges is
   `M2M-S1 manual style relation persistence + admin curation + default-off PDP read`.
+
+### M2M-S1 as-built, operations, and documentation standard
+
+- [PR #19](https://github.com/DuckCow/mira-wig/pull/19) installed M2M-S1 on
+  main at merge SHA
+  `05be8faa3d79670102da431f14c9a3579e82bacb`.
+- Source implementation and the C1 activation-boundary correction and C2 exact
+  active-state correction are complete and reviewed. The reviewed source head
+  is `d938e333d022d4593f66a9e096ec38cfdd3745c0`.
+- Customer activation remains off. Both KR purpose keys remain blank and
+  default-off, and no production relation data was seeded.
+- The post-merge
+  `manual-item-relations-source-status-v0.1.md` records installed source truth
+  separately from the unchanged frozen
+  `manual-item-relations-contract-v0.1.md`.
+- A dormant operations runbook was installed for curation, future activation
+  preparation, diagnostics, and rollback. It grants no activation authority.
+- Medium and high-risk repository features now require a durable post-merge
+  source-status/as-built record under the feature documentation standard.
+- Default collaboration roles are: Fable for primary product planning, UX,
+  customer journey, and operator workflow; ChatGPT for adjudication, contract
+  drafting, bounded authorization, and review coordination; Codex for
+  repository implementation, migrations, tests, validation, and draft PR
+  preparation; and Opus for selective independent technical audit of
+  high-risk work.
+- Opus is a selective audit role, not the default source implementer.
+- Added documentation:
+  `docs/discovery/manual-item-relations-source-status-v0.1.md`,
+  `docs/engineering/feature-documentation-standard-v0.1.md`,
+  `docs/operations/README.md`, and
+  `docs/operations/manual-item-relations-operations-v0.1.md`, with discovery
+  README and decision-log cross-references.
+- This documentation installation changes no source, test, schema, migration,
+  dependency, environment value, relation data, activation, customer behavior,
+  automatic recommendation, D5/D6 integration, event, reranking,
+  personalization, commerce, fulfillment, or production behavior.

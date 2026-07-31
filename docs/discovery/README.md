@@ -76,14 +76,27 @@ Model agreement is not evidence.
 11. [`manual-item-relations-contract-v0.1.md`](./manual-item-relations-contract-v0.1.md)
    Bounded manual persistence and pre-launch customer-surface contract for market-scoped directional style relations.
 
-12. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
+12. [`manual-item-relations-source-status-v0.1.md`](./manual-item-relations-source-status-v0.1.md)
+   Reviewed M2M-S1 as-built/source-status record for the installed manual relation source, review corrections, invariant ownership, dormant activation state, and re-entry gates.
+
+13. [`testing-events-and-evaluation-contract-v0.2.md`](./testing-events-and-evaluation-contract-v0.2.md)
    Golden cases, event schemas, sensitive-concept handling, exposure attribution, offline/online evaluation, and feedback-loop controls.
 
-13. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
+14. [`catalog-evidence-status-v0.2.md`](./catalog-evidence-status-v0.2.md)
    Dated repository/catalog evidence baseline, invalidation rules, and current blockers.
 
-14. [`decision-log.md`](./decision-log.md)
+15. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
+
+## Related repository documentation
+
+These are cross-references, not discovery contracts:
+
+- [`../engineering/feature-documentation-standard-v0.1.md`](../engineering/feature-documentation-standard-v0.1.md)
+  defines repository-wide documentation classification, artifacts, lifecycle,
+  and default model/tool roles.
+- [`../operations/README.md`](../operations/README.md) indexes operational
+  runbooks and their non-design, non-activation boundaries.
 
 ## Required reading by task
 
