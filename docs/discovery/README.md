@@ -73,12 +73,22 @@ Model agreement is not evidence.
 10. [`item-to-item-rollout-contract-v0.2.md`](./item-to-item-rollout-contract-v0.2.md)
    Purpose-specific relations, cold start, candidate admission, manual/content/image/behavior sources, learning gates, and activation rules.
 
-11. [`product-media-contract-v0.1.md`](./product-media-contract-v0.1.md)
-   Frozen media asset/assignment, style and variant ownership, rights, truth,
-   coverage, legacy-migration, privacy-boundary, and non-activation contract.
-   Product planning is complete and design is frozen at v0.1; source, media
-   data, enforcement, image similarity, embeddings, and training remain
-   unauthorized pending independent Opus technical architecture audit.
+11. [`product-media-contract-v0.2.md`](./product-media-contract-v0.2.md)
+   Current Product Media design authority upon reviewed merge. It freezes the
+   production-grade media foundation, Product Specification dependency,
+   readiness and activation separation, and deployment qualification gates.
+   The companion [Deployment Qualification Annex v0.1](./product-media-deployment-qualification-annex-v0.1.md)
+   remains UNPOPULATED and grants no technical source or deployment
+   qualification. The [Deferred Capability Register v0.1](./product-media-deferred-capability-register-v0.1.md)
+   and [Live Boundary Defect Register v0.2](./product-media-live-boundary-defect-register-v0.2.md)
+   govern deferred re-entry and LBD-01 through LBD-07 without granting risk
+   acceptance. Source, migration, enforcement, and machine use remain
+   unauthorized. No known external Product Truth Authority exists; bounded
+   internal Catalog Product Specification authority design is the next product
+   task after reviewed documentation install. The
+   [`product-media-contract-v0.1.md`](./product-media-contract-v0.1.md)
+   authority remains current until that merge and is historical/superseded upon
+   it.
 
 12. [`manual-item-relations-contract-v0.1.md`](./manual-item-relations-contract-v0.1.md)
    Bounded manual persistence and pre-launch customer-surface contract for market-scoped directional style relations.
