@@ -42,5 +42,5 @@ specific defect and must include rollback and regression evidence.
 WIG-COM-SEC-R0-GPT-S0-LIVE-MEDIA-BOUNDARY-DEFECT-CONTRACT-v0.2
 ```
 
-That task should decide whether to split the six defects by owner or authorize
+That task should decide whether to split the seven defects by owner or authorize
 one coordinated security/catalog source sequence.
