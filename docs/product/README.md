@@ -10,9 +10,23 @@ authority for a feature.
   — records the human disposition of Fable's clean-sheet product-media
   architecture. It grants no source, migration, media-data,
   customer-publication, checkout-enforcement, or image-similarity authority.
-  The frozen [Product Media Contract v0.1](../discovery/product-media-contract-v0.1.md)
-  is the design authority, and its next gate is an independent Opus technical
-  architecture audit.
+- [Product Media v0.2 Audit Adjudication v0.1](./product-media-v0.2-audit-adjudication-v0.1.md)
+  — records the project owner's acceptance of the complete textual T7
+  remediations and authorizes documentation install only after conformance
+  review.
+- [External Product Truth Authority Decision v0.1](./external-product-truth-authority-decision-v0.1.md)
+  — records the project owner's closed finding that there is no known external
+  Product Truth Authority and requires bounded internal Catalog Product
+  Specification authority design after reviewed documentation install.
+
+Upon reviewed merge, the frozen
+[Product Media Contract v0.2](../discovery/product-media-contract-v0.2.md)
+becomes the design authority and
+[Product Media Contract v0.1](../discovery/product-media-contract-v0.1.md)
+becomes historical/superseded. The independent model audit report is review
+evidence, not design authority. No source, migration, media-data,
+customer-publication, checkout-enforcement, machine-use, or image-similarity
+authority is granted.
 
 ## Manual item relations
 

@@ -903,3 +903,20 @@ production behavior was changed or activated.
   checkout enforcement, embeddings, training, and similarity remain
   unauthorized;
 - independent Opus technical architecture audit is the next gate.
+
+## 2026-07-31 — Product Media Contract v0.2 documentation conformance
+
+- Product Media Contract v0.2 survived independent T7 adversarial audit with
+  textual amendments;
+- all four T7 documentation-install blockers were remediated;
+- production-grade foundation and deferred-capability re-entry rules are
+  retained;
+- the Deployment Qualification Annex remains governed and UNPOPULATED;
+- Live Boundary Defect Register v0.2 owns LBD-01 through LBD-07;
+- no risk acceptance was granted for those defects;
+- no known external Product Truth Authority exists;
+- a bounded internal Catalog Product Specification authority is required after
+  reviewed documentation install; and
+- no technical source, schema, migration, storage provider, deployment
+  mechanism, legacy migration, customer enforcement, or machine-use authority
+  was granted.
