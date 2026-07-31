@@ -93,10 +93,11 @@ model Market {
   taxConfig     Json?
   paymentConfig Json?
 
-  variantPrices    VariantMarketPrice[]
-  availableStyles  WigStyleMarket[]
-  checkoutSessions CheckoutSession[]
-  orders           Order[]
+  variantPrices     VariantMarketPrice[]
+  availableStyles   WigStyleMarket[]
+  wigStyleRelations WigStyleRelation[]
+  checkoutSessions  CheckoutSession[]
+  orders            Order[]
 }
 
 /// 변형(Variant) × 마켓 별 가격.
@@ -144,6 +145,11 @@ enum FulfillmentType {
   STOCKED
 }
 
+enum WigStyleRelationPurpose {
+  SIMILAR_STYLE
+  COMPARE_WITH
+}
+
 model WigStyle {
   id            String      @id @default(cuid())
   name          String
@@ -162,6 +168,31 @@ model WigStyle {
   wishlistItems    WishlistItem[]
   cartItems        CartItem[]
   availableMarkets WigStyleMarket[]
+  sourceRelations  WigStyleRelation[] @relation("WigStyleRelationSource")
+  targetRelations  WigStyleRelation[] @relation("WigStyleRelationTarget")
+}
+
+model WigStyleRelation {
+  id                   String                  @id @default(cuid())
+  sourceStyleId        String
+  targetStyleId        String
+  marketCode           String
+  purpose              WigStyleRelationPurpose
+  priority             Int                     @default(0)
+  isActive             Boolean                 @default(false)
+  internalRationale    String?                 @db.VarChar(500)
+  createdByAdminUserId String
+  updatedByAdminUserId String
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  sourceStyle WigStyle @relation("WigStyleRelationSource", fields: [sourceStyleId], references: [id], onDelete: Restrict)
+  targetStyle WigStyle @relation("WigStyleRelationTarget", fields: [targetStyleId], references: [id], onDelete: Restrict)
+  market      Market   @relation(fields: [marketCode], references: [code], onDelete: Restrict)
+
+  @@unique([sourceStyleId, targetStyleId, marketCode])
+  @@index([sourceStyleId, marketCode, isActive, purpose, priority], map: "WigStyleRelation_sourceStyleId_marketCode_isActive_purpose_prio")
+  @@index([targetStyleId])
 }
 
 model WigVariant {
