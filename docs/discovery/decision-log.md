@@ -792,3 +792,90 @@ control rather than an MG1 redefinition.
   dependency, environment value, relation data, activation, customer behavior,
   automatic recommendation, D5/D6 integration, event, reranking,
   personalization, commerce, fulfillment, or production behavior.
+
+## 2026-07-31 — M2M-S3 Fable product/operations adjudication v0.1
+
+### Audit disposition
+
+- Review input:
+  `WIG-COM-REC-R2-FAB-M2M-S3-POSTMERGE-PRODUCT-OPS-AUDIT REPORT v1`.
+- Binding adjudication:
+  `WIG-COM-REC-R3-HUM-M2M-S3-ADJUDICATION-v0.1`.
+- Whole product model: `KEEP`.
+- Dormant foundation: `SAFE TO RETAIN`.
+- Customer activation remains off.
+- No new versioned product contract is required by this adjudication.
+
+### Source-verified resolutions and deferred patch
+
+- F-10 is resolved by the current public read. It rechecks source global
+  activity and exact-market publication, target global activity and
+  exact-market publication, and one same active target variant carrying an
+  exact-market price whenever customer candidates load. No F-10 read-path
+  source patch is required.
+- Public ordering is priority ascending followed by target style ID using the
+  source-owned locale-independent UTF-16 code-unit comparator. Fable's
+  tie-break uncertainty is closed.
+- F-09 is accepted as a separately authorized, activation-blocking source
+  patch. Before any customer gate is enabled, the KR relation-manager
+  administrator surface must show a read-only
+  `OFF / ON / INVALID CONFIGURATION` state for each purpose. This
+  documentation task does not implement that indicator.
+
+### Product and operations policy
+
+- First customer activation is `SIMILAR_STYLE` only with customer label
+  `비슷한 스타일`.
+- The `COMPARE_WITH` customer gate remains off until a separately approved
+  real comparison affordance or navigation-only customer copy exists.
+- Active real-launch rationales must record at least two observable common
+  attributes, at least one meaningful difference, and one sentence explaining
+  the customer-exploration intent.
+- A named reviewer other than the author must review purpose, rationale,
+  representative images, target diagnostics, and exact landing before row
+  activation for a real launch relation. Reviewer and date are operating
+  evidence; no review-state database field is claimed.
+- Event-triggered maintenance is the normative minimum: before customer
+  activation; on retirement, unpublication, pricing/publication eligibility
+  change, or material image/style change; before another purpose; and before
+  automatic candidates.
+- Arbitrary calendar and row/style-count thresholds remain planning signals,
+  not normative requirements.
+- `internalRationale` owns current editorial justification and must not be
+  overloaded with dated state history.
+- An ungoverned rejected-pair spreadsheet is rejected as negative training
+  truth. A future automatic-candidate contract must govern negative meaning,
+  market, purpose, review time, evidence, expiry/supersession, export, and
+  label use.
+- Inbound visibility, overview/filtering, broken-eligibility queues, bulk
+  ordering, formal review state, history/version, provenance, negative
+  evidence, and manual-plus-automatic combination remain later re-entry
+  candidates. Read/UI work is not presumed to require a database migration.
+- Media-role architecture planning may proceed independently. This clearance
+  does not authorize media source changes, image similarity, automatic
+  candidates, customer-private image access, or production activation.
+
+### Installed documentation and non-authority
+
+Added:
+
+- `docs/product/README.md`;
+- `docs/product/manual-item-relations-product-ops-adjudication-v0.1.md`; and
+- `docs/operations/manual-item-relations-activation-template-v0.1.md`.
+
+Modified:
+
+- `docs/operations/manual-item-relations-operations-v0.1.md`;
+- `docs/operations/README.md`; and
+- `docs/discovery/decision-log.md`.
+
+The runbook now contains the purpose-assignment rule, bounded rationale
+template and Korean examples, independent review, event-triggered maintenance,
+F-09 and F-10 dispositions, and the `SIMILAR_STYLE`-only first-activation
+policy. The dormant activation template grants no authority until a completed,
+reviewed, dated record is separately approved.
+
+No source, test, schema, migration, dependency, environment value, relation
+data, customer exposure, automatic recommendation, D5/D6 integration, image
+similarity, event, reranking, personalization, commerce, fulfillment, or
+production behavior was changed or activated.
