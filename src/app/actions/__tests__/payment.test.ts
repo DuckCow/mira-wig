@@ -82,6 +82,7 @@ const mockGetCurrentMarketCode = vi.mocked(getCurrentMarketCode);
 const mockResolveProvider = providerResolver;
 const mockCompleteFromCapture = vi.mocked(completeFromCapture);
 const ORIGINAL_MOCK_MODE = process.env.PAYMENT_MOCK_MODE;
+const ORIGINAL_MOCK_FORCE_FAIL = process.env.PAYMENT_MOCK_FORCE_FAIL;
 const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
 const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env.TOSS_SANDBOX_SECRET_KEY;
 const ORIGINAL_TOSS_LIVE_SECRET_KEY = process.env.TOSS_LIVE_SECRET_KEY;
@@ -153,6 +154,7 @@ describe("payment actions", () => {
     vi.clearAllMocks();
     mockResolveProvider.mockReset();
     process.env.PAYMENT_MOCK_MODE = "success";
+    delete process.env.PAYMENT_MOCK_FORCE_FAIL;
     delete process.env.PAYMENT_MODE;
     delete process.env.TOSS_SANDBOX_SECRET_KEY;
     delete process.env.TOSS_LIVE_SECRET_KEY;
@@ -173,6 +175,7 @@ describe("payment actions", () => {
     restoreEnv("TOSS_SANDBOX_EXTERNAL_ENABLED", ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
     restorePaymentMode();
     restoreMockMode();
+    restoreEnv("PAYMENT_MOCK_FORCE_FAIL", ORIGINAL_MOCK_FORCE_FAIL);
     await cleanup(ctx);
   });
 
@@ -657,7 +660,68 @@ describe("payment actions", () => {
     await expect(confirmKeyOf(blocker.id)).resolves.toBeNull();
   });
 
-  it("amount mismatch returns terminal failure and enqueues one neutral remediation signal", async () => {
+  it("unset mock mode preserves normal mock completion", async () => {
+    delete process.env.PAYMENT_MOCK_MODE;
+    const session = await submitSessionWithOneLine(ctx);
+    await createPendingPayment(session);
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result.success).toBe(true);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(manufacturingRequestCount(ctx.userId)).resolves.toBe(1);
+    await expect(finalizedSuccessfulPaymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("blank mock mode preserves normal mock completion", async () => {
+    process.env.PAYMENT_MOCK_MODE = "";
+    const session = await submitSessionWithOneLine(ctx);
+    await createPendingPayment(session);
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result.success).toBe(true);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(manufacturingRequestCount(ctx.userId)).resolves.toBe(1);
+    await expect(finalizedSuccessfulPaymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("explicit success mock mode preserves normal mock completion", async () => {
+    process.env.PAYMENT_MOCK_MODE = "success";
+    const session = await submitSessionWithOneLine(ctx);
+    await createPendingPayment(session);
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result.success).toBe(true);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(manufacturingRequestCount(ctx.userId)).resolves.toBe(1);
+    await expect(finalizedSuccessfulPaymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("obsolete PAYMENT_MOCK_FORCE_FAIL alone has no mock behavior authority", async () => {
+    delete process.env.PAYMENT_MOCK_MODE;
+    process.env.PAYMENT_MOCK_FORCE_FAIL = "1";
+    const session = await submitSessionWithOneLine(ctx);
+    await createPendingPayment(session);
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result.success).toBe(true);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(manufacturingRequestCount(ctx.userId)).resolves.toBe(1);
+    await expect(finalizedSuccessfulPaymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("amount mismatch returns terminal failure without a completed order", async () => {
     process.env.PAYMENT_MOCK_MODE = "amount-mismatch";
     const session = await submitSessionWithOneLine(ctx);
     await createPendingPayment(session);
@@ -672,11 +736,13 @@ describe("payment actions", () => {
       expect(result.retryable).toBe(false);
     }
     await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(manufacturingRequestCount(ctx.userId)).resolves.toBe(0);
+    await expect(finalizedSuccessfulPaymentCount(session.sessionId)).resolves.toBe(0);
     await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.FAILED);
     await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(1);
   });
 
-  it("retryable provider failure returns retryable response and no remediation signal", async () => {
+  it("retryable mock failure is bounded, redacted, and creates no completed commerce records", async () => {
     process.env.PAYMENT_MOCK_MODE = "retryable-throw";
     const session = await submitSessionWithOneLine(ctx);
     const payment = await createPendingPayment(session);
@@ -692,13 +758,19 @@ describe("payment actions", () => {
     if (!result.success) {
       expect(result.kind).toBe("OUTCOME_UNKNOWN");
       expect(result.errorCode).toBe("PROVIDER_RETRYABLE");
+      expect(result.error).toBe("Payment provider is temporarily unavailable.");
       expect(result.retryable).toBe(true);
     }
+    expectProviderNeutralNonSuccess(result);
+    expect(JSON.stringify(result)).not.toContain("Mock provider retryable failure");
     expect(persisted).toEqual({
       providerConfirmIdempotencyKey: `confirm:${PaymentProvider.TOSS}:${payment.id}`,
       providerPaymentKey: null,
     });
     await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(manufacturingRequestCount(ctx.userId)).resolves.toBe(0);
+    await expect(finalizedSuccessfulPaymentCount(session.sessionId)).resolves.toBe(0);
     await expect(outboxCount(PaymentProvider.TOSS, key)).resolves.toBe(0);
   });
 
@@ -1420,6 +1492,16 @@ async function deleteVariants(context: TestContext): Promise<void> {
 
 async function paymentCount(checkoutSessionId: string): Promise<number> {
   return db.payment.count({ where: { checkoutSessionId } });
+}
+
+async function finalizedSuccessfulPaymentCount(checkoutSessionId: string): Promise<number> {
+  return db.payment.count({
+    where: {
+      checkoutSessionId,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+    },
+  });
 }
 
 async function onlyPayment(checkoutSessionId: string) {
