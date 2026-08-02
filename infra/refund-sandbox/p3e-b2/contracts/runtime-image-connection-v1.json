@@ -171,7 +171,7 @@
     "timestampEpochSeconds": 1784764800,
     "manifestAlgorithm": "SORTED_PATH_SIZE_MODE_SHA256_JSON",
     "expectedFileCount": 147,
-    "expectedManifestSha256": "4db3a176399c366554b889be5a405d2e73f8d47bd88d0574be53bf7dd1b001ed",
+    "expectedManifestSha256": "232bc422fb300d36940f2eaa71f0be475e2e2be50139285df4b266dbb4cb591b",
     "repositoryGraphInputCount": 108,
     "packagedGraphInputCount": 45,
     "entrypointCount": 3,
