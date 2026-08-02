@@ -34,6 +34,6 @@ export function createTossPaymentCorrelationPort(
     });
     if (!payment || payment.provider !== PaymentProvider.TOSS) return null;
     if (!payment.checkoutSessionId.trim()) return null;
-    return { checkoutSessionId: payment.checkoutSessionId };
+    return { paymentId: normalized, checkoutSessionId: payment.checkoutSessionId };
   };
 }

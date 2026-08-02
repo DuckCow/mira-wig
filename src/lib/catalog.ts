@@ -8,6 +8,9 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "./db";
 import {
+  stylePublishedInMarketWhere,
+} from "./commerce-integrity";
+import {
   WigCategory,
   WIG_CATEGORIES,
   CATEGORY_LABELS,
@@ -39,10 +42,7 @@ function buildWhere(
   params: GetWigStylesParams,
   marketCode: string,
 ): Prisma.WigStyleWhereInput {
-  const base: Prisma.WigStyleWhereInput = {
-    isActive: true,
-    availableMarkets: { some: { marketCode, isActive: true } },
-  };
+  const base: Prisma.WigStyleWhereInput = stylePublishedInMarketWhere(marketCode);
   if (params.category) base.category = params.category;
   if (params.query) {
     base.OR = [
@@ -101,8 +101,8 @@ export async function getWigStyles(
 // ── 상세 쿼리 ────────────────────────────────────────────────
 
 async function fetchStyleDetailRow(id: string, marketCode: string) {
-  return db.wigStyle.findUnique({
-    where: { id, isActive: true },
+  return db.wigStyle.findFirst({
+    where: { id, ...stylePublishedInMarketWhere(marketCode) },
     select: {
       id: true,
       name: true,

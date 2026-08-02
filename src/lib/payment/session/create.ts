@@ -2,6 +2,10 @@ import { CheckoutSessionStatus } from "@prisma/client";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { snapshotToJson } from "@/lib/order/snapshot";
 import { normalizeShippingAddress } from "@/lib/order/validation";
+import {
+  variantPurchasableInMarketFailure,
+  commerceIntegrityMessage,
+} from "@/lib/commerce-integrity";
 import { SESSION_TTL_MS, SessionException, type CreateCheckoutSessionInput, type CreateCheckoutSessionResult } from "./types";
 
 type SessionTx = Prisma.TransactionClient;
@@ -23,8 +27,8 @@ export async function createCheckoutSession(
   return client.$transaction(async (tx) => {
     const market = await loadMarket(tx, normalizedInput.marketCode);
     validateShippingCountry(normalizedInput.shipping.country, market.shippableCountries);
-    const cartItems = await loadCartItems(tx, normalizedInput.userId);
-    const lines = await buildLines(tx, cartItems, normalizedInput.marketCode, market.currency);
+    const cartItems = await loadCartItems(tx, normalizedInput.userId, normalizedInput.marketCode);
+    const lines = buildLines(cartItems, market.currency);
     const subtotalAmount = sumLines(lines);
     const shippingAmount = 0;
     const totalAmount = subtotalAmount + shippingAmount;
@@ -90,16 +94,18 @@ async function loadMarket(tx: SessionTx, marketCode: string) {
   return market;
 }
 
-async function loadCartItems(tx: SessionTx, userId: string) {
+async function loadCartItems(tx: SessionTx, userId: string, marketCode: string) {
   return tx.cartItem.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
     select: {
       variantId: true,
+      wigStyleId: true,
       quantity: true,
       variant: {
         select: {
           id: true,
+          wigStyleId: true,
           stock: true,
           isActive: true,
           fulfillmentType: true,
@@ -107,65 +113,63 @@ async function loadCartItems(tx: SessionTx, userId: string) {
           colorHex: true,
           length: true,
           curl: true,
-          wigStyle: { select: { name: true, coverImageKey: true } },
+          wigStyle: {
+            select: {
+              name: true,
+              coverImageKey: true,
+              isActive: true,
+              availableMarkets: {
+                where: { marketCode, isActive: true },
+                select: { marketCode: true },
+                take: 1,
+              },
+            },
+          },
+          marketPrices: {
+            where: { marketCode },
+            select: { amount: true },
+            take: 1,
+          },
         },
       },
     },
   });
 }
 
-async function buildLines(
-  tx: SessionTx,
+function buildLines(
   cartItems: CartRow[],
-  marketCode: CreateCheckoutSessionInput["marketCode"],
   currencyCode: string,
-): Promise<LineInput[]> {
+): LineInput[] {
   if (cartItems.length === 0) throw new SessionException("CART_EMPTY", "장바구니가 비어 있습니다.");
-
-  const lines: LineInput[] = [];
-  for (const item of cartItems) {
-    lines.push(await buildLine(tx, item, marketCode, currencyCode));
-  }
-  return lines;
+  return cartItems.map((item) => buildLine(item, currencyCode));
 }
 
-async function buildLine(
-  tx: SessionTx,
+function buildLine(
   item: CartRow,
-  marketCode: CreateCheckoutSessionInput["marketCode"],
   currencyCode: string,
-): Promise<LineInput> {
-  validateVariant(item);
-  const price = await findMarketPrice(tx, item.variantId, marketCode);
+): LineInput {
+  const failure = variantPurchasableInMarketFailure({
+    selectedStyleId: item.wigStyleId,
+    canonicalStyleId: item.variant.wigStyleId,
+    styleActive: item.variant.wigStyle.isActive,
+    stylePublishedInMarket: item.variant.wigStyle.availableMarkets.length === 1,
+    variantActive: item.variant.isActive,
+    hasMarketPrice: item.variant.marketPrices.length === 1,
+    stock: item.variant.stock,
+    quantity: item.quantity,
+  });
+  if (failure) throw new SessionException(failure, commerceIntegrityMessage(failure));
+  const price = item.variant.marketPrices[0];
+  if (!price) throw new Error("Missing guarded market price");
   validateAmount(price.amount);
   return {
     variant: { connect: { id: item.variantId } },
+    wigStyleId: item.wigStyleId,
     quantity: item.quantity,
     unitAmount: price.amount,
     fulfillmentType: item.variant.fulfillmentType,
     snapshotData: snapshotToJson(toSnapshot(item, currencyCode)),
   };
-}
-
-function validateVariant(item: CartRow): void {
-  if (!item.variant.isActive) {
-    throw new SessionException("VARIANT_UNAVAILABLE", "구매할 수 없는 옵션입니다.");
-  }
-  if (!Number.isInteger(item.quantity) || item.quantity < 1) {
-    throw new SessionException("STOCK_INSUFFICIENT", "수량이 올바르지 않습니다.");
-  }
-  if (item.variant.stock < item.quantity) {
-    throw new SessionException("STOCK_INSUFFICIENT", "재고가 부족합니다.");
-  }
-}
-
-async function findMarketPrice(tx: SessionTx, variantId: string, marketCode: string) {
-  const price = await tx.variantMarketPrice.findUnique({
-    where: { variantId_marketCode: { variantId, marketCode } },
-    select: { amount: true },
-  });
-  if (!price) throw new SessionException("VARIANT_PRICE_UNAVAILABLE", "현재 마켓 가격이 없습니다.");
-  return price;
 }
 
 function validateAmount(amount: number): void {

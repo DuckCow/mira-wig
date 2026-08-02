@@ -2,15 +2,21 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
+  PaymentRemediationOperation,
+  PaymentRemediationStatus,
+  Prisma,
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
+import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
+import { PaymentMethod } from "@/lib/payment/providers/routing";
 import { createCheckoutSession, transitionCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { completeFromCapture, recordCapture, type CaptureFacts } from "@/lib/payment/complete";
 
@@ -54,9 +60,113 @@ describe("payment completion core", () => {
     expect(order.totalAmount).toBe(session.totalAmount);
     expect(order.shipping?.recipientName).toBe("홍길동");
     expect(order.items).toHaveLength(1);
+    expect(order.items[0]?.wigStyleId).toBe(variant.styleId);
+    const sessionLine = await db.checkoutSessionLine.findFirstOrThrow({
+      where: { sessionId: session.sessionId, variantId: variant.id },
+      select: { wigStyleId: true },
+    });
+    expect(sessionLine.wigStyleId).toBe(variant.styleId);
     expect(order.items[0]?.mr).not.toBeNull();
     await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
     await expect(db.cartItem.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
+  });
+
+  it("finalization reasserts exact parent identity before order or MR writes", async () => {
+    const purchased = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const wrongParent = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, purchased, 1);
+    const session = await submitSession(ctx);
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: session.sessionId, variantId: purchased.id },
+      data: { wigStyleId: wrongParent.styleId },
+    });
+    const facts = captureFacts(ctx, session);
+
+    const result = await completeFromCapture(db, facts);
+
+    expect(result).toMatchObject({
+      kind: "compensationEnqueued",
+      failure: { code: "VARIANT_PARENT_MISMATCH" },
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(mrCount(ctx.userId)).resolves.toBe(0);
+    await expect(outboxCount(facts)).resolves.toBe(1);
+    await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+    await expect(db.cartItem.count({ where: { userId: ctx.userId } })).resolves.toBe(1);
+  });
+
+  it("unpublication after frozen session creation is prospective at finalization", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await db.wigStyleMarket.update({
+      where: { wigStyleId_marketCode: { wigStyleId: variant.styleId, marketCode: MarketCode.KR } },
+      data: { isActive: false },
+    });
+    const facts = captureFacts(ctx, session);
+
+    const result = await completeFromCapture(db, facts);
+
+    expect(result.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(mrCount(ctx.userId)).resolves.toBe(1);
+    await expect(outboxCount(facts)).resolves.toBe(0);
+  });
+
+  it("ordinary catalog and price edits after contact authorization are prospective", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    const attempt = await initiatePaymentAttempt(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      adapterContext: {
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+        market: MarketCode.KR,
+        method: PaymentMethod.MOCK,
+        currency: session.currency,
+        ruleId: "test.finalization.prospective",
+        credentials: [],
+        liveGuard: { kind: "blocked", liveEnabled: false, reason: "test sandbox" },
+      },
+      now: defaultNow(),
+      contactBoundaryClock: () => new Date(defaultNow().getTime() + 1),
+    });
+    await db.wigStyle.update({ where: { id: variant.styleId }, data: { isActive: false } });
+    await db.wigVariant.update({ where: { id: variant.id }, data: { isActive: false, stock: 0 } });
+    await db.wigStyleMarket.update({
+      where: { wigStyleId_marketCode: { wigStyleId: variant.styleId, marketCode: MarketCode.KR } },
+      data: { isActive: false },
+    });
+    await db.variantMarketPrice.delete({
+      where: { variantId_marketCode: { variantId: variant.id, marketCode: MarketCode.KR } },
+    });
+
+    const result = await completeFromCapture(db, {
+      ...captureFacts(ctx, session),
+      paymentId: attempt.paymentId,
+    });
+
+    expect(result.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(mrCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("price value changes after commitment are prospective just like price deletion", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await db.variantMarketPrice.update({
+      where: { variantId_marketCode: { variantId: variant.id, marketCode: MarketCode.KR } },
+      data: { amount: 99_000 },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(result.kind).toBe("completed");
+    const order = await requireOrder(ctx.userId);
+    expect(order.items[0]?.unitAmount).toBe(12_000);
   });
 
   it("KR 빈 administrativeArea 세션은 완료 시 OrderShipping에도 빈 문자열로 복사한다", async () => {
@@ -97,7 +207,7 @@ describe("payment completion core", () => {
     expect(order.items[0]?.mr).toBeNull();
   });
 
-  it("STOCKED 부족은 완료 효과를 롤백하고 void 인텐트를 남긴다", async () => {
+  it("STOCKED 부족은 완료 효과를 롤백하고 중립 remediation 신호를 남긴다", async () => {
     const variant = await createCatalogVariant(ctx, {
       amount: 9_000,
       stock: 1,
@@ -169,7 +279,7 @@ describe("payment completion core", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
   });
 
-  it("금액 불일치는 주문 없이 FAILED와 pg.void 행 1개로 귀결된다", async () => {
+  it("금액 불일치는 주문 없이 FAILED와 중립 remediation 신호 1개로 귀결된다", async () => {
     const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
     await addCart(ctx, variant, 1);
     const session = await submitSession(ctx);
@@ -214,7 +324,7 @@ describe("payment completion core", () => {
     await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
   });
 
-  it("expiresAt 후 캡처는 void 인텐트로 귀결된다", async () => {
+  it("expiresAt 후 캡처는 중립 remediation 신호로 귀결된다", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const facts = captureFacts(ctx, session, {
       capturedAt: new Date(session.expiresAt.getTime() + 1),
@@ -240,6 +350,95 @@ describe("payment completion core", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
   });
 
+  it("a verifiably REMEDIATED sibling no longer blocks completion", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const remediatedAt = new Date();
+    await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.VOIDED,
+        attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_REMEDIATED,
+        remediationStatus: PaymentRemediationStatus.REMEDIATED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        providerPaymentKey: `remediated_${randomUUID()}`,
+        idempotencyKey: `remediated:${randomUUID()}`,
+        financialSucceededAt: remediatedAt,
+        blockingEndedAt: remediatedAt,
+        remediationOperation: PaymentRemediationOperation.VOID,
+        remediationResultRef: `void-result:${randomUUID()}`,
+        remediatedAt,
+      },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(result.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("an unresolved sibling still blocks completion and leaves no commerce writes", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const facts = captureFacts(ctx, session);
+    const primary = await recordCapture(db, facts);
+    await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.MOCK,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.SUCCEEDED,
+        attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+        remediationStatus: PaymentRemediationStatus.PENDING,
+        amount: session.totalAmount,
+        currency: session.currency,
+        providerPaymentKey: `sibling_${randomUUID()}`,
+        idempotencyKey: `sibling:${randomUUID()}`,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
+        financialSucceededAt: new Date(),
+        blockingEndedAt: new Date(),
+        suspendedByPaymentId: primary.id,
+      },
+    });
+
+    const result = await completeFromCapture(db, facts);
+
+    expect(result).toMatchObject({
+      kind: "compensationEnqueued",
+      failure: { code: "PAYMENT_BLOCKED_BY_REMEDIATION" },
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(mrCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("a same-session suspension cycle cannot finalize or create commerce rows", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const [cycleA, cycleB] = await Promise.all([
+      createOrdinarySuperseded(session, "cycle-a"),
+      createOrdinarySuperseded(session, "cycle-b"),
+    ]);
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "Payment"
+      SET "attemptLifecycle" = 'SUSPENDED',
+          "suspendedByPaymentId" = CASE "id"
+            WHEN ${cycleA.id} THEN ${cycleB.id}
+            WHEN ${cycleB.id} THEN ${cycleA.id}
+          END
+      WHERE "id" IN (${cycleA.id}, ${cycleB.id})
+    `);
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(result).toMatchObject({
+      kind: "compensationEnqueued",
+      failure: { code: "PAYMENT_BLOCKED_BY_REMEDIATION" },
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(mrCount(ctx.userId)).resolves.toBe(0);
+  });
+
   it("providerRef가 있는 pending payment도 providerPaymentKey null 조건으로 캡처 claim 된다", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const providerRef = `pref_${randomUUID()}`;
@@ -249,9 +448,12 @@ describe("payment completion core", () => {
         provider: PaymentProvider.MOCK,
         mode: PaymentMode.SANDBOX,
         status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
         amount: session.totalAmount,
         currency: session.currency,
         providerRef,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
         idempotencyKey: `pref_idem_${randomUUID()}`,
       },
       select: { id: true, providerPaymentKey: true },
@@ -319,9 +521,12 @@ describe("payment completion core", () => {
         provider: PaymentProvider.MOCK,
         mode: PaymentMode.SANDBOX,
         status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
         amount: session.totalAmount,
         currency: session.currency,
         idempotencyKey: `mode_mismatch_${randomUUID()}`,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
       },
       select: { id: true },
     });
@@ -358,9 +563,13 @@ describe("payment completion core", () => {
         provider: PaymentProvider.MOCK,
         mode: PaymentMode.SANDBOX,
         status: PaymentAttemptStatus.SUCCEEDED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
         amount: session.totalAmount,
         currency: session.currency,
         providerPaymentKey,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
+        financialSucceededAt: new Date(),
         idempotencyKey: `orphan_mode_${randomUUID()}`,
       },
       select: { id: true },
@@ -385,7 +594,7 @@ describe("payment completion core", () => {
     await expect(outboxCount(facts)).resolves.toBe(0);
   });
 
-  it("mode mismatch does not consume the void dedup slot for a later legitimate compensation", async () => {
+  it("mode mismatch does not consume the remediation dedup slot for a later legitimate signal", async () => {
     const session = await submitSessionWithOneLine(ctx);
     await db.payment.create({
       data: {
@@ -393,9 +602,12 @@ describe("payment completion core", () => {
         provider: PaymentProvider.MOCK,
         mode: PaymentMode.SANDBOX,
         status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
         amount: session.totalAmount,
         currency: session.currency,
         idempotencyKey: `dedup_mode_${randomUUID()}`,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
       },
     });
     const providerPaymentKey = `dedup_mode_capture_${randomUUID()}`;
@@ -410,7 +622,7 @@ describe("payment completion core", () => {
     await expect(outboxCount(legitimate)).resolves.toBe(1);
   });
 
-  it("같은 캡처 재실패는 void enqueue를 행 1개로 멱등 처리한다", async () => {
+  it("같은 캡처 재실패는 remediation 신호를 행 1개로 멱등 처리한다", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const facts = captureFacts(ctx, session, { amount: session.totalAmount + 1 });
 
@@ -504,6 +716,7 @@ async function createCatalogVariant(context: TestContext, options: VariantOption
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/b2-cover.png",
+      availableMarkets: { create: { marketCode: MarketCode.KR, isActive: true } },
     },
     select: { id: true },
   });
@@ -557,6 +770,28 @@ async function submitSessionWithOneLine(context: TestContext, now?: Date) {
   return submitSession(context, now);
 }
 
+async function createOrdinarySuperseded(
+  session: Awaited<ReturnType<typeof submitSessionWithOneLine>>,
+  label: string,
+) {
+  return db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.MOCK,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      idempotencyKey: `${label}:${randomUUID()}`,
+      contactIntentAt: new Date(),
+      supersededAt: new Date(),
+      blockingEndedAt: new Date(),
+    },
+    select: { id: true },
+  });
+}
+
 function validShipping(): CheckoutShippingInput {
   return {
     recipientName: "홍길동",
@@ -585,7 +820,7 @@ function captureFacts(
     receivedAt: new Date(session.expiresAt.getTime() - 1_000),
     ...overrides,
   };
-  context.outboxDedupKeys.push(voidDedupKey(facts));
+  context.outboxDedupKeys.push(remediationDedupKey(facts));
   return facts;
 }
 
@@ -593,8 +828,8 @@ function defaultNow(): Date {
   return new Date(B2_DEFAULT_NOW);
 }
 
-function voidDedupKey(facts: CaptureFacts): string {
-  return `void:${facts.provider}:${facts.providerPaymentKey}`;
+function remediationDedupKey(facts: CaptureFacts): string {
+  return `payment-remediation:${facts.provider}:${facts.providerPaymentKey}`;
 }
 
 async function requireOrder(userId: string) {
@@ -643,7 +878,7 @@ async function succeededPaymentCount(facts: CaptureFacts): Promise<number> {
 }
 
 async function outboxCount(facts: CaptureFacts): Promise<number> {
-  return db.paymentOutbox.count({ where: { dedupKey: voidDedupKey(facts) } });
+  return db.paymentOutbox.count({ where: { dedupKey: remediationDedupKey(facts) } });
 }
 
 async function statusOf(sessionId: string): Promise<CheckoutSessionStatus> {

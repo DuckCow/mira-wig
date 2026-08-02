@@ -2,7 +2,9 @@ import { PaymentProvider as ProviderCode } from "@prisma/client";
 import type {
   PaymentConfirmFacts,
   PaymentConfirmInput,
+  PaymentConfirmationProvider,
   PaymentInitiateInput,
+  PaymentInitiationProvider,
   PaymentInitiateResult,
   PaymentProvider,
 } from "./types";
@@ -22,6 +24,19 @@ export function createMockPaymentProvider(
     initiate: async (input) => mockInitiate(input),
     confirm: async (input) => mockConfirm(input, options),
   };
+}
+
+export function createMockPaymentInitiationProvider(
+  code: ProviderCode = ProviderCode.MOCK,
+): PaymentInitiationProvider {
+  return { code, initiate: async (input) => mockInitiate(input) };
+}
+
+export function createMockPaymentConfirmationProvider(
+  code: ProviderCode = ProviderCode.MOCK,
+  options: MockPaymentProviderOptions = {},
+): PaymentConfirmationProvider {
+  return { code, confirm: async (input) => mockConfirm(input, options) };
 }
 
 function mockInitiate(_input: PaymentInitiateInput): Promise<PaymentInitiateResult> {

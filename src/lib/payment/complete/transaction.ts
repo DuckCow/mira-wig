@@ -1,11 +1,14 @@
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
+  PaymentRemediationStatus,
   Prisma,
 } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { parseSnapshotData, snapshotToJson } from "@/lib/order/snapshot";
+import { containsSuspensionCycle } from "@/lib/payment/remediation";
 import { transitionCheckoutSession } from "@/lib/payment/session";
 import type { CheckoutSessionTransition } from "@/lib/payment/session";
 import type {
@@ -46,9 +49,10 @@ export async function runCompletionTransaction(
 async function completeInTransaction(
   tx: CompletionTx,
   facts: CaptureFacts,
-  payment: CapturedPayment,
+  capturedPayment: CapturedPayment,
 ): Promise<CompletionSucceeded | CompletionAlreadyCompleted> {
   await lockCheckoutSession(tx, facts.checkoutSessionId);
+  const payment = await requireCurrentPayment(tx, capturedPayment.id, facts);
   const session = await requireSession(tx, facts.checkoutSessionId, payment, facts);
   const already = alreadyCompleted(session, payment, facts);
   if (already) return already;
@@ -58,6 +62,7 @@ async function completeInTransaction(
   await decrementStockedLines(tx, session.lines, payment, facts);
   await deletePurchasedCartLines(tx, session);
   await completeSession(tx, session, facts);
+  await finalizePayment(tx, payment, facts);
   return { kind: "completed", checkoutSessionId: session.id, paymentId: payment.id, orderId: order.id };
 }
 
@@ -82,9 +87,22 @@ async function loadSession(tx: CompletionTx, sessionId: string) {
   return tx.checkoutSession.findUnique({
     where: { id: sessionId },
     include: {
-      lines: { orderBy: { createdAt: "asc" } },
+      lines: {
+        orderBy: { createdAt: "asc" },
+        include: {
+          variant: {
+            select: {
+              wigStyleId: true,
+              stock: true,
+            },
+          },
+        },
+      },
       shipping: true,
       order: { select: { id: true, paymentId: true } },
+      payments: {
+        select: { id: true, remediationStatus: true, suspendedByPaymentId: true },
+      },
     },
   });
 }
@@ -107,19 +125,96 @@ function guardCompletion(
   facts: CaptureFacts,
 ): void {
   guardPayment(payment, facts);
+  guardPaymentLineage(session, payment, facts);
   guardSessionState(session, facts, payment);
   guardCaptureWindow(session, facts, payment);
   if (payment.amount !== session.totalAmount) fail("AMOUNT_MISMATCH", "Payment amount mismatch", facts, payment);
   if (payment.currency !== session.currency) fail("CURRENCY_MISMATCH", "Payment currency mismatch", facts, payment);
   if (!session.shipping) fail("SHIPPING_MISSING", "Checkout session shipping missing", facts, payment);
   if (session.lines.length === 0) fail("LINES_MISSING", "Checkout session lines missing", facts, payment);
+  guardCommerceIntegrity(session, facts, payment);
+}
+
+function guardPaymentLineage(
+  session: CompletionSession,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+): void {
+  if (containsSuspensionCycle(session.payments)) {
+    fail("PAYMENT_BLOCKED_BY_REMEDIATION", "Payment suspension lineage contains a cycle", facts, payment);
+  }
+  const unresolved = session.payments.some((candidate) => (
+    candidate.id !== payment.id
+    && candidate.remediationStatus !== PaymentRemediationStatus.NONE
+    && candidate.remediationStatus !== PaymentRemediationStatus.REMEDIATED
+  ));
+  if (unresolved) {
+    fail("PAYMENT_BLOCKED_BY_REMEDIATION", "Another payment in this checkout lineage requires remediation", facts, payment);
+  }
+}
+
+async function requireCurrentPayment(
+  tx: CompletionTx,
+  paymentId: string,
+  facts: CaptureFacts,
+): Promise<CapturedPayment> {
+  const payment = await tx.payment.findUnique({
+    where: { id: paymentId },
+    select: {
+      id: true,
+      checkoutSessionId: true,
+      provider: true,
+      mode: true,
+      status: true,
+      attemptLifecycle: true,
+      remediationStatus: true,
+      amount: true,
+      currency: true,
+      providerPaymentKey: true,
+      contactStartedAt: true,
+      supersededAt: true,
+      blockingEndedAt: true,
+      suspendedByPaymentId: true,
+    },
+  });
+  if (!payment) {
+    throw new TerminalCompletionError({
+      kind: "terminalFailure",
+      code: "PAYMENT_NOT_SUCCEEDED",
+      message: "Captured payment is missing",
+      checkoutSessionId: facts.checkoutSessionId,
+      paymentId,
+      provider: facts.provider,
+      providerPaymentKey: facts.providerPaymentKey,
+      failedAt: facts.receivedAt,
+    });
+  }
+  return payment;
 }
 
 function guardPayment(payment: CapturedPayment, facts: CaptureFacts): void {
+  if (payment.supersededAt) {
+    fail("SUPERSEDED_ATTEMPT_CAPTURED", "Superseded payment attempt captured", facts, payment);
+  }
+  if (payment.suspendedByPaymentId || payment.remediationStatus !== PaymentRemediationStatus.NONE) {
+    fail("PAYMENT_BLOCKED_BY_REMEDIATION", "Payment lineage is blocked by unresolved remediation", facts, payment);
+  }
   if (payment.status !== PaymentAttemptStatus.SUCCEEDED) fail("PAYMENT_NOT_SUCCEEDED", "Payment is not succeeded", facts, payment);
   if (payment.checkoutSessionId !== facts.checkoutSessionId) fail("PAYMENT_SESSION_MISMATCH", "Payment session mismatch", facts, payment);
   if (payment.mode !== facts.mode) fail("MODE_MISMATCH", "Payment mode mismatch", facts, payment);
   if (payment.providerPaymentKey !== facts.providerPaymentKey) fail("PAYMENT_KEY_MISMATCH", "Payment key mismatch", facts, payment);
+}
+
+function guardCommerceIntegrity(
+  session: CompletionSession,
+  facts: CaptureFacts,
+  payment: CapturedPayment,
+): void {
+  for (const line of session.lines) {
+    if (line.wigStyleId !== line.variant.wigStyleId) {
+      fail("VARIANT_PARENT_MISMATCH", "Frozen style and variant parent identity differ", facts, payment);
+    }
+  }
 }
 
 function guardSessionState(
@@ -168,6 +263,7 @@ async function createOrder(
 function orderItemCreate(line: CompletionLine): Prisma.OrderItemCreateWithoutOrderInput {
   const item = {
     variant: { connect: { id: line.variantId } },
+    wigStyleId: line.wigStyleId,
     quantity: line.quantity,
     unitAmount: line.unitAmount,
     fulfillmentType: line.fulfillmentType,
@@ -236,6 +332,27 @@ async function completeSession(
     now: facts.receivedAt,
   });
   if (count !== 1) throw new Error("Checkout session completion transition conflict");
+}
+
+async function finalizePayment(
+  tx: CompletionTx,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+): Promise<void> {
+  const result = await tx.payment.updateMany({
+    where: {
+      id: payment.id,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      blockingEndedAt: null,
+      suspendedByPaymentId: null,
+      remediationStatus: PaymentRemediationStatus.NONE,
+    },
+    data: {
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+      blockingEndedAt: facts.receivedAt,
+    },
+  });
+  if (result.count !== 1) throw new Error("Payment finalization transition conflict");
 }
 
 function completionTransition(status: CheckoutSessionStatus): CheckoutSessionTransition {

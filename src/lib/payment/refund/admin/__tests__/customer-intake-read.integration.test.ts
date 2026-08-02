@@ -4,6 +4,7 @@ import {
   CustomerRefundIntakeReasonCode,
   CustomerRefundIntakeStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -226,9 +227,13 @@ async function seedOrderRows(ctx: TestContext, count: number) {
       provider: PaymentProvider.MOCK,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       amount: 10_000,
       currency: "KRW",
+      providerPaymentKey: `queue_provider_key_${row.paymentId}`,
       idempotencyKey: `queue_payment_idem_${row.paymentId}`,
+      financialSucceededAt: BASE_TIME,
+      blockingEndedAt: BASE_TIME,
     })),
   });
   await db.order.createMany({

@@ -3,7 +3,7 @@ import { PaymentModeConfigException, configuredPaymentMode } from "@/lib/payment
 import { ProviderCapability } from "@/lib/payment/providers/capabilities";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import { credentialChecksForProvider, type ProviderEnv } from "@/lib/payment/providers/credentials";
-import { ProviderResolveException, resolveProvider } from "@/lib/payment/providers/resolve";
+import { ProviderResolveException, resolveConfirmationProvider } from "@/lib/payment/providers/resolve";
 import {
   NoEligibleProviderError,
   defaultPaymentMethodForMarket,
@@ -13,12 +13,19 @@ import {
   type PaymentMode,
   type ProviderRegistryEntry,
 } from "@/lib/payment/providers/routing";
-import type { PaymentProvider as PaymentProviderPort } from "@/lib/payment/providers/types";
+import type { PaymentConfirmationProvider } from "@/lib/payment/providers/types";
 
 type ProviderUnavailableFailure = {
   success: false;
   errorCode: "PROVIDER_UNAVAILABLE";
   error: "No payment provider is available.";
+  retryable: false;
+};
+
+type PaymentUnavailableFailure = {
+  success: false;
+  errorCode: "PAYMENT_UNAVAILABLE";
+  error: "Pending payment attempt is unavailable.";
   retryable: false;
 };
 
@@ -35,9 +42,22 @@ export interface ActionProviderSuccess {
 }
 
 export type ActionProviderResolution = ActionProviderSuccess | ProviderUnavailableFailure;
+export type ActionModeResolution = { success: true; mode: PaymentMode } | ProviderUnavailableFailure;
 export type AdapterResolutionResult =
-  | { success: true; provider: PaymentProviderPort }
-  | ProviderUnavailableFailure;
+  | { success: true; provider: PaymentConfirmationProvider }
+  | ProviderUnavailableFailure
+  | PaymentUnavailableFailure;
+
+export interface ActionConfirmAdapterInput {
+  session: ProviderBoundarySession;
+  marketCode: string;
+  method: PaymentMethod | undefined;
+  payment: {
+    provider: PaymentProvider;
+    mode: PaymentMode;
+    routingRuleId: string | null;
+  };
+}
 
 interface ProviderFactoryContextOptions {
   registry?: Partial<Record<PaymentProvider, ProviderRegistryEntry>>;
@@ -73,11 +93,37 @@ export function resolveActionProvider(
   }
 }
 
-export function resolveActionAdapter(context: ProviderFactoryContext): AdapterResolutionResult {
+export function resolveActionMode(): ActionModeResolution {
   try {
-    return { success: true, provider: resolveProvider(context) };
+    return { success: true, mode: configuredPaymentMode() };
+  } catch (error) {
+    if (error instanceof PaymentModeConfigException) return providerUnavailable();
+    throw error;
+  }
+}
+
+export function resolveActionConfirmAdapter(input: ActionConfirmAdapterInput): AdapterResolutionResult {
+  try {
+    const method = input.method ?? defaultPaymentMethodForMarket(input.marketCode);
+    const configuredMode = configuredPaymentMode();
+    if (configuredMode !== input.payment.mode) return paymentUnavailable();
+    const routing = resolveProviderForPayment({
+      market: input.marketCode,
+      method,
+      currency: input.session.currency,
+      amountMinor: input.session.totalAmount,
+      mode: configuredMode,
+    });
+    const context = createProviderFactoryContext(input.session, input.marketCode, method, {
+      selectedProvider: input.payment.provider,
+      mode: input.payment.mode,
+      ruleId: input.payment.routingRuleId ?? routing.ruleId,
+    });
+    return { success: true, provider: resolveConfirmationProvider(context) };
   } catch (e) {
-    if (e instanceof ProviderResolveException) return providerUnavailable();
+    if (e instanceof ProviderResolveException
+      || e instanceof NoEligibleProviderError
+      || e instanceof PaymentModeConfigException) return providerUnavailable();
     throw e;
   }
 }
@@ -122,6 +168,15 @@ function providerUnavailable(): ProviderUnavailableFailure {
     success: false,
     errorCode: "PROVIDER_UNAVAILABLE",
     error: "No payment provider is available.",
+    retryable: false,
+  };
+}
+
+function paymentUnavailable(): PaymentUnavailableFailure {
+  return {
+    success: false,
+    errorCode: "PAYMENT_UNAVAILABLE",
+    error: "Pending payment attempt is unavailable.",
     retryable: false,
   };
 }

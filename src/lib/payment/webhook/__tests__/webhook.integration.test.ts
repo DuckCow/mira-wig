@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 import {
   FulfillmentType,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentEventFailureStage,
   PaymentEventSource,
@@ -25,7 +26,7 @@ import {
   TOSS_SANDBOX_EXTERNAL_ENABLED,
   type SandboxExternalCodeRegistryEntry,
 } from "@/lib/payment/providers/factory";
-import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
+import { PaymentMethod } from "@/lib/payment/providers/routing";
 import { tossBasicAuthorization } from "@/lib/payment/providers/toss/auth";
 import { deriveTossOrderId } from "@/lib/payment/providers/toss/order-id";
 import { handleWebhook } from "../handle";
@@ -464,6 +465,7 @@ describe("payment webhook core", () => {
     expect(payment).toMatchObject({
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       providerPaymentKey: firstPayload.providerPaymentKey,
     });
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
@@ -536,7 +538,7 @@ describe("payment webhook core", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(0);
   });
 
-  it("terminal amount mismatch returns 2xx and enqueues one void intent", async () => {
+  it("terminal amount mismatch returns 2xx and enqueues one provider remediation request", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const payload = capturePayload(ctx, session, { amount: session.totalAmount + 1 });
 
@@ -1113,9 +1115,18 @@ async function initiateForSession(context: TestContext, sessionId: string): Prom
   await initiatePaymentAttempt(db, {
     sessionId,
     userId: context.userId,
-    provider: createMockPaymentProvider(PaymentProvider.TOSS),
-    mode: PaymentMode.SANDBOX,
+    adapterContext: {
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      market: MarketCode.KR,
+      method: PaymentMethod.CARD,
+      currency: "KRW",
+      ruleId: "test.kr.card.toss",
+      credentials: [],
+      liveGuard: { kind: "blocked", liveEnabled: false, reason: "test sandbox" },
+    },
     now: B4_RECEIVED_AT,
+    contactBoundaryClock: () => new Date(B4_RECEIVED_AT.getTime() + 1),
   });
 }
 
@@ -1127,6 +1138,7 @@ async function createCatalogVariant(context: TestContext, options: VariantOption
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/b4-cover.png",
+      availableMarkets: { create: { marketCode: MarketCode.KR, isActive: true } },
     },
     select: { id: true },
   });
@@ -1530,7 +1542,10 @@ async function cleanup(context: TestContext): Promise<void> {
 }
 
 async function deleteOutbox(context: TestContext): Promise<void> {
-  const dedupKeys = context.providerPaymentKeys.map((key) => `void:${PaymentProvider.TOSS}:${key}`);
+  const dedupKeys = context.providerPaymentKeys.flatMap((key) => [
+    `void:${PaymentProvider.TOSS}:${key}`,
+    `payment-remediation:${PaymentProvider.TOSS}:${key}`,
+  ]);
   await db.paymentOutbox.deleteMany({ where: { dedupKey: { in: dedupKeys } } });
 }
 
@@ -1576,9 +1591,12 @@ async function createConflictingOrder(
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       amount: session.totalAmount,
       currency: session.currency,
       providerPaymentKey,
+      financialSucceededAt: B4_NOW,
+      blockingEndedAt: B4_NOW,
       idempotencyKey: `b4_conflict_${randomUUID()}`,
     },
     select: { id: true },
@@ -1702,7 +1720,9 @@ async function orderCount(userId: string): Promise<number> {
 }
 
 async function outboxCount(provider: PaymentProvider, providerPaymentKey: string): Promise<number> {
-  return db.paymentOutbox.count({ where: { dedupKey: `void:${provider}:${providerPaymentKey}` } });
+  return db.paymentOutbox.count({
+    where: { dedupKey: `payment-remediation:${provider}:${providerPaymentKey}` },
+  });
 }
 
 async function expectZeroPublicIngressWrites(

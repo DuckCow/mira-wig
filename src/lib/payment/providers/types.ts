@@ -21,7 +21,11 @@ export interface PaymentInitiateRedirect {
   providerRef?: string;
 }
 
-export type PaymentInitiateResult = PaymentInitiateReady | PaymentInitiateRedirect;
+export interface PaymentInitiateInProgress {
+  kind: "inProgress";
+}
+
+export type PaymentInitiateResult = PaymentInitiateReady | PaymentInitiateRedirect | PaymentInitiateInProgress;
 
 export interface PaymentConfirmInput {
   checkoutSessionId: string;
@@ -43,8 +47,14 @@ export interface PaymentConfirmFacts {
 
 export type PaymentConfirmResult = PaymentConfirmFacts | NormalizedProviderConfirmResult;
 
-export interface PaymentProvider {
+export interface PaymentInitiationProvider<Result extends PaymentInitiateResult = PaymentInitiateResult> {
   code: ProviderCode;
-  initiate(input: PaymentInitiateInput): Promise<PaymentInitiateResult>;
-  confirm(input: PaymentConfirmInput): Promise<PaymentConfirmResult>;
+  initiate(input: PaymentInitiateInput): Promise<Result>;
 }
+
+export interface PaymentConfirmationProvider<Result extends PaymentConfirmResult = PaymentConfirmResult> {
+  code: ProviderCode;
+  confirm(input: PaymentConfirmInput): Promise<Result>;
+}
+
+export interface PaymentProvider extends PaymentInitiationProvider, PaymentConfirmationProvider {}

@@ -4,27 +4,29 @@ import { TOSS_SANDBOX_SECRET_KEY, type ProviderEnv } from "./credentials";
 import type { ProviderFactoryContext } from "./contract";
 import {
   TOSS_SANDBOX_EXTERNAL_ENABLED,
-  createProviderAdapter,
+  createConfirmationProvider,
   ProviderResolveException,
-  type CreateProviderAdapterOptions,
+  type CreateConfirmationProviderOptions,
   type ProviderResolveErrorCode,
 } from "./factory";
 import { PaymentMode } from "./routing";
-import { createTossConfirmFetchClient, createTossSandboxPaymentProvider } from "./toss/adapter";
-import type { PaymentProvider } from "./types";
+import { createTossConfirmAdapter, createTossConfirmFetchClient } from "./toss/adapter";
+import type {
+  PaymentConfirmationProvider,
+} from "./types";
 
 export type ResolveProviderInput = ProviderFactoryContext;
 export { ProviderResolveException };
-export type { CreateProviderAdapterOptions, ProviderResolveErrorCode };
+export type { CreateConfirmationProviderOptions, ProviderResolveErrorCode };
 
-export function resolveProvider(
+export function resolveConfirmationProvider(
   input: ResolveProviderInput,
-  options?: CreateProviderAdapterOptions,
-): PaymentProvider {
-  return createProviderAdapter(input, options ?? defaultProviderAdapterOptions());
+  options?: CreateConfirmationProviderOptions,
+): PaymentConfirmationProvider {
+  return createConfirmationProvider(input, options ?? defaultProviderAdapterOptions());
 }
 
-function defaultProviderAdapterOptions(env: ProviderEnv = process.env): CreateProviderAdapterOptions {
+export function defaultProviderAdapterOptions(env: ProviderEnv = process.env): CreateConfirmationProviderOptions {
   if (!hasSandboxExternalIntent(env)) return { env };
   return {
     env,
@@ -35,8 +37,8 @@ function defaultProviderAdapterOptions(env: ProviderEnv = process.env): CreatePr
         capability: ProviderCapability.ACTION_ADAPTER,
       },
     ],
-    sandboxExternalAdapters: {
-      [ProviderCode.TOSS]: (context) => createTossSandboxPaymentProvider({
+    sandboxExternalConfirmationAdapters: {
+      [ProviderCode.TOSS]: (context) => createTossConfirmAdapter({
         httpClient: createTossConfirmFetchClient({ secretKey: requiredTossSandboxSecret(context, env) }),
       }),
     },

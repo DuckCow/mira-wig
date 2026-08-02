@@ -14,7 +14,7 @@ import type { CartItemView } from "@/lib/cart";
 import type { MarketCode } from "@/lib/market/types";
 
 function pricedItems(items: CartItemView[]): CartItemView[] {
-  return items.filter((item) => item.price !== null);
+  return items.filter((item) => item.price !== null && item.unavailableCode === null);
 }
 
 function productSubtotal(items: CartItemView[]): number {

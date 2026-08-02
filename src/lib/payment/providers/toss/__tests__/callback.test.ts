@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -274,12 +275,16 @@ async function expectInvalidCallbackLeavesPayment(
 
 async function createPayment(context: TestContext, options: PaymentOptions = {}) {
   const session = await createSession(context, options);
+  const status = options.status ?? PaymentAttemptStatus.INITIATED;
+  const now = new Date();
+  const lifecycle = paymentLifecycleFields(status, now);
   return db.payment.create({
     data: {
       checkoutSessionId: session.id,
       provider: options.provider ?? PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
-      status: options.status ?? PaymentAttemptStatus.INITIATED,
+      status,
+      ...lifecycle,
       amount: options.amount ?? AMOUNT,
       currency: options.currency ?? "KRW",
       providerRef: options.providerRef ?? undefined,
@@ -287,6 +292,25 @@ async function createPayment(context: TestContext, options: PaymentOptions = {})
       idempotencyKey: `toss-callback:${session.id}:${randomUUID()}`,
     },
   });
+}
+
+function paymentLifecycleFields(status: PaymentAttemptStatus, now: Date) {
+  if (status === PaymentAttemptStatus.FAILED) {
+    return { attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE, blockingEndedAt: now };
+  }
+  if (status === PaymentAttemptStatus.SUCCEEDED) {
+    return {
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      contactIntentAt: now,
+      contactStartedAt: now,
+      financialSucceededAt: now,
+    };
+  }
+  return {
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    contactIntentAt: now,
+    contactStartedAt: now,
+  };
 }
 
 async function createSession(context: TestContext, options: PaymentOptions) {

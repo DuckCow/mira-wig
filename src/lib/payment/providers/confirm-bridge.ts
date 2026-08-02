@@ -1,4 +1,4 @@
-import { PaymentAttemptStatus, Prisma } from "@prisma/client";
+import { PaymentAttemptLifecycle, PaymentAttemptStatus, Prisma } from "@prisma/client";
 import type { PaymentProvider, PrismaClient } from "@prisma/client";
 import type { CaptureFacts } from "@/lib/payment/complete";
 import type { PaymentMode } from "@/lib/payment/providers/routing";
@@ -50,7 +50,7 @@ export async function bridgeProviderConfirmResult(
   const result = input.result;
   if (isPaymentConfirmFacts(result)) return legacySuccess(input, result);
   if (result.kind === "succeeded") return normalizedSuccess(input, result);
-  return normalizedFailure(input.client, input.paymentId, result);
+  return normalizedFailure(input.client, input.paymentId, result, input.receivedAt);
 }
 
 export function isNormalizedProviderConfirmResult(
@@ -71,6 +71,7 @@ function legacySuccess(
     success: true,
     captureFacts: {
       ...facts,
+      paymentId: input.paymentId,
       checkoutSessionId: input.checkoutSessionId,
       provider: input.provider,
       mode: input.mode,
@@ -86,6 +87,7 @@ function normalizedSuccess(
   return {
     success: true,
     captureFacts: {
+      paymentId: input.paymentId,
       checkoutSessionId: input.checkoutSessionId,
       provider: input.provider,
       mode: input.mode,
@@ -102,10 +104,14 @@ async function normalizedFailure(
   client: PrismaClient,
   paymentId: string,
   failure: ProviderConfirmFailed,
+  receivedAt: Date,
 ): Promise<ProviderConfirmBridgeFailure> {
-  if (failure.classification === "RETRYABLE") return actionFailure("PROVIDER_RETRYABLE", true);
+  if (failure.classification === "RETRYABLE") {
+    await markUnknown(client, paymentId, "PROVIDER_CONFIRM_RETRYABLE");
+    return actionFailure("PROVIDER_RETRYABLE", true);
+  }
   if (failure.classification === "TERMINAL") {
-    return markerOrInternal(await markTerminal(client, paymentId));
+    return markerOrInternal(await markTerminal(client, paymentId, receivedAt));
   }
   if (failure.classification === "MANUAL_REVIEW") {
     return markerOrInternal(await markPending(client, paymentId, "PROVIDER_CONFIRM_MANUAL_REVIEW"));
@@ -116,10 +122,18 @@ async function normalizedFailure(
   return actionFailure("PROVIDER_PROGRAMMER_ERROR", false);
 }
 
-async function markTerminal(client: PrismaClient, paymentId: string): Promise<ProviderConfirmBridgeFailure | null> {
+async function markTerminal(
+  client: PrismaClient,
+  paymentId: string,
+  receivedAt: Date,
+): Promise<ProviderConfirmBridgeFailure | null> {
   const result = await client.payment.updateMany({
     where: pendingPaymentWhere(paymentId),
-    data: markerData("PROVIDER_CONFIRM_TERMINAL", PaymentAttemptStatus.FAILED),
+    data: {
+      ...markerData("PROVIDER_CONFIRM_TERMINAL", PaymentAttemptStatus.FAILED),
+      attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+      blockingEndedAt: receivedAt,
+    },
   });
   if (result.count !== 1) return actionFailure("PROVIDER_PROGRAMMER_ERROR", false);
   return actionFailure("PROVIDER_TERMINAL", false);
@@ -132,7 +146,10 @@ async function markPending(
 ): Promise<ProviderConfirmBridgeFailure | null> {
   const result = await client.payment.updateMany({
     where: pendingPaymentWhere(paymentId),
-    data: markerData(code),
+    data: {
+      ...markerData(code),
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+    },
   });
   if (result.count !== 1) return actionFailure("PROVIDER_PROGRAMMER_ERROR", false);
   if (code === "PROVIDER_CONFIRM_MANUAL_REVIEW") return actionFailure("PROVIDER_MANUAL_REVIEW", false);
@@ -147,8 +164,21 @@ function pendingPaymentWhere(paymentId: string): Prisma.PaymentWhereInput {
   return {
     id: paymentId,
     providerPaymentKey: null,
+    blockingEndedAt: null,
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
     status: { in: [...PENDING_STATUSES] },
   };
+}
+
+async function markUnknown(client: PrismaClient, paymentId: string, code: string): Promise<void> {
+  await client.payment.updateMany({
+    where: pendingPaymentWhere(paymentId),
+    data: {
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      errorCode: code,
+      errorMessage: "Provider confirm outcome is unresolved.",
+    },
+  });
 }
 
 function markerData(

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -656,18 +657,24 @@ async function createPayment(
   mode: PaymentMode,
   options: OrderOptions,
 ): Promise<string> {
+  const status = options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED;
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: sessionId,
       provider,
       mode,
-      status: options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED,
+      status,
+      attemptLifecycle: status === PaymentAttemptStatus.SUCCEEDED
+        ? PaymentAttemptLifecycle.FINALIZED
+        : PaymentAttemptLifecycle.TERMINAL_FAILURE,
       amount: options.paymentAmount ?? amount,
       currency: options.paymentCurrency ?? currency,
       providerPaymentKey: options.providerPaymentKey === undefined
         ? `provider_payment_${randomUUID()}`
         : options.providerPaymentKey,
       idempotencyKey: `payment_idem_${randomUUID()}`,
+      financialSucceededAt: status === PaymentAttemptStatus.SUCCEEDED ? NOW : undefined,
+      blockingEndedAt: NOW,
     },
   });
   context.paymentIds.push(payment.id);

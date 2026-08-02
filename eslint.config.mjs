@@ -14,6 +14,39 @@ import tseslint from "typescript-eslint";
 import importPlugin from "eslint-plugin-import";
 import nextPlugin from "@next/eslint-plugin-next";
 
+const initiationModuleRestriction = {
+  group: ["**/payment/providers/initiation"],
+  message: "Only the payment-attempt contact owner may import raw initiation resolution.",
+};
+const initiationTypeRestriction = {
+  group: ["**/payment/providers/types"],
+  importNames: ["PaymentInitiationProvider", "PaymentProvider"],
+  message: "Raw initiation capability types are restricted to the contact owner and provider infrastructure.",
+};
+const initiationFactoryRestriction = {
+  group: ["**/payment/providers/factory"],
+  importNames: ["createInitiationProvider"],
+  message: "Raw initiation construction is restricted to provider infrastructure.",
+};
+const mockInitiationRestriction = {
+  group: ["**/payment/providers/mock"],
+  importNames: ["createMockPaymentProvider", "createMockPaymentInitiationProvider"],
+  message: "Combined provider adapters must not escape provider infrastructure.",
+};
+const tossInitiationRestriction = {
+  group: ["**/payment/providers/toss/adapter"],
+  importNames: ["createTossSandboxPaymentProvider"],
+  message: "Low-level initiation-capable adapters are restricted provider infrastructure.",
+};
+
+/**
+ * @param {readonly Readonly<Record<string, unknown>>[]} patterns
+ * @returns {readonly ["error", Readonly<{ patterns: readonly Readonly<Record<string, unknown>>[] }> ]}
+ */
+function restrictedInitiationImports(patterns) {
+  return ["error", { patterns }];
+}
+
 export default tseslint.config(
   // Next.js 권장 규칙 (core-web-vitals 포함) — 베이스로 먼저 적용
   { ...nextPlugin.configs["core-web-vitals"], files: ["src/**/*.{ts,tsx}"] },
@@ -104,6 +137,98 @@ export default tseslint.config(
     files: ["src/**/__tests__/**/*.ts", "src/**/*.test.ts", "src/**/*.integration.test.ts"],
     rules: {
       complexity: ["error", 10],
+    },
+  },
+
+  // Raw provider initiation is a restricted capability. Ordinary production
+  // modules may not import or re-export its resolver or construction seams.
+  {
+    files: ["**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"],
+    ignores: [
+      "**/__tests__/**",
+      "**/*.test.*",
+      "**/*.spec.*",
+      "coverage/**",
+      "dist/**",
+      "build/**",
+      "out/**",
+      ".next/**",
+      "node_modules/**",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        ...restrictedInitiationImports([
+          initiationModuleRestriction,
+          initiationTypeRestriction,
+          initiationFactoryRestriction,
+          mockInitiationRestriction,
+          tossInitiationRestriction,
+        ]),
+      ],
+    },
+  },
+  {
+    files: ["src/lib/payment/attempt/initiate.ts"],
+    rules: {
+      "no-restricted-imports": restrictedInitiationImports([
+        initiationFactoryRestriction,
+        mockInitiationRestriction,
+        tossInitiationRestriction,
+      ]),
+    },
+  },
+  {
+    files: ["src/lib/payment/providers/initiation.ts"],
+    rules: {
+      "no-restricted-imports": restrictedInitiationImports([
+        initiationModuleRestriction,
+        mockInitiationRestriction,
+        tossInitiationRestriction,
+      ]),
+    },
+  },
+  {
+    files: ["src/lib/payment/providers/contract.ts"],
+    rules: {
+      "no-restricted-imports": restrictedInitiationImports([
+        initiationModuleRestriction,
+        initiationFactoryRestriction,
+        mockInitiationRestriction,
+        tossInitiationRestriction,
+      ]),
+    },
+  },
+  {
+    files: ["src/lib/payment/providers/factory.ts"],
+    rules: {
+      "no-restricted-imports": restrictedInitiationImports([
+        initiationModuleRestriction,
+        tossInitiationRestriction,
+        {
+          ...mockInitiationRestriction,
+          importNames: ["createMockPaymentProvider"],
+        },
+      ]),
+    },
+  },
+  {
+    files: ["src/lib/payment/providers/mock.ts"],
+    rules: {
+      "no-restricted-imports": restrictedInitiationImports([
+        initiationModuleRestriction,
+        initiationFactoryRestriction,
+        tossInitiationRestriction,
+      ]),
+    },
+  },
+  {
+    files: ["src/lib/payment/providers/toss/adapter.ts"],
+    rules: {
+      "no-restricted-imports": restrictedInitiationImports([
+        initiationModuleRestriction,
+        initiationFactoryRestriction,
+        mockInitiationRestriction,
+      ]),
     },
   },
 

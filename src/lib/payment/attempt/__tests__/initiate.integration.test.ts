@@ -1,24 +1,64 @@
 import { randomUUID } from "crypto";
 import {
+  CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
+  PaymentInitiationOutputKind,
   PaymentProvider,
+  PaymentRemediationStatus,
+  Prisma,
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Client } from "pg";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
-import { completeFromCapture, type CaptureFacts } from "@/lib/payment/complete";
-import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
-import { PaymentMode } from "@/lib/payment/providers/routing";
+import { completeFromCapture, recordCapture, type CaptureFacts } from "@/lib/payment/complete";
+import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
+import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
+import { PaymentMethod, PaymentMode } from "@/lib/payment/providers/routing";
 import type {
   PaymentInitiateInput,
   PaymentInitiateResult,
-  PaymentProvider as PaymentProviderPort,
+  PaymentInitiationProvider,
 } from "@/lib/payment/providers/types";
-import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
+import { createCheckoutSession, expireStale, type CheckoutShippingInput } from "@/lib/payment/session";
 import { initiatePaymentAttempt } from "../initiate";
+
+const initiationProviders = vi.hoisted(() => new Map<string, PaymentInitiationProvider>());
+
+vi.mock("@/lib/payment/providers/initiation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/payment/providers/initiation")>()),
+  resolveInitiationProvider: (context: ProviderFactoryContext) => {
+    const provider = initiationProviders.get(context.ruleId);
+    if (!provider) throw new Error(`Missing test initiation provider for ${context.ruleId}`);
+    return provider;
+  },
+}));
+
+type PaymentAttemptCoordinationPoint =
+  | "BEFORE_AUTHORIZATION_LOCK"
+  | "AFTER_AUTHORIZATION_LOCK"
+  | "AFTER_AUTHORIZATION_COMMIT"
+  | "BEFORE_CONTACT_CLAIM_COMMIT"
+  | "AFTER_CONTACT_CLAIM_COMMIT";
+
+interface PaymentAttemptTestCoordination {
+  waitAt(point: PaymentAttemptCoordinationPoint): Promise<void>;
+  includes(point: PaymentAttemptCoordinationPoint): boolean;
+}
+
+interface TestInitiationInput {
+  sessionId: string;
+  userId: string;
+  provider: PaymentInitiationProvider;
+  mode: PaymentMode;
+  routingRuleId: string;
+  now?: Date;
+  contactBoundaryNow?: Date;
+}
 
 interface TestContext {
   userId: string;
@@ -36,6 +76,7 @@ describe("payment initiate providerRef persistence", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
+    initiationProviders.clear();
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
@@ -49,11 +90,12 @@ describe("payment initiate providerRef persistence", () => {
     const session = await submitSessionWithOneLine(ctx);
     const providerRef = `pref_ready_${randomUUID()}`;
 
-    const result = await initiatePaymentAttempt(db, {
+    const result = await initiatePaymentAttemptForTest(db, {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({ kind: "ready", providerRef }),
       mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
     });
 
     const payment = await onlyPayment(session.sessionId);
@@ -70,7 +112,7 @@ describe("payment initiate providerRef persistence", () => {
     const session = await submitSessionWithOneLine(ctx);
     const providerRef = `pref_redirect_${randomUUID()}`;
 
-    const result = await initiatePaymentAttempt(db, {
+    const result = await initiatePaymentAttemptForTest(db, {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({
@@ -79,6 +121,7 @@ describe("payment initiate providerRef persistence", () => {
         providerRef,
       }),
       mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
     });
 
     const payment = await onlyPayment(session.sessionId);
@@ -93,11 +136,12 @@ describe("payment initiate providerRef persistence", () => {
   it("leaves providerRef null when initiate result omits it", async () => {
     const session = await submitSessionWithOneLine(ctx);
 
-    await initiatePaymentAttempt(db, {
+    await initiatePaymentAttemptForTest(db, {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({ kind: "ready" }),
       mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
     });
 
     const payment = await onlyPayment(session.sessionId);
@@ -105,30 +149,51 @@ describe("payment initiate providerRef persistence", () => {
     expect(payment.providerPaymentKey).toBeNull();
   });
 
-  it("does not write providerRef when provider initiate fails", async () => {
+  it("records OUTCOME_UNKNOWN after provider contact failure and blocks every recontact", async () => {
     const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider = failingProvider(calls);
 
-    await expect(initiatePaymentAttempt(db, {
+    await expect(initiatePaymentAttemptForTest(db, {
       sessionId: session.sessionId,
       userId: ctx.userId,
-      provider: failingProvider(),
+      provider,
       mode: PaymentMode.SANDBOX,
-    })).rejects.toThrow("Fake provider initiate failure");
+      routingRuleId: "test.kr.card.toss",
+    })).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
+    })).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.other",
+    })).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
 
     const payment = await onlyPayment(session.sessionId);
     expect(payment.status).toBe(PaymentAttemptStatus.INITIATED);
+    expect(payment.attemptLifecycle).toBe(PaymentAttemptLifecycle.OUTCOME_UNKNOWN);
     expect(payment.providerRef).toBeNull();
     expect(payment.providerPaymentKey).toBeNull();
+    expect(calls).toHaveLength(1);
   });
 
   it("final capture sets providerPaymentKey while preserving providerRef", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const providerRef = `pref_capture_${randomUUID()}`;
-    await initiatePaymentAttempt(db, {
+    await initiatePaymentAttemptForTest(db, {
       sessionId: session.sessionId,
       userId: ctx.userId,
       provider: fakeProvider({ kind: "ready", providerRef }),
       mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
     });
     const facts = captureFacts(session);
 
@@ -142,22 +207,1215 @@ describe("payment initiate providerRef persistence", () => {
       providerPaymentKey: facts.providerPaymentKey,
     });
   });
+
+  it("reuses one active attempt for simultaneous compatible starts", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider = fakeProvider(
+      { kind: "redirect", approveUrl: "https://fake.example/approve", providerRef: "same-ref" },
+      calls,
+    );
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
+    };
+
+    const [first, second] = await Promise.all([
+      initiatePaymentAttemptForTest(db, input),
+      initiatePaymentAttemptForTest(db, input),
+    ]);
+
+    expect(first.paymentId).toBe(second.paymentId);
+    expect(calls).toHaveLength(1);
+    expect([first.initiateResult.kind, second.initiateResult.kind]).toContain("redirect");
+    await expect(db.payment.count({
+      where: {
+        checkoutSessionId: session.sessionId,
+        status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+      },
+    })).resolves.toBe(1);
+  });
+
+  it("reclaims the same uncontacted CONTACT_AUTHORIZED row and preserves its idempotency identity", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const authorized = await createUncontactedAuthorizedPayment(session, "test.route.reclaim");
+    const calls: PaymentInitiateInput[] = [];
+
+    const result = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.reclaim",
+    });
+
+    expect(result.paymentId).toBe(authorized.paymentId);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.idempotencyKey).toBe(authorized.idempotencyKey);
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(1);
+  });
+
+  it("C2I expiry-first closes the exact auditor race before provider contact", async () => {
+    const session = await moveSessionExpiryIntoPast(await submitSessionWithOneLine(ctx));
+    const authorizationNow = new Date(session.expiresAt.getTime() - 2);
+    const sweepNow = new Date(session.expiresAt.getTime() + 1);
+    const contactBoundaryNow = new Date(session.expiresAt.getTime() + 2);
+    const authorizationCommitted = coordinationBarrier();
+    const calls: PaymentInitiateInput[] = [];
+    const initiation = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready", providerRef: "must-not-persist" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.c2i.expiry-first",
+      now: authorizationNow,
+      contactBoundaryNow,
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", authorizationCommitted));
+    await authorizationCommitted.reached;
+
+    await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(1);
+    authorizationCommitted.release();
+
+    await expect(initiation).rejects.toMatchObject({ code: "SESSION_NOT_USABLE" });
+    expect(calls).toHaveLength(0);
+    const payment = await onlyPayment(session.sessionId);
+    expect(payment).toMatchObject({
+      status: PaymentAttemptStatus.FAILED,
+      attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+      remediationStatus: PaymentRemediationStatus.NONE,
+      blockingEndedAt: contactBoundaryNow,
+      contactStartedAt: null,
+      providerRef: null,
+      providerPaymentKey: null,
+      initiationOutputKind: null,
+      errorCode: "CHECKOUT_SESSION_NOT_USABLE",
+    });
+    await expect(db.checkoutSession.findUnique({
+      where: { id: session.sessionId },
+      select: { status: true },
+    })).resolves.toEqual({ status: CheckoutSessionStatus.EXPIRED });
+    await expectNoRejectedPaymentSideEffects(session.sessionId);
+  });
+
+  it("C2I contact-first prevents later expiry from overtaking CONTACTED and completes once", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const authorizationNow = new Date(session.expiresAt.getTime() - 2);
+    const contactBoundaryNow = new Date(session.expiresAt.getTime() - 1);
+    const sweepNow = new Date(session.expiresAt.getTime() + 1);
+    const receivedAt = new Date(sweepNow.getTime() + 1);
+    const authorizationCommitted = coordinationBarrier();
+    const contactClaimCommitted = coordinationBarrier();
+    const calls: PaymentInitiateInput[] = [];
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready", providerRef: "c2i-contacted" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.c2i.contact-first",
+      now: authorizationNow,
+      contactBoundaryNow,
+    };
+    const initiation = initiatePaymentAttemptForTest(db, input, coordinationAtMany([
+      { point: "AFTER_AUTHORIZATION_COMMIT", barrier: authorizationCommitted },
+      { point: "AFTER_CONTACT_CLAIM_COMMIT", barrier: contactClaimCommitted },
+    ]));
+    await authorizationCommitted.reached;
+
+    authorizationCommitted.release();
+    await contactClaimCommitted.reached;
+    expect(calls).toHaveLength(0);
+
+    await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(0);
+    await expect(db.checkoutSession.findUnique({
+      where: { id: session.sessionId },
+      select: { status: true },
+    })).resolves.toEqual({ status: CheckoutSessionStatus.SUBMITTED });
+    contactClaimCommitted.release();
+    const initiated = await initiation;
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.paymentId).toBe(initiated.paymentId);
+    await expect(initiatePaymentAttemptForTest(db, input)).resolves.toMatchObject({
+      paymentId: initiated.paymentId,
+      initiateResult: { kind: "ready", providerRef: "c2i-contacted" },
+    });
+    expect(calls).toHaveLength(1);
+    const paymentBeforeCapture = await onlyPayment(session.sessionId);
+    expect(paymentBeforeCapture).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      contactIntentAt: authorizationNow,
+      contactStartedAt: contactBoundaryNow,
+      initiationOutputKind: PaymentInitiationOutputKind.READY,
+      providerRef: "c2i-contacted",
+      blockingEndedAt: null,
+    });
+
+    await expect(completeFromCapture(db, {
+      ...captureFacts(session),
+      paymentId: initiated.paymentId,
+      capturedAt: contactBoundaryNow,
+      receivedAt,
+    })).resolves.toMatchObject({ kind: "completed", paymentId: initiated.paymentId });
+    await expect(db.checkoutSession.findUnique({
+      where: { id: session.sessionId },
+      select: { status: true },
+    })).resolves.toEqual({ status: CheckoutSessionStatus.COMPLETED });
+    await expect(db.order.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(1);
+    await expect(db.manufacturingRequest.count({
+      where: { orderItem: { order: { checkoutSessionId: session.sessionId } } },
+    })).resolves.toBe(1);
+  });
+
+  it("C2J CONTACTED commit while expiry waits is observed by the fresh post-lock read", async () => {
+    const session = await moveSessionExpiryIntoPast(await submitSessionWithOneLine(ctx));
+    const authorizationNow = new Date(session.expiresAt.getTime() - 2);
+    const contactBoundaryNow = new Date(session.expiresAt.getTime() - 1);
+    const beforeContactCommit = coordinationBarrier();
+    const calls: PaymentInitiateInput[] = [];
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready", providerRef: "c2j-contacted" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.c2j.contacted-lock-wait",
+      now: authorizationNow,
+      contactBoundaryNow,
+    };
+    const observer = await openSessionLockObserver("contacted");
+    let released = false;
+
+    try {
+      const initiation = initiatePaymentAttemptForTest(
+        db,
+        input,
+        coordinationAt("BEFORE_CONTACT_CLAIM_COMMIT", beforeContactCommit),
+      );
+      await beforeContactCommit.reached;
+      const expiry = expireStale(db, { now: new Date(), limit: 10 });
+      const waiting = await waitForSessionLockWait(observer);
+
+      expect(waiting.state).toBe("active");
+      expect(waiting.waitEventType).toBe("Lock");
+      expect(waiting.blockingPids.length).toBeGreaterThan(0);
+      beforeContactCommit.release();
+      released = true;
+
+      const [initiated, expiryCount] = await Promise.all([initiation, expiry]);
+      expect(expiryCount).toBe(0);
+      expect(calls).toHaveLength(1);
+      await expect(db.checkoutSession.findUnique({
+        where: { id: session.sessionId },
+        select: { status: true },
+      })).resolves.toEqual({ status: CheckoutSessionStatus.SUBMITTED });
+      await expect(db.payment.findUnique({
+        where: { id: initiated.paymentId },
+        select: {
+          status: true,
+          attemptLifecycle: true,
+          contactStartedAt: true,
+          initiationOutputKind: true,
+          providerRef: true,
+          blockingEndedAt: true,
+        },
+      })).resolves.toMatchObject({
+        status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        contactStartedAt: contactBoundaryNow,
+        initiationOutputKind: PaymentInitiationOutputKind.READY,
+        providerRef: "c2j-contacted",
+        blockingEndedAt: null,
+      });
+      await expect(initiatePaymentAttemptForTest(db, input)).resolves.toMatchObject({
+        paymentId: initiated.paymentId,
+        initiateResult: { kind: "ready", providerRef: "c2j-contacted" },
+      });
+      expect(calls).toHaveLength(1);
+    } finally {
+      if (!released) beforeContactCommit.release();
+      await observer.end();
+    }
+  });
+
+  it("C2I compatible reclaim then expiry closes the reclaimed authority without recontact", async () => {
+    const session = await moveSessionExpiryIntoPast(await submitSessionWithOneLine(ctx));
+    const authorizationNow = new Date(session.expiresAt.getTime() - 2);
+    const contactBoundaryNow = new Date(session.expiresAt.getTime() + 1);
+    const authorized = await createUncontactedAuthorizedPayment(
+      session,
+      "test.c2i.compatible-reclaim",
+      new Date(authorizationNow.getTime() - 1),
+    );
+    const authorizationCommitted = coordinationBarrier();
+    const calls: PaymentInitiateInput[] = [];
+    const initiation = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.c2i.compatible-reclaim",
+      now: authorizationNow,
+      contactBoundaryNow,
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", authorizationCommitted));
+    await authorizationCommitted.reached;
+
+    await expect(expireStale(db, {
+      now: contactBoundaryNow,
+      limit: 10,
+    })).resolves.toBe(1);
+    authorizationCommitted.release();
+
+    await expect(initiation).rejects.toMatchObject({ code: "SESSION_NOT_USABLE" });
+    expect(calls).toHaveLength(0);
+    await expect(db.payment.findUnique({ where: { id: authorized.paymentId } })).resolves.toMatchObject({
+      id: authorized.paymentId,
+      idempotencyKey: authorized.idempotencyKey,
+      status: PaymentAttemptStatus.FAILED,
+      attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+      blockingEndedAt: contactBoundaryNow,
+      contactStartedAt: null,
+    });
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(1);
+    await expectNoRejectedPaymentSideEffects(session.sessionId);
+  });
+
+  it("C2I incompatible supersession then expiry closes only the new authorization", async () => {
+    const session = await moveSessionExpiryIntoPast(await submitSessionWithOneLine(ctx));
+    const oldAuthorizedAt = new Date(session.expiresAt.getTime() - 4);
+    const newAuthorizedAt = new Date(session.expiresAt.getTime() - 2);
+    const contactBoundaryNow = new Date(session.expiresAt.getTime() + 1);
+    const old = await createUncontactedAuthorizedPayment(
+      session,
+      "test.c2i.old-route",
+      oldAuthorizedAt,
+    );
+    const authorizationCommitted = coordinationBarrier();
+    const calls: PaymentInitiateInput[] = [];
+    const initiation = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.c2i.new-route",
+      now: newAuthorizedAt,
+      contactBoundaryNow,
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", authorizationCommitted));
+    await authorizationCommitted.reached;
+    const replacementId = await paymentIdForRoutingRule(session.sessionId, "test.c2i.new-route");
+
+    await expect(expireStale(db, {
+      now: contactBoundaryNow,
+      limit: 10,
+    })).resolves.toBe(1);
+    authorizationCommitted.release();
+
+    await expect(initiation).rejects.toMatchObject({ code: "SESSION_NOT_USABLE" });
+    expect(calls).toHaveLength(0);
+    await expect(db.payment.findUnique({ where: { id: old.paymentId } })).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      contactStartedAt: null,
+      blockingEndedAt: newAuthorizedAt,
+    });
+    await expect(db.payment.findUnique({ where: { id: replacementId } })).resolves.toMatchObject({
+      status: PaymentAttemptStatus.FAILED,
+      attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+      contactStartedAt: null,
+      blockingEndedAt: contactBoundaryNow,
+      errorCode: "CHECKOUT_SESSION_NOT_USABLE",
+    });
+    await expect(openContactOwners(session.sessionId)).resolves.toEqual([]);
+    await expectNoRejectedPaymentSideEffects(session.sessionId);
+  });
+
+  it("C2I already-EXPIRED session rejects before creating provider authority", async () => {
+    const session = await moveSessionExpiryIntoPast(await submitSessionWithOneLine(ctx));
+    await expect(expireStale(db, {
+      now: new Date(session.expiresAt.getTime() + 1),
+      limit: 10,
+    })).resolves.toBe(1);
+    const calls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.c2i.already-expired",
+      now: new Date(session.expiresAt.getTime() - 1),
+      contactBoundaryNow: session.expiresAt,
+    })).rejects.toMatchObject({ code: "SESSION_NOT_USABLE" });
+
+    expect(calls).toHaveLength(0);
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(0);
+    await expectNoRejectedPaymentSideEffects(session.sessionId);
+  });
+
+  it("C2I exact expiresAt boundary rejects with the freshly captured contact time", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const authorizationNow = new Date(session.expiresAt.getTime() - 1);
+    const contactBoundaryClock = vi.fn(() => new Date(session.expiresAt));
+    const calls: PaymentInitiateInput[] = [];
+    const routingRuleId = "test.c2i.exact-boundary";
+    const provider = fakeProvider({ kind: "ready" }, calls);
+    initiationProviders.set(routingRuleId, provider);
+
+    await expect(initiatePaymentAttempt(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      adapterContext: testAdapterContext({
+        sessionId: session.sessionId,
+        userId: ctx.userId,
+        provider,
+        mode: PaymentMode.SANDBOX,
+        routingRuleId,
+      }),
+      now: authorizationNow,
+      contactBoundaryClock,
+    })).rejects.toMatchObject({ code: "SESSION_NOT_USABLE" });
+
+    expect(contactBoundaryClock).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(0);
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      status: PaymentAttemptStatus.FAILED,
+      attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+      blockingEndedAt: session.expiresAt,
+      contactStartedAt: null,
+    });
+    await expectNoRejectedPaymentSideEffects(session.sessionId);
+  });
+
+  it("persists an output-less CONTACTED state as IN_PROGRESS and never recontacts it", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider = fakeProvider({ kind: "inProgress" }, calls);
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.in-progress",
+    };
+
+    const first = await initiatePaymentAttemptForTest(db, input);
+    const second = await initiatePaymentAttemptForTest(db, input);
+
+    expect(first).toMatchObject({ paymentId: second.paymentId, initiateResult: { kind: "inProgress" } });
+    expect(second.initiateResult).toEqual({ kind: "inProgress" });
+    expect(calls).toHaveLength(1);
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      initiationOutputKind: null,
+    });
+  });
+
+  it("blocks initiation for session-wide remediation exposure without changing contact authority", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const blocker = await createUncontactedAuthorizedPayment(session, "test.route.blocker");
+    await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.TOSS,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.SUCCEEDED,
+        attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+        remediationStatus: PaymentRemediationStatus.PENDING,
+        amount: session.totalAmount,
+        currency: session.currency,
+        providerPaymentKey: `exposed_${randomUUID()}`,
+        idempotencyKey: `exposed:${randomUUID()}`,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
+        financialSucceededAt: new Date(),
+        blockingEndedAt: new Date(),
+        suspendedByPaymentId: blocker.paymentId,
+      },
+    });
+    const calls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.new",
+    })).rejects.toMatchObject({ code: "SESSION_REMEDIATION_REQUIRED" });
+
+    expect(calls).toHaveLength(0);
+    await expect(db.payment.findUnique({
+      where: { id: blocker.paymentId },
+      select: { attemptLifecycle: true, contactStartedAt: true, blockingEndedAt: true },
+    })).resolves.toEqual({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      contactStartedAt: null,
+      blockingEndedAt: null,
+    });
+  });
+
+  it("fails closed on a same-session suspension cycle without creating or contacting a payment", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const cycleA = await createOrdinarySupersededPayment(session, "cycle-a");
+    const cycleB = await createOrdinarySupersededPayment(session, "cycle-b");
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "Payment"
+      SET "attemptLifecycle" = 'SUSPENDED',
+          "suspendedByPaymentId" = CASE "id"
+            WHEN ${cycleA.id} THEN ${cycleB.id}
+            WHEN ${cycleB.id} THEN ${cycleA.id}
+          END
+      WHERE "id" IN (${cycleA.id}, ${cycleB.id})
+    `);
+    const calls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.cycle",
+    })).rejects.toMatchObject({ code: "SESSION_REMEDIATION_REQUIRED" });
+
+    expect(calls).toHaveLength(0);
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(2);
+  });
+
+  it("database invariant rejects a second active attempt even outside the service", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.kr.card.toss",
+    });
+
+    await expect(db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.TOSS,
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: "test.raw.second",
+        status: PaymentAttemptStatus.AWAITING,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        idempotencyKey: `raw_second_${randomUUID()}`,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
+      },
+    })).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("atomically supersedes an incompatible route and preserves audit evidence", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const provider = fakeProvider({ kind: "ready", providerRef: "route-ref" });
+    const first = await createUncontactedAuthorizedPayment(session, "test.route.first");
+    const second = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.second",
+    });
+
+    expect(second.paymentId).not.toBe(first.paymentId);
+    const attempts = await db.payment.findMany({
+      where: { checkoutSessionId: session.sessionId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, status: true, attemptLifecycle: true, routingRuleId: true, supersededAt: true, errorCode: true },
+    });
+    expect(attempts[0]?.supersededAt).toBeInstanceOf(Date);
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        id: first.paymentId,
+        status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+        routingRuleId: "test.route.first",
+        supersededAt: attempts[0]?.supersededAt,
+        errorCode: "PAYMENT_ATTEMPT_SUPERSEDED",
+      }),
+      expect.objectContaining({
+        id: second.paymentId,
+        status: PaymentAttemptStatus.INITIATED,
+        routingRuleId: "test.route.second",
+        supersededAt: null,
+      }),
+    ]);
+  });
+
+  it("Schedule A/C deterministically commits compatible contact before incompatible supersession", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const contactAuthorizedAt = new Date();
+    const compatibleAuthorizationAt = new Date(contactAuthorizedAt.getTime() + 1);
+    const compatibleContactAt = new Date(contactAuthorizedAt.getTime() + 2);
+    const incompatibleAttemptAt = new Date(contactAuthorizedAt.getTime() + 3);
+    const initial = await createUncontactedAuthorizedPayment(
+      session,
+      "test.route.compatible",
+      contactAuthorizedAt,
+    );
+    const calls: PaymentInitiateInput[] = [];
+    const providerContact = coordinationBarrier();
+    const compatibleAuthorized = coordinationBarrier();
+    const incompatibleBeforeLock = coordinationBarrier();
+    const provider = barrierProvider(calls, providerContact);
+
+    const compatible = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.compatible",
+      now: compatibleAuthorizationAt,
+      contactBoundaryNow: compatibleContactAt,
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", compatibleAuthorized));
+    await compatibleAuthorized.reached;
+
+    const incompatible = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.incompatible",
+      now: incompatibleAttemptAt,
+    }, coordinationAt("BEFORE_AUTHORIZATION_LOCK", incompatibleBeforeLock));
+    await incompatibleBeforeLock.reached;
+
+    compatibleAuthorized.release();
+    await providerContact.reached;
+    incompatibleBeforeLock.release();
+    const supersession = await incompatible.then(
+      () => ({ kind: "fulfilled" as const }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    providerContact.release();
+    const contacted = await compatible;
+
+    expect(contacted.paymentId).toBe(initial.paymentId);
+    expect(supersession).toMatchObject({ kind: "rejected", error: { code: "ATTEMPT_STATE_CONFLICT" } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.paymentId).toBe(initial.paymentId);
+    const rows = await paymentRaceRows(session.sessionId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: initial.paymentId,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      blockingEndedAt: null,
+    });
+    expect(rows[0]?.contactIntentAt).toEqual(contactAuthorizedAt);
+    expect(rows[0]?.contactStartedAt).toEqual(compatibleContactAt);
+    await expect(openContactOwners(session.sessionId)).resolves.toEqual([initial.paymentId]);
+    await expectNoCommerceWrites(session.sessionId);
+  });
+
+  it("Schedule B/C deterministically commits incompatible supersession before the old contact CAS", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const contactAuthorizedAt = new Date();
+    const oldAuthorizationAt = new Date(contactAuthorizedAt.getTime() + 1);
+    const oldContactAt = new Date(contactAuthorizedAt.getTime() + 2);
+    const replacementAuthorizationAt = new Date(contactAuthorizedAt.getTime() + 3);
+    const replacementContactAt = new Date(contactAuthorizedAt.getTime() + 4);
+    const initial = await createUncontactedAuthorizedPayment(
+      session,
+      "test.route.compatible",
+      contactAuthorizedAt,
+    );
+    const calls: PaymentInitiateInput[] = [];
+    const oldAuthorized = coordinationBarrier();
+    const replacementContact = coordinationBarrier();
+    const provider = barrierProvider(calls, replacementContact);
+
+    const oldContact = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.compatible",
+      now: oldAuthorizationAt,
+      contactBoundaryNow: oldContactAt,
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", oldAuthorized));
+    await oldAuthorized.reached;
+
+    const replacement = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.incompatible",
+      now: replacementAuthorizationAt,
+      contactBoundaryNow: replacementContactAt,
+    });
+    await replacementContact.reached;
+    oldAuthorized.release();
+    const oldResult = await oldContact.then(
+      () => ({ kind: "fulfilled" as const }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    replacementContact.release();
+    const replacementResult = await replacement;
+
+    expect(oldResult).toMatchObject({ kind: "rejected", error: { code: "ATTEMPT_STATE_CONFLICT" } });
+    expect(replacementResult.paymentId).not.toBe(initial.paymentId);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.paymentId).toBe(replacementResult.paymentId);
+    const rows = await paymentRaceRows(session.sessionId);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.id).sort()).toEqual([
+      initial.paymentId,
+      replacementResult.paymentId,
+    ].sort());
+    const superseded = rows.find((row) => row.id === initial.paymentId);
+    const contacted = rows.find((row) => row.id === replacementResult.paymentId);
+    expect(superseded).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      contactIntentAt: contactAuthorizedAt,
+      contactStartedAt: null,
+      blockingEndedAt: replacementAuthorizationAt,
+    });
+    expect(contacted).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      contactIntentAt: replacementAuthorizationAt,
+      contactStartedAt: replacementContactAt,
+      blockingEndedAt: null,
+    });
+    await expect(openContactOwners(session.sessionId)).resolves.toEqual([replacementResult.paymentId]);
+    await expectNoCommerceWrites(session.sessionId);
+  });
+
+  it("Schedule D forces two incompatible requests to serialize under the CheckoutSession lock", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const contactAuthorizedAt = new Date();
+    const firstAttemptAt = new Date(contactAuthorizedAt.getTime() + 1);
+    const firstContactAt = new Date(contactAuthorizedAt.getTime() + 2);
+    const secondAttemptAt = new Date(contactAuthorizedAt.getTime() + 3);
+    const secondContactAt = new Date(contactAuthorizedAt.getTime() + 4);
+    const initial = await createUncontactedAuthorizedPayment(
+      session,
+      "test.route.initial",
+      contactAuthorizedAt,
+    );
+    const firstHasLock = coordinationBarrier();
+    const firstCommitted = coordinationBarrier();
+    const secondBeforeLock = coordinationBarrier();
+    const providerContact = coordinationBarrier();
+    const calls: PaymentInitiateInput[] = [];
+    const provider = barrierProvider(calls, providerContact);
+
+    const first = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.incompatible-b",
+      now: firstAttemptAt,
+      contactBoundaryNow: firstContactAt,
+    }, coordinationAtMany([
+      { point: "AFTER_AUTHORIZATION_LOCK", barrier: firstHasLock },
+      { point: "AFTER_AUTHORIZATION_COMMIT", barrier: firstCommitted },
+    ]));
+    await firstHasLock.reached;
+
+    const second = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.incompatible-c",
+      now: secondAttemptAt,
+      contactBoundaryNow: secondContactAt,
+    }, coordinationAt("BEFORE_AUTHORIZATION_LOCK", secondBeforeLock));
+    await secondBeforeLock.reached;
+
+    firstHasLock.release();
+    await firstCommitted.reached;
+    const firstPaymentId = await paymentIdForRoutingRule(
+      session.sessionId,
+      "test.route.incompatible-b",
+    );
+    secondBeforeLock.release();
+    await providerContact.reached;
+    firstCommitted.release();
+    const firstResult = await first.then(
+      () => ({ kind: "fulfilled" as const }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
+    );
+    providerContact.release();
+    const secondResult = await second;
+    const rows = await paymentRaceRows(session.sessionId);
+
+    expect(firstResult).toMatchObject({ kind: "rejected", error: { code: "ATTEMPT_STATE_CONFLICT" } });
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.id).sort()).toEqual([
+      initial.paymentId,
+      firstPaymentId,
+      secondResult.paymentId,
+    ].sort());
+    const initialRow = rows.find((row) => row.id === initial.paymentId);
+    const firstRow = rows.find((row) => row.id === firstPaymentId);
+    const contactedRow = rows.find((row) => row.id === secondResult.paymentId);
+    const supersededRows = rows.filter((row) => row.attemptLifecycle === PaymentAttemptLifecycle.SUPERSEDED);
+    expect(initialRow).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      contactIntentAt: contactAuthorizedAt,
+      contactStartedAt: null,
+      blockingEndedAt: firstAttemptAt,
+    });
+    expect(firstRow).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      contactIntentAt: firstAttemptAt,
+      contactStartedAt: null,
+      blockingEndedAt: secondAttemptAt,
+    });
+    expect(supersededRows).toHaveLength(2);
+    expect(supersededRows.every((row) => row.contactStartedAt === null)).toBe(true);
+    expect(contactedRow).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      contactIntentAt: secondAttemptAt,
+      contactStartedAt: secondContactAt,
+      blockingEndedAt: null,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.paymentId).toBe(secondResult.paymentId);
+    await expect(openContactOwners(session.sessionId)).resolves.toEqual([secondResult.paymentId]);
+    await expectNoCommerceWrites(session.sessionId);
+  });
+
+  it("records late superseded success, blocks its replacement, and creates no order", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const provider = fakeProvider({ kind: "ready" });
+    const oldAttempt = await createUncontactedAuthorizedPayment(session, "test.route.old");
+    const currentAttempt = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.current",
+    });
+    const oldFacts = {
+      ...captureFacts(session),
+      paymentId: oldAttempt.paymentId,
+      providerPaymentKey: `late_${randomUUID()}`,
+    };
+
+    const late = await completeFromCapture(db, oldFacts);
+    const duplicateLate = await completeFromCapture(db, oldFacts);
+    const current = await completeFromCapture(db, {
+      ...captureFacts(session),
+      paymentId: currentAttempt.paymentId,
+    });
+
+    expect(late).toMatchObject({ kind: "compensationEnqueued", failure: { code: "SUPERSEDED_ATTEMPT_CAPTURED" } });
+    expect(duplicateLate).toMatchObject({ kind: "compensationEnqueued", failure: { code: "SUPERSEDED_ATTEMPT_CAPTURED" } });
+    expect(current).toMatchObject({ kind: "compensationEnqueued", failure: { code: "PAYMENT_BLOCKED_BY_REMEDIATION" } });
+    await expect(db.order.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(0);
+    await expect(db.manufacturingRequest.count({
+      where: { orderItem: { order: { checkoutSessionId: session.sessionId } } },
+    })).resolves.toBe(0);
+    await expect(db.paymentOutbox.count({
+      where: { dedupKey: `payment-remediation:${PaymentProvider.TOSS}:${oldFacts.providerPaymentKey}` },
+    })).resolves.toBe(1);
+    await expect(db.payment.findUnique({
+      where: { id: oldAttempt.paymentId },
+      select: {
+        status: true,
+        attemptLifecycle: true,
+        remediationStatus: true,
+        blockingEndedAt: true,
+        suspendedByPaymentId: true,
+      },
+    })).resolves.toMatchObject({
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      suspendedByPaymentId: currentAttempt.paymentId,
+    });
+    const replacement = await db.payment.findUnique({
+      where: { id: currentAttempt.paymentId },
+      select: { attemptLifecycle: true, suspendedByPaymentId: true, blockingEndedAt: true },
+    });
+    expect(replacement).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      suspendedByPaymentId: null,
+      blockingEndedAt: null,
+    });
+  });
+
+  it("transfers the slot only when the current blocker is still uncontacted", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const old = await createUncontactedAuthorizedPayment(session, "test.route.defensive-old");
+    await db.payment.update({
+      where: { id: old.paymentId },
+      data: {
+        attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+        supersededAt: new Date(),
+        blockingEndedAt: new Date(),
+      },
+    });
+    const current = await createUncontactedAuthorizedPayment(session, "test.route.defensive-current");
+    const facts = {
+      ...captureFacts(session),
+      paymentId: old.paymentId,
+      providerPaymentKey: `late_uncontacted_${randomUUID()}`,
+    };
+
+    const captured = await recordCapture(db, facts);
+    const duplicate = await recordCapture(db, facts);
+
+    expect(duplicate.id).toBe(captured.id);
+    await expect(db.payment.findUnique({ where: { id: old.paymentId } })).resolves.toMatchObject({
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      blockingEndedAt: null,
+    });
+    await expect(db.payment.findUnique({ where: { id: current.paymentId } })).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      suspendedByPaymentId: old.paymentId,
+    });
+    await expect(db.order.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(0);
+  });
+
+  it("keeps an OUTCOME_UNKNOWN blocker in the slot and suspends the defensive late-success row", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const old = await createUncontactedAuthorizedPayment(session, "test.route.unknown-old");
+    await db.payment.update({
+      where: { id: old.paymentId },
+      data: {
+        attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+        supersededAt: new Date(),
+        blockingEndedAt: new Date(),
+      },
+    });
+    const current = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "inProgress" }),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.unknown-current",
+    });
+    await db.payment.update({
+      where: { id: current.paymentId },
+      data: { attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN },
+    });
+
+    await recordCapture(db, {
+      ...captureFacts(session),
+      paymentId: old.paymentId,
+      providerPaymentKey: `late_unknown_${randomUUID()}`,
+    });
+
+    await expect(db.payment.findUnique({ where: { id: current.paymentId } })).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      blockingEndedAt: null,
+    });
+    await expect(db.payment.findUnique({ where: { id: old.paymentId } })).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      suspendedByPaymentId: current.paymentId,
+    });
+  });
+
+  it("financial success awaiting finalization keeps the blocking slot", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const first = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.success",
+    });
+    await recordCaptureOnly(session, first.paymentId);
+    const replacementCalls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, replacementCalls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.route.replacement",
+    })).rejects.toMatchObject({ code: "ATTEMPT_STATE_CONFLICT" });
+    expect(replacementCalls).toHaveLength(0);
+  });
+
+  it("stale ordinary commerce facts reject before provider contact", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const line = await db.checkoutSessionLine.findFirstOrThrow({
+      where: { sessionId: session.sessionId },
+      select: { variantId: true },
+    });
+    await db.variantMarketPrice.update({
+      where: { variantId_marketCode: { variantId: line.variantId, marketCode: MarketCode.KR } },
+      data: { amount: session.totalAmount + 1 },
+    });
+    const calls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.stale.price",
+    })).rejects.toMatchObject({ code: "SESSION_TERMS_STALE" });
+
+    expect(calls).toHaveLength(0);
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(0);
+  });
+
+  it("rejects a disabled or currency-diverged Market before contact without payment residue", async () => {
+    for (const data of [{ isActive: false }, { isActive: true, currency: "USD" }]) {
+      const session = await submitSessionWithOneLine(ctx);
+      await db.market.update({ where: { code: MarketCode.KR }, data });
+      const calls: PaymentInitiateInput[] = [];
+
+      await expect(initiatePaymentAttemptForTest(db, {
+        sessionId: session.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, calls),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: "test.market.pre-contact",
+      })).rejects.toMatchObject({ code: "SESSION_TERMS_STALE" });
+
+      expect(calls).toHaveLength(0);
+      await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(0);
+      await ensureMarkets();
+    }
+  });
+
+  it("treats ordinary Market edits after persisted contact output as prospective", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready", providerRef: "persisted" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.market.post-contact",
+    };
+    const first = await initiatePaymentAttemptForTest(db, input);
+    await db.market.update({ where: { code: MarketCode.KR }, data: { isActive: false, currency: "USD" } });
+
+    const second = await initiatePaymentAttemptForTest(db, input);
+
+    expect(second).toMatchObject({ paymentId: first.paymentId, initiateResult: { kind: "ready", providerRef: "persisted" } });
+    expect(calls).toHaveLength(1);
+  });
 });
 
-function fakeProvider(initiateResult: PaymentInitiateResult): PaymentProviderPort {
-  const provider = createMockPaymentProvider(PaymentProvider.TOSS);
+async function initiatePaymentAttemptForTest(
+  client: typeof db,
+  input: TestInitiationInput,
+  coordination?: PaymentAttemptTestCoordination,
+) {
+  initiationProviders.set(input.routingRuleId, input.provider);
+  await coordination?.waitAt("BEFORE_AUTHORIZATION_LOCK");
+  const coordinatedAfterCommit = coordinatePaymentTransactions(client, coordination);
+  try {
+    const contactBoundaryNow = input.contactBoundaryNow;
+    return await initiatePaymentAttempt(client, {
+      sessionId: input.sessionId,
+      userId: input.userId,
+      adapterContext: testAdapterContext(input),
+      now: input.now,
+      contactBoundaryClock: contactBoundaryNow
+        ? () => new Date(contactBoundaryNow.getTime())
+        : undefined,
+    });
+  } finally {
+    coordinatedAfterCommit?.mockRestore();
+  }
+}
+
+function coordinatePaymentTransactions(
+  client: typeof db,
+  coordination: PaymentAttemptTestCoordination | undefined,
+) {
+  if (!coordination) return null;
+  const coordinatesAuthorization = coordination.includes("AFTER_AUTHORIZATION_LOCK")
+    || coordination.includes("AFTER_AUTHORIZATION_COMMIT");
+  const coordinatesContactClaim = coordination.includes("BEFORE_CONTACT_CLAIM_COMMIT")
+    || coordination.includes("AFTER_CONTACT_CLAIM_COMMIT");
+  if (!coordinatesAuthorization && !coordinatesContactClaim) return null;
+  const transaction = client.$transaction.bind(client);
+  const transactionSpy = vi.spyOn(client, "$transaction");
+  transactionSpy.mockImplementation(transaction);
+  if (!coordinatesAuthorization && coordinatesContactClaim) {
+    transactionSpy.mockImplementationOnce(transaction);
+  }
+  if (coordinatesAuthorization) {
+    transactionSpy.mockImplementationOnce(async (operation) => {
+      const result = await transaction(operation);
+      await coordination.waitAt("AFTER_AUTHORIZATION_LOCK");
+      await coordination.waitAt("AFTER_AUTHORIZATION_COMMIT");
+      return result;
+    });
+  }
+  if (coordinatesContactClaim) {
+    transactionSpy.mockImplementationOnce(async (operation) => {
+      const result = coordination.includes("BEFORE_CONTACT_CLAIM_COMMIT")
+        ? await transaction(async (tx) => {
+          const pending = await operation(tx);
+          await coordination.waitAt("BEFORE_CONTACT_CLAIM_COMMIT");
+          return pending;
+        })
+        : await transaction(operation);
+      await coordination.waitAt("AFTER_CONTACT_CLAIM_COMMIT");
+      return result;
+    });
+  }
+  return transactionSpy;
+}
+
+function testAdapterContext(input: TestInitiationInput): ProviderFactoryContext {
   return {
-    ...provider,
-    initiate: (_input: PaymentInitiateInput) => Promise.resolve(initiateResult),
+    provider: input.provider.code,
+    mode: input.mode,
+    market: MarketCode.KR,
+    method: PaymentMethod.CARD,
+    currency: "KRW",
+    ruleId: input.routingRuleId,
+    credentials: [],
+    liveGuard: { kind: "blocked", liveEnabled: false, reason: "test-owned provider" },
   };
 }
 
-function failingProvider(): PaymentProviderPort {
-  const provider = createMockPaymentProvider(PaymentProvider.TOSS);
+function fakeProvider(
+  initiateResult: PaymentInitiateResult,
+  calls: PaymentInitiateInput[] = [],
+): PaymentInitiationProvider {
   return {
-    ...provider,
-    initiate: (_input: PaymentInitiateInput) => Promise.reject(new Error("Fake provider initiate failure")),
+    code: PaymentProvider.TOSS,
+    initiate: (input: PaymentInitiateInput) => {
+      calls.push(input);
+      return Promise.resolve(initiateResult);
+    },
   };
+}
+
+function failingProvider(calls: PaymentInitiateInput[]): PaymentInitiationProvider {
+  return {
+    code: PaymentProvider.TOSS,
+    initiate: (input: PaymentInitiateInput) => {
+      calls.push(input);
+      return Promise.reject(new Error("Fake provider initiate failure"));
+    },
+  };
+}
+
+interface CoordinationBarrier {
+  reached: Promise<void>;
+  wait(): Promise<void>;
+  release(): void;
+}
+
+function coordinationBarrier(): CoordinationBarrier {
+  let markReached: () => void = () => { throw new Error("Coordination barrier was not initialized"); };
+  let releaseWait: () => void = () => { throw new Error("Coordination barrier was not initialized"); };
+  const reached = new Promise<void>((resolve) => { markReached = resolve; });
+  const released = new Promise<void>((resolve) => { releaseWait = resolve; });
+  return {
+    reached,
+    wait: async () => {
+      markReached();
+      await released;
+    },
+    release: releaseWait,
+  };
+}
+
+function coordinationAt(
+  point: PaymentAttemptCoordinationPoint,
+  barrier: CoordinationBarrier,
+): PaymentAttemptTestCoordination {
+  return coordinationAtMany([{ point, barrier }]);
+}
+
+function coordinationAtMany(
+  entries: ReadonlyArray<{ point: PaymentAttemptCoordinationPoint; barrier: CoordinationBarrier }>,
+): PaymentAttemptTestCoordination {
+  return {
+    waitAt: (point) => entries.find((entry) => entry.point === point)?.barrier.wait() ?? Promise.resolve(),
+    includes: (point) => entries.some((entry) => entry.point === point),
+  };
+}
+
+function barrierProvider(
+  calls: PaymentInitiateInput[],
+  barrier: CoordinationBarrier,
+): PaymentInitiationProvider {
+  return {
+    code: PaymentProvider.TOSS,
+    initiate: async (input) => {
+      calls.push(input);
+      await barrier.wait();
+      return { kind: "ready" };
+    },
+  };
+}
+
+async function paymentRaceRows(checkoutSessionId: string) {
+  return db.payment.findMany({
+    where: { checkoutSessionId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      attemptLifecycle: true,
+      contactIntentAt: true,
+      contactStartedAt: true,
+      blockingEndedAt: true,
+    },
+  });
+}
+
+async function openContactOwners(checkoutSessionId: string): Promise<string[]> {
+  const payments = await db.payment.findMany({
+    where: { checkoutSessionId, blockingEndedAt: null },
+    orderBy: { id: "asc" },
+    select: { id: true },
+  });
+  return payments.map((payment) => payment.id);
+}
+
+async function paymentIdForRoutingRule(
+  checkoutSessionId: string,
+  routingRuleId: string,
+): Promise<string> {
+  const payment = await db.payment.findFirst({
+    where: { checkoutSessionId, routingRuleId },
+    select: { id: true },
+  });
+  if (!payment) throw new Error(`Missing payment for routing rule ${routingRuleId}`);
+  return payment.id;
+}
+
+async function expectNoCommerceWrites(checkoutSessionId: string): Promise<void> {
+  await expect(db.order.count({ where: { checkoutSessionId } })).resolves.toBe(0);
+  await expect(db.manufacturingRequest.count({
+    where: { orderItem: { order: { checkoutSessionId } } },
+  })).resolves.toBe(0);
+  await expect(hasUnresolvedSessionExposure(db, checkoutSessionId)).resolves.toBe(false);
+}
+
+async function expectNoRejectedPaymentSideEffects(checkoutSessionId: string): Promise<void> {
+  await expectNoCommerceWrites(checkoutSessionId);
+  const paymentIds = await db.payment.findMany({
+    where: { checkoutSessionId },
+    select: { id: true },
+  });
+  const outboxCounts = await Promise.all(paymentIds.map((payment) => db.paymentOutbox.count({
+    where: { payload: { path: ["paymentId"], equals: payment.id } },
+  })));
+  expect(outboxCounts.every((count) => count === 0)).toBe(true);
+  await expect(db.payment.count({
+    where: {
+      checkoutSessionId,
+      OR: [
+        { providerPaymentKey: { not: null } },
+        { financialSucceededAt: { not: null } },
+        { remediationStatus: { not: PaymentRemediationStatus.NONE } },
+      ],
+    },
+  })).resolves.toBe(0);
 }
 
 function makeContext(): TestContext {
@@ -184,6 +1442,104 @@ async function submitSessionWithOneLine(context: TestContext) {
   });
 }
 
+async function moveSessionExpiryIntoPast<T extends { sessionId: string; expiresAt: Date }>(session: T): Promise<T> {
+  const expiresAt = new Date("2026-07-06T00:00:00.000Z");
+  await db.checkoutSession.update({
+    where: { id: session.sessionId },
+    data: { expiresAt },
+  });
+  return { ...session, expiresAt };
+}
+
+interface SessionLockWaitEvidence {
+  state: string;
+  waitEventType: string | null;
+  blockingPids: number[];
+}
+
+async function openSessionLockObserver(label: string): Promise<Client> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required for lock-wait verification");
+  const observer = new Client({
+    connectionString,
+    application_name: `wig_c2j_initiate_observer_${label}`,
+  });
+  await observer.connect();
+  return observer;
+}
+
+async function waitForSessionLockWait(observer: Client): Promise<SessionLockWaitEvidence> {
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
+    const result = await observer.query<SessionLockWaitEvidence>(`
+      SELECT a.state,
+             a.wait_event_type AS "waitEventType",
+             pg_blocking_pids(a.pid) AS "blockingPids"
+      FROM pg_stat_activity a
+      WHERE a.datname = current_database()
+        AND a.state = 'active'
+        AND a.wait_event_type = 'Lock'
+        AND a.query LIKE '%CheckoutSession%FOR UPDATE%'
+        AND cardinality(pg_blocking_pids(a.pid)) > 0
+    `);
+    const waiting = result.rows[0];
+    if (waiting) return waiting;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for CheckoutSession row-lock evidence");
+}
+
+async function createUncontactedAuthorizedPayment(
+  session: { sessionId: string; totalAmount: number; currency: string },
+  routingRuleId: string,
+  contactAuthorizedAt: Date = new Date(),
+): Promise<{ paymentId: string; idempotencyKey: string }> {
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      idempotencyKey: `authorized:${session.sessionId}:${randomUUID()}`,
+      contactIntentAt: contactAuthorizedAt,
+    },
+    select: { id: true, idempotencyKey: true },
+  });
+  return { paymentId: payment.id, idempotencyKey: payment.idempotencyKey };
+}
+
+async function createOrdinarySupersededPayment(
+  session: { sessionId: string; totalAmount: number; currency: string },
+  label: string,
+) {
+  return db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      idempotencyKey: `${label}:${randomUUID()}`,
+      contactIntentAt: new Date(),
+      supersededAt: new Date(),
+      blockingEndedAt: new Date(),
+    },
+    select: { id: true },
+  });
+}
+
+async function recordCaptureOnly(
+  session: { sessionId: string; totalAmount: number; currency: string },
+  paymentId: string,
+): Promise<void> {
+  await recordCapture(db, { ...captureFacts(session), paymentId });
+}
+
 async function createCatalogVariant(context: TestContext, options: VariantOptions) {
   const style = await db.wigStyle.create({
     data: {
@@ -192,6 +1548,7 @@ async function createCatalogVariant(context: TestContext, options: VariantOption
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/d1b-initiate-cover.png",
+      availableMarkets: { create: { marketCode: MarketCode.KR, isActive: true } },
     },
     select: { id: true },
   });
@@ -275,6 +1632,22 @@ async function deletePaymentsAndSessions(userId: string): Promise<void> {
   const sessions = await db.checkoutSession.findMany({ where: { userId }, select: { id: true } });
   const sessionIds = sessions.map((session) => session.id);
   if (sessionIds.length === 0) return;
+  const payments = await db.payment.findMany({
+    where: { checkoutSessionId: { in: sessionIds }, providerPaymentKey: { not: null } },
+    select: { provider: true, providerPaymentKey: true },
+  });
+  await db.paymentOutbox.deleteMany({
+    where: {
+      dedupKey: {
+        in: payments.flatMap((payment) => payment.providerPaymentKey
+          ? [
+            `void:${payment.provider}:${payment.providerPaymentKey}`,
+            `payment-remediation:${payment.provider}:${payment.providerPaymentKey}`,
+          ]
+          : []),
+      },
+    },
+  });
   await db.payment.deleteMany({ where: { checkoutSessionId: { in: sessionIds } } });
   await db.checkoutSessionLine.deleteMany({ where: { sessionId: { in: sessionIds } } });
   await db.checkoutSessionShipping.deleteMany({ where: { sessionId: { in: sessionIds } } });

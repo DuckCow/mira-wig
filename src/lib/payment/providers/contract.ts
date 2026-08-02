@@ -1,6 +1,10 @@
 import type { PaymentProvider as ProviderCode } from "@prisma/client";
 import type { CaptureFacts } from "@/lib/payment/complete/types";
-import type { PaymentConfirmInput, PaymentInitiateInput } from "./types";
+import type {
+  PaymentConfirmationProvider,
+  PaymentInitiationProvider,
+  PaymentConfirmInput,
+} from "./types";
 import type { PaymentMethod, PaymentMode, ProviderLiveGuardResult } from "./routing";
 
 export interface ProviderDiagnostics {
@@ -90,11 +94,9 @@ export type NormalizedProviderConfirmResult =
   | ProviderConfirmSucceeded
   | ProviderConfirmFailed;
 
-export interface ProviderPaymentAdapter {
-  code: ProviderCode;
-  initiate(input: PaymentInitiateInput): Promise<NormalizedProviderInitiateResult>;
-  confirm(input: ProviderConfirmContractInput): Promise<NormalizedProviderConfirmResult>;
-}
+export interface ProviderPaymentAdapter
+  extends PaymentInitiationProvider<NormalizedProviderInitiateResult>,
+  PaymentConfirmationProvider<NormalizedProviderConfirmResult> {}
 
 export interface ProviderWebhookRawRequest {
   body: string;

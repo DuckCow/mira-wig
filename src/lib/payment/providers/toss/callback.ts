@@ -1,4 +1,4 @@
-import { PaymentAttemptStatus, PaymentProvider, Prisma } from "@prisma/client";
+import { PaymentAttemptLifecycle, PaymentAttemptStatus, PaymentProvider, Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { MarketCode } from "@/lib/market/types";
 import { deriveTossOrderId, parseTossOrderId } from "./order-id";
@@ -13,6 +13,7 @@ const tossCallbackPaymentSelect = {
   checkoutSessionId: true,
   provider: true,
   status: true,
+  attemptLifecycle: true,
   amount: true,
   currency: true,
   providerRef: true,
@@ -107,7 +108,10 @@ function validatePayment(
   if (payment.amount !== input.amount) return failure("AMOUNT_MISMATCH", "Toss amount does not match local payment.", payment.id);
   if (!isTossKrPayment(payment)) return failure("STOP", "Payment is not compatible with D1 Toss KRW route.", payment.id);
   if (payment.providerPaymentKey) return validateCompletedPayment(payment, input.paymentKey);
-  if (!isPendingStatus(payment.status)) return failure("NOT_PENDING", "Payment is not pending.", payment.id);
+  if (!isPendingStatus(payment.status)
+    || payment.attemptLifecycle !== PaymentAttemptLifecycle.CONTACTED) {
+    return failure("NOT_PENDING", "Payment is not pending.", payment.id);
+  }
   return null;
 }
 
@@ -149,6 +153,8 @@ function pendingProviderRefWriteWhere(paymentId: string): Prisma.PaymentWhereInp
     provider: PaymentProvider.TOSS,
     providerRef: null,
     providerPaymentKey: null,
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    blockingEndedAt: null,
     status: { in: [...PENDING_STATUSES] },
   };
 }

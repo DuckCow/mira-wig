@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -18,8 +18,9 @@ import {
   parseTossRefundCredentialConfig,
 } from "./providers/toss/refund-credential-config";
 import {
-  loadRefundWorkerRepositoryMigrations,
-} from "./worker-migration-readiness";
+  loadRefundWorkerMigrationInventory,
+  refundWorkerMigrationSelfCheckProof,
+} from "./worker-migration-inventory";
 
 const CONTRACT_VERSION = "mira-refund-worker-runtime-image-connection/v1";
 const NODE_VERSION = "22.23.1";
@@ -553,16 +554,8 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
   if (version.status !== 0 || !version.stdout.includes(`version ${PROXY_VERSION}`)) {
     throw new Error("INCOMPATIBLE_PROXY");
   }
-  const migrations = await loadRefundWorkerRepositoryMigrations();
-  const digest = createHash("sha256");
-  for (const migration of migrations) {
-    digest.update(migration.name);
-    digest.update("\0");
-    digest.update(await readFile(
-      fileURLToPath(new URL(`../../../../prisma/migrations/${migration.name}/migration.sql`, import.meta.url)),
-    ));
-    digest.update("\0");
-  }
+  const migrations = await loadRefundWorkerMigrationInventory();
+  const migrationProof = refundWorkerMigrationSelfCheckProof(migrations);
   return Object.freeze({
     ok: true,
     code: "IMAGE_SELF_CHECK_READY",
@@ -572,8 +565,8 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     proxyVersionCompatible: true,
     workerBundlePresent: true,
     preflightBundlePresent: true,
-    migrationCount: migrations.length,
-    migrationDigest: digest.digest("hex"),
+    migrationCount: migrationProof.migrationCount,
+    migrationDigest: migrationProof.migrationDigest,
     nonRoot: true,
   });
 }

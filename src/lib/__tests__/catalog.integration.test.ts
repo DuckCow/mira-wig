@@ -64,6 +64,17 @@ describe("catalog market pricing", () => {
     expect(price).not.toBe(LEGACY_BASE_PRICE);
   });
 
+  it("uses the listing publication predicate for direct PDP access", async () => {
+    const style = await createStyle(ctx, { markets: [MarketCode.KR] });
+    await createVariant(ctx, { styleId: style.id, marketPrices: { KR: 12_000, US: 2_999 } });
+
+    const usListing = await getWigStyles({}, MarketCode.US);
+    const usDetail = await getWigStyleById(style.id, MarketCode.US);
+
+    expect(usListing.some((item) => item.id === style.id)).toBe(false);
+    expect(usDetail).toBeNull();
+  });
+
   it("returns null listing basePrice for styles with no priced variants in the requested market", async () => {
     const style = await createStyle(ctx, { markets: [MarketCode.US] });
     await createVariant(ctx, { styleId: style.id, marketPrices: { KR: 12_000 } });

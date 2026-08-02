@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import { isDeepStrictEqual } from "util";
 import {
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -268,7 +269,12 @@ describe("acquireRefundExecutionLease", () => {
       mutate: async (fixture: DispatchFixture) => {
         await db.payment.update({
           where: { id: fixture.paymentId },
-          data: { status: PaymentAttemptStatus.FAILED },
+          data: {
+            status: PaymentAttemptStatus.FAILED,
+            attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+            financialSucceededAt: null,
+            blockingEndedAt: new Date(),
+          },
         });
       },
     },
@@ -276,7 +282,19 @@ describe("acquireRefundExecutionLease", () => {
       label: "missing provider payment key",
       expected: "PAYMENT_NOT_EXECUTABLE",
       mutate: async (fixture: DispatchFixture) => {
-        await db.payment.update({ where: { id: fixture.paymentId }, data: { providerPaymentKey: null } });
+        const now = new Date();
+        await db.payment.update({
+          where: { id: fixture.paymentId },
+          data: {
+            status: PaymentAttemptStatus.INITIATED,
+            attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+            providerPaymentKey: null,
+            financialSucceededAt: null,
+            blockingEndedAt: null,
+            contactIntentAt: now,
+            contactStartedAt: now,
+          },
+        });
       },
     },
     {

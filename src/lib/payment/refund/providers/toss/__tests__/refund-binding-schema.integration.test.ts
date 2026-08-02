@@ -4,6 +4,7 @@ import { join } from "path";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -350,9 +351,12 @@ async function createFixture(): Promise<TestContext> {
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       amount: 85_000,
       currency: "KRW",
       providerPaymentKey: `synthetic_payment_${identity}`,
+      financialSucceededAt: NOW,
+      blockingEndedAt: NOW,
       idempotencyKey: `synthetic_payment_idem_${identity}`,
     },
   });

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -622,10 +623,15 @@ async function createHistoricalOwnership(
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       amount,
       currency: "KRW",
       providerRef: `h1-ref-${digest}`,
       providerPaymentKey: `historical-s5-payment-${digest}`,
+      contactIntentAt: now,
+      contactStartedAt: now,
+      financialSucceededAt: now,
+      blockingEndedAt: now,
       idempotencyKey: `h1-payment-${digest}`,
     } });
     await tx.order.create({ data: {

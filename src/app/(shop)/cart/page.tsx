@@ -70,9 +70,19 @@ function CartRow({
         <p className="text-sm font-semibold text-gray-900">
           {unitPrice ?? "이 마켓에서 가격 미제공"}
         </p>
+        {item.unavailableMessage ? (
+          <p className="text-xs font-medium text-red-600" role="status">
+            {item.unavailableMessage}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
-        <QuantityControl cartItemId={item.id} current={item.quantity} max={item.stock} />
+        <QuantityControl
+          cartItemId={item.id}
+          current={item.quantity}
+          max={item.stock}
+          disabled={item.unavailableCode !== null}
+        />
         {lineTotal === null ? (
           <p className="text-sm font-semibold text-gray-900">가격 확인 필요</p>
         ) : (
@@ -89,11 +99,11 @@ function CartRow({
 
 function CartSummary({
   subtotal,
-  hasUnavailablePrice,
+  hasUnavailableItem,
   marketCode,
 }: {
   subtotal: number;
-  hasUnavailablePrice: boolean;
+  hasUnavailableItem: boolean;
   marketCode: MarketCode;
 }) {
   const { currency } = MARKET_CONFIGS[marketCode];
@@ -101,7 +111,7 @@ function CartSummary({
     <div className="space-y-2 pt-4 border-t border-gray-200">
       <div className="flex justify-between text-base font-semibold text-gray-900">
         <span>상품 합계</span>
-        <span>{hasUnavailablePrice ? "가격 확인 필요" : formatPrice(subtotal, currency)}</span>
+        <span>{hasUnavailableItem ? "상품 확인 필요" : formatPrice(subtotal, currency)}</span>
       </div>
       <p className="text-xs text-gray-500">
         배송비·세금 제외 — 배송지에 따라 결제 단계에서 확정됩니다.
@@ -133,7 +143,7 @@ export default async function CartPage() {
   const marketCode = await getCurrentMarketCode();
   const items = await getCart(session.user.id, marketCode);
   const imageUrls = await resolveImageUrls(items);
-  const hasUnavailablePrice = items.some((item) => item.price === null);
+  const hasUnavailableItem = items.some((item) => item.unavailableCode !== null);
   const productSubtotal = items.reduce((sum, item) => {
     if (item.price === null) return sum;
     return sum + item.price * item.quantity;
@@ -156,13 +166,13 @@ export default async function CartPage() {
           <div className="mt-6 space-y-4">
             <CartSummary
               subtotal={productSubtotal}
-              hasUnavailablePrice={hasUnavailablePrice}
+              hasUnavailableItem={hasUnavailableItem}
               marketCode={marketCode}
             />
-            {hasUnavailablePrice ? (
+            {hasUnavailableItem ? (
               <>
                 <div className="text-sm text-red-600">
-                  현재 마켓 가격이 없는 상품이 있어 주문할 수 없습니다.
+                  현재 구매할 수 없는 상품이 있습니다. 안내된 상품을 제거하거나 다시 담아주세요.
                 </div>
                 <button
                   type="button"

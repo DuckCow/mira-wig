@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "typegen": "next typegen",
+    "pretypecheck": "npm run typegen",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:setup": "createdb -U $USER wig_platform_test 2>/dev/null || true && node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy",

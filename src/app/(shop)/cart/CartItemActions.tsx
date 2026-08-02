@@ -26,10 +26,12 @@ export function QuantityControl({
   cartItemId,
   current,
   max,
+  disabled = false,
 }: {
   cartItemId: string;
   current: number;
   max: number;
+  disabled?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
 
@@ -48,7 +50,7 @@ export function QuantityControl({
       <button
         type="button"
         onClick={() => { update(current - 1); }}
-        disabled={current <= 1 || isPending}
+        disabled={disabled || current <= 1 || isPending}
         aria-label="수량 줄이기"
         className="px-2.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 text-sm"
       >
@@ -60,7 +62,7 @@ export function QuantityControl({
       <button
         type="button"
         onClick={() => { update(current + 1); }}
-        disabled={current >= max || isPending}
+        disabled={disabled || current >= max || isPending}
         aria-label="수량 늘리기"
         className="px-2.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 text-sm"
       >

@@ -20,7 +20,7 @@ export type TossLookupHttpResult =
 // and lookup implementations must not fabricate provider data on transient failures.
 export type TossPaymentLookupPort = (paymentKey: string) => Promise<TossLookupHttpResult>;
 // `null` means the paymentId is definitively absent, unknown, or not owned by Mira, so callers may ignore/no-capture; infrastructure, DB, timeout-like, or ambiguous failures must throw, and future Prisma ports must not catch transient DB errors as null.
-export type TossPaymentCorrelationPort = (paymentId: string) => Promise<{ checkoutSessionId: string } | null>;
+export type TossPaymentCorrelationPort = (paymentId: string) => Promise<{ paymentId: string; checkoutSessionId: string } | null>;
 
 interface TossWebhookTrigger { eventType: string; eventId?: string; paymentKey?: string }
 
@@ -108,6 +108,7 @@ async function parseTossWebhook(
   return {
     kind: "capture",
     facts: {
+      paymentId: hit.paymentId,
       checkoutSessionId: hit.checkoutSessionId,
       provider: PaymentProvider.TOSS,
       mode: input.context.mode,

@@ -1,9 +1,15 @@
 import { PaymentProvider as ProviderCode } from "@prisma/client";
 import type { ProviderFactoryContext } from "./contract";
 import { ProviderCapability, type ProviderCapability as ProviderCapabilityValue } from "./capabilities";
-import { createMockPaymentProvider } from "./mock";
+import {
+  createMockPaymentConfirmationProvider,
+  createMockPaymentInitiationProvider,
+} from "./mock";
 import { PaymentMode, PROVIDER_REGISTRY, type PaymentMode as PaymentModeValue } from "./routing";
-import type { PaymentProvider } from "./types";
+import type {
+  PaymentConfirmationProvider,
+  PaymentInitiationProvider,
+} from "./types";
 
 export type ProviderResolveErrorCode =
   | "MOCK_PROVIDER_LIVE"
@@ -34,11 +40,27 @@ export interface SandboxExternalCapabilityInput {
   capability: ProviderCapabilityValue;
 }
 
-export interface CreateProviderAdapterOptions {
+interface CreateProviderOptionsBase {
   env?: ProviderEnv;
   sandboxExternalCodeRegistry?: readonly SandboxExternalCodeRegistryEntry[];
-  sandboxExternalAdapters?: Partial<Record<ProviderCode, (context: ProviderFactoryContext) => PaymentProvider>>;
-  liveAdapters?: Partial<Record<ProviderCode, (context: ProviderFactoryContext) => PaymentProvider>>;
+}
+
+export interface CreateInitiationProviderOptions extends CreateProviderOptionsBase {
+  sandboxExternalInitiationAdapters?: Partial<
+    Record<ProviderCode, (context: ProviderFactoryContext) => PaymentInitiationProvider>
+  >;
+  liveInitiationAdapters?: Partial<
+    Record<ProviderCode, (context: ProviderFactoryContext) => PaymentInitiationProvider>
+  >;
+}
+
+export interface CreateConfirmationProviderOptions extends CreateProviderOptionsBase {
+  sandboxExternalConfirmationAdapters?: Partial<
+    Record<ProviderCode, (context: ProviderFactoryContext) => PaymentConfirmationProvider>
+  >;
+  liveConfirmationAdapters?: Partial<
+    Record<ProviderCode, (context: ProviderFactoryContext) => PaymentConfirmationProvider>
+  >;
 }
 
 export class ProviderResolveException extends Error {
@@ -53,38 +75,67 @@ export class ProviderResolveException extends Error {
   }
 }
 
-export function createProviderAdapter(
+export function createInitiationProvider(
   context: ProviderFactoryContext,
-  options: CreateProviderAdapterOptions = {},
-): PaymentProvider {
+  options: CreateInitiationProviderOptions = {},
+): PaymentInitiationProvider {
   assertSupportedMode(context);
   assertRegistryAllowsMode(context);
-  if (context.mode === PaymentMode.SANDBOX) {
-    return sandboxAdapterForContext(context, options);
-  }
-
+  if (context.mode === PaymentMode.SANDBOX) return sandboxInitiationProvider(context, options);
   assertLiveEnabled(context);
   assertLiveCredentialsPresent(context);
-  const liveAdapter = options.liveAdapters?.[context.provider];
-  if (liveAdapter) return liveAdapter(context);
+  const adapter = options.liveInitiationAdapters?.[context.provider];
+  if (adapter) return adapter(context);
   throw providerError(context, "LIVE_ADAPTER_UNAVAILABLE", "Live payment provider adapter is not wired.");
 }
 
-function sandboxAdapterForContext(
+export function createConfirmationProvider(
   context: ProviderFactoryContext,
-  options: CreateProviderAdapterOptions,
-): PaymentProvider {
+  options: CreateConfirmationProviderOptions = {},
+): PaymentConfirmationProvider {
+  assertSupportedMode(context);
+  assertRegistryAllowsMode(context);
+  if (context.mode === PaymentMode.SANDBOX) return sandboxConfirmationProvider(context, options);
+  assertLiveEnabled(context);
+  assertLiveCredentialsPresent(context);
+  const adapter = options.liveConfirmationAdapters?.[context.provider];
+  if (adapter) return adapter(context);
+  throw providerError(context, "LIVE_ADAPTER_UNAVAILABLE", "Live payment provider adapter is not wired.");
+}
+
+function sandboxInitiationProvider(
+  context: ProviderFactoryContext,
+  options: CreateInitiationProviderOptions,
+): PaymentInitiationProvider {
+  if (!assertSandboxExternalReady(context, options)) return createMockPaymentInitiationProvider(context.provider);
+  const adapter = options.sandboxExternalInitiationAdapters?.[context.provider];
+  if (adapter) return adapter(context);
+  throw providerError(context, "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE", "Sandbox external provider adapter is not wired.");
+}
+
+function sandboxConfirmationProvider(
+  context: ProviderFactoryContext,
+  options: CreateConfirmationProviderOptions,
+): PaymentConfirmationProvider {
+  if (!assertSandboxExternalReady(context, options)) return createMockPaymentConfirmationProvider(context.provider);
+  const adapter = options.sandboxExternalConfirmationAdapters?.[context.provider];
+  if (adapter) return adapter(context);
+  throw providerError(context, "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE", "Sandbox external provider adapter is not wired.");
+}
+
+function assertSandboxExternalReady(
+  context: ProviderFactoryContext,
+  options: CreateProviderOptionsBase,
+): boolean {
   const capability = sandboxCapabilityInput(context, ProviderCapability.ACTION_ADAPTER);
   const codeKeyEnabled = sandboxExternalCodeKeyEnabled(capability, options.sandboxExternalCodeRegistry);
   const deploymentKeyEnabled = sandboxExternalDeploymentKeyEnabled(capability, options.env ?? process.env);
-  if (!codeKeyEnabled && !deploymentKeyEnabled) return createMockPaymentProvider(context.provider);
+  if (!codeKeyEnabled && !deploymentKeyEnabled) return false;
   if (codeKeyEnabled !== deploymentKeyEnabled) {
     throw providerError(context, "SANDBOX_EXTERNAL_MISCONFIGURED", "Sandbox external provider opt-in is incomplete.");
   }
   assertSandboxCredentialsPresent(context);
-  const adapter = options.sandboxExternalAdapters?.[context.provider];
-  if (adapter) return adapter(context);
-  throw providerError(context, "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE", "Sandbox external provider adapter is not wired.");
+  return true;
 }
 
 export function sandboxExternalCodeKeyEnabled(
