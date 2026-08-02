@@ -8,11 +8,21 @@ import type {
   ProviderFactoryContext,
 } from "@/lib/payment/providers/contract";
 import { TOSS_SANDBOX_SECRET_KEY } from "../../credentials";
-import { TOSS_SANDBOX_EXTERNAL_ENABLED } from "../../factory";
+import {
+  TOSS_SANDBOX_EXTERNAL_ENABLED,
+  type CreateConfirmationProviderOptions,
+  type CreateInitiationProviderOptions,
+} from "../../factory";
+import { resolveInitiationProvider } from "../../initiation";
 import { createMockPaymentProvider } from "../../mock";
-import { resolveProvider } from "../../resolve";
+import { resolveConfirmationProvider } from "../../resolve";
 import { PaymentMethod, PaymentMode } from "../../routing";
-import type { PaymentConfirmInput, PaymentInitiateInput, PaymentConfirmResult } from "../../types";
+import type {
+  PaymentConfirmInput,
+  PaymentInitiateInput,
+  PaymentConfirmResult,
+  PaymentProvider as PaymentProviderPort,
+} from "../../types";
 import {
   createTossConfirmFetchClient,
   createTossConfirmAdapter,
@@ -31,6 +41,20 @@ const AMOUNT = 12_000;
 const APPROVED_AT = "2026-07-07T00:59:59.000Z";
 const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env[TOSS_SANDBOX_EXTERNAL_ENABLED];
 const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env[TOSS_SANDBOX_SECRET_KEY];
+type TestProviderOptions = CreateInitiationProviderOptions & CreateConfirmationProviderOptions;
+
+function resolveProvider(
+  context: ProviderFactoryContext,
+  options?: TestProviderOptions,
+): PaymentProviderPort {
+  const initiation = resolveInitiationProvider(context, options);
+  const confirmation = resolveConfirmationProvider(context, options);
+  return {
+    code: initiation.code,
+    initiate: (input) => initiation.initiate(input),
+    confirm: (input) => confirmation.confirm(input),
+  };
+}
 
 describe("Toss confirm fake HTTP adapter seam", () => {
   beforeEach(() => {

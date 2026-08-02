@@ -278,13 +278,14 @@ describe("Toss query webhook parser", () => {
   });
 
   it("captures DONE when correlation finds the checkout session", async () => {
-    const correlation = recordingCorrelation({ checkoutSessionId: CHECKOUT_SESSION_ID });
+    const correlation = recordingCorrelation({ paymentId: PAYMENT_ID, checkoutSessionId: CHECKOUT_SESSION_ID });
     const parser = createTossWebhookParser({ correlation: correlation.correlation });
 
     const parsed = await parser.parse(verifiedInput());
 
     expect(correlation.calls).toEqual([PAYMENT_ID]);
     expect(expectCapture(parsed)).toMatchObject({
+      paymentId: PAYMENT_ID,
       checkoutSessionId: CHECKOUT_SESSION_ID,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
@@ -365,7 +366,9 @@ describe("Toss query webhook parser", () => {
     const verifier = createTossQueryWebhookVerifier({ context: verifiedContext(), lookup: lookup.lookup });
     const verifiedResult = await verifier.verify(rawWebhook());
     const verified = expectVerified(verifiedResult);
-    const parser = createTossWebhookParser({ correlation: recordingCorrelation({ checkoutSessionId: CHECKOUT_SESSION_ID }).correlation });
+    const parser = createTossWebhookParser({
+      correlation: recordingCorrelation({ paymentId: PAYMENT_ID, checkoutSessionId: CHECKOUT_SESSION_ID }).correlation,
+    });
     const parsed = await parser.parse(verified);
 
     expect(JSON.stringify(verifiedResult)).not.toContain(sentinel);
@@ -385,7 +388,7 @@ describe("Toss query webhook parser", () => {
 
 function parseWithCorrelation(input: ProviderVerifiedWebhookInput): Promise<NormalizedProviderWebhookEvent> {
   return createTossWebhookParser({
-    correlation: recordingCorrelation({ checkoutSessionId: CHECKOUT_SESSION_ID }).correlation,
+    correlation: recordingCorrelation({ paymentId: PAYMENT_ID, checkoutSessionId: CHECKOUT_SESSION_ID }).correlation,
   }).parse(input);
 }
 
@@ -489,7 +492,7 @@ function throwingLookup(error: Error): { calls: string[]; lookup: TossPaymentLoo
 }
 
 function recordingCorrelation(
-  result: { checkoutSessionId: string } | null,
+  result: { paymentId: string; checkoutSessionId: string } | null,
 ): { calls: string[]; correlation: TossPaymentCorrelationPort } {
   const calls: string[] = [];
   return {

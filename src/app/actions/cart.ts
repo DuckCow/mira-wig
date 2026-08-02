@@ -70,7 +70,8 @@ export async function updateCartQuantity(
   if (!userId) return { success: false, error: "로그인이 필요합니다." };
 
   try {
-    await libUpdateQuantity(userId, cartItemId, quantity);
+    const marketCode = await getCurrentMarketCode();
+    await libUpdateQuantity(userId, cartItemId, quantity, marketCode);
     revalidatePath("/cart");
     return { success: true };
   } catch (e) {

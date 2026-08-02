@@ -5,15 +5,31 @@ import { ProviderCapability } from "../capabilities";
 import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
 import {
   TOSS_SANDBOX_EXTERNAL_ENABLED,
-  type CreateProviderAdapterOptions,
+  type CreateConfirmationProviderOptions,
+  type CreateInitiationProviderOptions,
   type SandboxExternalCodeRegistryEntry,
 } from "../factory";
 import { PaymentMethod, PaymentMode } from "../routing";
-import { ProviderResolveException, resolveProvider } from "../resolve";
+import { resolveInitiationProvider } from "../initiation";
+import { ProviderResolveException, resolveConfirmationProvider } from "../resolve";
 import type { PaymentConfirmInput, PaymentInitiateInput, PaymentProvider as PaymentProviderPort } from "../types";
 
 const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
 const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env.TOSS_SANDBOX_SECRET_KEY;
+type TestProviderOptions = CreateInitiationProviderOptions & CreateConfirmationProviderOptions;
+
+function resolveProvider(
+  context: ProviderFactoryContext,
+  options?: TestProviderOptions,
+): PaymentProviderPort {
+  const initiation = resolveInitiationProvider(context, options);
+  const confirmation = resolveConfirmationProvider(context, options);
+  return {
+    code: initiation.code,
+    initiate: (input) => initiation.initiate(input),
+    confirm: (input) => confirmation.confirm(input),
+  };
+}
 
 describe("payment provider adapter resolution", () => {
   beforeEach(() => {
@@ -52,7 +68,7 @@ describe("payment provider adapter resolution", () => {
     const resolved = resolveProvider(factoryContext({
       credentials: [presentSandboxCredential()],
     }), {
-      sandboxExternalAdapters: { [PaymentProvider.TOSS]: adapter.create },
+      ...sandboxAdapters(adapter.create),
     });
 
     await expect(resolved.confirm(confirmInput(PaymentProvider.TOSS))).resolves.toMatchObject({
@@ -94,7 +110,7 @@ describe("payment provider adapter resolution", () => {
       "fake_secret_do_not_leak",
       {
         ...options(),
-        sandboxExternalAdapters: { [PaymentProvider.TOSS]: adapter.create },
+        ...sandboxAdapters(adapter.create),
       },
     );
     expect(adapter.calls).toBe(0);
@@ -117,7 +133,7 @@ describe("payment provider adapter resolution", () => {
       {
         env: sandboxEnabledEnv(),
         sandboxExternalCodeRegistry: tossActionCodeRegistry(),
-        sandboxExternalAdapters: { [PaymentProvider.TOSS]: fakeSandboxExternalAdapter },
+        ...sandboxAdapters(fakeSandboxExternalAdapter),
       },
     );
   });
@@ -126,7 +142,7 @@ describe("payment provider adapter resolution", () => {
     const resolved = resolveProvider(factoryContext({ credentials: [presentSandboxCredential()] }), {
       env: sandboxEnabledEnv(),
       sandboxExternalCodeRegistry: tossActionCodeRegistry(),
-      sandboxExternalAdapters: { [PaymentProvider.TOSS]: fakeSandboxExternalAdapter },
+      ...sandboxAdapters(fakeSandboxExternalAdapter),
     });
 
     await expect(resolved.confirm(confirmInput(PaymentProvider.TOSS))).resolves.toMatchObject({
@@ -211,7 +227,7 @@ describe("payment provider adapter resolution", () => {
       {
         env: sandboxEnabledEnv(),
         sandboxExternalCodeRegistry: tossActionCodeRegistry(),
-        sandboxExternalAdapters: { [PaymentProvider.TOSS]: adapter.create },
+        ...sandboxAdapters(adapter.create),
       },
     );
     expect(adapter.calls).toBe(0);
@@ -232,7 +248,7 @@ function expectResolutionFailure(
   context: ProviderFactoryContext,
   code: string,
   absentText?: string,
-  options: CreateProviderAdapterOptions = {},
+  options: TestProviderOptions = {},
 ): void {
   expect(() => resolveProvider(context, options)).toThrow(ProviderResolveException);
   try {
@@ -305,11 +321,21 @@ function fakeSandboxExternalAdapter(context: ProviderFactoryContext): PaymentPro
   };
 }
 
-function throwingAdapter(): { calls: number; create: (context: ProviderFactoryContext) => PaymentProviderPort } {
+function sandboxAdapters(
+  create: (context: ProviderFactoryContext) => PaymentProviderPort,
+): Pick<TestProviderOptions, "sandboxExternalInitiationAdapters" | "sandboxExternalConfirmationAdapters"> {
   return {
-    calls: 0,
+    sandboxExternalInitiationAdapters: { [PaymentProvider.TOSS]: create },
+    sandboxExternalConfirmationAdapters: { [PaymentProvider.TOSS]: create },
+  };
+}
+
+function throwingAdapter(): { calls: number; create: (context: ProviderFactoryContext) => PaymentProviderPort } {
+  let calls = 0;
+  return {
+    get calls() { return calls; },
     create() {
-      this.calls += 1;
+      calls += 1;
       throw new Error("external sandbox adapter must not be constructed");
     },
   };

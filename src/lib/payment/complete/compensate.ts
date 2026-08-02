@@ -1,51 +1,83 @@
-import { CheckoutSessionStatus } from "@prisma/client";
-import type { Prisma, PrismaClient } from "@prisma/client";
-import { enqueue } from "@/lib/payment/outbox";
+import {
+  CheckoutSessionStatus,
+  PaymentAttemptStatus,
+  PaymentRemediationStatus,
+  Prisma,
+} from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import { enqueuePaymentRemediationRequired } from "@/lib/payment/remediation";
 import { transitionCheckoutSession } from "@/lib/payment/session";
-import type { CompensationEnqueued, CompensationSkipped, CompletionTerminalFailure } from "./types";
-
-const VOID_TOPIC = "pg.void";
+import type { CompensationEnqueued, CompensationSkipped, CompletionFailureCode, CompletionTerminalFailure } from "./types";
 
 export async function compensateTerminalFailure(
   client: PrismaClient,
   failure: CompletionTerminalFailure,
 ): Promise<CompensationEnqueued | CompensationSkipped> {
-  if (isVoidlessFailure(failure)) {
-    await client.$transaction((tx) => markSessionFailed(tx, failure));
+  if (failure.code === "MODE_MISMATCH") {
     return { kind: "compensationSkipped", failure, reason: "VOID_NOT_REQUIRED" };
   }
 
-  const dedupKey = voidDedupKey(failure);
-  await client.$transaction(async (tx) => {
-    await enqueueVoid(tx, failure, dedupKey);
-    await markSessionFailed(tx, failure);
+  const dedupKey = await client.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "CheckoutSession"
+      WHERE "id" = ${failure.checkoutSessionId}
+      FOR UPDATE
+    `);
+    await markRemediationPending(tx, failure);
+    const key = await enqueuePaymentRemediationRequired(tx, {
+      paymentId: failure.paymentId,
+      provider: failure.provider,
+      mode: await paymentMode(tx, failure.paymentId),
+      providerPaymentKey: failure.providerPaymentKey,
+      reason: failure.code,
+    });
+    if (mayMutateSession(failure.code)) await markSessionFailed(tx, failure);
+    return key;
   });
   return { kind: "compensationEnqueued", failure, outboxDedupKey: dedupKey };
 }
 
-function isVoidlessFailure(failure: CompletionTerminalFailure): boolean {
-  return failure.code === "MODE_MISMATCH";
-}
-
-function voidDedupKey(failure: CompletionTerminalFailure): string {
-  return `void:${failure.provider}:${failure.providerPaymentKey}`;
-}
-
-async function enqueueVoid(
+async function markRemediationPending(
   tx: Prisma.TransactionClient,
   failure: CompletionTerminalFailure,
-  dedupKey: string,
 ): Promise<void> {
-  await enqueue(tx, {
-    topic: VOID_TOPIC,
-    dedupKey,
-    payload: {
-      paymentId: failure.paymentId,
-      provider: failure.provider,
-      providerPaymentKey: failure.providerPaymentKey,
-      reason: failure.code,
+  const result = await tx.payment.updateMany({
+    where: {
+      id: failure.paymentId,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      remediationStatus: {
+        in: [PaymentRemediationStatus.NONE, PaymentRemediationStatus.REQUIRED],
+      },
+    },
+    data: {
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      errorCode: failure.code,
+      errorMessage: failure.message,
     },
   });
+  if (result.count === 1) return;
+  const payment = await tx.payment.findUnique({
+    where: { id: failure.paymentId },
+    select: { status: true, remediationStatus: true },
+  });
+  if (payment?.status === PaymentAttemptStatus.SUCCEEDED
+    && payment.remediationStatus !== PaymentRemediationStatus.NONE) return;
+  throw new Error("Payment remediation transition conflict");
+}
+
+async function paymentMode(
+  tx: Prisma.TransactionClient,
+  paymentId: string,
+) {
+  const payment = await tx.payment.findUnique({ where: { id: paymentId }, select: { mode: true } });
+  if (!payment) throw new Error("Payment remediation target is missing");
+  return payment.mode;
+}
+
+function mayMutateSession(code: CompletionFailureCode): boolean {
+  return code !== "VARIANT_PARENT_MISMATCH"
+    && code !== "SUPERSEDED_ATTEMPT_CAPTURED"
+    && code !== "PAYMENT_BLOCKED_BY_REMEDIATION";
 }
 
 async function markSessionFailed(

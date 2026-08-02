@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import {
   assembleRefundWorkerBuildContext,
 } from "./build-refund-worker-bundles.mjs";
+import type {
+  RefundWorkerMigrationInventory,
+} from "../src/lib/payment/refund/worker-migration-inventory.js";
 
 const PROOF_IMAGE_TAG_PREFIX = "mira-refund-worker:r2a-local-proof-";
 const PROOF_CONTAINER_NAME_PREFIX = "mira-refund-r2a-proof-";
@@ -770,7 +773,11 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
     );
     requireCondition(inspected.command.length === 0, "IMAGE_DEFAULT_COMMAND");
 
-    const runtimeProof = verifyRuntimeClosure(proof);
+    const runtimeProof = verifyRuntimeClosure(
+      proof,
+      context.manifestEntries,
+      context.migrationInventory,
+    );
     const [runtimeInventory, baseInventory] = [
       captureImageNativeInventory(proof.tag, proof),
       captureImageNativeInventory(NODE_BASE, proof),
@@ -866,7 +873,11 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
   });
 }
 
-function verifyRuntimeClosure(ownership: ProofImageOwnership) {
+function verifyRuntimeClosure(
+  ownership: ProofImageOwnership,
+  packagedEntries: readonly Readonly<{ path: string; sha256: string }>[],
+  migrationInventory: RefundWorkerMigrationInventory,
+) {
   const image = ownership.tag;
   const noArgument = captureContainerStatus(ownership, [
     "run", "--rm", "--platform", PLATFORM, "--network", "none", image,
@@ -889,7 +900,11 @@ function verifyRuntimeClosure(ownership: ProofImageOwnership) {
   const self = parseSelfCheck(JSON.parse(selfCheck.stdout));
   requireCondition(self !== null, "SELF_CHECK_SHAPE");
   requireCondition(self.code === "IMAGE_SELF_CHECK_READY", "SELF_CHECK_CODE");
-  requireCondition(self.migrationCount === 29, "SELF_CHECK_MIGRATIONS");
+  verifyRefundWorkerMigrationInventoryClosure(
+    packagedEntries,
+    self,
+    migrationInventory,
+  );
   requireCondition(self.nonRoot === true, "SELF_CHECK_NON_ROOT");
 
   const disabled = captureContainerStatus(ownership, [
@@ -970,6 +985,32 @@ function verifyRuntimeClosure(ownership: ProofImageOwnership) {
     writeDeniedProbeCount: writeProbe.deniedCount,
     writeAllowedProbeCount: writeProbe.allowedCount,
   });
+}
+
+export function verifyRefundWorkerMigrationInventoryClosure(
+  packagedEntries: readonly Readonly<{ path: string; sha256: string }>[],
+  selfCheck: Readonly<{ migrationCount: number; migrationDigest: string }>,
+  migrationInventory: RefundWorkerMigrationInventory,
+): void {
+  const packagedMigrations = packagedEntries
+    .filter((entry) => /^prisma\/migrations\/[^/]+\/migration\.sql$/u.test(entry.path))
+    .map((entry) => Object.freeze({ path: entry.path, sha256: entry.sha256 }));
+  const authoritativeMigrations = migrationInventory.entries.map((entry) => Object.freeze({
+    path: entry.path,
+    sha256: entry.sha256,
+  }));
+  requireCondition(
+    JSON.stringify(packagedMigrations) === JSON.stringify(authoritativeMigrations),
+    "PACKAGED_MIGRATION_INVENTORY",
+  );
+  requireCondition(
+    selfCheck.migrationCount === migrationInventory.migrationCount,
+    "SELF_CHECK_MIGRATION_COUNT",
+  );
+  requireCondition(
+    selfCheck.migrationDigest === migrationInventory.migrationDigest,
+    "SELF_CHECK_MIGRATION_DIGEST",
+  );
 }
 
 function proveProxyChecksumMismatchFails(

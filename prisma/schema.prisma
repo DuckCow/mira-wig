@@ -310,6 +310,38 @@ enum PaymentAttemptStatus {
   VOIDED
 }
 
+enum PaymentAttemptLifecycle {
+  CONTACT_AUTHORIZED
+  CONTACTED
+  OUTCOME_UNKNOWN
+  SUPERSEDED
+  TERMINAL_FAILURE
+  SUSPENDED
+  FINALIZED
+  TERMINAL_REMEDIATED
+}
+
+enum PaymentInitiationOutputKind {
+  READY
+  REDIRECT
+}
+
+enum PaymentRemediationStatus {
+  NONE
+  REQUIRED
+  PENDING
+  RECONCILIATION_REQUIRED
+  REMEDIATED
+}
+
+enum PaymentRemediationOperation {
+  VOID
+  CANCEL
+  REVERSAL
+  REFUND
+  MANUAL_RECONCILIATION
+}
+
 enum RefundAttemptStatus {
   REQUESTED
   PROCESSING
@@ -465,6 +497,8 @@ model CheckoutSessionLine {
   session         CheckoutSession @relation(fields: [sessionId], references: [id])
   variantId       String
   variant         WigVariant      @relation(fields: [variantId], references: [id])
+  /// Cart-selected parent identity. This is not inferred from variantId at completion.
+  wigStyleId      String
   quantity        Int
   unitAmount      Int
   fulfillmentType FulfillmentType
@@ -489,28 +523,49 @@ model CheckoutSessionShipping {
 }
 
 model Payment {
-  id                            String               @id @default(cuid())
+  id                            String                       @id @default(cuid())
   checkoutSessionId             String
-  session                       CheckoutSession      @relation(fields: [checkoutSessionId], references: [id])
+  session                       CheckoutSession              @relation(fields: [checkoutSessionId], references: [id])
   provider                      PaymentProvider
   mode                          PaymentMode
-  status                        PaymentAttemptStatus @default(INITIATED)
+  routingRuleId                 String?
+  /// Financial result axis. Logical attempt/contact authority is attemptLifecycle.
+  status                        PaymentAttemptStatus         @default(INITIATED)
+  attemptLifecycle              PaymentAttemptLifecycle
+  remediationStatus             PaymentRemediationStatus     @default(NONE)
   amount                        Int
   currency                      String
   providerRef                   String?
-  providerConfirmIdempotencyKey String?              @unique
+  providerConfirmIdempotencyKey String?                      @unique
   providerPaymentKey            String?
-  idempotencyKey                String               @unique
+  idempotencyKey                String                       @unique
+  contactIntentAt               DateTime?
+  contactStartedAt              DateTime?
+  initiationOutputKind          PaymentInitiationOutputKind?
+  initiationApproveUrl          String?
+  initiationCompletedAt         DateTime?
+  financialSucceededAt          DateTime?
   errorCode                     String?
   errorMessage                  String?
-  createdAt                     DateTime             @default(now())
-  updatedAt                     DateTime             @updatedAt
+  supersededAt                  DateTime?
+  blockingEndedAt               DateTime?
+  suspendedByPaymentId          String?
+  suspendedByPayment            Payment?                     @relation("PaymentRemediationBlock", fields: [checkoutSessionId, suspendedByPaymentId], references: [checkoutSessionId, id], onDelete: Restrict)
+  suspendedPayments             Payment[]                    @relation("PaymentRemediationBlock")
+  remediationOperation          PaymentRemediationOperation?
+  remediationResultRef          String?
+  remediatedAt                  DateTime?
+  createdAt                     DateTime                     @default(now())
+  updatedAt                     DateTime                     @updatedAt
   order                         Order?
   refundAttempts                RefundAttempt[]
 
   @@unique([provider, providerPaymentKey])
+  @@unique([checkoutSessionId, id])
   @@index([provider, providerRef])
   @@index([checkoutSessionId, status])
+  @@index([checkoutSessionId, attemptLifecycle])
+  @@index([suspendedByPaymentId])
 }
 
 model Order {
@@ -683,7 +738,7 @@ model RefundExecutionDispatchAttempt {
   contactMarkedAt      DateTime?                           @db.Timestamp(3)
   createdAt            DateTime                            @default(now()) @db.Timestamp(3)
 
-  command                 RefundExecutionCommand                            @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  command                 RefundExecutionCommand                          @relation(fields: [commandId], references: [id], onDelete: Restrict)
   contactEligibilityProof RefundExecutionProviderContactEligibilityProof?
   evidence                RefundExecutionEvidence[]
 
@@ -773,8 +828,8 @@ model RefundExecutionEvidence {
   observedAt DateTime
   createdAt  DateTime @default(now())
 
-  dispatchAttemptId           String?
-  dispatchAttempt             RefundExecutionDispatchAttempt? @relation(fields: [dispatchAttemptId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "RefundEvidence_dispatch_fkey")
+  dispatchAttemptId          String?
+  dispatchAttempt            RefundExecutionDispatchAttempt? @relation(fields: [dispatchAttemptId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "RefundEvidence_dispatch_fkey")
   authorizingLeaseGeneration Int?
 
   @@index([commandId, createdAt])
@@ -788,6 +843,8 @@ model OrderItem {
   order           Order                 @relation(fields: [orderId], references: [id])
   variantId       String
   variant         WigVariant            @relation(fields: [variantId], references: [id])
+  /// Checkout-selected parent identity snapshot.
+  wigStyleId      String
   quantity        Int
   unitAmount      Int
   fulfillmentType FulfillmentType

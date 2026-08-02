@@ -172,7 +172,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       ok: true,
       manifestDigest: contract.buildContext.expectedManifestSha256,
       fileCount: contract.buildContext.expectedFileCount,
-      repositoryGraphInputCount: 107,
+      repositoryGraphInputCount: contract.buildContext.repositoryGraphInputCount,
       packagedGraphInputCount: 45,
       entrypointCount: 3,
       temporaryContextsRemoved: true,
@@ -1323,10 +1323,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
 
   it("keeps schema, migrations, and the R2A subinventory byte-authoritative", () => {
     expect(sha256(readFileSync(join(ROOT, "prisma/schema.prisma")))).toBe(
-      "cf37230ced1259c46074724be7ef7c18365346c381ffa9b0a67548715cb2b40a",
+      "39b4e7d878ba45e2af197e3916b08e1b40520c9db723eb040a34f583ae165fa5",
     );
     expect(migrationRuntimeDigest()).toBe(
-      "bba06e20e2dfc3116386c233915219006642eeab12f50a5982b44c01588c89bc",
+      "0e8f62a9d2c8d472df75f45bdc66c7780c124413424f4174b434079098ef6168",
     );
     const terraform = repositoryRelativeFiles(INFRA)
       .filter((path) => !path.startsWith(

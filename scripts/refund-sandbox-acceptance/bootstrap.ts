@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -172,10 +173,15 @@ async function createPreRefundRows(
     provider: PaymentProvider.TOSS,
     mode: PaymentMode.SANDBOX,
     status: PaymentAttemptStatus.SUCCEEDED,
+    attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
     amount: input.fixture.amount,
     currency: "KRW",
     providerRef: `h1-ref-${ids.digest}`,
     providerPaymentKey: input.fixture.paymentKey,
+    contactIntentAt: now,
+    contactStartedAt: now,
+    financialSucceededAt: now,
+    blockingEndedAt: now,
     idempotencyKey: `h1-payment-${ids.digest}`,
   } });
   await tx.order.create({ data: {

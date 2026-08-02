@@ -3,7 +3,9 @@ import {
   CheckoutSessionStatus,
   FulfillmentType,
   OutboxStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
+  PaymentInitiationOutputKind,
   PaymentMode,
   PaymentProvider,
   Prisma,
@@ -170,7 +172,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
       expect(kinds(results).sort()).toEqual(["compensationEnqueued", "completed"]);
       await expect(orderCountForSessions([first.sessionId, second.sessionId])).resolves.toBe(1);
       await expect(stockOf(variant.id)).resolves.toBe(0);
-      await expect(totalVoidIntentCount([firstFacts, secondFacts])).resolves.toBe(1);
+      await expect(totalRemediationSignalCount([firstFacts, secondFacts])).resolves.toBe(1);
     }
 
     await expect(orderCount(ctx.userId)).resolves.toBe(rounds);
@@ -241,7 +243,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
       const payload = capturePayload(ctx, session, providerPaymentKey);
 
       const [confirmResult, webhookResult] = await Promise.all([
-        confirmPayment(session.sessionId, PaymentProvider.TOSS, { providerPaymentKey }),
+        confirmPayment(session.sessionId, { providerPaymentKey }),
         handleWebhook(db, PaymentProvider.TOSS, rawWebhook(payload), {
           testOnlyPipeline: createMockWebhookPipeline(PaymentProvider.TOSS),
         }),
@@ -259,7 +261,7 @@ describe.sequential("C1-core payment concurrency harness", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(rounds);
   });
 
-  it("C1-7: two distinct payments racing one checkout session yields one order and one void intent", async () => {
+  it("C1-7: two distinct financial successes block ordering and emit neutral remediation", async () => {
     const rounds = 3;
 
     for (let round = 0; round < rounds; round += 1) {
@@ -272,13 +274,13 @@ describe.sequential("C1-core payment concurrency harness", () => {
         completeFromCapture(db, secondFacts),
       ]);
 
-      expect(kinds(results).sort()).toEqual(["compensationEnqueued", "completed"]);
-      await expect(orderCountBySession(session.sessionId)).resolves.toBe(1);
+      expect(kinds(results).sort()).toEqual(["compensationEnqueued", "compensationEnqueued"]);
+      await expect(orderCountBySession(session.sessionId)).resolves.toBe(0);
       await expect(paymentCount(session.sessionId)).resolves.toBe(2);
-      await expect(totalVoidIntentCount([firstFacts, secondFacts])).resolves.toBe(1);
+      await expect(totalRemediationSignalCount([firstFacts, secondFacts])).resolves.toBe(2);
     }
 
-    await expect(orderCount(ctx.userId)).resolves.toBe(rounds);
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
   });
 
   it("C1-8: bounded jitter stress for same-session completion keeps effects single", async () => {
@@ -350,6 +352,7 @@ async function createCatalogVariant(context: TestContext, options: VariantOption
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/c1-cover.png",
+      availableMarkets: { create: { marketCode: MarketCode.KR, isActive: true } },
     },
     select: { id: true },
   });
@@ -406,9 +409,14 @@ async function createPendingPaymentAttempt(session: SessionResult): Promise<stri
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
       amount: session.totalAmount,
       currency: session.currency,
       idempotencyKey: `c1_initiate_${randomUUID()}`,
+      contactIntentAt: C1_NOW,
+      contactStartedAt: C1_NOW,
+      initiationOutputKind: PaymentInitiationOutputKind.READY,
+      initiationCompletedAt: C1_NOW,
     },
     select: { id: true },
   });
@@ -443,7 +451,7 @@ function captureFacts(
     receivedAt: new Date(session.expiresAt.getTime() - 1_000),
     ...overrides,
   };
-  context.outboxDedupKeys.push(voidDedupKey(facts));
+  context.outboxDedupKeys.push(remediationDedupKey(facts));
   return facts;
 }
 
@@ -493,9 +501,13 @@ async function createVoidPayment(context: TestContext): Promise<MinimalPayment> 
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
       amount: 12_000,
       currency: "KRW",
       providerPaymentKey,
+      contactIntentAt: C1_NOW,
+      contactStartedAt: C1_NOW,
+      financialSucceededAt: C1_NOW,
       idempotencyKey: `c1_void_idem_${randomUUID()}`,
     },
     select: { id: true, provider: true, providerPaymentKey: true },
@@ -632,8 +644,8 @@ function kinds(results: CompleteFromCaptureResult[]): CompleteFromCaptureResult[
   return results.map((result) => result.kind);
 }
 
-function voidDedupKey(facts: Pick<CaptureFacts, "provider" | "providerPaymentKey">): string {
-  return `void:${facts.provider}:${facts.providerPaymentKey}`;
+function remediationDedupKey(facts: Pick<CaptureFacts, "provider" | "providerPaymentKey">): string {
+  return `payment-remediation:${facts.provider}:${facts.providerPaymentKey}`;
 }
 
 function trackTopic(context: TestContext, topic: string): string {
@@ -658,11 +670,11 @@ async function paymentCount(checkoutSessionId: string): Promise<number> {
 }
 
 async function outboxCountForFacts(facts: CaptureFacts): Promise<number> {
-  return db.paymentOutbox.count({ where: { dedupKey: voidDedupKey(facts) } });
+  return db.paymentOutbox.count({ where: { dedupKey: remediationDedupKey(facts) } });
 }
 
-async function totalVoidIntentCount(facts: CaptureFacts[]): Promise<number> {
-  return db.paymentOutbox.count({ where: { dedupKey: { in: facts.map(voidDedupKey) } } });
+async function totalRemediationSignalCount(facts: CaptureFacts[]): Promise<number> {
+  return db.paymentOutbox.count({ where: { dedupKey: { in: facts.map(remediationDedupKey) } } });
 }
 
 async function stockOf(variantId: string): Promise<number> {

@@ -1,18 +1,10 @@
-import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  loadRefundWorkerMigrationInventory,
+  REFUND_WORKER_MIGRATIONS_DIRECTORY,
+} from "./worker-migration-inventory";
 
-const MIGRATION_LOCK_FILE = "migration_lock.toml";
-const MIGRATION_SQL_FILE = "migration.sql";
-const MAX_MIGRATION_NAME_LENGTH = 128;
-const MIGRATION_NAME = /^[0-9]{14}_[a-z0-9]+(?:_[a-z0-9]+)*$/u;
-
-export const REFUND_WORKER_MIGRATIONS_DIRECTORY = fileURLToPath(
-  new URL("../../../../prisma/migrations/", import.meta.url),
-);
+export { REFUND_WORKER_MIGRATIONS_DIRECTORY };
 
 export type RefundWorkerRepositoryMigration = Readonly<{
   name: string;
@@ -49,76 +41,11 @@ export type RefundWorkerMigrationReadiness =
 export async function loadRefundWorkerRepositoryMigrations(
   migrationsDirectory: string = REFUND_WORKER_MIGRATIONS_DIRECTORY,
 ): Promise<readonly RefundWorkerRepositoryMigration[]> {
-  await requireRealDirectory(migrationsDirectory);
-  const entries = (await readdir(migrationsDirectory, { withFileTypes: true }))
-    .sort((left, right) => compareNames(left.name, right.name));
-  if (new Set(entries.map((entry) => entry.name)).size !== entries.length) {
-    throw new Error("DUPLICATE_MIGRATION_ROOT_ENTRY");
-  }
-  const migrations: RefundWorkerRepositoryMigration[] = [];
-  let lockFileFound = false;
-  for (const entry of entries) {
-    const migration = await loadMigrationRootEntry(migrationsDirectory, entry);
-    if (!migration) {
-      lockFileFound = true;
-      continue;
-    }
-    migrations.push(migration);
-  }
-  if (!lockFileFound) throw new Error("MISSING_MIGRATION_LOCK_FILE");
-  return Object.freeze(migrations);
-}
-
-function compareNames(left: string, right: string): number {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
-}
-
-async function loadMigrationRootEntry(
-  migrationsDirectory: string,
-  entry: Dirent,
-): Promise<RefundWorkerRepositoryMigration | null> {
-  if (entry.name === MIGRATION_LOCK_FILE) {
-    await requireRealRegularFile(join(migrationsDirectory, entry.name), entry.isFile());
-    return null;
-  }
-  requireCanonicalMigrationEntry(entry.name, entry.isDirectory(), entry.isSymbolicLink());
-  const migrationDirectory = join(migrationsDirectory, entry.name);
-  await requireRealDirectory(migrationDirectory);
-  const migrationEntries = await readdir(migrationDirectory, { withFileTypes: true });
-  if (migrationEntries.length !== 1 || migrationEntries[0]?.name !== MIGRATION_SQL_FILE) {
-    throw new Error("INVALID_MIGRATION_DIRECTORY_CONTENTS");
-  }
-  const migrationFile = join(migrationDirectory, MIGRATION_SQL_FILE);
-  await requireRealRegularFile(migrationFile, migrationEntries[0].isFile());
-  const body = await readFile(migrationFile);
-  return Object.freeze({
+  const inventory = await loadRefundWorkerMigrationInventory(migrationsDirectory);
+  return Object.freeze(inventory.entries.map((entry) => Object.freeze({
     name: entry.name,
-    checksum: createHash("sha256").update(body).digest("hex"),
-  });
-}
-
-function requireCanonicalMigrationEntry(
-  name: string,
-  directory: boolean,
-  symbolicLink: boolean,
-): void {
-  if (name.startsWith(".") || name.length > MAX_MIGRATION_NAME_LENGTH
-    || !MIGRATION_NAME.test(name)) throw new Error("INVALID_MIGRATION_NAME");
-  if (symbolicLink || !directory) throw new Error("INVALID_MIGRATION_ROOT_ENTRY");
-}
-
-async function requireRealDirectory(path: string): Promise<void> {
-  const stats = await lstat(path);
-  if (stats.isSymbolicLink() || !stats.isDirectory()) throw new Error("EXPECTED_REAL_DIRECTORY");
-}
-
-async function requireRealRegularFile(path: string, directoryEntryIsFile: boolean): Promise<void> {
-  const stats = await lstat(path);
-  if (!directoryEntryIsFile || stats.isSymbolicLink() || !stats.isFile()) {
-    throw new Error("EXPECTED_REAL_REGULAR_FILE");
-  }
+    checksum: entry.sha256,
+  })));
 }
 
 export async function readRefundWorkerMigrationLedger(

@@ -4,12 +4,15 @@ import { join } from "path";
 import {
   CheckoutSessionStatus,
   OutboxStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentEventFailureStage,
   PaymentEventSource,
   PaymentEventStatus,
   PaymentMode,
   PaymentProvider,
+  PaymentRemediationStatus,
+  Prisma,
   ShippingCountry,
   WebhookIngressRejectionStage,
   WigCategory,
@@ -494,6 +497,88 @@ describe("payment reconciliation C2-v0", () => {
       .toMatchObject({ recommendedAction: "AUTO_REENTRY_CANDIDATE" });
     expect(after).toEqual(before);
   });
+
+  it("groups exposed-session evidence, includes the neutral outbox, and forbids auto re-entry", async () => {
+    const session = await createSession(ctx);
+    const owner = await createAuthorizedPayment(ctx, session.id, C2_NOW);
+    const exposed = await createSuspendedExposure(ctx, session.id, owner.id);
+    const outbox = await db.paymentOutbox.create({
+      data: {
+        topic: "payment.remediation_required",
+        payload: {
+          paymentId: exposed.id,
+          provider: PaymentProvider.TOSS,
+          mode: PaymentMode.SANDBOX,
+          providerPaymentKey: exposed.providerPaymentKey,
+          reason: "TEST_NEUTRAL_REMEDIATION",
+        },
+        dedupKey: `payment-remediation:${PaymentProvider.TOSS}:${exposed.providerPaymentKey}`,
+      },
+    });
+    ctx.outboxIds.push(outbox.id);
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    expect(findingFor(findings, "SESSION_UNRESOLVED_PAYMENT_EXPOSURE", "checkoutSession", session.id))
+      .toMatchObject({ recommendedAction: "MANUAL_REVIEW" });
+    expect(hasSourceFinding(findings, "SESSION_UNRESOLVED_PAYMENT_EXPOSURE", "paymentOutbox", outbox.id)).toBe(true);
+    expect(findingFor(findings, "NEUTRAL_REMEDIATION_PENDING", "payment", exposed.id))
+      .toMatchObject({ recommendedAction: "MANUAL_REVIEW" });
+    expect(findingFor(findings, "SUCCEEDED_PAYMENT_WITHOUT_ORDER", "payment", exposed.id).recommendedAction)
+      .toBe("MANUAL_REVIEW");
+  });
+
+  it("detects exposed sessions without an open owner and never chooses a provider operation", async () => {
+    const session = await createSession(ctx);
+    const target = await createOrdinarySuperseded(ctx, session.id, "no-owner-target");
+    const exposed = await createSuspendedExposure(ctx, session.id, target.id);
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+    const noOwner = findingFor(findings, "EXPOSED_SESSION_WITHOUT_OPEN_OWNER", "checkoutSession", session.id);
+
+    expect(noOwner).toMatchObject({ recommendedAction: "MANUAL_REVIEW" });
+    expect(noOwner.sourceIds.payment).toContain(exposed.id);
+    expect(findings
+      .filter((item) => item.sourceIds.checkoutSession?.includes(session.id))
+      .some((item) => item.recommendedAction === "AUTO_REENTRY_CANDIDATE" || item.recommendedAction === "VOID_PENDING"))
+      .toBe(false);
+  });
+
+  it("detects stale authorization, output-less contact, and unknown outcome as manual findings", async () => {
+    const staleSession = await createSession(ctx);
+    const contactedSession = await createSession(ctx);
+    const unknownSession = await createSession(ctx);
+    const stale = await createAuthorizedPayment(ctx, staleSession.id, C2_OLD);
+    const contacted = await createContactedPayment(ctx, contactedSession.id, PaymentAttemptLifecycle.CONTACTED);
+    const unknown = await createContactedPayment(ctx, unknownSession.id, PaymentAttemptLifecycle.OUTCOME_UNKNOWN);
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+
+    expect(hasFinding(findings, "STALE_CONTACT_AUTHORIZED", stale.id)).toBe(true);
+    expect(hasFinding(findings, "OUTPUTLESS_CONTACTED", contacted.id)).toBe(true);
+    expect(hasFinding(findings, "PAYMENT_OUTCOME_UNKNOWN", unknown.id)).toBe(true);
+  });
+
+  it("reports a same-session suspension cycle without repair or provider action", async () => {
+    const session = await createSession(ctx);
+    const cycleA = await createOrdinarySuperseded(ctx, session.id, "cycle-a");
+    const cycleB = await createOrdinarySuperseded(ctx, session.id, "cycle-b");
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "Payment"
+      SET "attemptLifecycle" = 'SUSPENDED',
+          "suspendedByPaymentId" = CASE "id"
+            WHEN ${cycleA.id} THEN ${cycleB.id}
+            WHEN ${cycleB.id} THEN ${cycleA.id}
+          END
+      WHERE "id" IN (${cycleA.id}, ${cycleB.id})
+    `);
+
+    const findings = await reconcilePaymentCore(db, reconcileOptions());
+    const cycle = findingFor(findings, "PAYMENT_SUSPENSION_CYCLE", "checkoutSession", session.id);
+
+    expect(cycle).toMatchObject({ recommendedAction: "MANUAL_REVIEW" });
+    expect(cycle.details).toMatchObject({ automaticRepairAuthorized: false });
+  });
 });
 
 function makeContext(): TestContext {
@@ -576,12 +661,15 @@ async function createSession(context: TestContext, input: SessionInput = {}) {
 }
 
 async function createPayment(context: TestContext, sessionId: string, input: PaymentInput = {}) {
+  const status = input.status ?? PaymentAttemptStatus.SUCCEEDED;
+  const lifecycle = paymentLifecycleFields(status);
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: sessionId,
       provider: PaymentProvider.TOSS,
       mode: input.mode ?? PaymentMode.SANDBOX,
-      status: input.status ?? PaymentAttemptStatus.SUCCEEDED,
+      status,
+      ...lifecycle,
       amount: input.amount ?? 12_000,
       currency: input.currency ?? "KRW",
       providerRef: input.providerRef,
@@ -596,6 +684,119 @@ async function createPayment(context: TestContext, sessionId: string, input: Pay
   });
   context.paymentIds.push(payment.id);
   return payment;
+}
+
+async function createAuthorizedPayment(context: TestContext, sessionId: string, updatedAt: Date) {
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      amount: 12_000,
+      currency: "KRW",
+      idempotencyKey: `authorized:${randomUUID()}`,
+      routingRuleId: "test.reconciliation.authorized",
+      contactIntentAt: updatedAt,
+      createdAt: updatedAt,
+      updatedAt,
+    },
+  });
+  context.paymentIds.push(payment.id);
+  return payment;
+}
+
+async function createContactedPayment(
+  context: TestContext,
+  sessionId: string,
+  attemptLifecycle: Extract<PaymentAttemptLifecycle, "CONTACTED" | "OUTCOME_UNKNOWN">,
+) {
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle,
+      amount: 12_000,
+      currency: "KRW",
+      idempotencyKey: `contacted:${randomUUID()}`,
+      contactIntentAt: C2_OLD,
+      contactStartedAt: C2_OLD,
+      createdAt: C2_OLD,
+      updatedAt: C2_OLD,
+    },
+  });
+  context.paymentIds.push(payment.id);
+  return payment;
+}
+
+async function createOrdinarySuperseded(context: TestContext, sessionId: string, label: string) {
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      amount: 12_000,
+      currency: "KRW",
+      idempotencyKey: `${label}:${randomUUID()}`,
+      contactIntentAt: C2_OLD,
+      supersededAt: C2_OLD,
+      blockingEndedAt: C2_OLD,
+      createdAt: C2_OLD,
+      updatedAt: C2_OLD,
+    },
+  });
+  context.paymentIds.push(payment.id);
+  return payment;
+}
+
+async function createSuspendedExposure(context: TestContext, sessionId: string, targetId: string) {
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      amount: 12_000,
+      currency: "KRW",
+      providerPaymentKey: `exposed:${randomUUID()}`,
+      idempotencyKey: `exposed:${randomUUID()}`,
+      contactIntentAt: C2_OLD,
+      contactStartedAt: C2_OLD,
+      financialSucceededAt: C2_OLD,
+      blockingEndedAt: C2_OLD,
+      suspendedByPaymentId: targetId,
+      createdAt: C2_OLD,
+      updatedAt: C2_OLD,
+    },
+  });
+  context.paymentIds.push(payment.id);
+  return payment;
+}
+
+function paymentLifecycleFields(status: PaymentAttemptStatus) {
+  if (status === PaymentAttemptStatus.FAILED) {
+    return { attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE, blockingEndedAt: C2_NOW };
+  }
+  if (status === PaymentAttemptStatus.SUCCEEDED) {
+    return {
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      contactIntentAt: C2_NOW,
+      contactStartedAt: C2_NOW,
+      financialSucceededAt: C2_NOW,
+    };
+  }
+  return {
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    contactIntentAt: C2_NOW,
+    contactStartedAt: C2_NOW,
+  };
 }
 
 async function createOrder(context: TestContext, session: Awaited<ReturnType<typeof createSession>>, payment: Awaited<ReturnType<typeof createPayment>>) {
@@ -622,6 +823,7 @@ async function createMtoOrderItem(context: TestContext, orderId: string): Promis
     data: {
       orderId,
       variantId: variant.id,
+      wigStyleId: variant.wigStyleId,
       quantity: 1,
       unitAmount: 12_000,
       fulfillmentType: "MTO",

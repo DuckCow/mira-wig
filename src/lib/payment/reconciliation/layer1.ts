@@ -3,6 +3,7 @@ import {
   FulfillmentType,
   OutboxStatus,
   PaymentAttemptStatus,
+  PaymentRemediationStatus,
   Prisma,
 } from "@prisma/client";
 import type { PaymentProvider, PrismaClient } from "@prisma/client";
@@ -44,10 +45,19 @@ async function appendPaymentOrderFindings(
     where: { status: PaymentAttemptStatus.SUCCEEDED },
     include: { order: { select: { id: true } } },
   });
+  const exposedSessionIds = new Set(payments
+    .filter((payment) => payment.remediationStatus !== PaymentRemediationStatus.NONE
+      && payment.remediationStatus !== PaymentRemediationStatus.REMEDIATED)
+    .map((payment) => payment.checkoutSessionId));
   const missingOrder = payments.filter((payment) => !payment.order);
   const voidPaths = await loadVoidPaths(client, missingOrder);
   for (const payment of missingOrder) {
-    findings.push(paymentWithoutOrderFinding(payment, voidPaths, options));
+    findings.push(paymentWithoutOrderFinding(
+      payment,
+      voidPaths,
+      options,
+      exposedSessionIds.has(payment.checkoutSessionId),
+    ));
   }
 }
 
@@ -69,18 +79,22 @@ function paymentWithoutOrderFinding(
   payment: { id: string; mode: string; provider: PaymentProvider; providerPaymentKey: string | null; updatedAt: Date },
   voidPaths: Awaited<ReturnType<typeof loadVoidPaths>>,
   options: NormalizedOptions,
+  sessionExposed: boolean,
 ): ReconciliationFinding {
   const dedupKey = paymentVoidDedupKey(payment);
   const voidPath = dedupKey ? voidPaths.get(dedupKey) : undefined;
   const stale = isOlderThan(payment.updatedAt, options.now, options.staleSucceededPaymentAfterMs);
-  const action = paymentAction(stale, payment.providerPaymentKey, voidPath);
+  const action = paymentAction(stale, sessionExposed, payment.providerPaymentKey, voidPath);
   return finding({
     kind: "SUCCEEDED_PAYMENT_WITHOUT_ORDER",
     severity: paymentSeverity(action),
     recommendedAction: action,
     source: paymentSources(Boolean(voidPath)),
     sourceIds: paymentSourceIds(payment.id, voidPath?.id),
-    details: paymentWithoutOrderDetails(payment, dedupKey, voidPath?.status ?? "absent", options),
+    details: {
+      ...paymentWithoutOrderDetails(payment, dedupKey, voidPath?.status ?? "absent", options),
+      sessionExposed,
+    },
     confidence: paymentConfidence(payment.providerPaymentKey),
   });
 }
@@ -94,9 +108,11 @@ function paymentVoidDedupKey(
 
 function paymentAction(
   stale: boolean,
+  sessionExposed: boolean,
   providerPaymentKey: string | null,
   voidPath: { status: OutboxStatus; attempts: number } | undefined,
 ): ReconciliationRecommendedAction {
+  if (sessionExposed) return "MANUAL_REVIEW";
   if (!stale) return "NORMAL_IN_FLIGHT";
   return stalePaymentAction(providerPaymentKey, voidPath);
 }

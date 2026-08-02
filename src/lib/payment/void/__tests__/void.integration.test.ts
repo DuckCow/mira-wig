@@ -3,23 +3,41 @@ import {
   CheckoutSessionStatus,
   FulfillmentType,
   OutboxStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
+  PaymentRemediationOperation,
+  PaymentRemediationStatus,
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
 import type { PaymentOutbox } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { completeFromCapture, type CaptureFacts } from "@/lib/payment/complete";
+import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
 import { dispatchPending, enqueue, OUTBOX_MAX_ATTEMPTS } from "@/lib/payment/outbox";
+import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
+import type { PaymentInitiateInput, PaymentInitiationProvider } from "@/lib/payment/providers/types";
+import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
+import { PaymentMethod } from "@/lib/payment/providers/routing";
 import type { VoidExecutor, VoidExecutorInput, VoidExecutorResult } from "../executor";
-import { createVoidHandler, type VoidPayload } from "../handler";
+import { createVoidHandler, VOID_TOPIC, type VoidPayload, type VoidTransitionPayment } from "../handler";
 
 const B5_NOW = new Date("2026-08-03T00:00:00.000Z");
+const initiationProviders = vi.hoisted(() => new Map<string, PaymentInitiationProvider>());
+
+vi.mock("@/lib/payment/providers/initiation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/payment/providers/initiation")>()),
+  resolveInitiationProvider: (context: ProviderFactoryContext) => {
+    const provider = initiationProviders.get(context.ruleId);
+    if (!provider) throw new Error(`Missing test initiation provider for ${context.ruleId}`);
+    return provider;
+  },
+}));
 
 interface TestContext {
   userId: string;
@@ -41,6 +59,7 @@ describe("pg.void handler", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
+    initiationProviders.clear();
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
@@ -61,6 +80,114 @@ describe("pg.void handler", () => {
     await expect(paymentStatus(payment.id)).resolves.toBe(PaymentAttemptStatus.VOIDED);
     await expect(outboxStatus(dedupKey)).resolves.toMatchObject({ status: OutboxStatus.DONE });
     expect(exec.calls[0]?.operationKey).toBe(dedupKey);
+  });
+
+  it("terminally remediates one suspended success and releases its sibling only after exposure is resolved", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const lineage = await createSuspendedSuccess(ctx, session);
+    const dedupKey = await enqueueVoid(ctx, lineage.suspended);
+    const exec = countingExecutor();
+    const providerCalls: PaymentInitiateInput[] = [];
+    const provider = initiationProvider(providerCalls);
+    const commerceBefore = await commerceSnapshot(ctx, session.sessionId);
+
+    await expect(hasUnresolvedSessionExposure(db, session.sessionId)).resolves.toBe(true);
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: lineage.routingRuleId,
+    })).rejects.toMatchObject({ code: "SESSION_REMEDIATION_REQUIRED" });
+    expect(providerCalls).toHaveLength(0);
+
+    const first = await dispatchVoid(ctx, exec.executor);
+    const second = await dispatchVoid(ctx, exec.executor);
+    const remediated = await db.payment.findUniqueOrThrow({
+      where: { id: lineage.suspended.id },
+      select: {
+        checkoutSessionId: true,
+        status: true,
+        attemptLifecycle: true,
+        remediationStatus: true,
+        remediationOperation: true,
+        remediationResultRef: true,
+        remediatedAt: true,
+        suspendedByPaymentId: true,
+        blockingEndedAt: true,
+      },
+    });
+
+    expect(first.succeeded).toBe(1);
+    expect(second.claimed).toBe(0);
+    expect(exec.calls).toHaveLength(1);
+    expect(remediated).toMatchObject({
+      checkoutSessionId: session.sessionId,
+      status: PaymentAttemptStatus.VOIDED,
+      attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_REMEDIATED,
+      remediationStatus: PaymentRemediationStatus.REMEDIATED,
+      remediationOperation: PaymentRemediationOperation.VOID,
+      remediationResultRef: dedupKey,
+      suspendedByPaymentId: null,
+    });
+    expect(remediated.remediatedAt).toBeInstanceOf(Date);
+    expect(remediated.blockingEndedAt).toEqual(remediated.remediatedAt);
+    await expect(hasUnresolvedSessionExposure(db, session.sessionId)).resolves.toBe(false);
+
+    const resumed = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: lineage.routingRuleId,
+    });
+    expect(resumed.paymentId).toBe(lineage.primaryId);
+    expect(providerCalls).toHaveLength(1);
+    await expect(db.payment.findMany({
+      where: { checkoutSessionId: session.sessionId, blockingEndedAt: null },
+      select: { id: true, attemptLifecycle: true },
+    })).resolves.toEqual([{
+      id: lineage.primaryId,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    }]);
+    await expect(commerceSnapshot(ctx, session.sessionId)).resolves.toEqual(commerceBefore);
+  });
+
+  it("keeps a suspended success intact and retryable when its authorized void executor fails", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const lineage = await createSuspendedSuccess(ctx, session);
+    const dedupKey = await enqueueVoid(ctx, lineage.suspended);
+    const exec = countingExecutor("retryable");
+
+    const result = await dispatchVoid(ctx, exec.executor);
+    const payment = await db.payment.findUniqueOrThrow({
+      where: { id: lineage.suspended.id },
+      select: {
+        status: true,
+        attemptLifecycle: true,
+        remediationStatus: true,
+        remediationOperation: true,
+        remediationResultRef: true,
+        remediatedAt: true,
+        suspendedByPaymentId: true,
+      },
+    });
+
+    expect(result.retried).toBe(1);
+    expect(exec.calls).toHaveLength(1);
+    expect(payment).toEqual({
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      remediationOperation: null,
+      remediationResultRef: null,
+      remediatedAt: null,
+      suspendedByPaymentId: lineage.primaryId,
+    });
+    await expect(outboxStatus(dedupKey)).resolves.toMatchObject({
+      status: OutboxStatus.PENDING,
+      attempts: 1,
+    });
   });
 
   it("already VOIDED payment succeeds without executor call", async () => {
@@ -117,19 +244,22 @@ describe("pg.void handler", () => {
     await expect(voidedPaymentCount(payment.id)).resolves.toBe(1);
   });
 
-  it("B2 terminal compensation dispatches through pg.void to VOIDED", async () => {
+  it("C0 terminal compensation stays neutral and never invokes the void executor", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const facts = captureFacts(ctx, session, { amount: session.totalAmount + 1 });
     const completion = await completeFromCapture(db, facts);
     const exec = countingExecutor();
-    await moveVoidIntentToTestTopic(ctx, facts);
 
     const result = await dispatchVoid(ctx, exec.executor);
 
     expect(completion.kind).toBe("compensationEnqueued");
-    expect(result.succeeded).toBe(1);
+    expect(result.succeeded).toBe(0);
+    expect(exec.calls).toHaveLength(0);
     const payment = await paymentByKey(facts.providerPaymentKey);
-    await expect(paymentStatus(payment.id)).resolves.toBe(PaymentAttemptStatus.VOIDED);
+    await expect(paymentStatus(payment.id)).resolves.toBe(PaymentAttemptStatus.SUCCEEDED);
+    await expect(db.paymentOutbox.count({
+      where: { dedupKey: `payment-remediation:${facts.provider}:${facts.providerPaymentKey}` },
+    })).resolves.toBe(1);
   });
 
   it("re-entry after executor success but missing transition converges to one VOIDED state", async () => {
@@ -170,10 +300,37 @@ describe("pg.void handler", () => {
   });
 });
 
+function initiatePaymentAttemptForTest(
+  client: typeof db,
+  input: {
+    sessionId: string;
+    userId: string;
+    provider: PaymentInitiationProvider;
+    mode: PaymentMode;
+    routingRuleId: string;
+  },
+) {
+  initiationProviders.set(input.routingRuleId, input.provider);
+  return initiatePaymentAttempt(client, {
+    sessionId: input.sessionId,
+    userId: input.userId,
+    adapterContext: {
+      provider: input.provider.code,
+      mode: input.mode,
+      market: MarketCode.KR,
+      method: PaymentMethod.CARD,
+      currency: "KRW",
+      ruleId: input.routingRuleId,
+      credentials: [],
+      liveGuard: { kind: "blocked", liveEnabled: false, reason: "test-owned provider" },
+    },
+  });
+}
+
 function makeContext(): TestContext {
   return {
     userId: `b5_${randomUUID()}`,
-    voidTopic: `pg.void.b5.${randomUUID()}`,
+    voidTopic: VOID_TOPIC,
     sessionIds: [],
     paymentIds: [],
     styleIds: [],
@@ -196,15 +353,27 @@ async function createPayment(
 ): Promise<TestPayment> {
   const sessionId = await createMinimalSession(context);
   const providerPaymentKey = `b5_payment_${randomUUID()}`;
+  const voided = status === PaymentAttemptStatus.VOIDED;
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: sessionId,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status,
+      attemptLifecycle: voided
+        ? PaymentAttemptLifecycle.TERMINAL_REMEDIATED
+        : PaymentAttemptLifecycle.CONTACTED,
       amount: 12_000,
       currency: "KRW",
       providerPaymentKey,
+      contactIntentAt: voided ? undefined : B5_NOW,
+      contactStartedAt: voided ? undefined : B5_NOW,
+      financialSucceededAt: B5_NOW,
+      blockingEndedAt: voided ? B5_NOW : undefined,
+      remediationStatus: voided ? PaymentRemediationStatus.REMEDIATED : undefined,
+      remediationOperation: voided ? PaymentRemediationOperation.VOID : undefined,
+      remediationResultRef: voided ? `existing_void_${providerPaymentKey}` : undefined,
+      remediatedAt: voided ? B5_NOW : undefined,
       idempotencyKey: `b5_idem_${randomUUID()}`,
     },
     select: { id: true, provider: true, providerPaymentKey: true },
@@ -212,6 +381,85 @@ async function createPayment(
   context.paymentIds.push(payment.id);
   if (!payment.providerPaymentKey) throw new Error("Missing created providerPaymentKey");
   return { id: payment.id, provider: payment.provider, providerPaymentKey: payment.providerPaymentKey };
+}
+
+async function createSuspendedSuccess(
+  context: TestContext,
+  session: { sessionId: string; totalAmount: number; currency: string },
+): Promise<{ primaryId: string; routingRuleId: string; suspended: TestPayment }> {
+  const routingRuleId = `b5.route.${randomUUID()}`;
+  const primary = await db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      routingRuleId,
+      idempotencyKey: `b5_primary_${randomUUID()}`,
+      contactIntentAt: B5_NOW,
+    },
+    select: { id: true },
+  });
+  const providerPaymentKey = `b5_suspended_${randomUUID()}`;
+  const suspended = await db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      amount: session.totalAmount,
+      currency: session.currency,
+      providerPaymentKey,
+      idempotencyKey: `b5_suspended_${randomUUID()}`,
+      contactIntentAt: B5_NOW,
+      contactStartedAt: B5_NOW,
+      financialSucceededAt: B5_NOW,
+      blockingEndedAt: B5_NOW,
+      suspendedByPaymentId: primary.id,
+    },
+    select: { id: true, provider: true, providerPaymentKey: true },
+  });
+  context.paymentIds.push(primary.id, suspended.id);
+  if (!suspended.providerPaymentKey) throw new Error("Missing suspended providerPaymentKey");
+  return {
+    primaryId: primary.id,
+    routingRuleId,
+    suspended: {
+      id: suspended.id,
+      provider: suspended.provider,
+      providerPaymentKey: suspended.providerPaymentKey,
+    },
+  };
+}
+
+function initiationProvider(calls: PaymentInitiateInput[]): PaymentInitiationProvider {
+  return {
+    code: PaymentProvider.TOSS,
+    initiate: (input) => {
+      calls.push(input);
+      return Promise.resolve({ kind: "ready" });
+    },
+  };
+}
+
+async function commerceSnapshot(context: TestContext, sessionId: string) {
+  const line = await db.checkoutSessionLine.findFirstOrThrow({
+    where: { sessionId },
+    select: { variant: { select: { stock: true } } },
+  });
+  return {
+    orders: await db.order.count({ where: { checkoutSessionId: sessionId } }),
+    manufacturingRequests: await db.manufacturingRequest.count({
+      where: { orderItem: { order: { checkoutSessionId: sessionId } } },
+    }),
+    cartItems: await db.cartItem.count({ where: { userId: context.userId } }),
+    stock: line.variant.stock,
+  };
 }
 
 async function createMinimalSession(context: TestContext): Promise<string> {
@@ -265,14 +513,23 @@ function voidResult(mode: "success" | "retryable"): VoidExecutorResult {
 
 function failFirstTransition() {
   let shouldFail = true;
-  return async (paymentId: string): Promise<number> => {
+  return async (payment: VoidTransitionPayment, resultRef: string): Promise<number> => {
     if (shouldFail) {
       shouldFail = false;
       return 0;
     }
     const result = await db.payment.updateMany({
-      where: { id: paymentId, status: PaymentAttemptStatus.SUCCEEDED },
-      data: { status: PaymentAttemptStatus.VOIDED },
+      where: { id: payment.id, status: PaymentAttemptStatus.SUCCEEDED },
+      data: {
+        status: PaymentAttemptStatus.VOIDED,
+        attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_REMEDIATED,
+        remediationStatus: PaymentRemediationStatus.REMEDIATED,
+        remediationOperation: PaymentRemediationOperation.VOID,
+        remediationResultRef: resultRef,
+        remediatedAt: B5_NOW,
+        suspendedByPaymentId: null,
+        blockingEndedAt: B5_NOW,
+      },
     });
     return result.count;
   };
@@ -281,7 +538,7 @@ function failFirstTransition() {
 async function dispatchVoid(
   context: TestContext,
   executor: VoidExecutor,
-  transitionPayment?: (paymentId: string) => Promise<number>,
+  transitionPayment?: (payment: VoidTransitionPayment, resultRef: string) => Promise<number>,
   now = B5_NOW,
 ) {
   return dispatchPending({
@@ -313,6 +570,7 @@ async function createCatalogVariant(context: TestContext) {
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/b5-cover.png",
+      availableMarkets: { create: { marketCode: MarketCode.KR, isActive: true } },
     },
     select: { id: true },
   });
@@ -355,7 +613,10 @@ function captureFacts(
   overrides: Partial<CaptureFacts> = {},
 ): CaptureFacts {
   const providerPaymentKey = `b5_capture_${randomUUID()}`;
-  context.dedupKeys.push(`void:${PaymentProvider.TOSS}:${providerPaymentKey}`);
+  context.dedupKeys.push(
+    `void:${PaymentProvider.TOSS}:${providerPaymentKey}`,
+    `payment-remediation:${PaymentProvider.TOSS}:${providerPaymentKey}`,
+  );
   return {
     checkoutSessionId: session.sessionId,
     provider: PaymentProvider.TOSS,
@@ -366,13 +627,6 @@ function captureFacts(
     receivedAt: B5_NOW,
     ...overrides,
   };
-}
-
-async function moveVoidIntentToTestTopic(context: TestContext, facts: CaptureFacts): Promise<void> {
-  await db.paymentOutbox.update({
-    where: { dedupKey: `void:${facts.provider}:${facts.providerPaymentKey}` },
-    data: { topic: context.voidTopic },
-  });
 }
 
 async function cleanup(context: TestContext): Promise<void> {

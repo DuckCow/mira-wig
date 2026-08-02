@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -139,10 +140,13 @@ async function constructDispatchFixture(
       provider,
       mode,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       amount: totalAmount,
       currency: "KRW",
       providerRef,
       providerPaymentKey,
+      financialSucceededAt: DISPATCH_NOW,
+      blockingEndedAt: DISPATCH_NOW,
       idempotencyKey: `payment_idem_${identity}`,
     },
   });

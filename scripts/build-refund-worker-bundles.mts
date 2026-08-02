@@ -23,6 +23,10 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, type BuildOptions } from "esbuild";
+import {
+  loadRefundWorkerMigrationInventory,
+  type RefundWorkerMigrationInventory,
+} from "../src/lib/payment/refund/worker-migration-inventory.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const sourceDateEpochSeconds = 1_784_764_800;
@@ -61,6 +65,7 @@ export type RefundWorkerBuildContext = Readonly<{
   repositoryGraphInputCount: number;
   packagedGraphInputCount: number;
   entrypointCount: number;
+  migrationInventory: RefundWorkerMigrationInventory;
   cleanup: () => Promise<void>;
 }>;
 
@@ -75,7 +80,8 @@ export async function assembleRefundWorkerBuildContext():
 Promise<RefundWorkerBuildContext> {
   const graph = await resolveBundleGraph();
   const assets = new Set([...graph.repositoryInputs, ...exactContextAssets]);
-  for (const migration of await exactMigrationAssets()) assets.add(migration);
+  const migrationInventory = await loadRefundWorkerMigrationInventory();
+  for (const migration of migrationInventory.entries) assets.add(migration.path);
 
   const parent = await mkdtemp(join(tmpdir(), "mira-refund-worker-context-"));
   const contextDirectory = join(parent, "context");
@@ -105,6 +111,7 @@ Promise<RefundWorkerBuildContext> {
       repositoryGraphInputCount: graph.repositoryInputs.length,
       packagedGraphInputCount: graph.packagedInputs.length,
       entrypointCount: Object.keys(entryPoints).length,
+      migrationInventory,
       cleanup: async () => rm(parent, { recursive: true, force: true }),
     });
   } catch (error) {
@@ -163,52 +170,6 @@ function bundleOptions(overrides: BuildOptions): BuildOptions {
     logLevel: "info",
     ...overrides,
   };
-}
-
-async function exactMigrationAssets(): Promise<readonly string[]> {
-  const root = resolve(repositoryRoot, "prisma/migrations");
-  const assets = [];
-  for (const directory of await readdir(root, { withFileTypes: true })) {
-    if (isMigrationLockEntry(directory)) continue;
-    if (!isMigrationDirectoryEntry(directory)) {
-      throw new Error("REFUND_WORKER_MIGRATION_INVENTORY_INVALID");
-    }
-    const migrationDirectory = join(root, directory.name);
-    const files = await readdir(migrationDirectory, { withFileTypes: true });
-    if (!isExactMigrationFileInventory(files)) {
-      throw new Error("REFUND_WORKER_MIGRATION_INVENTORY_INVALID");
-    }
-    assets.push(`prisma/migrations/${directory.name}/migration.sql`);
-  }
-  if (assets.length !== 30) throw new Error("REFUND_WORKER_MIGRATION_COUNT_INVALID");
-  return assets.sort((left, right) => left.localeCompare(right));
-}
-
-function isMigrationLockEntry(entry: Readonly<{
-  name: string;
-  isFile: () => boolean;
-}>): boolean {
-  return entry.isFile() && entry.name === "migration_lock.toml";
-}
-
-function isMigrationDirectoryEntry(entry: Readonly<{
-  isDirectory: () => boolean;
-  isSymbolicLink: () => boolean;
-}>): boolean {
-  return entry.isDirectory() && !entry.isSymbolicLink();
-}
-
-function isExactMigrationFileInventory(
-  files: readonly Readonly<{
-    name: string;
-    isFile: () => boolean;
-    isSymbolicLink: () => boolean;
-  }>[],
-): boolean {
-  const file = files[0];
-  return files.length === 1 && file !== undefined
-    && file.name === "migration.sql" && file.isFile()
-    && !file.isSymbolicLink();
 }
 
 async function copyExactRepositoryFile(

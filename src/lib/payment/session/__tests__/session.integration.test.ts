@@ -2,13 +2,21 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
+  PaymentMode,
+  PaymentProvider,
+  PaymentRemediationStatus,
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Client } from "pg";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
+import { recordCapture, type CaptureFacts } from "@/lib/payment/complete";
+import { PAYMENT_REMEDIATION_REQUIRED_TOPIC } from "@/lib/payment/remediation";
 import {
   SESSION_TTL_MS,
   SessionException,
@@ -308,12 +316,117 @@ describe("checkout session lifecycle", () => {
     expect(isUsable(session, now)).toBe(false);
   });
 
+  it("expiresAt이 fresh time보다 늦으면 SUBMITTED 세션은 usable이다", () => {
+    const now = new Date("2026-07-06T00:00:00.000Z");
+    const session = {
+      status: CheckoutSessionStatus.SUBMITTED,
+      expiresAt: new Date(now.getTime() + 1),
+    };
+
+    expect(isUsable(session, now)).toBe(true);
+  });
+
   it("스위퍼는 만료된 SUBMITTED 세션을 EXPIRED로 전이하고 count를 반환한다", async () => {
     const result = await createReadySession(ctx, new Date("2026-07-06T00:00:00.000Z"));
     const sweepNow = new Date(result.expiresAt.getTime() + 1);
 
     await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(1);
     await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.EXPIRED);
+  });
+
+  it("스위퍼는 uncontacted CONTACT_AUTHORIZED 결제 권한만 있으면 세션을 만료한다", async () => {
+    const result = await createReadySession(ctx, new Date("2026-07-06T00:00:00.000Z"));
+    const sweepNow = new Date(result.expiresAt.getTime() + 1);
+    await createSessionPayment(result, PaymentAttemptLifecycle.CONTACT_AUTHORIZED);
+
+    await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(1);
+    await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.EXPIRED);
+  });
+
+  it("스위퍼는 active CONTACTED 결제가 있는 세션을 만료하지 않는다", async () => {
+    const result = await createReadySession(ctx, new Date("2026-07-06T00:00:00.000Z"));
+    const sweepNow = new Date(result.expiresAt.getTime() + 1);
+    await createSessionPayment(result, PaymentAttemptLifecycle.CONTACTED);
+
+    await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(0);
+    await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+  });
+
+  it("C2J unresolved exposure commit while expiry waits is seen after the session lock", async () => {
+    const session = await createPastDueSession(ctx);
+    const superseded = await createSupersededPayment(session);
+    const facts = captureFacts(session, superseded.id);
+    const beforeCommit = coordinationBarrier();
+    const observer = await openLockObserver("exposure");
+    const transactionSpy = holdNextTransactionBeforeCommit(beforeCommit);
+    let released = false;
+
+    try {
+      const capture = recordCapture(db, facts);
+      await beforeCommit.reached;
+      const expiry = expireStale(db, { now: new Date(), limit: 10 });
+      const waiting = await waitForSessionLockWait(observer);
+
+      expect(waiting.state).toBe("active");
+      expect(waiting.waitEventType).toBe("Lock");
+      expect(waiting.blockingPids.length).toBeGreaterThan(0);
+      beforeCommit.release();
+      released = true;
+
+      const [captured, expiryCount] = await Promise.all([capture, expiry]);
+      expect(expiryCount).toBe(0);
+      expect(captured).toMatchObject({
+        id: superseded.id,
+        status: PaymentAttemptStatus.SUCCEEDED,
+        attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+        remediationStatus: PaymentRemediationStatus.PENDING,
+        blockingEndedAt: null,
+      });
+      await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+      await expect(db.payment.findUnique({
+        where: { id: superseded.id },
+        select: { financialSucceededAt: true, remediationStatus: true, blockingEndedAt: true },
+      })).resolves.toMatchObject({
+        financialSucceededAt: facts.capturedAt,
+        remediationStatus: PaymentRemediationStatus.PENDING,
+        blockingEndedAt: null,
+      });
+      await expect(db.paymentOutbox.count({
+        where: {
+          topic: PAYMENT_REMEDIATION_REQUIRED_TOPIC,
+          payload: { path: ["paymentId"], equals: superseded.id },
+        },
+      })).resolves.toBe(1);
+    } finally {
+      if (!released) beforeCommit.release();
+      transactionSpy.mockRestore();
+      await observer.end();
+    }
+  });
+
+  it("C2J stale future candidate is rejected by fresh post-lock DB time", async () => {
+    const result = await createReadySession(ctx);
+
+    await expect(expireStale(db, { now: result.expiresAt, limit: 10 })).resolves.toBe(0);
+    await expect(statusOf(result.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+  });
+
+  it("C2J ordinary expiry counts only committed transitions and replay is zero", async () => {
+    const first = await createPastDueSession(ctx);
+    const second = await createPastDueSession(ctx);
+    const sweepNow = new Date("2026-07-06T00:00:00.001Z");
+
+    await expect(db.checkoutSession.count({
+      where: {
+        id: { in: [first.sessionId, second.sessionId] },
+        status: CheckoutSessionStatus.SUBMITTED,
+        expiresAt: { lte: sweepNow },
+      },
+    })).resolves.toBe(2);
+    await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(2);
+    await expect(statusOf(first.sessionId)).resolves.toBe(CheckoutSessionStatus.EXPIRED);
+    await expect(statusOf(second.sessionId)).resolves.toBe(CheckoutSessionStatus.EXPIRED);
+    await expect(expireStale(db, { now: sweepNow, limit: 10 })).resolves.toBe(0);
   });
 
   it("스위퍼는 COMPLETED 세션을 EXPIRED 대상으로 삼지 않는다", async () => {
@@ -457,6 +570,7 @@ function isSyntheticMarketCodeForTest(code: string): code is MarketCode {
 }
 
 async function cleanup(context: TestContext): Promise<void> {
+  await db.payment.deleteMany({ where: { session: { userId: context.userId } } });
   await db.checkoutSessionLine.deleteMany({ where: { session: { userId: context.userId } } });
   await db.checkoutSessionShipping.deleteMany({ where: { session: { userId: context.userId } } });
   await db.checkoutSession.deleteMany({ where: { userId: context.userId } });
@@ -483,6 +597,9 @@ async function createCartVariant(context: TestContext, options: CatalogOptions =
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/b1-cover.png",
+      availableMarkets: {
+        create: [MarketCode.KR, MarketCode.US, MarketCode.JP].map((marketCode) => ({ marketCode, isActive: true })),
+      },
     },
     select: { id: true, name: true },
   });
@@ -564,6 +681,150 @@ async function createReadySession(context: TestContext, now?: Date) {
   const variant = await createCartVariant(context, { amount: 12_000, stock: 5 });
   await addCart(context, variant, 1);
   return createCheckoutSession(db, baseInput(context, { now }));
+}
+
+async function createPastDueSession(context: TestContext) {
+  const session = await createReadySession(context);
+  const expiresAt = new Date("2026-07-06T00:00:00.000Z");
+  await db.checkoutSession.update({
+    where: { id: session.sessionId },
+    data: { expiresAt },
+  });
+  return { ...session, expiresAt };
+}
+
+async function createSupersededPayment(
+  session: { sessionId: string; totalAmount: number; currency: string },
+) {
+  const now = new Date();
+  return db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.MOCK,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      idempotencyKey: `c2j-superseded:${randomUUID()}`,
+      contactIntentAt: now,
+      supersededAt: now,
+      blockingEndedAt: now,
+    },
+    select: { id: true },
+  });
+}
+
+function captureFacts(
+  session: { sessionId: string; totalAmount: number; currency: string; expiresAt: Date },
+  paymentId: string,
+): CaptureFacts {
+  const capturedAt = new Date(session.expiresAt.getTime() - 1);
+  return {
+    paymentId,
+    checkoutSessionId: session.sessionId,
+    provider: PaymentProvider.MOCK,
+    mode: PaymentMode.SANDBOX,
+    providerPaymentKey: `c2j-exposure:${randomUUID()}`,
+    amount: session.totalAmount,
+    currency: session.currency,
+    capturedAt,
+    receivedAt: new Date(),
+  };
+}
+
+interface CoordinationBarrier {
+  reached: Promise<void>;
+  wait(): Promise<void>;
+  release(): void;
+}
+
+function coordinationBarrier(): CoordinationBarrier {
+  let markReached: () => void = () => { throw new Error("Coordination barrier was not initialized"); };
+  let releaseWait: () => void = () => { throw new Error("Coordination barrier was not initialized"); };
+  const reached = new Promise<void>((resolve) => { markReached = resolve; });
+  const released = new Promise<void>((resolve) => { releaseWait = resolve; });
+  return {
+    reached,
+    wait: async () => {
+      markReached();
+      await released;
+    },
+    release: releaseWait,
+  };
+}
+
+function holdNextTransactionBeforeCommit(barrier: CoordinationBarrier) {
+  const transaction = db.$transaction.bind(db);
+  const transactionSpy = vi.spyOn(db, "$transaction");
+  transactionSpy.mockImplementation(transaction);
+  transactionSpy.mockImplementationOnce(async (operation) => transaction(async (tx) => {
+    const result = await operation(tx);
+    await barrier.wait();
+    return result;
+  }));
+  return transactionSpy;
+}
+
+interface SessionLockWaitEvidence {
+  state: string;
+  waitEventType: string | null;
+  blockingPids: number[];
+}
+
+async function openLockObserver(label: string): Promise<Client> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required for lock-wait verification");
+  const observer = new Client({
+    connectionString,
+    application_name: `wig_c2j_session_observer_${label}`,
+  });
+  await observer.connect();
+  return observer;
+}
+
+async function waitForSessionLockWait(observer: Client): Promise<SessionLockWaitEvidence> {
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
+    const result = await observer.query<SessionLockWaitEvidence>(`
+      SELECT a.state,
+             a.wait_event_type AS "waitEventType",
+             pg_blocking_pids(a.pid) AS "blockingPids"
+      FROM pg_stat_activity a
+      WHERE a.datname = current_database()
+        AND a.state = 'active'
+        AND a.wait_event_type = 'Lock'
+        AND a.query LIKE '%CheckoutSession%FOR UPDATE%'
+        AND cardinality(pg_blocking_pids(a.pid)) > 0
+    `);
+    const waiting = result.rows[0];
+    if (waiting) return waiting;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for CheckoutSession row-lock evidence");
+}
+
+async function createSessionPayment(
+  session: { sessionId: string; totalAmount: number; currency: string },
+  attemptLifecycle: PaymentAttemptLifecycle,
+): Promise<void> {
+  const contactIntentAt = new Date();
+  await db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `test.session-expiry.${randomUUID()}`,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle,
+      amount: session.totalAmount,
+      currency: session.currency,
+      idempotencyKey: `session-expiry:${randomUUID()}`,
+      contactIntentAt,
+      contactStartedAt: attemptLifecycle === PaymentAttemptLifecycle.CONTACTED
+        ? contactIntentAt
+        : undefined,
+    },
+  });
 }
 
 async function expectFailure(

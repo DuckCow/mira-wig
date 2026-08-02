@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -583,16 +584,22 @@ async function createSession(context: TestContext, amount: number, currency: str
 }
 
 async function createPayment(context: TestContext, sessionId: string, options: OrderOptions): Promise<string> {
+  const status = options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED;
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: sessionId,
       provider: PaymentProvider.MOCK,
       mode: PaymentMode.SANDBOX,
-      status: options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED,
+      status,
+      attemptLifecycle: status === PaymentAttemptStatus.SUCCEEDED
+        ? PaymentAttemptLifecycle.FINALIZED
+        : PaymentAttemptLifecycle.TERMINAL_FAILURE,
       amount: options.paymentAmount ?? 1_000,
       currency: options.paymentCurrency ?? "KRW",
       providerPaymentKey: `provider_payment_${randomUUID()}`,
       idempotencyKey: `payment_idem_${randomUUID()}`,
+      financialSucceededAt: status === PaymentAttemptStatus.SUCCEEDED ? NOW : undefined,
+      blockingEndedAt: NOW,
     },
     select: { id: true },
   });

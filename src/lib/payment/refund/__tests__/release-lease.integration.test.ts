@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { isDeepStrictEqual } from "util";
 import {
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -237,7 +238,12 @@ describe("releaseRefundExecutionLease", () => {
       label: "Payment not SUCCEEDED",
       mutate: (fixture: DispatchFixture) => db.payment.update({
         where: { id: fixture.paymentId },
-        data: { status: PaymentAttemptStatus.FAILED },
+        data: {
+          status: PaymentAttemptStatus.FAILED,
+          attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE,
+          financialSucceededAt: null,
+          blockingEndedAt: new Date(),
+        },
       }),
     },
     {

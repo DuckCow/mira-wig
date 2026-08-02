@@ -6,6 +6,7 @@ import type {
 } from "@prisma/client";
 
 export interface CaptureFacts {
+  paymentId?: string;
   checkoutSessionId: string;
   provider: PaymentProvider;
   mode: PaymentMode;
@@ -18,7 +19,20 @@ export interface CaptureFacts {
 
 export type CapturedPayment = Pick<
   Payment,
-  "id" | "checkoutSessionId" | "provider" | "mode" | "status" | "amount" | "currency" | "providerPaymentKey"
+  | "id"
+  | "checkoutSessionId"
+  | "provider"
+  | "mode"
+  | "status"
+  | "attemptLifecycle"
+  | "remediationStatus"
+  | "amount"
+  | "currency"
+  | "providerPaymentKey"
+  | "contactStartedAt"
+  | "supersededAt"
+  | "blockingEndedAt"
+  | "suspendedByPaymentId"
 >;
 
 export type CompletionFailureCode =
@@ -26,6 +40,8 @@ export type CompletionFailureCode =
   | "SESSION_STATE_INVALID"
   | "SESSION_ALREADY_COMPLETED_BY_OTHER_PAYMENT"
   | "PAYMENT_NOT_SUCCEEDED"
+  | "SUPERSEDED_ATTEMPT_CAPTURED"
+  | "PAYMENT_BLOCKED_BY_REMEDIATION"
   | "PAYMENT_SESSION_MISMATCH"
   | "MODE_MISMATCH"
   | "PAYMENT_KEY_MISMATCH"
@@ -34,6 +50,10 @@ export type CompletionFailureCode =
   | "CAPTURE_AFTER_EXPIRY"
   | "SHIPPING_MISSING"
   | "LINES_MISSING"
+  | "VARIANT_PARENT_MISMATCH"
+  | "STYLE_UNPUBLISHED"
+  | "VARIANT_UNAVAILABLE"
+  | "VARIANT_PRICE_UNAVAILABLE"
   | "STOCK_INSUFFICIENT"
   | "TRANSITION_CONFLICT"
   | "TRANSIENT_DB_ERROR";

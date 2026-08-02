@@ -6,7 +6,7 @@ import type {
   ProviderConfirmSucceeded,
 } from "@/lib/payment/providers/contract";
 import { createMockPaymentProvider } from "../../mock";
-import { resolveProvider } from "../../resolve";
+import { resolveConfirmationProvider as resolveProvider } from "../../resolve";
 import { PaymentMethod, PaymentMode } from "../../routing";
 import {
   buildTossConfirmRequest,

@@ -1,4 +1,10 @@
-import { PaymentAttemptStatus, PaymentProvider } from "@prisma/client";
+import {
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
+  PaymentProvider,
+  PaymentRemediationOperation,
+  PaymentRemediationStatus,
+} from "@prisma/client";
 import type { Payment, Prisma, PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { OutboxHandler, OutboxHandlerContext, OutboxHandlerResult, OutboxTerminalFailed } from "@/lib/payment/outbox";
@@ -6,8 +12,22 @@ import { createMockVoidExecutor, type VoidExecutor } from "./executor";
 
 export const VOID_TOPIC = "pg.void";
 
-type VoidPayment = Pick<Payment, "id" | "provider" | "providerPaymentKey" | "status">;
-type VoidTransition = (paymentId: string) => Promise<number>;
+export type VoidTransitionPayment = Pick<
+  Payment,
+  | "id"
+  | "provider"
+  | "providerPaymentKey"
+  | "status"
+  | "attemptLifecycle"
+  | "remediationStatus"
+  | "remediationOperation"
+  | "remediationResultRef"
+  | "remediatedAt"
+  | "suspendedByPaymentId"
+  | "blockingEndedAt"
+>;
+type VoidPayment = VoidTransitionPayment;
+type VoidTransition = (payment: VoidTransitionPayment, resultRef: string) => Promise<number>;
 
 export interface VoidPayload {
   paymentId: string;
@@ -42,14 +62,27 @@ async function handleVoidWith(
   if (payment.status !== PaymentAttemptStatus.SUCCEEDED) return;
   if (!matchesPayload(payment, payload)) return terminalMismatch(payload);
 
-  await executeVoid(options.executor ?? createMockVoidExecutor(), payload, operationKey(payload, ctx));
-  await transitionVoided(payload.paymentId, options.transitionPayment ?? defaultTransition(client));
+  const resultRef = operationKey(payload, ctx);
+  await executeVoid(options.executor ?? createMockVoidExecutor(), payload, resultRef);
+  await transitionVoided(payment, resultRef, options.transitionPayment ?? defaultTransition(client));
 }
 
 async function loadPayment(client: PrismaClient, paymentId: string): Promise<VoidPayment | null> {
   return client.payment.findUnique({
     where: { id: paymentId },
-    select: { id: true, provider: true, providerPaymentKey: true, status: true },
+    select: {
+      id: true,
+      provider: true,
+      providerPaymentKey: true,
+      status: true,
+      attemptLifecycle: true,
+      remediationStatus: true,
+      remediationOperation: true,
+      remediationResultRef: true,
+      remediatedAt: true,
+      suspendedByPaymentId: true,
+      blockingEndedAt: true,
+    },
   });
 }
 
@@ -78,16 +111,38 @@ async function executeVoid(
   if ("retryable" in result) throw new Error(result.reason);
 }
 
-async function transitionVoided(paymentId: string, transition: VoidTransition): Promise<void> {
-  const count = await transition(paymentId);
+async function transitionVoided(payment: VoidPayment, resultRef: string, transition: VoidTransition): Promise<void> {
+  const count = await transition(payment, resultRef);
   if (count !== 1) throw new Error("Payment void transition conflict");
 }
 
 function defaultTransition(client: PrismaClient): VoidTransition {
-  return async (paymentId) => {
+  return async (payment, resultRef) => {
+    const remediatedAt = new Date();
     const result = await client.payment.updateMany({
-      where: { id: paymentId, status: PaymentAttemptStatus.SUCCEEDED },
-      data: { status: PaymentAttemptStatus.VOIDED },
+      where: {
+        id: payment.id,
+        provider: payment.provider,
+        providerPaymentKey: payment.providerPaymentKey,
+        status: PaymentAttemptStatus.SUCCEEDED,
+        attemptLifecycle: payment.attemptLifecycle,
+        remediationStatus: payment.remediationStatus,
+        remediationOperation: payment.remediationOperation,
+        remediationResultRef: payment.remediationResultRef,
+        remediatedAt: payment.remediatedAt,
+        suspendedByPaymentId: payment.suspendedByPaymentId,
+        blockingEndedAt: payment.blockingEndedAt,
+      },
+      data: {
+        status: PaymentAttemptStatus.VOIDED,
+        attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_REMEDIATED,
+        remediationStatus: PaymentRemediationStatus.REMEDIATED,
+        remediationOperation: PaymentRemediationOperation.VOID,
+        remediationResultRef: resultRef,
+        remediatedAt,
+        suspendedByPaymentId: null,
+        blockingEndedAt: remediatedAt,
+      },
     });
     return result.count;
   };

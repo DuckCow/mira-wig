@@ -1,6 +1,12 @@
 "use server";
 
-import { PaymentAttemptStatus, PaymentProvider } from "@prisma/client";
+import {
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
+  PaymentProvider,
+  PaymentRemediationStatus,
+  Prisma,
+} from "@prisma/client";
 import type { CheckoutSession, Payment } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getCurrentMarketCode } from "@/lib/market/resolve";
@@ -8,20 +14,49 @@ import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
 import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
+import {
+  hasSessionSuspensionCycle,
+  hasUnresolvedSessionExposure,
+} from "@/lib/payment/remediation";
 import { bridgeProviderConfirmResult, type ProviderConfirmActionErrorCode } from "@/lib/payment/providers/confirm-bridge";
-import { PaymentMode, type PaymentMethod } from "@/lib/payment/providers/routing";
-import type { PaymentInitiateResult, PaymentProvider as PaymentProviderPort } from "@/lib/payment/providers/types";
-import { resolveActionAdapter, resolveActionProvider, type ActionProviderSuccess } from "./payment-provider-boundary";
+import type { PaymentMethod } from "@/lib/payment/providers/routing";
+import type { PaymentConfirmationProvider, PaymentInitiateResult } from "@/lib/payment/providers/types";
+import {
+  resolveActionConfirmAdapter,
+  resolveActionMode,
+  resolveActionProvider,
+} from "./payment-provider-boundary";
 
 type ActionSession = Pick<CheckoutSession, "id" | "userId" | "marketCode" | "totalAmount" | "currency">;
-type PaymentActionFailure = { success: false; errorCode: PaymentActionErrorCode; error: string; retryable: boolean };
+type PaymentActionFailure = {
+  kind: "FAILED";
+  success: false;
+  errorCode: PaymentActionErrorCode;
+  error: string;
+  retryable: boolean;
+};
+type PaymentActionBoundedKind = "IN_PROGRESS" | "OUTCOME_UNKNOWN" | "REMEDIATION_REQUIRED";
+type PaymentActionBoundedState = {
+  [Kind in PaymentActionBoundedKind]: {
+  kind: Kind;
+  success: false;
+  errorCode: PaymentActionErrorCode;
+  error: string;
+  retryable: boolean;
+  paymentId?: string;
+  }
+}[PaymentActionBoundedKind];
+type PaymentActionNonSuccess = PaymentActionFailure | PaymentActionBoundedState;
 type BoundaryResult =
-  | (ActionProviderSuccess & { userId: string; session: ActionSession })
+  | { success: true; userId: string; marketCode: string; session: ActionSession }
   | PaymentActionFailure;
-type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionFailure;
-type PendingConfirmPayment = Pick<Payment, "id" | "providerRef" | "providerConfirmIdempotencyKey" | "mode">;
+type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionNonSuccess;
+type PendingConfirmPayment = Pick<
+  Payment,
+  "id" | "provider" | "providerRef" | "providerConfirmIdempotencyKey" | "mode" | "routingRuleId"
+>;
 type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
-type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionFailure;
+type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionNonSuccess;
 
 export interface ConfirmPaymentInput {
   providerPaymentKey?: string;
@@ -33,13 +68,20 @@ export interface InitiatePaymentInput {
 }
 
 export type PaymentActionResult =
-  | { success: true; orderId?: string; paymentId: string; provider: PaymentProvider; redirectTo?: string }
-  | PaymentActionFailure;
+  | { kind: "READY"; success: true; orderId?: string; paymentId: string; provider: PaymentProvider }
+  | { kind: "REDIRECT"; success: true; orderId?: string; paymentId: string; provider: PaymentProvider; redirectTo: string }
+  | PaymentActionNonSuccess;
 
 export type PaymentActionErrorCode =
   | "UNAUTHORIZED"
   | "SESSION_UNAVAILABLE"
   | "SESSION_NOT_USABLE"
+  | "SESSION_TERMS_STALE"
+  | "SESSION_REMEDIATION_REQUIRED"
+  | "ATTEMPT_IN_PROGRESS"
+  | "ATTEMPT_SUPERSEDED"
+  | "ATTEMPT_OUTCOME_UNKNOWN"
+  | "ATTEMPT_STATE_CONFLICT"
   | "PROVIDER_INVALID"
   | "PROVIDER_MISMATCH"
   | "PROVIDER_UNAVAILABLE"
@@ -48,70 +90,92 @@ export type PaymentActionErrorCode =
   | "COMPLETION_RETRYABLE"
   | "PAYMENT_FAILED";
 
-export async function initiatePayment(checkoutSessionId: string, input: InitiatePaymentInput = {}): Promise<PaymentActionResult> {
-  const boundary = await resolveBoundary(checkoutSessionId, input.method);
-  if (!boundary.success) return boundary;
+const PUBLIC_PAYMENT_ERROR_MESSAGES: Record<PaymentActionErrorCode, string> = {
+  UNAUTHORIZED: "Login is required.",
+  SESSION_UNAVAILABLE: "Checkout session is unavailable.",
+  SESSION_NOT_USABLE: "Checkout session is not usable.",
+  SESSION_TERMS_STALE: "Checkout terms changed. Please create a new checkout session.",
+  SESSION_REMEDIATION_REQUIRED: "This checkout session has a payment issue that requires review.",
+  ATTEMPT_IN_PROGRESS: "Payment initiation is still being processed.",
+  ATTEMPT_SUPERSEDED: "The previous payment attempt is no longer available.",
+  ATTEMPT_OUTCOME_UNKNOWN: "The payment outcome is unresolved and requires review.",
+  ATTEMPT_STATE_CONFLICT: "Another payment attempt is already in progress.",
+  PROVIDER_INVALID: "Payment provider is invalid.",
+  PROVIDER_MISMATCH: "Payment provider does not match this checkout.",
+  PROVIDER_UNAVAILABLE: "No payment provider is available.",
+  PAYMENT_UNAVAILABLE: "Pending payment attempt is unavailable.",
+  PROVIDER_RETRYABLE: "Payment provider is temporarily unavailable.",
+  PROVIDER_TERMINAL: "Payment could not be approved.",
+  PROVIDER_MANUAL_REVIEW: "Payment requires manual review.",
+  PROVIDER_STOP: "Payment provider is temporarily unavailable.",
+  PROVIDER_PROGRAMMER_ERROR: "Payment operation failed.",
+  COMPLETION_RETRYABLE: "Payment completion is still being processed.",
+  PAYMENT_FAILED: "Payment could not be completed.",
+};
 
-  const provider = resolveActionAdapter(boundary.adapterContext);
-  if (!provider.success) return provider;
+export async function initiatePayment(checkoutSessionId: string, input: InitiatePaymentInput = {}): Promise<PaymentActionResult> {
   try {
+    const boundary = await resolveBoundary(checkoutSessionId);
+    if (!boundary.success) return boundary;
+    const provider = resolveActionProvider(boundary.session, boundary.marketCode, input.method);
+    if (!provider.success) return actionError(provider.errorCode, provider.retryable);
     const result = await initiatePaymentAttempt(db, {
       sessionId: checkoutSessionId,
       userId: boundary.userId,
-      provider: provider.provider,
-      mode: boundary.mode,
+      adapterContext: provider.adapterContext,
     });
     return initiateSuccess(result.paymentId, result.provider, result.initiateResult);
   } catch (e) {
     if (e instanceof PaymentInitiateException) return initiateError(e);
-    throw e;
+    return actionError("PAYMENT_FAILED", false);
   }
 }
 
 export async function confirmPayment(
   checkoutSessionId: string,
-  providerValue: string,
   input: ConfirmPaymentInput = {},
 ): Promise<PaymentActionResult> {
-  const parsed = parseProvider(providerValue);
-  if (!parsed) return actionError("PROVIDER_INVALID", "Payment provider is invalid.", false);
-  const boundary = await resolveBoundary(checkoutSessionId, input.method);
-  if (!boundary.success) return boundary;
-  if (parsed !== boundary.provider) return actionError("PROVIDER_MISMATCH", "Payment provider does not match market.", false);
-
-  const payment = await prepareConfirmPayment(boundary.session.id, parsed, boundary.mode);
-  if (!payment.success) return payment;
-  const provider = resolveActionAdapter(boundary.adapterContext);
-  if (!provider.success) return provider;
-  const facts = await confirmWithProvider(provider.provider, boundary.session, payment.payment, boundary.mode, input);
-  if (!facts.success) return facts;
-  return completeConfirmedPayment(facts.captureFacts);
+  try {
+    const boundary = await resolveBoundary(checkoutSessionId);
+    if (!boundary.success) return boundary;
+    const mode = resolveActionMode();
+    if (!mode.success) return actionError(mode.errorCode, mode.retryable);
+    const payment = await prepareConfirmPayment(boundary.session.id, mode.mode);
+    if (!payment.success) return payment;
+    const provider = resolveActionConfirmAdapter({
+      session: boundary.session,
+      marketCode: boundary.marketCode,
+      method: input.method,
+      payment: payment.payment,
+    });
+    if (!provider.success) return actionError(provider.errorCode, provider.retryable);
+    const facts = await confirmWithProvider(provider.provider, boundary.session, payment.payment, input);
+    if (!facts.success) return facts;
+    return completeConfirmedPayment(facts.captureFacts);
+  } catch {
+    return actionError("PAYMENT_FAILED", false);
+  }
 }
 
 async function resolveBoundary(
   checkoutSessionId: string,
-  method: PaymentMethod | undefined,
 ): Promise<BoundaryResult> {
   const session = await getSession();
-  if (!session?.user.id) return actionError("UNAUTHORIZED", "Login is required.", false);
+  if (!session?.user.id) return actionError("UNAUTHORIZED", false);
 
   const marketCode = await getCurrentMarketCode();
   const checkoutSession = await loadActionSession(checkoutSessionId);
   if (!checkoutSession || checkoutSession.userId !== session.user.id) {
-    return actionError("SESSION_UNAVAILABLE", "Checkout session is unavailable.", false);
+    return actionError("SESSION_UNAVAILABLE", false);
   }
   if (checkoutSession.marketCode !== marketCode) {
-    return actionError("SESSION_UNAVAILABLE", "Checkout session is unavailable.", false);
+    return actionError("SESSION_UNAVAILABLE", false);
   }
-  const provider = resolveActionProvider(checkoutSession, marketCode, method);
-  if (!provider.success) return provider;
   return {
     success: true as const,
     userId: session.user.id,
+    marketCode,
     session: checkoutSession,
-    provider: provider.provider,
-    mode: provider.mode,
-    adapterContext: provider.adapterContext,
   };
 }
 
@@ -123,10 +187,9 @@ async function loadActionSession(sessionId: string): Promise<ActionSession | nul
 }
 
 async function confirmWithProvider(
-  provider: PaymentProviderPort,
+  provider: PaymentConfirmationProvider,
   session: ActionSession,
   payment: PendingConfirmPaymentWithKey,
-  mode: PaymentMode,
   input: ConfirmPaymentInput,
 ): Promise<ActionProviderConfirmResult> {
   try {
@@ -140,95 +203,182 @@ async function confirmWithProvider(
       amount: session.totalAmount,
       currency: session.currency,
     });
-    return bridgeProviderConfirmResult({
+    const bridged = await bridgeProviderConfirmResult({
       client: db,
       checkoutSessionId: session.id,
       paymentId: payment.id,
       provider: provider.code,
-      mode,
+      mode: payment.mode,
       result,
       receivedAt: new Date(),
     });
-  } catch (e) {
-    return actionError("PROVIDER_RETRYABLE", errorMessage(e), true);
+    if (bridged.success) return bridged;
+    if (bridged.errorCode === "PROVIDER_TERMINAL" || bridged.errorCode === "PROVIDER_PROGRAMMER_ERROR") {
+      return actionError(bridged.errorCode, bridged.retryable);
+    }
+    return boundedState("OUTCOME_UNKNOWN", bridged.errorCode, bridged.retryable, payment.id);
+  } catch {
+    await markConfirmOutcomeUnknown(payment.id);
+    return boundedState(
+      "OUTCOME_UNKNOWN",
+      "PROVIDER_RETRYABLE",
+      true,
+      payment.id,
+    );
   }
+}
+
+async function markConfirmOutcomeUnknown(paymentId: string): Promise<void> {
+  await db.payment.updateMany({
+    where: {
+      id: paymentId,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      blockingEndedAt: null,
+      providerPaymentKey: null,
+    },
+    data: {
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      errorCode: "PROVIDER_CONFIRM_OUTCOME_UNKNOWN",
+      errorMessage: "Provider confirm outcome is unresolved.",
+    },
+  });
 }
 
 async function prepareConfirmPayment(
   checkoutSessionId: string,
-  provider: PaymentProvider,
-  mode: PaymentMode,
+  mode: PendingConfirmPayment["mode"],
 ): Promise<ConfirmAttemptResult> {
-  const payments = await db.payment.findMany({
-    where: pendingConfirmWhere(checkoutSessionId, provider),
-    orderBy: { createdAt: "desc" },
-    take: 2,
-    select: pendingConfirmSelect(),
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "CheckoutSession"
+      WHERE "id" = ${checkoutSessionId}
+      FOR UPDATE
+    `);
+    if (await hasUnresolvedSessionExposure(tx, checkoutSessionId)
+      || await hasSessionSuspensionCycle(tx, checkoutSessionId)) {
+      return boundedState(
+        "REMEDIATION_REQUIRED",
+        "SESSION_REMEDIATION_REQUIRED",
+        false,
+      );
+    }
+    const payments = await tx.payment.findMany({
+      where: pendingConfirmWhere(checkoutSessionId),
+      orderBy: { createdAt: "desc" },
+      take: 2,
+      select: pendingConfirmSelect(),
+    });
+    if (payments.length === 0) {
+      return classifyUnavailableConfirm(tx, checkoutSessionId);
+    }
+    if (payments.length > 1) {
+      return actionError("PAYMENT_UNAVAILABLE", false);
+    }
+    if (payments[0].mode !== mode) return actionError("PAYMENT_UNAVAILABLE", false);
+    return ensureConfirmIdempotencyKey(tx, checkoutSessionId, payments[0]);
   });
-  if (payments.length === 0) {
-    return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is unavailable.", false);
+}
+
+async function classifyUnavailableConfirm(
+  tx: Prisma.TransactionClient,
+  checkoutSessionId: string,
+): Promise<PaymentActionNonSuccess> {
+  const payment = await tx.payment.findFirst({
+    where: {
+      checkoutSessionId,
+      providerPaymentKey: null,
+      remediationStatus: PaymentRemediationStatus.NONE,
+      blockingEndedAt: null,
+      status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+      attemptLifecycle: {
+        in: [PaymentAttemptLifecycle.CONTACTED, PaymentAttemptLifecycle.OUTCOME_UNKNOWN],
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, attemptLifecycle: true, initiationOutputKind: true },
+  });
+  if (payment?.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN) {
+    return boundedState(
+      "OUTCOME_UNKNOWN",
+      "ATTEMPT_OUTCOME_UNKNOWN",
+      false,
+      payment.id,
+    );
   }
-  if (payments.length > 1) {
-    return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is ambiguous.", false);
+  if (payment?.attemptLifecycle === PaymentAttemptLifecycle.CONTACTED
+    && payment.initiationOutputKind === null) {
+    return boundedState(
+      "IN_PROGRESS",
+      "ATTEMPT_IN_PROGRESS",
+      false,
+      payment.id,
+    );
   }
-  if (payments[0].mode !== mode) {
-    return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt is unavailable.", false);
-  }
-  return ensureConfirmIdempotencyKey(checkoutSessionId, provider, payments[0]);
+  return actionError("PAYMENT_UNAVAILABLE", false);
 }
 
 async function ensureConfirmIdempotencyKey(
+  tx: Prisma.TransactionClient,
   checkoutSessionId: string,
-  provider: PaymentProvider,
   payment: PendingConfirmPayment,
 ): Promise<ConfirmAttemptResult> {
   if (payment.providerConfirmIdempotencyKey) {
     return { success: true, payment: withConfirmKey(payment, payment.providerConfirmIdempotencyKey) };
   }
 
-  const key = confirmIdempotencyKey(provider, payment.id);
-  const result = await db.payment.updateMany({
+  const key = confirmIdempotencyKey(payment.provider, payment.id);
+  const result = await tx.payment.updateMany({
     where: {
       id: payment.id,
-      ...pendingConfirmWhere(checkoutSessionId, provider),
+      ...pendingConfirmWhere(checkoutSessionId),
       providerConfirmIdempotencyKey: null,
     },
     data: { providerConfirmIdempotencyKey: key },
   });
   if (result.count === 1) return { success: true, payment: withConfirmKey(payment, key) };
-  return reuseConcurrentConfirmKey(checkoutSessionId, provider, payment.id);
+  return reuseConcurrentConfirmKey(tx, checkoutSessionId, payment.id);
 }
 
 async function reuseConcurrentConfirmKey(
+  tx: Prisma.TransactionClient,
   checkoutSessionId: string,
-  provider: PaymentProvider,
   paymentId: string,
 ): Promise<ConfirmAttemptResult> {
-  const payment = await db.payment.findFirst({
-    where: { id: paymentId, ...pendingConfirmWhere(checkoutSessionId, provider) },
+  const payment = await tx.payment.findFirst({
+    where: { id: paymentId, ...pendingConfirmWhere(checkoutSessionId) },
     select: pendingConfirmSelect(),
   });
   if (payment?.providerConfirmIdempotencyKey) {
     return { success: true, payment: withConfirmKey(payment, payment.providerConfirmIdempotencyKey) };
   }
-  return actionError("PAYMENT_UNAVAILABLE", "Pending payment attempt changed before confirm.", false);
+  return actionError("PAYMENT_UNAVAILABLE", false);
 }
 
 function withConfirmKey(payment: PendingConfirmPayment, providerConfirmIdempotencyKey: string): PendingConfirmPaymentWithKey {
   return { ...payment, providerConfirmIdempotencyKey };
 }
 
-function pendingConfirmWhere(checkoutSessionId: string, provider: PaymentProvider) {
+function pendingConfirmWhere(checkoutSessionId: string) {
   return {
     checkoutSessionId,
-    provider,
     providerPaymentKey: null,
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    remediationStatus: PaymentRemediationStatus.NONE,
+    blockingEndedAt: null,
+    initiationOutputKind: { not: null },
     status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
   };
 }
 
 function pendingConfirmSelect() {
-  return { id: true, providerRef: true, providerConfirmIdempotencyKey: true, mode: true };
+  return {
+    id: true,
+    provider: true,
+    providerRef: true,
+    providerConfirmIdempotencyKey: true,
+    mode: true,
+    routingRuleId: true,
+  };
 }
 
 function confirmIdempotencyKey(provider: PaymentProvider, paymentId: string): string {
@@ -238,19 +388,19 @@ function confirmIdempotencyKey(provider: PaymentProvider, paymentId: string): st
 async function completeConfirmedPayment(facts: CaptureFacts): Promise<PaymentActionResult> {
   try {
     return translateCompletion(await completeFromCapture(db, facts), facts.provider);
-  } catch (e) {
-    return actionError("COMPLETION_RETRYABLE", errorMessage(e), true);
+  } catch {
+    return actionError("COMPLETION_RETRYABLE", true);
   }
 }
 
 function translateCompletion(result: CompleteFromCaptureResult, provider: PaymentProvider): PaymentActionResult {
   if (result.kind === "completed" || result.kind === "alreadyCompleted") {
-    return { success: true, orderId: result.orderId, paymentId: result.paymentId, provider };
+    return { kind: "READY", success: true, orderId: result.orderId, paymentId: result.paymentId, provider };
   }
   if (result.kind === "compensationEnqueued" || result.kind === "compensationSkipped") {
-    return actionError("PAYMENT_FAILED", result.failure.message, false);
+    return actionError("PAYMENT_FAILED", false);
   }
-  return actionError("COMPLETION_RETRYABLE", result.message, true);
+  return actionError("COMPLETION_RETRYABLE", true);
 }
 
 function initiateSuccess(
@@ -258,27 +408,46 @@ function initiateSuccess(
   provider: PaymentProvider,
   result: PaymentInitiateResult,
 ): PaymentActionResult {
-  if (result.kind === "redirect") return { success: true, paymentId, provider, redirectTo: result.approveUrl };
-  return { success: true, paymentId, provider };
+  if (result.kind === "redirect") {
+    return { kind: "REDIRECT", success: true, paymentId, provider, redirectTo: result.approveUrl };
+  }
+  if (result.kind === "inProgress") {
+    return boundedState(
+      "IN_PROGRESS",
+      "ATTEMPT_IN_PROGRESS",
+      false,
+      paymentId,
+    );
+  }
+  return { kind: "READY", success: true, paymentId, provider };
 }
 
 function initiateError(e: PaymentInitiateException): PaymentActionResult {
-  return actionError(e.code, e.message, false);
+  if (e.code === "ATTEMPT_OUTCOME_UNKNOWN") {
+    return boundedState("OUTCOME_UNKNOWN", e.code, false);
+  }
+  if (e.code === "SESSION_REMEDIATION_REQUIRED") {
+    return boundedState("REMEDIATION_REQUIRED", e.code, false);
+  }
+  return actionError(e.code, false);
 }
 
-function parseProvider(value: string): PaymentProvider | null {
-  if (value === PaymentProvider.MOCK) return PaymentProvider.MOCK;
-  if (value === PaymentProvider.TOSS) return PaymentProvider.TOSS;
-  if (value === PaymentProvider.PAYPAL) return PaymentProvider.PAYPAL;
-  return null;
+function actionError(errorCode: PaymentActionErrorCode, retryable: boolean): PaymentActionFailure {
+  return { kind: "FAILED", success: false, errorCode, error: PUBLIC_PAYMENT_ERROR_MESSAGES[errorCode], retryable };
 }
 
-function actionError(errorCode: PaymentActionErrorCode, error: string, retryable: boolean): PaymentActionFailure {
-  return { success: false, errorCode, error, retryable };
-}
-
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return "Payment operation failed.";
+function boundedState(
+  kind: PaymentActionBoundedKind,
+  errorCode: PaymentActionErrorCode,
+  retryable: boolean,
+  paymentId?: string,
+): PaymentActionBoundedState {
+  return {
+    kind,
+    success: false,
+    errorCode,
+    error: PUBLIC_PAYMENT_ERROR_MESSAGES[errorCode],
+    retryable,
+    paymentId,
+  };
 }

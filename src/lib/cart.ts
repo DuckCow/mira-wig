@@ -6,14 +6,19 @@
 import "server-only";
 
 import { db } from "./db";
+import {
+  variantPurchasableInMarketFailure,
+  commerceIntegrityMessage,
+  type CommerceIntegrityFailureCode,
+} from "./commerce-integrity";
 import type { MarketCode } from "./market/types";
 
 // ── 에러 타입 ─────────────────────────────────────────────────
 
 export type CartErrorCode =
   | "INVALID_QUANTITY"
+  | CommerceIntegrityFailureCode
   | "VARIANT_NOT_FOUND"
-  | "VARIANT_PRICE_UNAVAILABLE"
   | "STOCK_EXCEEDED"
   | "ITEM_NOT_FOUND"
   | "FORBIDDEN";
@@ -44,6 +49,8 @@ export interface CartItemView {
   styleId: string;
   styleName: string;
   coverImageKey: string | null;
+  unavailableCode: CommerceIntegrityFailureCode | null;
+  unavailableMessage: string | null;
 }
 
 // ── 내부 헬퍼 ────────────────────────────────────────────────
@@ -57,9 +64,12 @@ async function fetchCartRows(userId: string, marketCode: MarketCode) {
     select: {
       id: true,
       quantity: true,
+      wigStyleId: true,
       variant: {
         select: {
           id: true,
+          wigStyleId: true,
+          isActive: true,
           color: true,
           colorHex: true,
           length: true,
@@ -68,12 +78,34 @@ async function fetchCartRows(userId: string, marketCode: MarketCode) {
           marketPrices: { where: { marketCode }, select: { amount: true }, take: 1 },
         },
       },
-      style: { select: { id: true, name: true, coverImageKey: true } },
+      style: {
+        select: {
+          id: true,
+          name: true,
+          coverImageKey: true,
+          isActive: true,
+          availableMarkets: {
+            where: { marketCode, isActive: true },
+            select: { marketCode: true },
+            take: 1,
+          },
+        },
+      },
     },
   });
 }
 
 function toView(row: CartRow): CartItemView {
+  const unavailableCode = variantPurchasableInMarketFailure({
+    selectedStyleId: row.wigStyleId,
+    canonicalStyleId: row.variant.wigStyleId,
+    styleActive: row.style.isActive,
+    stylePublishedInMarket: row.style.availableMarkets.length === 1,
+    variantActive: row.variant.isActive,
+    hasMarketPrice: row.variant.marketPrices.length === 1,
+    stock: row.variant.stock,
+    quantity: row.quantity,
+  });
   return {
     id: row.id,
     quantity: row.quantity,
@@ -87,6 +119,8 @@ function toView(row: CartRow): CartItemView {
     styleId: row.style.id,
     styleName: row.style.name,
     coverImageKey: row.style.coverImageKey,
+    unavailableCode,
+    unavailableMessage: unavailableCode ? commerceIntegrityMessage(unavailableCode) : null,
   };
 }
 
@@ -111,28 +145,50 @@ export async function addToCart(
   if (quantity < 1) throw new CartException("INVALID_QUANTITY", "수량은 1 이상이어야 합니다.");
 
   const variant = await db.wigVariant.findUnique({
-    where: { id: variantId, isActive: true },
-    select: { stock: true },
+    where: { id: variantId },
+    select: {
+      wigStyleId: true,
+      isActive: true,
+      stock: true,
+      wigStyle: {
+        select: {
+          isActive: true,
+          availableMarkets: {
+            where: { marketCode, isActive: true },
+            select: { marketCode: true },
+            take: 1,
+          },
+        },
+      },
+      marketPrices: {
+        where: { marketCode },
+        select: { amount: true },
+        take: 1,
+      },
+    },
   });
   if (!variant) throw new CartException("VARIANT_NOT_FOUND", "옵션을 찾을 수 없습니다.");
 
-  const marketPrice = await db.variantMarketPrice.findUnique({
-    where: { variantId_marketCode: { variantId, marketCode } },
-    select: { amount: true },
-  });
-  if (!marketPrice) {
-    throw new CartException("VARIANT_PRICE_UNAVAILABLE", "현재 마켓 가격이 없습니다.");
-  }
-
   const existing = await db.cartItem.findUnique({
     where: { userId_variantId: { userId, variantId } },
-    select: { id: true, quantity: true },
+    select: { id: true, quantity: true, wigStyleId: true },
   });
 
   const newQty = (existing?.quantity ?? 0) + quantity;
-  if (newQty > variant.stock) {
-    throw new CartException("STOCK_EXCEEDED", `재고 부족 (최대 ${variant.stock}개)`, { available: variant.stock });
+  if (existing && existing.wigStyleId !== wigStyleId) {
+    throwIntegrityFailure("VARIANT_PARENT_MISMATCH", variant.stock);
   }
+  const failure = variantPurchasableInMarketFailure({
+    selectedStyleId: wigStyleId,
+    canonicalStyleId: variant.wigStyleId,
+    styleActive: variant.wigStyle.isActive,
+    stylePublishedInMarket: variant.wigStyle.availableMarkets.length === 1,
+    variantActive: variant.isActive,
+    hasMarketPrice: variant.marketPrices.length === 1,
+    stock: variant.stock,
+    quantity: newQty,
+  });
+  if (failure) throwIntegrityFailure(failure, variant.stock);
 
   if (existing) {
     await db.cartItem.update({ where: { id: existing.id }, data: { quantity: newQty } });
@@ -145,20 +201,61 @@ export async function updateQuantity(
   userId: string,
   cartItemId: string,
   quantity: number,
+  marketCode: MarketCode,
 ): Promise<void> {
   if (quantity < 1) throw new CartException("INVALID_QUANTITY", "수량은 1 이상이어야 합니다.");
 
   const item = await db.cartItem.findUnique({
     where: { id: cartItemId },
-    select: { userId: true, variant: { select: { stock: true } } },
+    select: {
+      userId: true,
+      wigStyleId: true,
+      style: {
+        select: {
+          isActive: true,
+          availableMarkets: {
+            where: { marketCode, isActive: true },
+            select: { marketCode: true },
+            take: 1,
+          },
+        },
+      },
+      variant: {
+        select: {
+          wigStyleId: true,
+          isActive: true,
+          stock: true,
+          marketPrices: {
+            where: { marketCode },
+            select: { amount: true },
+            take: 1,
+          },
+        },
+      },
+    },
   });
   if (!item) throw new CartException("ITEM_NOT_FOUND", "장바구니 항목을 찾을 수 없습니다.");
   if (item.userId !== userId) throw new CartException("FORBIDDEN", "권한이 없습니다.");
-  if (quantity > item.variant.stock) {
-    throw new CartException("STOCK_EXCEEDED", `재고 부족 (최대 ${item.variant.stock}개)`, { available: item.variant.stock });
-  }
+  const failure = variantPurchasableInMarketFailure({
+    selectedStyleId: item.wigStyleId,
+    canonicalStyleId: item.variant.wigStyleId,
+    styleActive: item.style.isActive,
+    stylePublishedInMarket: item.style.availableMarkets.length === 1,
+    variantActive: item.variant.isActive,
+    hasMarketPrice: item.variant.marketPrices.length === 1,
+    stock: item.variant.stock,
+    quantity,
+  });
+  if (failure) throwIntegrityFailure(failure, item.variant.stock);
 
   await db.cartItem.update({ where: { id: cartItemId }, data: { quantity } });
+}
+
+function throwIntegrityFailure(code: CommerceIntegrityFailureCode, stock: number): never {
+  if (code === "STOCK_INSUFFICIENT") {
+    throw new CartException("STOCK_EXCEEDED", `재고 부족 (최대 ${stock}개)`, { available: stock });
+  }
+  throw new CartException(code, commerceIntegrityMessage(code));
 }
 
 export async function removeFromCart(

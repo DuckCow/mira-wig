@@ -135,15 +135,17 @@ describe("cart pricing", () => {
     await expect(cartQuantity(itemId)).resolves.toBe(1);
   });
 
-  it("allows update and remove after a cart line loses its market price", async () => {
+  it("blocks mutation but allows explicit removal after a cart line loses its market price", async () => {
     const variant = await createCatalogVariant(ctx, { stock: 3, marketPrices: { KR: 12_000 } });
     await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
     const itemId = await firstCartItemId(ctx.userId);
 
     await deleteMarketPrice(variant.id, MarketCode.KR);
 
-    await updateQuantity(ctx.userId, itemId, 2);
-    await expect(cartQuantity(itemId)).resolves.toBe(2);
+    await expectCartFailure("VARIANT_PRICE_UNAVAILABLE", () => (
+      updateQuantity(ctx.userId, itemId, 2, MarketCode.KR)
+    ));
+    await expect(cartQuantity(itemId)).resolves.toBe(1);
     await removeFromCart(ctx.userId, itemId);
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
   });
@@ -153,7 +155,7 @@ describe("cart pricing", () => {
     await addToCart(ctx.otherUserId, variant.id, variant.styleId, 1, MarketCode.KR);
     const otherItem = await firstCartItemId(ctx.otherUserId);
 
-    await expectCartFailure("FORBIDDEN", () => updateQuantity(ctx.userId, otherItem, 2));
+    await expectCartFailure("FORBIDDEN", () => updateQuantity(ctx.userId, otherItem, 2, MarketCode.KR));
   });
 
   it("rejects updateQuantity when requested quantity exceeds stock", async () => {
@@ -161,7 +163,7 @@ describe("cart pricing", () => {
     await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
     const itemId = await firstCartItemId(ctx.userId);
 
-    await expectCartFailure("STOCK_EXCEEDED", () => updateQuantity(ctx.userId, itemId, 3));
+    await expectCartFailure("STOCK_EXCEEDED", () => updateQuantity(ctx.userId, itemId, 3, MarketCode.KR));
     await expect(cartQuantity(itemId)).resolves.toBe(1);
   });
 
@@ -181,6 +183,56 @@ describe("cart pricing", () => {
     await addToCart(ctx.userId, second.id, second.styleId, 3, MarketCode.KR);
 
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(2);
+  });
+
+  it("rejects a forged style and variant pair before any cart write", async () => {
+    const first = await createCatalogVariant(ctx);
+    const second = await createCatalogVariant(ctx);
+
+    await expectCartFailure("VARIANT_PARENT_MISMATCH", () => (
+      addToCart(ctx.userId, second.id, first.styleId, 1, MarketCode.KR)
+    ));
+
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("keeps a malformed row visible and blocks checkout without repairing it", async () => {
+    const first = await createCatalogVariant(ctx);
+    const second = await createCatalogVariant(ctx);
+    await db.cartItem.create({
+      data: { userId: ctx.userId, wigStyleId: first.styleId, variantId: second.id, quantity: 1 },
+    });
+
+    const [line] = await getCart(ctx.userId, MarketCode.KR);
+    expect(line?.unavailableCode).toBe("VARIANT_PARENT_MISMATCH");
+    await expect(createCheckoutSession(db, {
+      userId: ctx.userId,
+      marketCode: MarketCode.KR,
+      shipping: validShipping(ShippingCountry.KR),
+    })).rejects.toMatchObject({ code: "VARIANT_PARENT_MISMATCH" });
+    await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
+    await expect(db.cartItem.findUnique({
+      where: { userId_variantId: { userId: ctx.userId, variantId: second.id } },
+      select: { wigStyleId: true },
+    })).resolves.toEqual({ wigStyleId: first.styleId });
+  });
+
+  it("revalidates publication when the market changes", async () => {
+    const variant = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000, US: 2_999 } });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    await db.wigStyleMarket.update({
+      where: { wigStyleId_marketCode: { wigStyleId: variant.styleId, marketCode: MarketCode.US } },
+      data: { isActive: false },
+    });
+
+    const [line] = await getCart(ctx.userId, MarketCode.US);
+    expect(line?.unavailableCode).toBe("STYLE_UNPUBLISHED");
+    await expect(createCheckoutSession(db, {
+      userId: ctx.userId,
+      marketCode: MarketCode.US,
+      shipping: validShipping(ShippingCountry.US),
+    })).rejects.toMatchObject({ code: "STYLE_UNPUBLISHED" });
+    await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
   });
 });
 
@@ -220,6 +272,12 @@ async function createCatalogVariant(context: TestContext, options: VariantOption
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/cart-cover.png",
+      availableMarkets: {
+        create: [MarketCode.KR, MarketCode.US, MarketCode.JP].map((marketCode) => ({
+          marketCode,
+          isActive: true,
+        })),
+      },
     },
     select: { id: true },
   });

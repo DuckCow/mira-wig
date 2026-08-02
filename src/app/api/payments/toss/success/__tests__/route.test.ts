@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -155,9 +156,12 @@ async function createPayment(context: TestContext) {
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
       status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
       amount: AMOUNT,
       currency: "KRW",
       idempotencyKey: `toss-route:${session.id}:${randomUUID()}`,
+      contactIntentAt: new Date(),
+      contactStartedAt: new Date(),
     },
   });
 }

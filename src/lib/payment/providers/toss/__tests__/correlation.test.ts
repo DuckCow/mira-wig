@@ -13,7 +13,10 @@ describe("Toss payment correlation resolver", () => {
     const fake = fakeCorrelationClient(paymentRecord(PaymentProvider.TOSS));
     const correlation = createTossPaymentCorrelationPort(fake.client);
 
-    await expect(correlation(PAYMENT_ID)).resolves.toEqual({ checkoutSessionId: CHECKOUT_SESSION_ID });
+    await expect(correlation(PAYMENT_ID)).resolves.toEqual({
+      paymentId: PAYMENT_ID,
+      checkoutSessionId: CHECKOUT_SESSION_ID,
+    });
     expect(fake.findUnique).toHaveBeenCalledWith({
       where: { id: PAYMENT_ID },
       select: { provider: true, checkoutSessionId: true },

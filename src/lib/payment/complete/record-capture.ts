@@ -1,9 +1,16 @@
-import { PaymentAttemptStatus, Prisma } from "@prisma/client";
+import {
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
+  PaymentRemediationStatus,
+  Prisma,
+} from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
+import { enqueuePaymentRemediationRequired } from "@/lib/payment/remediation";
 import type { CaptureFacts, CapturedPayment, CompletionTerminalFailure } from "./types";
 
 type CaptureTx = Prisma.TransactionClient;
 type ModeGuardPayment = Pick<CapturedPayment, "id" | "mode" | "status">;
+type BlockingPayment = Pick<CapturedPayment, "id" | "contactStartedAt">;
 
 export class PaymentCaptureModeMismatchError extends Error {
   constructor(readonly failure: CompletionTerminalFailure) {
@@ -25,11 +32,11 @@ export async function recordCapture(
 ): Promise<CapturedPayment> {
   try {
     return await client.$transaction((tx) => recordCaptureTx(tx, facts));
-  } catch (e) {
-    if (isUniqueConflict(e) || e instanceof PaymentCaptureClaimConflictError) {
+  } catch (error) {
+    if (isUniqueConflict(error) || error instanceof PaymentCaptureClaimConflictError) {
       return requireRecoverablePaymentByProviderKey(client, facts);
     }
-    throw e;
+    throw error;
   }
 }
 
@@ -37,11 +44,15 @@ async function recordCaptureTx(
   tx: CaptureTx,
   facts: CaptureFacts,
 ): Promise<CapturedPayment> {
+  await lockCheckoutSession(tx, facts.checkoutSessionId);
   const existing = await findPaymentByProviderKey(tx, facts);
   if (existing) {
+    guardExactPaymentIdentity(existing, facts);
     guardPendingCaptureMode(existing, facts);
     return updateExistingIfPending(tx, existing.id, facts);
   }
+
+  if (facts.paymentId) return captureExactAttempt(tx, facts, facts.paymentId);
 
   const pending = await findPendingAttempt(tx, facts);
   if (pending) {
@@ -51,19 +62,190 @@ async function recordCaptureTx(
     throw new PaymentCaptureClaimConflictError();
   }
 
+  return createWebhookFirstCapture(tx, facts);
+}
+
+async function createWebhookFirstCapture(
+  tx: CaptureTx,
+  facts: CaptureFacts,
+): Promise<CapturedPayment> {
+  const blocking = await tx.payment.findFirst({
+    where: { checkoutSessionId: facts.checkoutSessionId, blockingEndedAt: null },
+    select: { id: true },
+  });
+  if (blocking) return createBlockedWebhookFirstCapture(tx, facts, blocking.id);
+  const succeededAt = effectiveSucceededAt(facts);
   return tx.payment.create({
     data: {
       checkoutSessionId: facts.checkoutSessionId,
       provider: facts.provider,
       mode: facts.mode,
       status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
       amount: facts.amount,
       currency: facts.currency,
       providerPaymentKey: facts.providerPaymentKey,
       idempotencyKey: captureIdempotencyKey(facts),
+      contactIntentAt: facts.receivedAt,
+      contactStartedAt: facts.receivedAt,
+      financialSucceededAt: succeededAt,
     },
     select: paymentSelect(),
   });
+}
+
+async function createBlockedWebhookFirstCapture(
+  tx: CaptureTx,
+  facts: CaptureFacts,
+  blockingPaymentId: string,
+): Promise<CapturedPayment> {
+  const succeededAt = effectiveSucceededAt(facts);
+  const payment = await tx.payment.create({
+    data: {
+      checkoutSessionId: facts.checkoutSessionId,
+      provider: facts.provider,
+      mode: facts.mode,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      amount: facts.amount,
+      currency: facts.currency,
+      providerPaymentKey: facts.providerPaymentKey,
+      idempotencyKey: captureIdempotencyKey(facts),
+      contactIntentAt: facts.receivedAt,
+      contactStartedAt: facts.receivedAt,
+      financialSucceededAt: succeededAt,
+      blockingEndedAt: facts.receivedAt,
+      suspendedByPaymentId: blockingPaymentId,
+      errorCode: "CONCURRENT_FINANCIAL_SUCCESS_REQUIRES_REMEDIATION",
+      errorMessage: "Another payment already owns this checkout session's blocking slot.",
+    },
+    select: paymentSelect(),
+  });
+  await enqueuePaymentRemediationRequired(tx, {
+    paymentId: payment.id,
+    provider: facts.provider,
+    mode: facts.mode,
+    providerPaymentKey: facts.providerPaymentKey,
+    reason: "CONCURRENT_FINANCIAL_SUCCESS_REQUIRES_REMEDIATION",
+  });
+  return payment;
+}
+
+async function captureExactAttempt(
+  tx: CaptureTx,
+  facts: CaptureFacts,
+  paymentId: string,
+): Promise<CapturedPayment> {
+  await lockPayment(tx, paymentId);
+  const payment = await requirePaymentById(tx, paymentId);
+  guardExactPaymentIdentity(payment, facts);
+  guardPendingCaptureMode(payment, facts);
+  if (payment.providerPaymentKey === facts.providerPaymentKey) return payment;
+  if (payment.providerPaymentKey !== null) throw new Error("Correlated payment attempt already has another payment key");
+  if (!isCaptureRecordableStatus(payment.status)) {
+    throw new Error("Correlated payment attempt is not capture-recordable");
+  }
+  if (payment.attemptLifecycle === PaymentAttemptLifecycle.SUPERSEDED) {
+    return recordLateSupersededSuccess(tx, payment, facts);
+  }
+  return recordOrdinaryExactSuccess(tx, payment, facts);
+}
+
+async function recordOrdinaryExactSuccess(
+  tx: CaptureTx,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+): Promise<CapturedPayment> {
+  const lifecycle = payment.attemptLifecycle === PaymentAttemptLifecycle.SUSPENDED
+    ? PaymentAttemptLifecycle.SUSPENDED
+    : PaymentAttemptLifecycle.CONTACTED;
+  const result = await tx.payment.updateMany({
+    where: {
+      id: payment.id,
+      providerPaymentKey: null,
+      status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+    },
+    data: captureUpdateData(facts, lifecycle),
+  });
+  if (result.count !== 1) throw new PaymentCaptureClaimConflictError();
+  return requirePaymentById(tx, payment.id);
+}
+
+async function recordLateSupersededSuccess(
+  tx: CaptureTx,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+): Promise<CapturedPayment> {
+  const current = await loadCurrentBlockingPayment(tx, payment);
+  if (current?.contactStartedAt === null) {
+    await suspendUncontactedBlockingPayment(tx, current, payment.id, facts.receivedAt);
+  }
+  const currentKeepsSlot = current !== null && current.contactStartedAt !== null;
+  const result = await tx.payment.updateMany({
+    where: {
+      id: payment.id,
+      providerPaymentKey: null,
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+    },
+    data: {
+      ...captureUpdateData(
+        facts,
+        currentKeepsSlot ? PaymentAttemptLifecycle.SUSPENDED : PaymentAttemptLifecycle.SUPERSEDED,
+      ),
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      blockingEndedAt: currentKeepsSlot ? facts.receivedAt : null,
+      suspendedByPaymentId: currentKeepsSlot ? current.id : null,
+      errorCode: "SUPERSEDED_ATTEMPT_CAPTURED",
+      errorMessage: "A superseded payment attempt reported financial success and requires remediation.",
+    },
+  });
+  if (result.count !== 1) throw new PaymentCaptureClaimConflictError();
+  await enqueuePaymentRemediationRequired(tx, {
+    paymentId: payment.id,
+    provider: facts.provider,
+    mode: facts.mode,
+    providerPaymentKey: facts.providerPaymentKey,
+    reason: "SUPERSEDED_ATTEMPT_CAPTURED",
+  });
+  return requirePaymentById(tx, payment.id);
+}
+
+async function loadCurrentBlockingPayment(
+  tx: CaptureTx,
+  remediatingPayment: CapturedPayment,
+): Promise<BlockingPayment | null> {
+  return tx.payment.findFirst({
+    where: {
+      checkoutSessionId: remediatingPayment.checkoutSessionId,
+      id: { not: remediatingPayment.id },
+      blockingEndedAt: null,
+    },
+    select: { id: true, contactStartedAt: true },
+  });
+}
+
+async function suspendUncontactedBlockingPayment(
+  tx: CaptureTx,
+  current: BlockingPayment,
+  remediatingPaymentId: string,
+  now: Date,
+): Promise<void> {
+  const result = await tx.payment.updateMany({
+    where: { id: current.id, blockingEndedAt: null, contactStartedAt: null },
+    data: {
+      attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
+      suspendedByPaymentId: remediatingPaymentId,
+      blockingEndedAt: now,
+      errorCode: "PAYMENT_LINEAGE_REMEDIATION_BLOCK",
+      errorMessage: "A superseded payment in this checkout lineage requires terminal remediation.",
+    },
+  });
+  if (result.count !== 1) throw new PaymentCaptureClaimConflictError();
+}
+
+function isCaptureRecordableStatus(status: PaymentAttemptStatus): boolean {
+  return status === PaymentAttemptStatus.INITIATED || status === PaymentAttemptStatus.AWAITING;
 }
 
 async function updateExistingIfPending(
@@ -71,11 +253,9 @@ async function updateExistingIfPending(
   id: string,
   facts: CaptureFacts,
 ): Promise<CapturedPayment> {
-  await tx.payment.updateMany({
-    where: { id, mode: facts.mode, status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] } },
-    data: captureUpdateData(facts),
-  });
-  return requirePaymentById(tx, id);
+  const payment = await requirePaymentById(tx, id);
+  if (!isCaptureRecordableStatus(payment.status)) return payment;
+  return recordOrdinaryExactSuccess(tx, payment, facts);
 }
 
 async function claimPendingAttempt(
@@ -83,9 +263,10 @@ async function claimPendingAttempt(
   facts: CaptureFacts,
   paymentId: string,
 ): Promise<CapturedPayment | null> {
+  const lifecycle = PaymentAttemptLifecycle.CONTACTED;
   const result = await tx.payment.updateMany({
     where: { id: paymentId, ...pendingAttemptWhere(facts) },
-    data: captureUpdateData(facts),
+    data: captureUpdateData(facts, lifecycle),
   });
   if (result.count !== 1) return null;
   return requirePaymentById(tx, paymentId);
@@ -107,6 +288,13 @@ function pendingAttemptLookupWhere(facts: CaptureFacts): Prisma.PaymentWhereInpu
     checkoutSessionId: facts.checkoutSessionId,
     provider: facts.provider,
     providerPaymentKey: null,
+    blockingEndedAt: null,
+    attemptLifecycle: {
+      in: [
+        PaymentAttemptLifecycle.CONTACTED,
+        PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      ],
+    },
     status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
   };
 }
@@ -115,12 +303,17 @@ function pendingAttemptWhere(facts: CaptureFacts): Prisma.PaymentWhereInput {
   return { ...pendingAttemptLookupWhere(facts), mode: facts.mode };
 }
 
-function captureUpdateData(facts: CaptureFacts): Prisma.PaymentUpdateManyMutationInput {
+function captureUpdateData(
+  facts: CaptureFacts,
+  lifecycle: PaymentAttemptLifecycle,
+): Prisma.PaymentUpdateManyMutationInput {
   return {
     status: PaymentAttemptStatus.SUCCEEDED,
+    attemptLifecycle: lifecycle,
     amount: facts.amount,
     currency: facts.currency,
     providerPaymentKey: facts.providerPaymentKey,
+    financialSucceededAt: effectiveSucceededAt(facts),
   };
 }
 
@@ -148,6 +341,7 @@ async function requireRecoverablePaymentByProviderKey(
   facts: CaptureFacts,
 ): Promise<CapturedPayment> {
   const payment = await requirePaymentByProviderKey(client, facts);
+  guardExactPaymentIdentity(payment, facts);
   guardPendingCaptureMode(payment, facts);
   return payment;
 }
@@ -168,10 +362,25 @@ function paymentSelect(): Prisma.PaymentSelect {
     provider: true,
     mode: true,
     status: true,
+    attemptLifecycle: true,
+    remediationStatus: true,
     amount: true,
     currency: true,
     providerPaymentKey: true,
+    contactStartedAt: true,
+    supersededAt: true,
+    blockingEndedAt: true,
+    suspendedByPaymentId: true,
   };
+}
+
+function guardExactPaymentIdentity(payment: CapturedPayment, facts: CaptureFacts): void {
+  if (facts.paymentId && payment.id !== facts.paymentId) {
+    throw new Error("Capture payment identity mismatch");
+  }
+  if (payment.checkoutSessionId !== facts.checkoutSessionId || payment.provider !== facts.provider) {
+    throw new Error("Capture payment correlation mismatch");
+  }
 }
 
 function captureIdempotencyKey(facts: CaptureFacts): string {
@@ -179,7 +388,7 @@ function captureIdempotencyKey(facts: CaptureFacts): string {
 }
 
 function guardPendingCaptureMode(payment: ModeGuardPayment, facts: CaptureFacts): void {
-  if (!isPendingStatus(payment.status)) return;
+  if (!isCaptureRecordableStatus(payment.status)) return;
   if (payment.mode === facts.mode) return;
   throw new PaymentCaptureModeMismatchError({
     kind: "terminalFailure",
@@ -193,17 +402,27 @@ function guardPendingCaptureMode(payment: ModeGuardPayment, facts: CaptureFacts)
   });
 }
 
-function isPendingStatus(status: PaymentAttemptStatus): boolean {
-  return status === PaymentAttemptStatus.INITIATED || status === PaymentAttemptStatus.AWAITING;
+async function lockCheckoutSession(tx: CaptureTx, sessionId: string): Promise<void> {
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "CheckoutSession" WHERE "id" = ${sessionId} FOR UPDATE
+  `);
 }
 
-function isUniqueConflict(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError
-    ? e.code === "P2002"
-    : hasErrorCode(e, "P2002");
+async function lockPayment(tx: CaptureTx, paymentId: string): Promise<void> {
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} FOR UPDATE`);
 }
 
-function hasErrorCode(e: unknown, code: string): boolean {
-  if (typeof e !== "object" || e === null || !("code" in e)) return false;
-  return e.code === code;
+function effectiveSucceededAt(facts: CaptureFacts): Date {
+  return facts.capturedAt ?? facts.receivedAt;
+}
+
+function isUniqueConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError
+    ? error.code === "P2002"
+    : hasErrorCode(error, "P2002");
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  return error.code === code;
 }

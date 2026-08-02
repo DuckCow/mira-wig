@@ -170,9 +170,9 @@
     "modePolicy": "REGULAR_0644_DIRECTORY_0755",
     "timestampEpochSeconds": 1784764800,
     "manifestAlgorithm": "SORTED_PATH_SIZE_MODE_SHA256_JSON",
-    "expectedFileCount": 145,
-    "expectedManifestSha256": "957b914482e0ffd1dc0f8f28ffc6769a44327be31e2069df3b820d937cd246ca",
-    "repositoryGraphInputCount": 107,
+    "expectedFileCount": 147,
+    "expectedManifestSha256": "4db3a176399c366554b889be5a405d2e73f8d47bd88d0574be53bf7dd1b001ed",
+    "repositoryGraphInputCount": 108,
     "packagedGraphInputCount": 45,
     "entrypointCount": 3,
     "temporaryArtifactPolicy": "DELETE_IN_FINALLY"

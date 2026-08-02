@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -232,7 +233,10 @@ describe("requestRefundAttempt", () => {
   });
 
   it.each([null, randomWhitespace()])("requires a usable providerPaymentKey: %j", async (providerPaymentKey) => {
-    const fixture = await createOrder(ctx, { providerPaymentKey });
+    const fixture = await createOrder(ctx, {
+      paymentStatus: PaymentAttemptStatus.INITIATED,
+      providerPaymentKey,
+    });
     await expectFailure(fixture, "PAYMENT_NOT_REFUNDABLE");
   });
 
@@ -697,23 +701,51 @@ async function createPayment(
   const paymentCurrency = options.paymentCurrency ?? "KRW";
   const provider = options.provider ?? PaymentProvider.MOCK;
   const mode = options.mode ?? PaymentMode.SANDBOX;
+  const paymentFixture = normalizePaymentFixture(options);
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: sessionId,
       provider,
       mode,
-      status: options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED,
-      amount: paymentAmount,
-      currency: paymentCurrency,
-      providerPaymentKey: options.providerPaymentKey === undefined
-        ? `provider_payment_${randomUUID()}`
-        : options.providerPaymentKey,
+      ...paymentFixture,
       idempotencyKey: `payment_idem_${randomUUID()}`,
     },
     select: { id: true },
   });
   context.paymentIds.push(payment.id);
   return { id: payment.id, context: { paymentAmount, paymentCurrency, provider, mode } };
+}
+
+function normalizePaymentFixture(options: OrderFixtureOptions) {
+  const status = options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED;
+  const providerPaymentKey = options.providerPaymentKey === undefined
+    ? `provider_payment_${randomUUID()}`
+    : options.providerPaymentKey;
+  return {
+    status,
+    amount: options.paymentAmount ?? 1_000,
+    currency: options.paymentCurrency ?? "KRW",
+    providerPaymentKey,
+    ...paymentLifecycleFields(status),
+  };
+}
+
+function paymentLifecycleFields(status: PaymentAttemptStatus) {
+  if (status === PaymentAttemptStatus.SUCCEEDED) {
+    return {
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+      financialSucceededAt: NOW,
+      blockingEndedAt: NOW,
+    };
+  }
+  if (status === PaymentAttemptStatus.FAILED) {
+    return { attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE, blockingEndedAt: NOW };
+  }
+  return {
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    contactIntentAt: NOW,
+    contactStartedAt: NOW,
+  };
 }
 
 async function createOrderRow(

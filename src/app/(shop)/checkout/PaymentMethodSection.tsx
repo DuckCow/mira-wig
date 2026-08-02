@@ -10,9 +10,12 @@ interface PaymentMethodSectionProps {
 }
 
 type FailedPayment = Extract<PaymentActionResult, { success: false }>;
-type PaymentState =
+export type PaymentState =
   | { kind: "idle" }
   | { kind: "processing" }
+  | { kind: "inProgress"; message: string }
+  | { kind: "outcomeUnknown"; message: string }
+  | { kind: "remediationRequired"; message: string }
   | { kind: "checkingOrders"; message: string }
   | { kind: "success"; orderId?: string; paymentId: string }
   | { kind: "failed"; message: string };
@@ -118,7 +121,7 @@ function PaymentStateMessage({ state }: { state: PaymentState }) {
   if (state.kind === "processing") {
     return <p className="mt-3 text-sm text-gray-600" aria-live="polite">테스트 결제 처리 중...</p>;
   }
-  if (state.kind === "checkingOrders") {
+  if (state.kind === "checkingOrders" || state.kind === "inProgress" || state.kind === "outcomeUnknown") {
     return (
       <div className="mt-3 space-y-2 text-sm text-gray-700" aria-live="polite">
         <p>{state.message}</p>
@@ -127,6 +130,9 @@ function PaymentStateMessage({ state }: { state: PaymentState }) {
         </Link>
       </div>
     );
+  }
+  if (state.kind === "remediationRequired") {
+    return <p className="mt-3 text-sm text-amber-700" role="alert">{state.message}</p>;
   }
   if (state.kind === "failed") {
     return <p className="mt-3 text-sm text-red-600" role="alert">{state.message}</p>;
@@ -143,21 +149,65 @@ function PaymentStateMessage({ state }: { state: PaymentState }) {
   );
 }
 
-async function runMockPayment(
+export async function runMockPayment(
   checkoutSessionId: string,
   setState: (state: PaymentState) => void,
 ) {
   const initiated = await initiatePayment(checkoutSessionId, { method: MOCK_METHOD });
-  if (!initiated.success) {
+  if (!handleInitiationResult(initiated, setState)) return;
+
+  const confirmed = await confirmPayment(checkoutSessionId, { method: MOCK_METHOD });
+  handleConfirmationResult(confirmed, setState);
+}
+
+function handleInitiationResult(
+  initiated: PaymentActionResult,
+  setState: (state: PaymentState) => void,
+): boolean {
+  if (initiated.kind === "IN_PROGRESS") {
+    setState({ kind: "inProgress", message: "결제 준비가 처리 중입니다. 주문 내역에서 상태를 확인해 주세요." });
+    return false;
+  }
+  if (initiated.kind === "OUTCOME_UNKNOWN") {
+    setState({ kind: "outcomeUnknown", message: "결제 결과를 확인 중입니다. 자동으로 다시 결제하지 말고 주문 내역을 확인해 주세요." });
+    return false;
+  }
+  if (initiated.kind === "REMEDIATION_REQUIRED") {
+    setState({ kind: "remediationRequired", message: "이 주문서의 결제 문제를 확인 중입니다. 새 결제를 진행할 수 없습니다." });
+    return false;
+  }
+  if (initiated.kind === "FAILED") {
     setState({ kind: "failed", message: paymentErrorMessage(initiated) });
-    return;
+    return false;
   }
   if (initiated.provider !== MOCK_PROVIDER) {
     setState({ kind: "failed", message: "현재 사용할 수 있는 테스트 결제 수단이 없습니다." });
+    return false;
+  }
+  if (initiated.kind === "REDIRECT") {
+    window.location.assign(initiated.redirectTo);
+    return false;
+  }
+  return true;
+}
+
+function handleConfirmationResult(
+  confirmed: PaymentActionResult,
+  setState: (state: PaymentState) => void,
+): void {
+  if (confirmed.kind === "IN_PROGRESS") {
+    setState({ kind: "inProgress", message: "결제가 처리 중입니다. 주문 내역에서 상태를 확인해 주세요." });
     return;
   }
-  const confirmed = await confirmPayment(checkoutSessionId, MOCK_PROVIDER, { method: MOCK_METHOD });
-  if (!confirmed.success) {
+  if (confirmed.kind === "OUTCOME_UNKNOWN") {
+    setState({ kind: "outcomeUnknown", message: "결제 결과를 확인 중입니다. 자동으로 다시 결제하지 말고 주문 내역을 확인해 주세요." });
+    return;
+  }
+  if (confirmed.kind === "REMEDIATION_REQUIRED") {
+    setState({ kind: "remediationRequired", message: "이 주문서의 결제 문제를 확인 중입니다. 새 결제를 진행할 수 없습니다." });
+    return;
+  }
+  if (confirmed.kind === "FAILED") {
     if (confirmed.errorCode === "COMPLETION_RETRYABLE") {
       setState({ kind: "checkingOrders", message: ORDER_PROCESSING_MESSAGE });
       return;
@@ -165,11 +215,18 @@ async function runMockPayment(
     setState({ kind: "failed", message: paymentErrorMessage(confirmed) });
     return;
   }
+  if (confirmed.kind === "REDIRECT") {
+    setState({ kind: "failed", message: "결제 확인 결과가 예상한 형식과 다릅니다." });
+    return;
+  }
   setState({ kind: "success", orderId: confirmed.orderId, paymentId: confirmed.paymentId });
 }
 
 function mockButtonLabel(state: PaymentState): string {
   if (state.kind === "processing") return "테스트 결제 처리 중...";
+  if (state.kind === "inProgress") return "결제 처리 상태 확인";
+  if (state.kind === "outcomeUnknown") return "결제 결과 확인 중";
+  if (state.kind === "remediationRequired") return "결제 문제 확인 중";
   if (state.kind === "checkingOrders") return "주문 내역에서 확인";
   if (state.kind === "success") return "테스트 주문 생성 완료";
   if (state.kind === "failed") return "주문서 다시 생성 후 재시도";
@@ -177,7 +234,12 @@ function mockButtonLabel(state: PaymentState): string {
 }
 
 function isTerminalState(state: PaymentState): boolean {
-  return state.kind === "success" || state.kind === "failed" || state.kind === "checkingOrders";
+  return state.kind === "success"
+    || state.kind === "failed"
+    || state.kind === "checkingOrders"
+    || state.kind === "inProgress"
+    || state.kind === "outcomeUnknown"
+    || state.kind === "remediationRequired";
 }
 
 function paymentErrorMessage(result: FailedPayment): string {

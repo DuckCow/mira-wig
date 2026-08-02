@@ -2,6 +2,9 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import {
+  stylePublishedInMarketWhere,
+} from "@/lib/commerce-integrity";
+import {
   getEnabledManualRelationPurposes,
   type ManualItemRelationsActivationEnv,
 } from "./activation";
@@ -30,11 +33,7 @@ export async function getManualRelatedStyles(
   if (enabledPurposes.length === 0) return emptyGroups();
 
   const source = await db.wigStyle.findFirst({
-    where: {
-      id: sourceStyleId,
-      isActive: true,
-      availableMarkets: { some: { marketCode, isActive: true } },
-    },
+    where: { id: sourceStyleId, ...stylePublishedInMarketWhere(marketCode) },
     select: { id: true },
   });
   if (!source) return emptyGroups();
@@ -47,8 +46,7 @@ export async function getManualRelatedStyles(
       purpose: { in: enabledPurposes },
       targetStyleId: { not: sourceStyleId },
       targetStyle: {
-        isActive: true,
-        availableMarkets: { some: { marketCode, isActive: true } },
+        ...stylePublishedInMarketWhere(marketCode),
         variants: {
           some: {
             isActive: true,

@@ -4,6 +4,7 @@ import {
   CustomerRefundIntakeReasonCode,
   CustomerRefundIntakeStatus,
   OrderStatus,
+  PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
@@ -323,7 +324,10 @@ describe("CustomerRefundIntake administrator review core", () => {
       await seedAttempt(terminal, { status: RefundAttemptStatus.SUCCEEDED, amount: 1_000 });
       await expectApprovalFailure(terminal, "ORDER_STATUS_NOT_REFUNDABLE");
 
-      const unusablePayment = await createFixture(ctx, { providerPaymentKey: null });
+      const unusablePayment = await createFixture(ctx, {
+        paymentStatus: PaymentAttemptStatus.INITIATED,
+        providerPaymentKey: null,
+      });
       await expectApprovalFailure(unusablePayment, "PAYMENT_NOT_REFUNDABLE");
 
       const failedPayment = await createFixture(ctx, { paymentStatus: PaymentAttemptStatus.FAILED });
@@ -721,8 +725,6 @@ async function createOrder(context: TestContext, options: OrderOptions) {
   const userId = options.userId ?? context.ownerUserId;
   const amount = options.orderAmount ?? 1_000;
   const currency = options.orderCurrency ?? "KRW";
-  const paymentAmount = options.paymentAmount ?? 1_000;
-  const paymentCurrency = options.paymentCurrency ?? "KRW";
   const session = await db.checkoutSession.create({
     data: {
       userId,
@@ -737,17 +739,13 @@ async function createOrder(context: TestContext, options: OrderOptions) {
     },
   });
   context.sessionIds.push(session.id);
+  const paymentFixture = normalizePaymentFixture(options);
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: session.id,
       provider: PaymentProvider.MOCK,
       mode: PaymentMode.SANDBOX,
-      status: options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED,
-      amount: paymentAmount,
-      currency: paymentCurrency,
-      providerPaymentKey: options.providerPaymentKey === undefined
-        ? `provider_payment_${randomUUID()}`
-        : options.providerPaymentKey,
+      ...paymentFixture,
       idempotencyKey: `payment_idem_${randomUUID()}`,
     },
   });
@@ -774,6 +772,38 @@ async function createOrder(context: TestContext, options: OrderOptions) {
     sessionId: session.id,
     amount,
     currency,
+  };
+}
+
+function normalizePaymentFixture(options: OrderOptions) {
+  const status = options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED;
+  const providerPaymentKey = options.providerPaymentKey === undefined
+    ? `provider_payment_${randomUUID()}`
+    : options.providerPaymentKey;
+  return {
+    status,
+    amount: options.paymentAmount ?? 1_000,
+    currency: options.paymentCurrency ?? "KRW",
+    providerPaymentKey,
+    ...paymentLifecycleFields(status),
+  };
+}
+
+function paymentLifecycleFields(status: PaymentAttemptStatus) {
+  if (status === PaymentAttemptStatus.SUCCEEDED) {
+    return {
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+      financialSucceededAt: NOW,
+      blockingEndedAt: NOW,
+    };
+  }
+  if (status === PaymentAttemptStatus.FAILED) {
+    return { attemptLifecycle: PaymentAttemptLifecycle.TERMINAL_FAILURE, blockingEndedAt: NOW };
+  }
+  return {
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    contactIntentAt: NOW,
+    contactStartedAt: NOW,
   };
 }
 

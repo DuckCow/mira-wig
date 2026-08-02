@@ -105,6 +105,9 @@ Model agreement is not evidence.
 16. [`decision-log.md`](./decision-log.md)
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
+17. [`configuration-to-order-bounded-contract-v0.1.md`](./configuration-to-order-bounded-contract-v0.1.md)
+   Bounded configuration-to-order design contract. The accompanying 2026-08-01 task grants source authority only for C0 commerce integrity (LBD-06/LBD-07, payment-attempt singularity, late-callback safety, tests, and documentation); C1+ configurable-product, allocation, sharing, shipping, production, and provider activation remain deferred.
+
 ## Related repository documentation
 
 These are cross-references, not discovery contracts:

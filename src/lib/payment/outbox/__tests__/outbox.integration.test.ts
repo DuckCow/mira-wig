@@ -10,6 +10,8 @@ import {
   enqueue,
   type OutboxRegistry,
 } from "@/lib/payment/outbox";
+import { PAYMENT_REMEDIATION_REQUIRED_TOPIC } from "@/lib/payment/remediation";
+import { VOID_TOPIC } from "@/lib/payment/void";
 
 describe("payment outbox skeleton", () => {
   let topics: string[];
@@ -168,6 +170,23 @@ describe("payment outbox skeleton", () => {
     expect(result.claimed).toBe(0);
     expect(row.status).toBe(OutboxStatus.PENDING);
     expect(row.attempts).toBe(0);
+  });
+
+  it("중립 remediation topic은 pg.void 전용 dispatcher가 클레임하지 않는다", async () => {
+    topics.push(PAYMENT_REMEDIATION_REQUIRED_TOPIC);
+    await enqueueCommitted(PAYMENT_REMEDIATION_REQUIRED_TOPIC, `remediation-${randomUUID()}`);
+
+    const registry: OutboxRegistry = {
+      [VOID_TOPIC]: () => Promise.reject(new Error("should not run")),
+    };
+
+    const result = await dispatchPending({ client: db, registry });
+    const row = await findOutbox(PAYMENT_REMEDIATION_REQUIRED_TOPIC);
+
+    expect(result.claimed).toBe(0);
+    expect(row.status).toBe(OutboxStatus.PENDING);
+    expect(row.attempts).toBe(0);
+    expect(row.lastError).toBeNull();
   });
 
   it("좀비 PROCESSING 행은 PENDING 환원 후 정상 처리되고 attempts를 보존한다", async () => {

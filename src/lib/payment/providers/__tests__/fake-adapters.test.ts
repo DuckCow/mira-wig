@@ -2,7 +2,8 @@ import { PaymentProvider } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { createMockPaymentProvider } from "../mock";
 import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
-import { resolveProvider } from "../resolve";
+import { resolveInitiationProvider } from "../initiation";
+import { resolveConfirmationProvider } from "../resolve";
 import { PaymentMethod, PaymentMode } from "../routing";
 import type {
   NormalizedProviderConfirmResult,
@@ -24,7 +25,20 @@ import type {
   ProviderVerifiedWebhookInput,
   VerifiedProviderContext,
 } from "../contract";
-import type { PaymentInitiateInput } from "../types";
+import type { PaymentInitiateInput, PaymentProvider as PaymentProviderPort } from "../types";
+
+function resolveProvider(
+  context: ProviderFactoryContext,
+  options: Parameters<typeof resolveInitiationProvider>[1],
+): PaymentProviderPort {
+  const initiation = resolveInitiationProvider(context, options);
+  const confirmation = resolveConfirmationProvider(context, options);
+  return {
+    code: initiation.code,
+    initiate: (input) => initiation.initiate(input),
+    confirm: (input) => confirmation.confirm(input),
+  };
+}
 
 describe("fake provider adapter contract", () => {
   it("uses fake adapters without external provider calls", async () => {
