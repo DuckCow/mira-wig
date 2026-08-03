@@ -4,6 +4,17 @@ Product planning documents frame customer and operator decisions. They do not
 authorize source changes, activate features, or replace the design and source
 authority for a feature.
 
+## Catalog Product Specification and configurable-product foundation
+
+- [Catalog Product Specification & Configurable Product Foundation Contract v0.1](./catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md)
+  — establishes the bounded internal product-truth authority, Technical Model and
+  immutable Configuration Revision semantics required before C1 source work. It
+  grants no source, schema, migration, customer, commerce, manufacturing, sharing
+  or deployment authority.
+- [External Product Truth Authority Decision v0.1](./external-product-truth-authority-decision-v0.1.md)
+  — records that no known external PIM/ERP/supplier/manufacturing master currently
+  owns governed product truth and requires this bounded internal authority.
+
 ## Product media
 
 - [Product Media Architecture Adjudication v0.1](./product-media-architecture-adjudication-v0.1.md)
@@ -14,11 +25,6 @@ authority for a feature.
   — records the project owner's acceptance of the complete textual T7
   remediations and authorizes documentation install only after conformance
   review.
-- [External Product Truth Authority Decision v0.1](./external-product-truth-authority-decision-v0.1.md)
-  — records the project owner's closed finding that there is no known external
-  Product Truth Authority and requires bounded internal Catalog Product
-  Specification authority design after reviewed documentation install.
-
 Upon reviewed merge, the frozen
 [Product Media Contract v0.2](../discovery/product-media-contract-v0.2.md)
 becomes the design authority and

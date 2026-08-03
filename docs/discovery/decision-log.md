@@ -920,3 +920,46 @@ production behavior was changed or activated.
 - no technical source, schema, migration, storage provider, deployment
   mechanism, legacy migration, customer enforcement, or machine-use authority
   was granted.
+
+## 2026-08-04 — Catalog Product Specification and C1 semantic foundation
+
+### Disposition
+
+```text
+INSTALL BOUNDED DESIGN AUTHORITY
+SOURCE / SCHEMA / MIGRATION / CUSTOMER ACTIVATION NOT AUTHORIZED
+```
+
+### Authority decision
+
+- no known external Product Truth Authority currently exists;
+- the project owner remains final Product Specification decision owner;
+- delegated approval must be enforceable and distinct from generic `ADMIN` before source work;
+- approved-and-effective Product Specification truth alone may advance a Product Truth Reference;
+- Candidate A product truth is global with respect to market; publication, price, availability, lead time and fulfilment remain Commerce-owned.
+
+### Domain boundaries
+
+- `WigStyle` remains merchandising family and `WigVariant` current finite-SKU identity;
+- `TechnicalModelVersion` is a separate versioned technical interpretation identity;
+- unevaluated base/cap sameness fails closed to a distinct Technical Model;
+- Hair Geometry Profile length/curl are product-shape classifications, not measured-length evidence;
+- hair material/fiber authenticity requires governed evidence and explicit classification;
+- immutable `ConfigurationRevision` owns product intent only; fit/body truth, ViewState, commerce facts, Build Spec, manufacturing and shipping state remain outside it;
+- rendering may compose Revision + fit/default input + ViewState without transferring fit authority into the Revision;
+- render and production are sibling derivations; C1 persists neither projection.
+
+### Current-source preservation and recorded debts
+
+- current free-form `WigVariant.color/length/curl`, legacy `WigVariant.price`, line snapshots, ManufacturingRequest, media keys and D5/D6 fixtures are not promoted;
+- current finite-SKU C0 checkout/payment/order invariants remain authoritative;
+- MTO admission currently uses `stock` without MTO consumption; STOCKED allocation currently happens after capture; finalization reasserts parent identity rather than current publication/price;
+- the Product Media LBD register still lists LBD-06/LBD-07 as open despite C0 source closure; reconciliation is a separate docs task.
+
+### Candidate A gate
+
+Candidate A remains blocked until governed launch facts, exact TMV/PSV/profile compatibility, scope-bounded canonicalization/equality, externally enforced immutability, a real fail-closed consumer, exact source mapping, separate source authorization and independent review exist. No customer configurator route may be added even default-off in Candidate A.
+
+### Review and precedence closure
+
+The installed contract incorporates accepted Opus technical/domain and Fable product/UX findings. `docs/handoff/mira_handoff_v37.md` was reviewed for Claude-review precedence; it is historical relative to current source, explicitly yields current facts to code, and grants no conflicting Product Specification/C1 authority. Local model-review reports remain review evidence rather than repository authority.

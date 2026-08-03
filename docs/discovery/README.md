@@ -106,7 +106,10 @@ Model agreement is not evidence.
    Accepted invariants, pre-integration amendments, deferred decisions, supersession records, and dependencies.
 
 17. [`configuration-to-order-bounded-contract-v0.1.md`](./configuration-to-order-bounded-contract-v0.1.md)
-   Bounded configuration-to-order design contract. The accompanying 2026-08-01 task grants source authority only for C0 commerce integrity (LBD-06/LBD-07, payment-attempt singularity, late-callback safety, tests, and documentation); C1+ configurable-product, allocation, sharing, shipping, production, and provider activation remain deferred.
+   Bounded configuration-to-order design contract. The accompanying 2026-08-01 task grants source authority only for C0 commerce integrity (LBD-06/LBD-07, payment-attempt singularity, late-callback safety, tests, and documentation). Its C1 semantics are now narrowly amended by the product-authority contract below; C1+ source, allocation, sharing, shipping, production, and provider activation remain deferred.
+
+18. [`../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md`](../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md)
+   Cross-domain Product Specification and configurable-product foundation authority. It owns governed product truth, Technical Model and immutable Configuration Revision meanings required before C1 source work, Product Media truth references, and any discovery vocabulary backed by product facts. It grants no source, schema, migration, customer or production activation.
 
 ## Related repository documentation
 
@@ -115,6 +118,8 @@ These are cross-references, not discovery contracts:
 - [`../engineering/feature-documentation-standard-v0.1.md`](../engineering/feature-documentation-standard-v0.1.md)
   defines repository-wide documentation classification, artifacts, lifecycle,
   and default model/tool roles.
+- [`../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md`](../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md)
+  is the required product-truth dependency before configurable-product source, Product Media source, or discovery vocabulary may claim governed product facts.
 - [`../product/product-media-architecture-adjudication-v0.1.md`](../product/product-media-architecture-adjudication-v0.1.md)
   records the human disposition of Fable's clean-sheet product-media
   architecture and is product authority, not a discovery contract. It grants
