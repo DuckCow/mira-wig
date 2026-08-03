@@ -314,6 +314,8 @@ function initiatePaymentAttemptForTest(
   return initiatePaymentAttempt(client, {
     sessionId: input.sessionId,
     userId: input.userId,
+    now: B5_NOW,
+    contactBoundaryClock: () => B5_NOW,
     adapterContext: {
       provider: input.provider.code,
       mode: input.mode,
