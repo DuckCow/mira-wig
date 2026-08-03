@@ -6,8 +6,17 @@
 **Contract date:** 2026-08-01
 **Status:** `READY_FOR_BOUNDED_IMPLEMENTATION`
 **Authority class:** bounded design authority; source authority is granted only through an explicitly scoped implementation task.
+**Change control:** `supersedes: none | superseded-by: none | bounded-amended-by: ../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md (§0.4)`
 
 ---
+
+> **Installed bounded C1 amendment:** The reviewed
+> [`Catalog Product Specification & Configurable Product Foundation Contract v0.1`](../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md)
+> narrows only the C1 meanings listed in its §0.4. In particular,
+> Configuration Revision is immutable product intent, fit/body measurements
+> remain separate, and RenderWitness and ProductionProjection/BuildSpec are
+> sibling later derivations. C0 source authority and the
+> pre-irreversible-payment Build Spec freeze remain in force.
 
 ## 0. Authority and precedence
 
