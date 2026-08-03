@@ -47,6 +47,12 @@ export function resolveWebhookPipeline(
       "PayPal public webhook verification is unavailable.",
     );
   }
+  if (provider === ProviderCode.EXIMBAY) {
+    return createUnavailablePipeline(
+      "EXIMBAY.PUBLIC_WEBHOOK_UNAVAILABLE",
+      "Eximbay public webhook ingress is unavailable.",
+    );
+  }
   return createUnavailablePipeline(
     "PROVIDER.PUBLIC_WEBHOOK_UNSUPPORTED",
     "Public webhook provider is unsupported.",

@@ -116,8 +116,9 @@ async function resolveInTransaction(
 ): Promise<RefundExecutionResult> {
   const context = await lockAndLoad(tx, ownership, operation.input);
   if (!context) return commandNotFound();
-  // Generic E4 stays MOCK-only; future private Toss continuation owns response authority.
-  if (context.target.provider === PaymentProvider.TOSS) return ledgerFailure();
+  // Generic E4 stays MOCK-only; provider-specific continuations own response authority.
+  if (context.target.provider === PaymentProvider.TOSS
+    || context.target.provider === PaymentProvider.EXIMBAY) return ledgerFailure();
   const sourceDedupKey = buildRefundResultDedupKey(
     operation.input.commandId,
     operation.input.dispatchAttempt,

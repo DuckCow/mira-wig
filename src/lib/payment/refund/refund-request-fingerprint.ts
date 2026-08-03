@@ -6,6 +6,7 @@ import {
 
 const SERIALIZATION_VERSION = "refund-provider-request/v1";
 const POSTGRES_INT_MAX = 2_147_483_647;
+const PAYMENT_PROVIDER_VALUES = new Set<unknown>(Object.values(PaymentProvider));
 
 export type RefundRequestFingerprintInput = Readonly<{
   provider: PaymentProvider;
@@ -38,7 +39,7 @@ export function normalizeRefundRequestFingerprintInput(
   const providerPaymentReference = normalizeOpaque(input.providerPaymentReference);
   const providerOperationKey = normalizeOpaque(input.providerOperationKey);
   const currency = normalizeCurrency(input.currency);
-  if (!Object.values(PaymentProvider).includes(input.provider)
+  if (!isPaymentProvider(input.provider)
     || !Object.values(PaymentMode).includes(input.mode)
     || !providerPaymentReference || !providerOperationKey || !currency
     || !isPositivePostgresInteger(input.amountMinor)) {
@@ -52,6 +53,10 @@ export function normalizeRefundRequestFingerprintInput(
     currency,
     providerOperationKey,
   });
+}
+
+function isPaymentProvider(value: unknown): value is PaymentProvider {
+  return PAYMENT_PROVIDER_VALUES.has(value);
 }
 
 export function serializeRefundRequestFingerprintInput(

@@ -240,6 +240,14 @@ describe("requestRefundAttempt", () => {
     await expectFailure(fixture, "PAYMENT_NOT_REFUNDABLE");
   });
 
+  it("does not admit a refund request for disabled Eximbay identity", async () => {
+    const fixture = await createOrder(ctx, { provider: PaymentProvider.EXIMBAY });
+
+    await expectFailure(fixture, "PAYMENT_NOT_REFUNDABLE");
+    await expect(refundCount(fixture.orderId)).resolves.toBe(0);
+    await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.PAID);
+  });
+
   it("rejects an order/payment amount mismatch", async () => {
     const fixture = await createOrder(ctx, { orderAmount: 900, paymentAmount: 1_000 });
     await expectFailure(fixture, "PAYMENT_IDENTITY_MISMATCH");

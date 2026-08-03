@@ -123,6 +123,16 @@ export const PROVIDER_REGISTRY: Record<PaymentProvider, ProviderRegistryEntry> =
     mockOnly: false,
     liveEnabled: [],
   },
+  [PaymentProvider.EXIMBAY]: {
+    provider: PaymentProvider.EXIMBAY,
+    enabled: false,
+    allowedModes: [],
+    supportedMethods: [],
+    supportedCurrencies: [],
+    mockOnly: false,
+    liveEnabled: [],
+    notes: "Disabled EX1 provider identity. No runtime capabilities are authorized.",
+  },
 };
 
 export const ROUTING_RULES: readonly RoutingRule[] = [
@@ -185,12 +195,13 @@ export function resolveProviderForPayment(
   const rule = matchingRule(context, rules);
   if (!rule) throw noRuleError(context);
 
+  const candidates = [...rule.candidates];
   const filteredOut: FilteredProvider[] = [];
-  const eligible = eligibleProviders(rule.candidates, context, registry, filteredOut);
-  if (eligible.length < 1) throw new NoEligibleProviderError(context, rule.candidates, filteredOut);
+  const eligible = eligibleProviders(candidates, context, registry, filteredOut);
+  if (eligible.length < 1) throw new NoEligibleProviderError(context, candidates, filteredOut);
   return {
     selectedProvider: eligible[0],
-    candidates: [...rule.candidates],
+    candidates,
     ruleId: rule.id,
     mode: context.mode,
     filteredOut,
@@ -216,7 +227,10 @@ export function liveGuardForProviderContext(
   context: ProviderLiveGuardContext,
   registry: Partial<Record<PaymentProvider, ProviderRegistryEntry>> = PROVIDER_REGISTRY,
 ): ProviderLiveGuardResult {
-  const entry = registry[context.provider];
+  const provider = context.provider;
+  const activationFailure = canonicalActivationFailure(provider);
+  if (activationFailure) return { kind: "blocked", liveEnabled: false, reason: activationFailure };
+  const entry = registry[provider];
   if (!entry) return { kind: "blocked", liveEnabled: false, reason: "provider is not registered" };
   if (isLiveEnabled(entry, context)) return { kind: "allowed", liveEnabled: true };
   return { kind: "blocked", liveEnabled: false, reason: "provider is not live-enabled for context" };
@@ -237,11 +251,32 @@ function eligibleProviders(
   filteredOut: FilteredProvider[],
 ): PaymentProvider[] {
   return candidates.filter((provider) => {
+    const activationFailure = canonicalActivationFailure(provider);
+    if (activationFailure) {
+      filteredOut.push({ provider, reason: activationFailure });
+      return false;
+    }
+
     const reason = ineligibleReason(registry[provider], context);
     if (!reason) return true;
     filteredOut.push({ provider, reason });
     return false;
   });
+}
+
+function canonicalActivationFailure(provider: unknown): string | null {
+  if (!isCanonicalPaymentProvider(provider)) return "provider identity is invalid";
+  if (provider === PaymentProvider.EXIMBAY) {
+    return "provider is disabled by EX1 activation authority";
+  }
+  return null;
+}
+
+function isCanonicalPaymentProvider(provider: unknown): provider is PaymentProvider {
+  return provider === PaymentProvider.MOCK
+    || provider === PaymentProvider.TOSS
+    || provider === PaymentProvider.PAYPAL
+    || provider === PaymentProvider.EXIMBAY;
 }
 
 function ineligibleReason(entry: ProviderRegistryEntry | undefined, context: PaymentContext): string | null {

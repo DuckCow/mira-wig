@@ -295,6 +295,7 @@ enum PaymentProvider {
   MOCK
   TOSS
   PAYPAL
+  EXIMBAY
 }
 
 enum PaymentMode {

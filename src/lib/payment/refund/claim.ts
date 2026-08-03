@@ -124,6 +124,12 @@ function validateClaimCapability(
   aggregate: RefundExecutionClaimAggregate,
   capability: ClaimCapability,
 ): ClaimRefundAttemptForExecutionFailure | null {
+  if (aggregate.payment.provider === PaymentProvider.EXIMBAY) {
+    return failure(
+      "CLAIM_CAPABILITY_UNSUPPORTED",
+      "Eximbay refund execution is disabled.",
+    );
+  }
   if (capability === "provider-neutral") return null;
   if (aggregate.payment.provider === PaymentProvider.MOCK && aggregate.payment.mode === PaymentMode.SANDBOX) {
     return null;

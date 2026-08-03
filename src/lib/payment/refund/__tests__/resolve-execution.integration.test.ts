@@ -186,6 +186,43 @@ describe("fenced refund execution observation persistence", () => {
     expect(await redactedDispatchAuthorizationState(contacted.fixture)).toEqual(before);
   });
 
+  it("rejects Eximbay E4 before evidence handling with no command or evidence mutation", async () => {
+    const prepared = await prepareAuthorized(fixtures);
+    await Promise.all([
+      db.payment.update({
+        where: { id: prepared.fixture.paymentId },
+        data: { provider: PaymentProvider.EXIMBAY },
+      }),
+      db.refundAttempt.update({
+        where: { id: prepared.fixture.refundAttemptId },
+        data: { provider: PaymentProvider.EXIMBAY },
+      }),
+      db.refundExecutionDispatchAttempt.update({
+        where: {
+          commandId_ordinal: {
+            commandId: prepared.fixture.commandId,
+            ordinal: prepared.dispatchAttempt,
+          },
+        },
+        data: { provider: PaymentProvider.EXIMBAY },
+      }),
+    ]);
+    const before = await redactedDispatchAuthorizationState(prepared.fixture);
+    const evidenceBefore = await db.refundExecutionEvidence.count({
+      where: { commandId: prepared.fixture.commandId },
+    });
+
+    expectFailure(
+      await persistFreshRefundExecutionObservation(db, freshInput(prepared), RESULT_ENV),
+      "REFUND_LEDGER_INCONSISTENT",
+    );
+
+    expect(await redactedDispatchAuthorizationState(prepared.fixture)).toEqual(before);
+    await expect(db.refundExecutionEvidence.count({
+      where: { commandId: prepared.fixture.commandId },
+    })).resolves.toBe(evidenceBefore);
+  });
+
   it("explicitly rejects public generic replay for durable Toss artifacts with zero writes", async () => {
     const contacted = await prepareTossAuthorized(fixtures);
     await markDispatchContactForTest(contacted.fixture);

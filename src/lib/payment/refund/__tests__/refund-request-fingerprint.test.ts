@@ -70,6 +70,31 @@ describe("refund request fingerprint", () => {
     expect(facts.currency).toBe("KRW");
   });
 
+  it.each(Object.values(PaymentProvider))(
+    "accepts canonical Prisma provider identity %s",
+    (provider) => {
+      expect(normalizeRefundRequestFingerprintInput({
+        ...representative(),
+        provider,
+      }).provider).toBe(provider);
+    },
+  );
+
+  it.each([
+    ["near-match", "EXIM"],
+    ["prototype name", "__proto__"],
+    ["constructor name", "constructor"],
+    ["null", null],
+    ["number", 7],
+    ["plain object", {}],
+  ] satisfies readonly [string, unknown][])(
+    "rejects noncanonical runtime provider $label",
+    (_label, provider) => {
+      expect(() => normalizeRefundProviderAtRuntime(provider))
+        .toThrow(RefundRequestFingerprintInputError);
+    },
+  );
+
   it.each([
     { label: "money", change: { amountMinor: 401 } },
     { label: "provider reference", change: { providerPaymentReference: "mock:payment_2" } },
@@ -101,4 +126,11 @@ function representative(): RefundRequestFingerprintInput {
     currency: "KRW",
     providerOperationKey: "refund:payment_1:attempt_1",
   };
+}
+
+function normalizeRefundProviderAtRuntime(provider: unknown): unknown {
+  return Reflect.apply(normalizeRefundRequestFingerprintInput, undefined, [{
+    ...representative(),
+    provider,
+  }]);
 }
