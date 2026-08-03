@@ -2,11 +2,13 @@ import { PaymentProvider } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProviderFactoryContext } from "../contract";
 import { ProviderCapability } from "../capabilities";
-import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
+import { credentialChecksForProvider, TOSS_SANDBOX_SECRET_KEY } from "../credentials";
 import {
   TOSS_SANDBOX_EXTERNAL_ENABLED,
+  sandboxExternalDeploymentKeyEnabled,
   type CreateConfirmationProviderOptions,
   type CreateInitiationProviderOptions,
+  type ProviderEnv,
   type SandboxExternalCodeRegistryEntry,
 } from "../factory";
 import { PaymentMethod, PaymentMode } from "../routing";
@@ -173,6 +175,86 @@ describe("payment provider adapter resolution", () => {
       factoryContext({ provider: PaymentProvider.MOCK, mode: PaymentMode.LIVE }),
       "MOCK_PROVIDER_LIVE",
     );
+  });
+
+  it.each([PaymentMode.SANDBOX, PaymentMode.LIVE])(
+    "fails Eximbay %s resolution before constructing any supplied adapter",
+    (mode) => {
+      const adapter = throwingAdapter();
+      const options: TestProviderOptions = {
+        env: { TOSS_SANDBOX_EXTERNAL_ENABLED: "ENABLED" },
+        sandboxExternalCodeRegistry: [{
+          provider: PaymentProvider.EXIMBAY,
+          mode: PaymentMode.SANDBOX,
+          capability: ProviderCapability.ACTION_ADAPTER,
+        }],
+        sandboxExternalInitiationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
+        sandboxExternalConfirmationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
+        liveInitiationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
+        liveConfirmationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
+      };
+
+      expectResolutionFailure(factoryContext({
+        provider: PaymentProvider.EXIMBAY,
+        mode,
+        market: "US",
+        currency: "USD",
+      }), "PROVIDER_NOT_ENABLED", undefined, options);
+      expect(adapter.calls).toBe(0);
+    },
+  );
+
+  it("reads no credential or deployment environment key for disabled Eximbay", () => {
+    const reads: PropertyKey[] = [];
+    const env = new Proxy<Record<string, string | undefined>>({}, {
+      get: (_target, key) => {
+        reads.push(key);
+        return undefined;
+      },
+    });
+    const input = {
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    };
+
+    expect(credentialChecksForProvider(input, env)).toEqual([]);
+    expect(sandboxExternalDeploymentKeyEnabled(input, env)).toBe(false);
+    expect(reads).toEqual([]);
+  });
+
+  it.each([
+    ["constructor", "constructor"],
+    ["toString", "toString"],
+    ["__proto__", "__proto__"],
+    ["prototype", "prototype"],
+    ["unknown", "UNKNOWN"],
+    ["Eximbay prefix", "EXIMBAY_"],
+    ["null", null],
+    ["number", 7],
+    ["object", {}],
+  ] satisfies readonly [string, unknown][])(
+    "does not derive sandbox external authority from malformed runtime provider $label",
+    (_label, provider) => {
+      const reads: PropertyKey[] = [];
+      const env = new Proxy<Record<string, string | undefined>>({}, {
+        get: (_target, key) => {
+          reads.push(key);
+          return "ENABLED";
+        },
+      });
+
+      expect(sandboxDeploymentEnabledAtRuntime(provider, env)).toBe(false);
+      expect(reads).toEqual([]);
+    },
+  );
+
+  it("preserves the explicit Toss sandbox external deployment key", () => {
+    expect(sandboxExternalDeploymentKeyEnabled({
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    }, sandboxEnabledEnv())).toBe(true);
   });
 
   it("fails LIVE before credential checks when the provider is not live-enabled", () => {
@@ -347,6 +429,16 @@ function restoreEnv(key: string, original: string | undefined): void {
     return;
   }
   process.env[key] = original;
+}
+
+function sandboxDeploymentEnabledAtRuntime(provider: unknown, env: ProviderEnv): boolean {
+  const result: unknown = Reflect.apply(sandboxExternalDeploymentKeyEnabled, undefined, [{
+    provider,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.ACTION_ADAPTER,
+  }, env]);
+  if (typeof result !== "boolean") throw new Error("Sandbox deployment authority returned a non-boolean value.");
+  return result;
 }
 
 function factoryContext(overrides: Partial<ProviderFactoryContext> = {}): ProviderFactoryContext {

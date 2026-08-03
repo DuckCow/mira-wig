@@ -733,6 +733,126 @@ describe("runRefundExecutionWorkerCycle integration", () => {
     }
   });
 
+  it("additionally excludes Eximbay Q0 READY work before allocation and routing", async () => {
+    const fixture = await tossFixture(fixtures);
+    await setEximbayDomain(fixture);
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-q0-worker" },
+      ports(fixture, calls),
+      READY_ENV,
+    );
+
+    expect(result).toEqual(successCounters({
+      selectedCount: 0,
+      attemptedCount: 0,
+      readySelected: 0,
+    }));
+    expectSuccessfulAggregate(result);
+    const state = await dispatchState(fixture);
+    expect(state.command.status).toBe("READY");
+    expect(state.command.dispatchAttempt).toBe(0);
+    expect(state.command.leaseOwner).toBeNull();
+    expect(state.command.leaseUntil).toBeNull();
+    expect(state.command.leaseTokenHash).toBeNull();
+    expect(state.commandEvents.filter((event) => (
+      event.eventType === RefundExecutionCommandEventType.LEASE_ACQUIRED
+    ))).toHaveLength(0);
+    expect(state.evidence).toHaveLength(0);
+    expect(calls).toEqual({ get: 0, post: 0 });
+  });
+
+  it("additionally excludes Eximbay Q1 expired ordinal-zero work without reclaim mutation", async () => {
+    const fixture = await tossFixture(fixtures);
+    const acquired = await acquireRefundExecutionLease(db, {
+      commandId: fixture.commandId,
+      leaseOwner: "eximbay-q1-original-owner",
+    }, { [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" });
+    if (!acquired.ok) throw new Error(`Fixture lease failed: ${acquired.code}`);
+    await db.refundExecutionCommand.update({
+      where: { id: fixture.commandId },
+      data: { leaseUntil: EXPIRED },
+    });
+    await setEximbayDomain(fixture);
+    const before = await db.refundExecutionCommand.findUniqueOrThrow({
+      where: { id: fixture.commandId },
+    });
+    const beforeEventCount = await db.refundExecutionCommandEvent.count({
+      where: { commandId: fixture.commandId },
+    });
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-q1-worker" },
+      ports(fixture, calls),
+      UNCONTACTED_ENV,
+    );
+
+    expectSuccessfulEmptyAggregate(result);
+    const after = await db.refundExecutionCommand.findUniqueOrThrow({
+      where: { id: fixture.commandId },
+    });
+    expect(sameRedactedLeaseAuthority(before, after)).toBe(true);
+    expect(after.leaseGeneration).toBe(acquired.lease.leaseGeneration);
+    expect(await db.refundExecutionCommandEvent.count({
+      where: { commandId: fixture.commandId },
+    })).toBe(beforeEventCount);
+    expect(calls).toEqual({ get: 0, post: 0 });
+  });
+
+  it("additionally excludes Eximbay Q3 contacted work without recovery mutation", async () => {
+    const fixture = await tossFixture(fixtures);
+    await createContactedUnknownOutcome(fixture);
+    await setEximbayDomain(fixture);
+    const before = await recoveryProjection(fixture);
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-q3-worker" },
+      { lookup: eligibleLookup(fixture, calls), cancellation: countingCancellation(fixture, calls) },
+      CONTACTED_ENV,
+    );
+
+    expectSuccessfulEmptyAggregate(result);
+    expect(await recoveryProjection(fixture)).toEqual(before);
+    expect(calls).toEqual({ get: 0, post: 0 });
+  });
+
+  it("keeps Eximbay rows from starving eligible Toss Q0 work", async () => {
+    const eximbay: DispatchFixture[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      const fixture = await tossFixture(fixtures, new Date(Date.UTC(2011, 0, index + 1)));
+      await setEximbayDomain(fixture);
+      eximbay.push(fixture);
+    }
+    const valid = await tossFixture(fixtures, new Date("2021-01-01T00:00:00.000Z"));
+    const calls = { get: 0, post: 0 };
+
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-pre-take-domain-worker" },
+      ports(valid, calls),
+      READY_ENV,
+    );
+
+    expect(result).toEqual(successCounters({
+      readySelected: 1, succeededCount: 1, providerLookupCount: 2, providerCancellationCount: 1,
+    }));
+    expectSuccessfulAggregate(result);
+    expect(calls).toEqual({ get: 2, post: 1 });
+    expect((await dispatchState(valid)).command.status).toBe("DONE");
+    for (const fixture of eximbay) {
+      const state = await dispatchState(fixture);
+      expect(state.command.status).toBe("READY");
+      expect(state.command.dispatchAttempt).toBe(0);
+      expect(state.commandEvents).toHaveLength(0);
+    }
+  });
+
   it("serializes overlapping Q1 worker cycles to one reclaim generation and continuation", async () => {
     const fixture = await tossFixture(fixtures);
     const acquired = await acquireRefundExecutionLease(db, {
@@ -1115,6 +1235,13 @@ async function setUnsupportedDomain(
     data: kind === "provider"
       ? { provider: PaymentProvider.MOCK }
       : { mode: PaymentMode.LIVE },
+  });
+}
+
+async function setEximbayDomain(fixture: DispatchFixture): Promise<void> {
+  await db.refundAttempt.update({
+    where: { id: fixture.refundAttemptId },
+    data: { provider: PaymentProvider.EXIMBAY },
   });
 }
 

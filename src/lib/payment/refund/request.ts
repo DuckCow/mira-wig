@@ -1,6 +1,7 @@
 import {
   OrderStatus,
   PaymentAttemptStatus,
+  PaymentProvider,
   Prisma,
   RefundAttemptStatus,
   type PrismaClient,
@@ -241,6 +242,7 @@ function isRefundableOrderStatus(status: OrderStatus): boolean {
 
 function isRefundablePayment(order: RefundRequestOrder): boolean {
   return order.payment.status === PaymentAttemptStatus.SUCCEEDED
+    && order.payment.provider !== PaymentProvider.EXIMBAY
     && Boolean(order.payment.providerPaymentKey?.trim());
 }
 

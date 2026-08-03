@@ -173,6 +173,9 @@ function requiredProvider(payload: Record<string, unknown>, key: string): Paymen
   if (value === PaymentProvider.MOCK) return PaymentProvider.MOCK;
   if (value === PaymentProvider.TOSS) return PaymentProvider.TOSS;
   if (value === PaymentProvider.PAYPAL) return PaymentProvider.PAYPAL;
+  if (value === PaymentProvider.EXIMBAY) {
+    throw new Error("pg.void payload provider EXIMBAY is disabled");
+  }
   throw new Error(`pg.void payload invalid ${key}`);
 }
 

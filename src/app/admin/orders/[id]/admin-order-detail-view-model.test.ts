@@ -65,6 +65,18 @@ describe("admin order detail view model", () => {
     expect(JSON.stringify(view)).not.toContain("idempotencyKey");
   });
 
+  it("renders disabled Eximbay identity neutrally without implying availability", () => {
+    const order = source();
+    order.payment.provider = PaymentProvider.EXIMBAY;
+    order.refundAttempts = [attempt("refund_eximbay", 1_000, RefundAttemptStatus.CANCELLED)];
+    order.refundAttempts[0].provider = PaymentProvider.EXIMBAY;
+
+    const view = buildAdminOrderDetailViewModel(order);
+
+    expect(view.payment.providerContext).toBe("EXIMBAY / SANDBOX");
+    expect(view.refundAttempts[0].providerContext).toBe("EXIMBAY / SANDBOX");
+  });
+
   it("marks mismatched refund currencies for review instead of combining them", () => {
     const order = source({ refundAttempts: [attempt("refund_usd", 100, RefundAttemptStatus.SUCCEEDED, "USD")] });
 

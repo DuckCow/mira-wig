@@ -393,7 +393,63 @@ describe("payment webhook core", () => {
     );
 
     expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    await expect(onlyRejection(payload.transmissionId)).resolves.toMatchObject({
+      code: "PROVIDER.PUBLIC_WEBHOOK_UNSUPPORTED",
+      lastError: "Public webhook provider is unsupported.",
+    });
     await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.MOCK);
+  });
+
+  it("preserves the PayPal unavailable diagnostic without changing its public behavior", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+
+    const result = await handleWebhook(db, PaymentProvider.PAYPAL, rawWebhook(payload));
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    await expect(onlyRejection(payload.transmissionId)).resolves.toMatchObject({
+      code: "PAYPAL.PUBLIC_WEBHOOK_VERIFIER_UNAVAILABLE",
+      lastError: "PayPal public webhook verification is unavailable.",
+    });
+    await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.PAYPAL);
+  });
+
+  it("rejects Eximbay before any environment, resolver, or provider-contact seam is used", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payload = capturePayload(ctx, session);
+    let environmentReads = 0;
+    let registryReads = 0;
+    let providerContacts = 0;
+    const env = new Proxy<Record<string, string | undefined>>({}, {
+      get: () => { environmentReads += 1; return undefined; },
+    });
+    const options: WebhookHandleOptions = {
+      env,
+      fetchFn: () => {
+        providerContacts += 1;
+        return Promise.reject(new Error("Eximbay provider contact must remain unreachable."));
+      },
+    };
+    Object.defineProperty(options, "sandboxExternalCodeRegistry", {
+      get: () => { registryReads += 1; return []; },
+    });
+
+    const result = await handleWebhook(
+      db,
+      PaymentProvider.EXIMBAY,
+      rawWebhook(payload),
+      options,
+    );
+
+    expect(result).toMatchObject({ kind: "verifyFailed", status: 503 });
+    await expect(onlyRejection(payload.transmissionId)).resolves.toMatchObject({
+      code: "EXIMBAY.PUBLIC_WEBHOOK_UNAVAILABLE",
+      lastError: "Eximbay public webhook ingress is unavailable.",
+    });
+    expect(environmentReads).toBe(0);
+    expect(registryReads).toBe(0);
+    expect(providerContacts).toBe(0);
+    await expectZeroPublicIngressWrites(ctx, session, payload, PaymentProvider.EXIMBAY);
   });
 
   it("same transmissionId replay is absorbed without reprocessing", async () => {

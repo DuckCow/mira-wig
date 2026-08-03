@@ -165,8 +165,15 @@ export function sandboxExternalDeploymentKeyEnabled(input: SandboxExternalCapabi
 }
 
 function sandboxDeploymentKeyName(provider: ProviderCode): string | null {
-  if (provider === ProviderCode.TOSS) return TOSS_SANDBOX_EXTERNAL_ENABLED;
-  return null;
+  switch (provider) {
+    case ProviderCode.TOSS:
+      return TOSS_SANDBOX_EXTERNAL_ENABLED;
+    case ProviderCode.MOCK:
+    case ProviderCode.PAYPAL:
+    case ProviderCode.EXIMBAY:
+    default:
+      return null;
+  }
 }
 
 function assertSupportedMode(context: ProviderFactoryContext): asserts context is ProviderFactoryContext {

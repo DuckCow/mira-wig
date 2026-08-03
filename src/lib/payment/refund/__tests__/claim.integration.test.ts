@@ -246,6 +246,22 @@ describe("claimRefundAttemptForExecution", () => {
     await expectNoWriteFailure(fixture, targetId, "PAYMENT_NOT_REFUNDABLE");
   });
 
+  it("does not claim a seeded Eximbay refund attempt or create execution artifacts", async () => {
+    const fixture = await createOrder(ctx, { provider: PaymentProvider.EXIMBAY });
+    const targetId = await seedAttempt(fixture);
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForExecution(
+      db,
+      claimInput(fixture.orderId, targetId),
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+    await expect(commandCount(targetId)).resolves.toBe(0);
+    await expect(claimTransitionCount(targetId)).resolves.toBe(0);
+  });
+
   it.each([
     ["currency", { currency: "USD" }],
     ["provider", { provider: PaymentProvider.PAYPAL }],
@@ -489,6 +505,7 @@ describe("claimRefundAttemptForExecution", () => {
 
     it.each([
       [PaymentProvider.TOSS, PaymentMode.SANDBOX],
+      [PaymentProvider.EXIMBAY, PaymentMode.SANDBOX],
       [PaymentProvider.MOCK, PaymentMode.LIVE],
     ])("rejects unsupported capability %s / %s before writes", async (provider, mode) => {
       const fixture = await createOrder(ctx, { provider, mode });
