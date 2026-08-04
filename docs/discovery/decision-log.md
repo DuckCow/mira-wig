@@ -1118,3 +1118,93 @@ It grants no:
 The next documentation gate is the R2B source-status/as-built record. Any R2C
 scaling/LOD, learned-producer, external-asset, fitting or customer work requires
 separate reviewed authority.
+
+## 2026-08-04 — R2C-A render-runtime scaling measurement design freeze
+
+### Parent source
+
+- R2B source-status merge:
+  `3cb1d48e95000759ac8259d7dd931a5dd097c9c7`;
+- read-only reconnaissance:
+  `WIG-REN-WEB-R2CA-COD-R0-SCALING-RECON-v0.1`;
+- classification:
+  `SOURCE_ONLY / EVIDENCE_COLLECTION`.
+
+### Frozen experiment boundary
+
+R2C-A will:
+
+- use a dedicated admin-only performance surface;
+- use a distinct validated `BENCHMARK_ONLY` input above canonical R2B limits;
+- preserve the R2B route, fixture, manifest/binary schema and 96-strand
+  canonical limit;
+- measure aggregate owned CPU/wall-clock renderer stages;
+- keep GPU timestamps and true-GPU-memory claims outside v0.1;
+- retain results only in memory with explicit local JSON copy/download;
+- add no telemetry, DB, external storage, product, fitting, commerce or
+  manufacturing authority.
+
+### Scale and sampling decisions
+
+- automatic ladder:
+  `72, 144, 288, 576, 1,152`;
+- manual-only extension:
+  `2,304, 4,608`;
+- point-count axis:
+  `3, 6, 8` at the highest common safe level not above `576`;
+- initial sampling:
+  `2 warm-ups + 7 measured`;
+- initial p90:
+  prohibited;
+- decision-critical confirmation:
+  `20 measured`, nearest-rank p90;
+- lifecycle:
+  `20 cycles at 72`, `5 at the highest admitted level`, with a separate
+  operator action required for `20` high-level cycles.
+
+### Safety decisions
+
+- hard typed-array lower-bound cap:
+  `64 MiB`;
+- one synchronous owned stage:
+  `1,000 ms`;
+- candidate-to-logical-READY:
+  `3,000 ms`;
+- severe long task:
+  `1,000 ms` when supported;
+- whole run:
+  `15 minutes`;
+- fixed CSS viewport:
+  `800 × 600`;
+- existing DPR cap:
+  retained at `2`;
+- hidden-tab, viewport, drawing-buffer or DPR changes:
+  invalidate the active sample/run.
+
+These are diagnostic safety ceilings, not production budgets.
+
+### Evidence threshold
+
+An R2C-B architecture decision requires:
+
+- two device classes including a lower-capability device;
+- Chromium-family and Safari/WebKit evidence;
+- actual backend recorded;
+- paired counterbalanced backend sessions when comparing WebGPU and WebGL2;
+- raw samples and stop records;
+- a 20-sample confirmation for a decision-critical cell.
+
+### Authority
+
+This freeze authorizes documentation installation only.
+
+It does not authorize:
+
+- benchmark source implementation;
+- R2B limit or fixture changes;
+- LOD, packed rendering, workers or glTF;
+- learned generation;
+- persistence, telemetry or external storage;
+- customer, product, fit, commerce or manufacturing behavior.
+
+The next gate is a separately reviewed R2C-A Implementation Task Contract.
