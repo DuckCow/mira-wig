@@ -2,12 +2,15 @@
 
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createProceduralStrandSource } from "@/lib/rendering/procedural-strand-source";
+import {
+  isStrandBundleAbortError,
+  loadDiagnosticStrandBundle,
+  type LoadedStrandBundle,
+} from "@/lib/rendering/strand-bundle-loader";
 import {
   DEFAULT_VISUAL_STATE,
   canonicalizeVisualState,
@@ -16,6 +19,7 @@ import {
 } from "@/lib/rendering/visual-state";
 import type {
   RendererBackend,
+  RendererBackendCallbacks,
   RendererDiagnostics,
 } from "@/lib/rendering/renderer-backend";
 
@@ -55,81 +59,451 @@ function failureMessage(error: unknown): string {
   return "렌더러를 초기화하지 못했습니다.";
 }
 
-interface ViewportLifecycleBackend {
-  dispose(): void;
+export interface ViewportRenderHost {
+  reveal(): void;
+  remove(): void;
 }
 
-interface ViewportLifecycleObserver {
+interface DomViewportRenderHost extends ViewportRenderHost {
+  readonly element: HTMLElement;
+}
+
+interface ViewportObserver {
   disconnect(): void;
 }
 
-export interface ViewportLifecycle {
-  isActive(): boolean;
-  attachBackend(backend: ViewportLifecycleBackend): boolean;
-  attachObserver(observer: ViewportLifecycleObserver): boolean;
-  fail(error: unknown): void;
+type ViewportBackend = RendererBackend;
+
+interface RenderEntry {
+  readonly bundle: LoadedStrandBundle;
+  readonly backend: ViewportBackend;
+  readonly host: ViewportRenderHost;
+  readonly forceWebGL: boolean;
+  readonly generation: number;
+  failure: Error | null;
+}
+
+interface LoadOperation {
+  readonly initial: boolean;
+  readonly generation: number;
+  readonly intentGeneration: number;
+  readonly activeEntryAtStart: RenderEntry | null;
+  readonly controller: AbortController;
+}
+
+export interface ViewportCoordinatorOptions {
+  readonly loadBundle: (signal: AbortSignal) => Promise<LoadedStrandBundle>;
+  readonly createHost: () => ViewportRenderHost;
+  readonly createBackend: (
+    host: ViewportRenderHost,
+    forceWebGL: boolean,
+    callbacks: RendererBackendCallbacks,
+  ) => ViewportBackend;
+  readonly getVisualState: () => VisualState;
+  readonly isAbortError: (error: unknown) => boolean;
+  readonly clearPointer: () => void;
+  readonly onInitialLoading: () => void;
+  readonly onReplacementLoading: (loading: boolean) => void;
+  readonly onModeCommitted: (forceWebGL: boolean) => void;
+  readonly onReady: (diagnostics: RendererDiagnostics) => void;
+  readonly onDiagnostics: (diagnostics: RendererDiagnostics) => void;
+  readonly onInitialFailure: (message: string) => void;
+  readonly onReplacementFailure: (message: string) => void;
+  readonly onTerminalFailure: (message: string) => void;
+}
+
+export interface ViewportCoordinator {
+  startInitial(forceWebGL: boolean): Promise<void>;
+  reload(): Promise<void>;
+  changeMode(forceWebGL: boolean): Promise<void>;
+  updateVisualState(state: VisualState): void;
+  resize(width: number, height: number): void;
+  attachObserver(observer: ViewportObserver): boolean;
   deactivate(): void;
 }
 
-interface ViewportLifecycleOptions {
-  readonly isCurrentGeneration: () => boolean;
-  readonly clearActiveBackend: (backend: ViewportLifecycleBackend) => void;
-  readonly clearPointer: () => void;
-  readonly onFailure: (message: string) => void;
+type ViewportBackendFactory = ViewportCoordinatorOptions["createBackend"];
+
+export interface ViewportRuntimeSetupObserver {
+  readonly observer: ViewportObserver;
+  observe(): void;
 }
 
-/** Owns one viewport generation's backend, observer, pointer, and terminal status. */
-export function createViewportLifecycle(
-  options: ViewportLifecycleOptions,
-): ViewportLifecycle {
-  let active = true;
-  let backend: ViewportLifecycleBackend | null = null;
-  let observer: ViewportLifecycleObserver | null = null;
+export interface ViewportRuntimeSetupOptions {
+  readonly isMounted: () => boolean;
+  readonly loadBackendFactory: () => Promise<ViewportBackendFactory>;
+  readonly createCoordinator: (backendFactory: ViewportBackendFactory) => ViewportCoordinator;
+  readonly createObserver: (coordinator: ViewportCoordinator) => ViewportRuntimeSetupObserver;
+  readonly onCoordinatorChange: (coordinator: ViewportCoordinator | null) => void;
+  readonly onSetupFailure: (message: string) => void;
+}
 
-  function isActive(): boolean {
-    return active && options.isCurrentGeneration();
+/** Contains all asynchronous and observer setup before the coordinator owns normal runtime flow. */
+export async function initializeViewportRuntime(
+  options: ViewportRuntimeSetupOptions,
+): Promise<void> {
+  let coordinator: ViewportCoordinator | null = null;
+  let setupObserver: ViewportRuntimeSetupObserver | null = null;
+  let observerOwnedByCoordinator = false;
+  try {
+    const backendFactory = await options.loadBackendFactory();
+    if (!options.isMounted()) return;
+    coordinator = options.createCoordinator(backendFactory);
+    options.onCoordinatorChange(coordinator);
+    setupObserver = options.createObserver(coordinator);
+    observerOwnedByCoordinator = coordinator.attachObserver(setupObserver.observer);
+    if (!observerOwnedByCoordinator) {
+      setupObserver = null;
+      throw new Error("Viewport coordinator became inactive during setup.");
+    }
+    setupObserver.observe();
+    await coordinator.startInitial(false);
+  } catch (error) {
+    if (setupObserver !== null && !observerOwnedByCoordinator) {
+      setupObserver.observer.disconnect();
+    }
+    coordinator?.deactivate();
+    if (coordinator !== null) options.onCoordinatorChange(null);
+    if (options.isMounted()) options.onSetupFailure(failureMessage(error));
+  }
+}
+
+/** Owns load generations and hidden renderer candidates without requiring a GPU in tests. */
+export function createViewportCoordinator(
+  options: ViewportCoordinatorOptions,
+): ViewportCoordinator {
+  let active = true;
+  let intentGeneration = 0;
+  let loadGeneration = 0;
+  let rendererGeneration = 0;
+  let replacementLoading = false;
+  let loadController: AbortController | null = null;
+  let activeEntry: RenderEntry | null = null;
+  let candidateEntry: RenderEntry | null = null;
+  let observer: ViewportObserver | null = null;
+
+  function disposeEntry(entry: RenderEntry | null): void {
+    if (entry === null) return;
+    entry.backend.dispose();
+    entry.host.remove();
   }
 
-  function teardown(error?: unknown): void {
+  function disposeCandidate(entry: RenderEntry): void {
+    if (candidateEntry === entry) candidateEntry = null;
+    disposeEntry(entry);
+  }
+
+  function invalidateCandidate(): void {
+    rendererGeneration += 1;
+    const previousCandidate = candidateEntry;
+    candidateEntry = null;
+    disposeEntry(previousCandidate);
+  }
+
+  /** Latest user-started load or mode intent wins across both operation kinds. */
+  function beginIntent(cancelPendingLoad: boolean): number {
+    intentGeneration += 1;
+    invalidateCandidate();
+    if (cancelPendingLoad) {
+      if (loadController !== null) {
+        loadGeneration += 1;
+        loadController.abort();
+        loadController = null;
+      }
+      if (replacementLoading) {
+        replacementLoading = false;
+        options.onReplacementLoading(false);
+      }
+    }
+    return intentGeneration;
+  }
+
+  function enterTerminal(
+    failure: { readonly kind: "INITIAL" | "TERMINAL"; readonly message: string } | null,
+  ): void {
     if (!active) return;
-    const shouldReportFailure = error !== undefined && options.isCurrentGeneration();
     active = false;
-
-    const currentObserver = observer;
+    intentGeneration += 1;
+    loadGeneration += 1;
+    loadController?.abort();
+    loadController = null;
+    invalidateCandidate();
+    const currentActive = activeEntry;
+    activeEntry = null;
+    disposeEntry(currentActive);
+    observer?.disconnect();
     observer = null;
-    currentObserver?.disconnect();
+    options.clearPointer();
+    if (replacementLoading) {
+      replacementLoading = false;
+      options.onReplacementLoading(false);
+    }
+    if (failure?.kind === "INITIAL") options.onInitialFailure(failure.message);
+    if (failure?.kind === "TERMINAL") options.onTerminalFailure(failure.message);
+  }
 
-    const currentBackend = backend;
-    backend = null;
-    if (currentBackend !== null) {
-      options.clearActiveBackend(currentBackend);
-      currentBackend.dispose();
+  function failActive(entry: RenderEntry, error: unknown): void {
+    if (!active || activeEntry !== entry) return;
+    enterTerminal({ kind: "TERMINAL", message: failureMessage(error) });
+  }
+
+  function normalizedFailure(error: unknown): Error {
+    if (error instanceof Error) return error;
+    return new Error(failureMessage(error), { cause: error });
+  }
+
+  async function buildAndPromote(
+    bundle: LoadedStrandBundle,
+    candidateForceWebGL: boolean,
+    mayCommit: () => boolean,
+  ): Promise<boolean> {
+    invalidateCandidate();
+    const generation = rendererGeneration;
+
+    const host = options.createHost();
+    let entry: RenderEntry | null = null;
+    let creationFailure: Error | null = null;
+    let backend: ViewportBackend;
+    try {
+      backend = options.createBackend(host, candidateForceWebGL, {
+        onDiagnostics: (diagnostics) => {
+          if (entry !== null && activeEntry === entry) options.onDiagnostics(diagnostics);
+        },
+        onFailure: (error) => {
+          creationFailure = error;
+          if (entry !== null) entry.failure = error;
+          if (entry !== null) failActive(entry, error);
+        },
+      });
+    } catch (error) {
+      host.remove();
+      throw error;
+    }
+    entry = {
+      bundle,
+      backend,
+      host,
+      forceWebGL: candidateForceWebGL,
+      generation,
+      failure: creationFailure,
+    };
+    candidateEntry = entry;
+
+    let diagnostics: RendererDiagnostics;
+    try {
+      diagnostics = await backend.initialize(bundle.asset, options.getVisualState());
+      if (entry.failure !== null) throw entry.failure;
+    } catch (error) {
+      disposeCandidate(entry);
+      throw error;
+    }
+    if (
+      !active ||
+      generation !== rendererGeneration ||
+      candidateEntry !== entry ||
+      !mayCommit()
+    ) {
+      disposeCandidate(entry);
+      return false;
     }
 
-    options.clearPointer();
-    if (shouldReportFailure) options.onFailure(failureMessage(error));
+    const previousActive = activeEntry;
+    host.reveal();
+    activeEntry = entry;
+    candidateEntry = null;
+    options.onModeCommitted(entry.forceWebGL);
+    options.onReady(diagnostics);
+    disposeEntry(previousActive);
+    return true;
+  }
+
+  function beginLoad(
+    initial: boolean,
+    operationIntentGeneration: number,
+    activeEntryAtStart: RenderEntry | null,
+  ): LoadOperation {
+    loadGeneration += 1;
+    loadController?.abort();
+    const controller = new AbortController();
+    loadController = controller;
+    if (initial) options.onInitialLoading();
+    else {
+      replacementLoading = true;
+      options.onReplacementLoading(true);
+    }
+    return {
+      initial,
+      generation: loadGeneration,
+      intentGeneration: operationIntentGeneration,
+      activeEntryAtStart,
+      controller,
+    };
+  }
+
+  function loadCannotCommit(operation: LoadOperation): boolean {
+    return (
+      !active ||
+      operation.controller.signal.aborted ||
+      operation.generation !== loadGeneration ||
+      operation.intentGeneration !== intentGeneration ||
+      operation.activeEntryAtStart !== activeEntry
+    );
+  }
+
+  function reportLoadFailure(operation: LoadOperation, error: unknown): void {
+    if (loadCannotCommit(operation) || options.isAbortError(error)) return;
+    if (activeEntry !== null) {
+      options.onReplacementFailure(failureMessage(error));
+      return;
+    }
+    enterTerminal({ kind: "INITIAL", message: failureMessage(error) });
+  }
+
+  function finishLoad(operation: LoadOperation): void {
+    if (loadController === operation.controller) loadController = null;
+    if (
+      !operation.initial &&
+      active &&
+      operation.generation === loadGeneration &&
+      operation.intentGeneration === intentGeneration
+    ) {
+      replacementLoading = false;
+      options.onReplacementLoading(false);
+    }
+  }
+
+  async function runLoad(
+    initial: boolean,
+    candidateForceWebGL: boolean,
+    operationIntentGeneration: number,
+    activeEntryAtStart: RenderEntry | null,
+  ): Promise<void> {
+    if (!active) return;
+    const operation = beginLoad(
+      initial,
+      operationIntentGeneration,
+      activeEntryAtStart,
+    );
+
+    try {
+      const bundle = await options.loadBundle(operation.controller.signal);
+      if (loadCannotCommit(operation)) return;
+      await buildAndPromote(
+        bundle,
+        candidateForceWebGL,
+        () => !loadCannotCommit(operation),
+      );
+    } catch (error) {
+      reportLoadFailure(operation, error);
+    } finally {
+      finishLoad(operation);
+    }
   }
 
   return {
-    isActive,
-    attachBackend(nextBackend) {
-      if (!isActive()) {
-        nextBackend.dispose();
-        return false;
+    startInitial(nextForceWebGL) {
+      if (!active) return Promise.resolve();
+      const operationIntentGeneration = beginIntent(false);
+      return runLoad(true, nextForceWebGL, operationIntentGeneration, null);
+    },
+    reload() {
+      if (!active) return Promise.resolve();
+      const current = activeEntry;
+      const operationIntentGeneration = beginIntent(false);
+      return runLoad(
+        current === null,
+        current?.forceWebGL ?? false,
+        operationIntentGeneration,
+        current,
+      );
+    },
+    async changeMode(nextForceWebGL) {
+      if (!active) return;
+      const current = activeEntry;
+      if (current === null) return;
+      const operationIntentGeneration = beginIntent(true);
+      if (current.forceWebGL === nextForceWebGL) {
+        return;
       }
-      backend = nextBackend;
-      return true;
+      try {
+        await buildAndPromote(
+          current.bundle,
+          nextForceWebGL,
+          () =>
+            active &&
+            intentGeneration === operationIntentGeneration &&
+            activeEntry === current,
+        );
+      } catch (error) {
+        if (
+          active &&
+          intentGeneration === operationIntentGeneration &&
+          activeEntry === current
+        ) {
+          options.onReplacementFailure(failureMessage(error));
+        }
+      }
+    },
+    updateVisualState(state) {
+      if (!active) return;
+      const currentActive = activeEntry;
+      if (currentActive !== null) {
+        try {
+          currentActive.backend.updateVisualState(state);
+        } catch (error) {
+          failActive(currentActive, error);
+        }
+      }
+      const currentCandidate = candidateEntry;
+      if (currentCandidate !== null) {
+        try {
+          currentCandidate.backend.updateVisualState(state);
+        } catch (error) {
+          currentCandidate.failure = normalizedFailure(error);
+          disposeCandidate(currentCandidate);
+        }
+      }
+    },
+    resize(width, height) {
+      if (!active) return;
+      activeEntry?.backend.resize(width, height);
+      candidateEntry?.backend.resize(width, height);
     },
     attachObserver(nextObserver) {
-      if (!isActive()) {
+      if (!active) {
         nextObserver.disconnect();
         return false;
       }
+      observer?.disconnect();
       observer = nextObserver;
       return true;
     },
-    fail: (error) => teardown(error),
-    deactivate: () => teardown(),
+    deactivate() {
+      enterTerminal(null);
+    },
+  };
+}
+
+function createRenderHost(container: HTMLElement): DomViewportRenderHost {
+  const element = document.createElement("div");
+  element.className = "absolute inset-0";
+  element.style.visibility = "hidden";
+  element.style.pointerEvents = "none";
+  element.setAttribute("aria-hidden", "true");
+  container.appendChild(element);
+  let removed = false;
+  return {
+    element,
+    reveal() {
+      if (removed) return;
+      element.style.visibility = "visible";
+      element.removeAttribute("aria-hidden");
+    },
+    remove() {
+      if (removed) return;
+      removed = true;
+      element.remove();
+    },
   };
 }
 
@@ -137,7 +511,9 @@ function StatusOverlay({ status }: { status: ViewportStatus }) {
   if (status.kind === "READY") return null;
   const failed = status.kind === "FAILED" || status.kind === "UNSUPPORTED";
   const message =
-    status.kind === "INITIALIZING" ? "그래픽 백엔드를 초기화하는 중…" : status.message;
+    status.kind === "INITIALIZING"
+      ? "진단 번들과 그래픽 백엔드를 초기화하는 중…"
+      : status.message;
   return (
     <div className="absolute inset-0 z-10 grid place-items-center bg-slate-900/75 p-6 text-center">
       <p
@@ -174,31 +550,21 @@ function Diagnostics({ diagnostics }: { diagnostics: RendererDiagnostics | null 
 }
 
 export function RenderLabViewport() {
-  const asset = useMemo(
-    () =>
-      createProceduralStrandSource({
-        seed: 20_260_804,
-        columns: 9,
-        rows: 8,
-        controlPointCount: 6,
-        defaultWidth: 0.028,
-      }).createAsset(),
-    [],
-  );
   const containerRef = useRef<HTMLDivElement>(null);
-  const backendRef = useRef<RendererBackend | null>(null);
-  const lifecycleRef = useRef<ViewportLifecycle | null>(null);
-  const generationRef = useRef(0);
+  const coordinatorRef = useRef<ViewportCoordinator | null>(null);
   const visualStateRef = useRef<VisualState>(DEFAULT_VISUAL_STATE);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const [visualState, setVisualState] = useState<VisualState>(DEFAULT_VISUAL_STATE);
   const [forceWebGL, setForceWebGL] = useState(false);
   const [status, setStatus] = useState<ViewportStatus>({ kind: "INITIALIZING" });
   const [diagnostics, setDiagnostics] = useState<RendererDiagnostics | null>(null);
+  const [replacementWarning, setReplacementWarning] = useState<string | null>(null);
+  const [replacementLoading, setReplacementLoading] = useState(false);
 
   useEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
+    const target = container;
     if (!hasLocalRendererCapability()) {
       setStatus({
         kind: "UNSUPPORTED",
@@ -206,76 +572,95 @@ export function RenderLabViewport() {
       });
       return;
     }
+    let mounted = true;
+    let coordinator: ViewportCoordinator | null = null;
 
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    const lifecycle = createViewportLifecycle({
-      isCurrentGeneration: () => generationRef.current === generation,
-      clearActiveBackend: (backend) => {
-        if (backendRef.current === backend) backendRef.current = null;
-      },
-      clearPointer: () => {
-        pointerRef.current = null;
-      },
-      onFailure: (message) => {
-        setStatus((current) =>
-          current.kind === "FAILED" ? current : { kind: "FAILED", message },
-        );
-      },
-    });
-    lifecycleRef.current = lifecycle;
-    setStatus({ kind: "INITIALIZING" });
-    setDiagnostics(null);
-
-    async function initialize(target: HTMLDivElement): Promise<void> {
-      try {
+    void initializeViewportRuntime({
+      isMounted: () => mounted,
+      async loadBackendFactory() {
         const { createRendererBackend } = await import("@/lib/rendering/renderer-backend");
-        if (!lifecycle.isActive()) return;
-        const backend = createRendererBackend(
-          target,
-          { forceWebGL },
-          {
-            onDiagnostics: (next) => {
-              if (lifecycle.isActive()) setDiagnostics(next);
-            },
-            onFailure: (error) => lifecycle.fail(error),
-          },
-        );
-        if (!lifecycle.attachBackend(backend)) return;
-        backendRef.current = backend;
+        return (host, candidateForceWebGL, callbacks) => {
+          if (!("element" in host) || !(host.element instanceof HTMLElement)) {
+            throw new Error("Renderer host element is unavailable.");
+          }
+          return createRendererBackend(
+            host.element,
+            { forceWebGL: candidateForceWebGL },
+            callbacks,
+          );
+        };
+      },
+      createCoordinator: (backendFactory) => createViewportCoordinator({
+        loadBundle: (signal) => loadDiagnosticStrandBundle(signal),
+        createHost: () => createRenderHost(target),
+        createBackend: backendFactory,
+        getVisualState: () => visualStateRef.current,
+        isAbortError: isStrandBundleAbortError,
+        clearPointer: () => {
+          pointerRef.current = null;
+        },
+        onInitialLoading: () => {
+          setStatus({ kind: "INITIALIZING" });
+          setDiagnostics(null);
+          setReplacementWarning(null);
+        },
+        onReplacementLoading: setReplacementLoading,
+        onModeCommitted: setForceWebGL,
+        onReady: (nextDiagnostics) => {
+          setDiagnostics(nextDiagnostics);
+          setStatus({ kind: "READY" });
+          setReplacementWarning(null);
+        },
+        onDiagnostics: setDiagnostics,
+        onInitialFailure: (message) => {
+          setStatus({ kind: "FAILED", message });
+          setDiagnostics(null);
+        },
+        onReplacementFailure: setReplacementWarning,
+        onTerminalFailure: (message) => {
+          setStatus({ kind: "FAILED", message });
+          setDiagnostics(null);
+        },
+      }),
+      createObserver: (nextCoordinator) => {
         const observer = new ResizeObserver((entries) => {
           const entry = entries[0];
-          if (entry !== undefined && lifecycle.isActive()) {
-            backend.resize(entry.contentRect.width, entry.contentRect.height);
+          if (entry !== undefined) {
+            nextCoordinator.resize(entry.contentRect.width, entry.contentRect.height);
           }
         });
-        if (!lifecycle.attachObserver(observer)) return;
-        observer.observe(target);
-        const initialDiagnostics = await backend.initialize(asset, visualStateRef.current);
-        if (!lifecycle.isActive()) return;
-        setDiagnostics(initialDiagnostics);
-        setStatus({ kind: "READY" });
-      } catch (error) {
-        lifecycle.fail(error);
-      }
-    }
-
-    void initialize(container);
+        return {
+          observer,
+          observe: () => observer.observe(target),
+        };
+      },
+      onCoordinatorChange(nextCoordinator) {
+        const previousCoordinator = coordinator;
+        coordinator = nextCoordinator;
+        if (nextCoordinator !== null) {
+          coordinatorRef.current = nextCoordinator;
+        } else if (coordinatorRef.current === previousCoordinator) {
+          coordinatorRef.current = null;
+        }
+      },
+      onSetupFailure(message) {
+        pointerRef.current = null;
+        setDiagnostics(null);
+        setReplacementLoading(false);
+        setReplacementWarning(null);
+        setStatus({ kind: "FAILED", message });
+      },
+    });
     return () => {
-      if (lifecycleRef.current === lifecycle) lifecycleRef.current = null;
-      lifecycle.deactivate();
+      mounted = false;
+      if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+      coordinator?.deactivate();
     };
-  }, [asset, forceWebGL]);
+  }, []);
 
   useEffect(() => {
     visualStateRef.current = visualState;
-    const backend = backendRef.current;
-    if (backend === null) return;
-    try {
-      backend.updateVisualState(visualState);
-    } catch (error) {
-      lifecycleRef.current?.fail(error);
-    }
+    coordinatorRef.current?.updateVisualState(visualState);
   }, [visualState]);
 
   function updateDensity(tier: VisualDensityTier): void {
@@ -314,10 +699,15 @@ export function RenderLabViewport() {
     }
   }
 
+  function changeMode(nextForceWebGL: boolean): void {
+    setReplacementWarning(null);
+    void coordinatorRef.current?.changeMode(nextForceWebGL);
+  }
+
   function reset(): void {
     pointerRef.current = null;
     setVisualState(DEFAULT_VISUAL_STATE);
-    setForceWebGL(false);
+    changeMode(false);
   }
 
   return (
@@ -408,13 +798,32 @@ export function RenderLabViewport() {
             백엔드 진단 모드
             <select
               value={forceWebGL ? "WEBGL2" : "AUTO"}
-              onChange={(event) => setForceWebGL(event.target.value === "WEBGL2")}
+              onChange={(event) => changeMode(event.target.value === "WEBGL2")}
               className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-700"
             >
               <option value="AUTO">자동 (WebGPU 우선)</option>
               <option value="WEBGL2">WebGL2 강제</option>
             </select>
           </label>
+
+          <button
+            type="button"
+            onClick={() => {
+              setReplacementWarning(null);
+              void coordinatorRef.current?.reload();
+            }}
+            className="w-full rounded-lg border border-slate-400 px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            Reload diagnostic bundle
+          </button>
+          {replacementLoading ? (
+            <p role="status" className="text-xs text-slate-500">교체 번들을 검증하는 중…</p>
+          ) : null}
+          {replacementWarning !== null ? (
+            <p role="status" className="text-xs text-amber-700">
+              기존 READY 렌더를 유지했습니다: {replacementWarning}
+            </p>
+          ) : null}
 
           <button
             type="button"

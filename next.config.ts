@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  outputFileTracingIncludes: {
+    "/admin/render-lab/strand-bundle/\\[file\\]": [
+      "src/lib/rendering/fixtures/r2-diagnostic-v1/manifest.json",
+      "src/lib/rendering/fixtures/r2-diagnostic-v1/strands.bin",
+    ],
+  },
   images: {
     dangerouslyAllowLocalIP: true, // Next/Image가 로컬 mock-storage URL을 최적화할 수 있게 허용
     remotePatterns: [
