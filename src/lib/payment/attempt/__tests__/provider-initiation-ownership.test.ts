@@ -1142,6 +1142,26 @@ describe("provider initiation ownership", () => {
     }
   }, 30_000);
 
+  it("keeps strict synthetic fixtures hermetic from repository ambient types", () => {
+    const fixture = createOwnerExportFixture(
+      "import { provider } from './raw'; import { safe } from './safe'; export async function owner() { await provider.initiate(safe); }\n",
+    );
+    const program = createStrictFixtureProgram(fixture.root);
+    const sourcePaths = program.getSourceFiles().map(
+      (sourceFile) => sourceFile.fileName.split(sep).join("/"),
+    );
+    expect(fixtureDiagnostics(program)).toEqual([]);
+    expect(sourcePaths).toContain(`${fixture.root}/owner.ts`);
+    expect(sourcePaths).toContain(`${fixture.root}/raw.ts`);
+    expect(sourcePaths).toContain(`${fixture.root}/safe.ts`);
+    expect(sourcePaths.some((path) => (
+      path.endsWith("/typescript/lib/lib.es2022.full.d.ts")
+    ))).toBe(true);
+    expect(sourcePaths.filter((path) => (
+      path.includes("/node_modules/@types/")
+    ))).toEqual([]);
+  }, 30_000);
+
   it.each(OWNER_TYPE_EXPORT_REJECTION_CASES)(
     "rejects owner type-only capability export through $name",
     (testCase) => {
@@ -4149,6 +4169,7 @@ function createStrictFixtureProgram(root: string): ts.Program {
       module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       target: ts.ScriptTarget.ES2022,
+      types: [],
     },
   });
 }

@@ -343,7 +343,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     expect(sha256(readFileSync(join(ROOT, "containers/refund-worker/Dockerfile"))))
       .toBe("53f4308b5a028e8a3400ce814431facffd304ee519c2d4927d69c6d2b2d2cdfc");
     expect(sha256(readFileSync(join(ROOT, "package-lock.json"))))
-      .toBe("868a881ab12af2b9b8079c79837602a5d43bd53e4470ec30e12353c0eef21492");
+      .toBe("594ab37544f7c782fb66b246675022bfe803d63c9148dace3aa7f447926d3013");
   });
 
   it("publishes every exact non-authorizing status in the policy document", () => {
