@@ -963,3 +963,72 @@ Candidate A remains blocked until governed launch facts, exact TMV/PSV/profile c
 ### Review and precedence closure
 
 The installed contract incorporates accepted Opus technical/domain and Fable product/UX findings. `docs/handoff/mira_handoff_v37.md` was reviewed for Claude-review precedence; it is historical relative to current source, explicitly yields current facts to code, and grants no conflicting Product Specification/C1 authority. Local model-review reports remain review evidence rather than repository authority.
+
+## 2026-08-04 — R2B strand-bundle and async-loader design freeze
+
+### Baseline and evidence
+
+- parent R1 pull request: `#29`;
+- merged R1 baseline:
+  `424f0dffd270d79f54f97bb9a4715fb27e9ef2b7`;
+- read-only repository reconnaissance:
+  `WIG-REN-WEB-R2-COD-R0-BUNDLE-RECON-v0.1`;
+- current R1 source remains admin-only, visual-only, synchronous at the producer
+  seam and independent of product, fitting, commerce and manufacturing
+  authority.
+
+### Frozen R2B decisions
+
+- classify R2B as a medium feature under the Feature Documentation Standard;
+- require this Design Contract before source implementation;
+- serve exactly one committed synthetic bundle through an admin-protected route;
+- require both `/admin/**` middleware coverage and route-local `requireAdmin()`;
+- use one fixed little-endian binary buffer;
+- encode exactly positions, strand offsets, widths, density ranks and importance
+  ranks;
+- reject generic buffer-view/accessor indirection for schema v1;
+- decode directly into the existing validated `StrandAsset`;
+- do not add `PackedStrandAsset` in R2B;
+- preserve `importanceRank` without activating LOD behavior;
+- use canonical JSON plus one LF and byte-for-byte normalized comparison;
+- use SHA-256 only as payload-mismatch evidence, not authenticity;
+- retain the R1 diagnostic limits and reject production-scale expansion;
+- keep the active READY render until a replacement bundle and replacement
+  backend complete first-render initialization;
+- leave external storage, learned generation, Product Media, product mapping,
+  customer exposure and production activation deferred.
+
+### Rejected or deferred candidates
+
+Rejected for R2B:
+
+- public static fixture delivery;
+- bundler-imported or bundler-emitted fixture delivery;
+- an async wrapper without actual bytes;
+- a duplicate packed model adapted back into objects;
+- direct packed renderer conversion without profiling evidence.
+
+Deferred:
+
+- glTF/GLB or project-specific extensions;
+- external storage/CDN/asset registry;
+- production limits;
+- importance-based LOD;
+- learned-model output;
+- customer or commerce integration.
+
+### Authority
+
+This decision and its Design Contract authorize documentation installation
+only.
+
+They do not authorize:
+
+- source implementation;
+- dependency or lockfile changes;
+- storage/provider contact;
+- Product Media or Product Specification changes;
+- customer, fitting, commerce or manufacturing behavior;
+- source activation.
+
+The next gate is a separately reviewed R2B Implementation Task Contract.
