@@ -16,7 +16,7 @@ export default function RenderLabPage() {
           제품·주문·피팅·제작 사양이 아닙니다.
         </p>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-amber-900">
-          브라우저 그래픽 백엔드와 결정적 인메모리 스트랜드 fixture를 확인하는
+          브라우저 그래픽 백엔드와 커밋된 합성 VISUAL_ONLY 진단 번들을 확인하는
           일시적 엔지니어링 진단입니다. 표시 결과와 조작 값은 저장되거나 다른 흐름에
           전달되지 않습니다.
         </p>
