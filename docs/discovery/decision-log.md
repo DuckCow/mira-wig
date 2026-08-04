@@ -1032,3 +1032,89 @@ They do not authorize:
 - source activation.
 
 The next gate is a separately reviewed R2B Implementation Task Contract.
+
+## 2026-08-04 — R2B strand-bundle and async-loader source installation
+
+### Reviewed source chain
+
+- governing Design Contract merge:
+  `972097cc8f6176c33ace69c5468a04aadf120fab`;
+- implementation pull request:
+  `#31`;
+- reviewed implementation head:
+  `084cb0b230fa7bdc9d6c35fb8eca1db72b13d16f`;
+- main merge:
+  `e63b7de793c765acd9c4ed9d6238389989660738`;
+- final independent diff disposition:
+  `PASS — READY TO COMMIT`;
+- GitHub Actions CI run `#275`:
+  success.
+
+### Installed source boundary
+
+R2B installs:
+
+- a deterministic compiler for one synthetic visual-only strand fixture;
+- a canonical JSON manifest and one fixed little-endian binary payload;
+- route-local admin authorization and exact same-origin fixture delivery;
+- bounded streamed loading, real cancellation and SHA-256 mismatch detection;
+- decode into the existing validated `StrandAsset`;
+- hidden candidate backend initialization and first-render promotion;
+- one latest-user-intent ordering across reload and backend-mode operations;
+- terminal teardown and stale-completion suppression;
+- narrow production output tracing for the two fixture files.
+
+### Reviewed corrections
+
+Independent review required and source review closed:
+
+- async viewport setup-failure containment;
+- provisional versus committed backend mode ownership;
+- terminal coordinator teardown and resurrection prevention;
+- containment of rejecting stream cancellation;
+- shared cross-operation reload/mode intent;
+- full Unicode `Cc` strand-ID rejection;
+- manifest encoder and decoder byte ceilings;
+- security headers on `200`, `401`, `403` and `404`.
+
+### Verification
+
+At the reviewed source head:
+
+- focused R2B suites:
+  `5 files / 72 tests passed`;
+- literal repository verification:
+  `216 files / 5,332 tests passed`;
+- typecheck, repository-wide lint and production build:
+  passed;
+- deterministic compiler `--check`:
+  passed;
+- refund build-context:
+  unchanged and verified;
+- package and lockfile:
+  unchanged.
+
+### Authority and activation
+
+The installed source remains:
+
+```text
+SOURCE_ONLY
+VISUAL_ONLY
+ADMIN_DIAGNOSTIC_ONLY
+NOT CUSTOMER-ACTIVATED
+```
+
+It grants no:
+
+- customer route or navigation;
+- persistence or external storage;
+- learned inference or generation;
+- Product Media assignment;
+- product, variant, fit or order authority;
+- commerce or manufacturing behavior;
+- production-scale or LOD claim.
+
+The next documentation gate is the R2B source-status/as-built record. Any R2C
+scaling/LOD, learned-producer, external-asset, fitting or customer work requires
+separate reviewed authority.
