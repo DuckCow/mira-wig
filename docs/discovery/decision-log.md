@@ -1208,3 +1208,62 @@ It does not authorize:
 - customer, product, fit, commerce or manufacturing behavior.
 
 The next gate is a separately reviewed R2C-A Implementation Task Contract.
+
+## 2026-08-08 — R2C-A network-boundary contract supersession v0.2
+
+### Trigger evidence
+
+Final browser verification of the R2C-A implementation observed:
+
+```text
+GET https://lh3.googleusercontent.com/...
+```
+
+Network attribution established:
+
+- the request is initiated by the signed-in shared application frame/profile
+  image;
+- it occurs on the performance page while IDLE before benchmark start;
+- it also occurs on `/styles` and `/admin/styles`;
+- starting the benchmark introduced no new external request;
+- no R2C-A source path owns or consumes the request;
+- no unrelated application-shell source was changed.
+
+Disposition:
+
+```text
+PRE-EXISTING SHARED APP REQUEST
+```
+
+### Contract correction
+
+`render-runtime-scaling-measurement-design-contract-v0.2.md` supersedes v0.1.
+
+The semantic correction is limited to network ownership:
+
+- R2C-A-owned external requests remain prohibited;
+- R2C-A telemetry, uploads and third-party asset fetches remain prohibited;
+- same-origin guarded provenance actions remain allowed;
+- the installed same-origin R2B control route remains allowed;
+- a pre-existing shared application-shell external request does not by itself
+  violate R2C-A when it is independently attributed, occurs without benchmark
+  execution, is not consumed by R2C-A and was not introduced or modified by an
+  authorized R2C-A path.
+
+No authority is granted to the shared request. R2C-A may not depend on, modify,
+suppress, proxy, cache or normalize it without separate review.
+
+### Unchanged design authority
+
+All other R2C-A v0.1 decisions remain unchanged, including:
+
+- benchmark-only input separation;
+- scale ladder and safety ceilings;
+- User Timing stage semantics;
+- no GPU-time or true-GPU-memory claim;
+- provenance and result rules;
+- no persistence or telemetry;
+- no customer/product/fit/commerce/manufacturing activation;
+- separate reviewed source-status and measurement-result gates.
+
+This is a design-contract semantic version change, not source activation.
