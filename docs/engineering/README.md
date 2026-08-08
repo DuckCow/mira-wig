@@ -26,15 +26,19 @@ commerce, order, or manufacturing behavior.
 
 ## Browser/runtime scaling characterization
 
+- [Render Runtime Scaling Measurement Design Contract v0.3](./render-runtime-scaling-measurement-design-contract-v0.3.md)
+  — current R2C-A design authority upon reviewed merge. It narrows R2C-A to a
+  bounded exploratory renderer-scaling characterization: 72–1,152 synthetic
+  strands at six points, AUTO and forced WebGL2, truthful application-owned
+  stage timing, simple hard safety stops, per-sample cleanup truth, one
+  clean-source run-start provenance snapshot, and a small local result
+  artifact. It may justify a targeted R2C-B experiment but does not select a
+  durable renderer or asset architecture.
 - [Render Runtime Scaling Measurement Design Contract v0.2](./render-runtime-scaling-measurement-design-contract-v0.2.md)
-  — current R2C-A design authority upon reviewed merge. It governs the
-  admin-only benchmark surface, benchmark-only input, measurement semantics,
-  safety/admission rules, provenance, result evidence, and network ownership.
-  R2C-A-owned external traffic, telemetry, uploads, and third-party benchmark
-  assets remain prohibited. Independently attributed pre-existing shared
-  application-shell traffic receives no R2C-A authority or dependency.
+  — historical decision-grade predecessor. It is superseded by v0.3 upon
+  reviewed merge; its network-ownership clarification is inherited by v0.3.
 - [Render Runtime Scaling Measurement Design Contract v0.1](./render-runtime-scaling-measurement-design-contract-v0.1.md)
-  — historical predecessor. It is superseded by v0.2 upon reviewed merge.
+  — historical predecessor superseded by v0.2 and subsequently v0.3.
 
 ## Authority and lifecycle
 
