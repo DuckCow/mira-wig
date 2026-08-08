@@ -1267,3 +1267,85 @@ All other R2C-A v0.1 decisions remain unchanged, including:
 - separate reviewed source-status and measurement-result gates.
 
 This is a design-contract semantic version change, not source activation.
+
+## 2026-08-09 — R2C-A scope reduction adjudication / Design Contract v0.3
+
+### Disposition
+
+```text
+SUPERSEDE_WITH_MINIMAL_V0_3
+```
+
+A fresh read-only audit was performed after repeated independent review of the
+uncommitted R2C-A source candidate.
+
+The audit found that R2C-A only needs to answer which current application-owned
+renderer stage first becomes materially limiting across a bounded synthetic
+strand envelope, well enough to open a targeted R2C-B experiment.
+
+The v0.2 decision-grade benchmark framework had become disproportionate to
+that question. Remaining implementation risk was increasingly caused by
+cross-run admission, installed-control evidence, lifecycle campaigns,
+confirmatory statistics, comparability, optional browser probes and provenance
+state machinery rather than by core renderer-stage measurement.
+
+### v0.3 retained core
+
+- admin-only explicit-start surface;
+- immutable validated `BENCHMARK_ONLY` synthetic input;
+- `72 / 144 / 288 / 576 / 1152` at six points per strand;
+- AUTO + forced WEBGL2 with requested/actual backend separated;
+- one warm-up + five measured samples per cell;
+- raw samples plus count/median/minimum/maximum;
+- truthful input/backend/geometry/render/teardown stage timing;
+- fixed 800×600 viewport and DPR/drawing-buffer stability;
+- 1,000 ms synchronous-stage and 3,000 ms logical-ready hard stops;
+- 15-minute whole-session ceiling;
+- per-sample final zero benchmark-owned resources;
+- one guarded clean-source run-start provenance snapshot;
+- one small versioned local JSON artifact;
+- no persistence, telemetry, upload or benchmark-owned external traffic.
+
+### v0.3 deferred or removed from mandatory R2C-A
+
+- installed R2B transport control;
+- 2,304 / 4,608 extension;
+- mandatory 3 / 6 / 8 point axis;
+- cross-run progressive-admission artifacts;
+- cross-result comparability/fingerprint authority;
+- two-device and Chromium+Safari completion gate;
+- 20-sample confirmatory mode and p90;
+- 20 / 5 / 20 lifecycle campaigns;
+- Long Tasks and UA-specific memory;
+- color, rotation, density-rebuild and mode-replacement timing;
+- 64 MiB predictive admission;
+- repeated page/start/end Git provenance matching;
+- clipboard/download byte-identity proof.
+
+Two-device, Chromium and Safari/WebKit evidence remain required before a later
+prototype result is promoted into a durable R2C-B architecture choice.
+
+### Current source disposition
+
+The current uncommitted v0.4 R2C-A implementation remains protected evidence
+only. It is not accepted as the v0.3 implementation and must not be committed
+merely to preserve sunk work.
+
+After reviewed v0.3 documentation merge, perform fresh read-only implementation
+reconnaissance and classify each current R2C-A path as KEEP, SIMPLIFY, DELETE or
+UNCHANGED_SUPPORT.
+
+C5 corrections against Design Contract v0.2 are retired once v0.3 becomes
+effective.
+
+### Authority
+
+This decision changes documentation authority only.
+
+It does not:
+
+- edit or authorize current R2C-A source;
+- authorize decision-bearing high-load measurement;
+- widen R2B limits;
+- activate customer/product/fit/commerce/order/manufacturing behavior;
+- select any R2C-B renderer or asset remedy.
