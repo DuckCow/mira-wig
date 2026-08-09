@@ -34,6 +34,12 @@ commerce, order, or manufacturing behavior.
   clean-source run-start provenance snapshot, and a small local result
   artifact. It may justify a targeted R2C-B experiment but does not select a
   durable renderer or asset architecture.
+- [R2C-A Minimal Renderer Characterization Source Status v0.1](./render-runtime-scaling-measurement-source-status-v0.1.md)
+  — records the reviewed R2C-A v0.3 source installed by PR #36 / merge
+  `9ccef3917fe22ddaa4e11f9e33e0a0b48f82af0d`, its installed invariant
+  ownership, verification evidence, limitations, and the re-entry gate for the
+  first decision-bearing characterization. The 72→1,152 characterization is
+  not claimed to have run merely because the source is installed.
 - [Render Runtime Scaling Measurement Design Contract v0.2](./render-runtime-scaling-measurement-design-contract-v0.2.md)
   — historical decision-grade predecessor. It is superseded by v0.3 upon
   reviewed merge; its network-ownership clarification is inherited by v0.3.
