@@ -1349,3 +1349,87 @@ It does not:
 - widen R2B limits;
 - activate customer/product/fit/commerce/order/manufacturing behavior;
 - select any R2C-B renderer or asset remedy.
+
+## 2026-08-09 — R2C-A-S1 point/tessellation sensitivity freeze
+
+### Parent evidence
+
+```text
+A1 source:
+  5c3a072f74dc4114138ca9cf28c447b193c55369
+
+A1 artifact SHA-256:
+  e794c33ff922f81fa195dfb1ce91eb61f3e79e1abe8f9075193e35cc2e20bc78
+
+A1 disposition:
+  GEOMETRY_CREATE / DOMINANT_CPU_GEOMETRY_PREPARATION
+```
+
+### Frozen S1 scope
+
+```text
+strand counts:
+  576 / 1152
+
+points:
+  3 / 6 / 8
+
+requested backend:
+  AUTO only
+
+sampling:
+  1 warm-up + 5 measured per cell
+```
+
+### Frozen causal boundary
+
+Point count, Catmull-Rom work and longitudinal TubeGeometry tessellation vary
+together:
+
+```text
+P3 → tubularSegments 6
+P6 → tubularSegments 15
+P8 → tubularSegments 21
+
+radialSegments:
+  4 fixed
+```
+
+S1 cannot independently attribute `GEOMETRY_CREATE` cost to control points,
+Catmull-Rom work or longitudinal tessellation.
+
+### Frozen engineering gates
+
+```text
+P3 sensitivity gate:
+  G3 <= 0.75 × G6
+
+P8 sensitivity gate:
+  G8 >= 1.15 × G6
+```
+
+These are exploratory engineering decision gates, not statistical-significance
+thresholds.
+
+### Frozen dispositions
+
+```text
+COUPLED_POINT_TESSELLATION_SENSITIVE
+  → CONTROL_POINT_VS_TESSELLATION_DECOUPLING
+
+WEAK_COUPLED_COMPLEXITY_SENSITIVITY
+  → PER_STRAND_FIXED_CONSTRUCTION_OVERHEAD
+
+MIXED_OR_NONLINEAR
+  → no remedy selection; smallest decoupling factorial follow-up first
+```
+
+### Authority
+
+- Parent R2C-A v0.3 identity remains unchanged.
+- S1 has distinct input, `r2ca-s1-synthetic-generator/v1` generator and
+  `mira.render-lab.r2ca-s1-result` Result v1 identities.
+- P3/P8 have no visual-fidelity authority.
+- This decision does not authorize S1 source implementation.
+- It does not authorize R2C-B implementation or a durable architecture.
+- It does not authorize customer or product activation.

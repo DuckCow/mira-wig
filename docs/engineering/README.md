@@ -34,6 +34,11 @@ commerce, order, or manufacturing behavior.
   clean-source run-start provenance snapshot, and a small local result
   artifact. It may justify a targeted R2C-B experiment but does not select a
   durable renderer or asset architecture.
+- [Render Runtime Point/Tessellation Sensitivity Design Contract v0.1](./render-runtime-point-sensitivity-design-contract-v0.1.md)
+  — bounded R2C-A-S1 follow-up contract. It isolates the coupled three/six/eight
+  point and longitudinal-tessellation sensitivity of `GEOMETRY_CREATE` at 576
+  and 1,152 strands on AUTO, preserves the frozen R2C-A v0.3 identity, and may
+  choose only the target of a later bounded R2C-B prototype.
 - [R2C-A Minimal Renderer Characterization Source Status v0.1](./render-runtime-scaling-measurement-source-status-v0.1.md)
   — records the reviewed R2C-A v0.3 source installed by PR #36 / merge
   `9ccef3917fe22ddaa4e11f9e33e0a0b48f82af0d`, its installed invariant
