@@ -1,6 +1,15 @@
 import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import type { StrandAsset, StrandRecord } from "./strand-asset";
+import type {
+  RendererBenchmarkInput,
+  RendererBenchmarkPoint,
+} from "./benchmark-input";
+import type { BenchmarkAggregateStageObserver } from "./benchmark-measurement";
+import type {
+  ActualRendererBackend,
+  RequestedRendererBackend,
+} from "./benchmark-result";
+import type { StrandAsset, StrandPoint, StrandRecord } from "./strand-asset";
 import {
   canonicalizeVisualState,
   selectStrandsForTier,
@@ -35,6 +44,143 @@ export interface RendererBackend {
   updateVisualState(state: VisualState): void;
   resize(width: number, height: number): void;
   dispose(): void;
+}
+
+export interface RendererBenchmarkBackendObservation {
+  readonly actualBackend: ActualRendererBackend;
+  readonly drawingBufferWidth: number;
+  readonly drawingBufferHeight: number;
+  readonly rendererPixelRatio: number;
+}
+
+export type RendererBenchmarkPreGeometryGuard = (
+  observation: RendererBenchmarkBackendObservation,
+) => void;
+
+export interface RendererBenchmarkInitializationResult {
+  readonly diagnostics: RendererDiagnostics;
+  readonly observation: RendererBenchmarkBackendObservation;
+}
+
+export interface RendererBenchmarkResourceSnapshot {
+  readonly canvases: number;
+  readonly backends: number;
+  readonly geometries: number;
+}
+
+export interface RendererBenchmarkBackend {
+  initialize(
+    input: RendererBenchmarkInput,
+    initialState: VisualState,
+    observer: BenchmarkAggregateStageObserver,
+    preGeometryGuard: RendererBenchmarkPreGeometryGuard,
+  ): Promise<RendererBenchmarkInitializationResult>;
+  resize(width: number, height: number): void;
+  dispose(observer: BenchmarkAggregateStageObserver): void;
+  resourceSnapshot(): RendererBenchmarkResourceSnapshot;
+}
+
+export interface RendererGeometryAssembly<G, S> {
+  readonly createSource: (strand: S) => G;
+  readonly mergeSources: (sources: readonly G[]) => G | null;
+  readonly validateMerged: (merged: G) => void;
+  readonly commitMerged: (merged: G) => void;
+  readonly disposePrevious: () => void;
+  readonly disposeGeometry: (geometry: G) => void;
+  readonly measureCreate: (work: () => void) => void;
+  readonly measureMerge: (work: () => void) => void;
+  readonly measureFinalize: (work: () => void) => void;
+}
+
+function rendererGeometryError(value: unknown, fallback: string): Error {
+  if (value instanceof Error) return value;
+  if (typeof value === "string" && value.trim().length > 0) return new Error(value);
+  return new Error(fallback);
+}
+
+function disposeRendererGeometries<G>(
+  geometries: readonly G[],
+  dispose: (geometry: G) => void,
+  primary?: unknown,
+): void {
+  const failures: Error[] = [];
+  if (primary !== undefined) {
+    failures.push(rendererGeometryError(primary, "Renderer geometry work failed."));
+  }
+  for (const geometry of geometries) {
+    try {
+      dispose(geometry);
+    } catch (error) {
+      failures.push(rendererGeometryError(error, "Renderer geometry cleanup failed."));
+    }
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Renderer geometry work and cleanup failed.", {
+      cause: primary,
+    });
+  }
+  if (failures.length === 1) throw failures[0];
+}
+
+/** Owns the benchmark-only create → merge → finalize transaction. */
+export function assembleRendererBenchmarkGeometry<G, S>(
+  strands: readonly S[],
+  assembly: RendererGeometryAssembly<G, S>,
+): G {
+  const sources: G[] = [];
+  try {
+    assembly.measureCreate(() => {
+      for (const strand of strands) sources.push(assembly.createSource(strand));
+    });
+  } catch (error) {
+    disposeRendererGeometries(sources, assembly.disposeGeometry, error);
+  }
+
+  let merged: G | null = null;
+  try {
+    assembly.measureMerge(() => {
+      merged = assembly.mergeSources(sources);
+      if (merged === null) throw new Error("Renderer geometry merge returned null.");
+    });
+  } catch (error) {
+    const cleanup = merged === null ? sources : [...sources, merged];
+    disposeRendererGeometries(cleanup, assembly.disposeGeometry, error);
+  }
+  if (merged === null) throw new Error("Renderer geometry merge produced no candidate.");
+  const mergedCandidate: G = merged;
+
+  let committed = false;
+  try {
+    assembly.measureFinalize(() => {
+      disposeRendererGeometries(sources, assembly.disposeGeometry);
+      assembly.validateMerged(mergedCandidate);
+      assembly.commitMerged(mergedCandidate);
+      committed = true;
+      assembly.disposePrevious();
+    });
+  } catch (error) {
+    if (committed) throw error;
+    disposeRendererGeometries([mergedCandidate], assembly.disposeGeometry, error);
+  }
+  return mergedCandidate;
+}
+
+export function enforceRendererBenchmarkBackendRequest(
+  requestedBackend: RequestedRendererBackend,
+  observation: RendererBenchmarkBackendObservation,
+  expectedAutoBackend: ActualRendererBackend | null,
+): ActualRendererBackend {
+  if (requestedBackend === "WEBGL2" && observation.actualBackend !== "WEBGL2") {
+    throw new Error("FORCED_BACKEND_MISMATCH");
+  }
+  if (
+    requestedBackend === "AUTO" &&
+    expectedAutoBackend !== null &&
+    observation.actualBackend !== expectedAutoBackend
+  ) {
+    throw new Error("AUTO_BACKEND_DRIFT");
+  }
+  return observation.actualBackend;
 }
 
 export interface RendererFrameScheduler {
@@ -156,6 +302,28 @@ function createTubeGeometry(strand: StrandRecord): THREE.BufferGeometry {
   );
 }
 
+interface RendererBenchmarkGeometryStrand {
+  readonly controlPoints: readonly StrandPoint[] | readonly RendererBenchmarkPoint[];
+  readonly width: number;
+}
+
+function createBenchmarkTubeGeometry(
+  strand: RendererBenchmarkGeometryStrand,
+): THREE.BufferGeometry {
+  const points = strand.controlPoints.map(
+    ([x, y, z]) => new THREE.Vector3(x, y, z),
+  );
+  const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
+  const tubularSegments = (points.length - 1) * TUBE_SEGMENTS_PER_CONTROL_SPAN;
+  return new THREE.TubeGeometry(
+    curve,
+    tubularSegments,
+    strand.width / 2,
+    TUBE_RADIAL_SEGMENTS,
+    false,
+  );
+}
+
 function mergeStrandGeometry(strands: readonly StrandRecord[]): THREE.BufferGeometry {
   if (strands.length === 0) return new THREE.BufferGeometry();
   const geometries = strands.map(createTubeGeometry);
@@ -198,6 +366,7 @@ class ThreeRendererBackend implements RendererBackend {
   private backendKind: RendererBackendKind | null = null;
   private visibleStrandCount = 0;
   private disposed = false;
+  private benchmarkGeometryOwned = false;
 
   constructor(
     private readonly container: HTMLElement,
@@ -244,6 +413,74 @@ class ThreeRendererBackend implements RendererBackend {
     return this.failureGate.renderInitially(() => this.renderImmediately());
   }
 
+  async initializeBenchmark(
+    input: RendererBenchmarkInput,
+    initialState: VisualState,
+    observer: BenchmarkAggregateStageObserver,
+    preGeometryGuard: RendererBenchmarkPreGeometryGuard,
+  ): Promise<RendererBenchmarkInitializationResult> {
+    if (this.disposed) {
+      throw new Error("RendererBenchmarkBackend was disposed before initialization.");
+    }
+    observer.measureSynchronous("SCENE_SETUP", () => {
+      this.buildScene();
+      this.resize(this.container.clientWidth, this.container.clientHeight);
+    });
+    this.failureGate.throwIfFailed();
+    await observer.measureAwaited("RENDERER_INIT", () => this.renderer.init());
+    if (this.disposed) {
+      throw new Error("RendererBenchmarkBackend was disposed during initialization.");
+    }
+    this.failureGate.throwIfFailed();
+    this.backendKind =
+      this.renderer.coordinateSystem === THREE.WebGPUCoordinateSystem ? "WEBGPU" : "WEBGL2";
+    const observation = this.benchmarkObservation();
+
+    // This guard intentionally precedes every selection or TubeGeometry operation.
+    preGeometryGuard(observation);
+
+    const canonical = canonicalizeVisualState(initialState);
+    this.strandMaterial.color.set(canonical.previewColor);
+    this.fixtureGroup.rotation.set(
+      canonical.viewRotation.pitch,
+      canonical.viewRotation.yaw,
+      0,
+    );
+    const selected = observer.measureSynchronous("GEOMETRY_SELECT", () =>
+      input.strands.filter((strand) => strand.densityRank < 1),
+    );
+    const previousGeometry = this.strandGeometry;
+    const merged = assembleRendererBenchmarkGeometry(selected, {
+      createSource: createBenchmarkTubeGeometry,
+      mergeSources: (sources) => mergeGeometries([...sources]),
+      validateMerged: (candidate) => {
+        if (candidate.getAttribute("position") === undefined) {
+          throw new Error("Merged benchmark geometry has no position attribute.");
+        }
+      },
+      commitMerged: (candidate) => {
+        this.strandGeometry = candidate;
+        this.strandMesh.geometry = candidate;
+        this.benchmarkGeometryOwned = true;
+      },
+      disposePrevious: () => previousGeometry.dispose(),
+      disposeGeometry: (geometry) => geometry.dispose(),
+      measureCreate: (work) => observer.measureSynchronous("GEOMETRY_CREATE", work),
+      measureMerge: (work) => observer.measureSynchronous("GEOMETRY_MERGE", work),
+      measureFinalize: (work) => observer.measureSynchronous("GEOMETRY_FINALIZE", work),
+    });
+    if (this.strandGeometry !== merged) {
+      throw new Error("Benchmark geometry commit invariant failed.");
+    }
+    this.densityTier = "HIGH";
+    this.visibleStrandCount = selected.length;
+    const diagnostics = observer.measureSynchronous("RENDER_SUBMIT", () =>
+      this.failureGate.renderInitially(() => this.renderImmediately()),
+    );
+    this.failureGate.throwIfFailed();
+    return { diagnostics, observation };
+  }
+
   updateVisualState(state: VisualState): void {
     this.failureGate.runOwnedUpdate(() => {
       if (this.disposed) return;
@@ -284,6 +521,29 @@ class ThreeRendererBackend implements RendererBackend {
     this.scene.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
+    this.benchmarkGeometryOwned = false;
+  }
+
+  disposeBenchmark(observer: BenchmarkAggregateStageObserver): void {
+    observer.measureSynchronous("DISPOSE", () => this.dispose());
+  }
+
+  resourceSnapshot(): RendererBenchmarkResourceSnapshot {
+    return {
+      canvases: this.disposed ? 0 : 1,
+      backends: this.disposed ? 0 : 1,
+      geometries: this.benchmarkGeometryOwned ? 1 : 0,
+    };
+  }
+
+  private benchmarkObservation(): RendererBenchmarkBackendObservation {
+    if (this.backendKind === null) throw new Error("Renderer backend is not initialized.");
+    return {
+      actualBackend: this.backendKind,
+      drawingBufferWidth: this.renderer.domElement.width,
+      drawingBufferHeight: this.renderer.domElement.height,
+      rendererPixelRatio: this.renderer.getPixelRatio(),
+    };
   }
 
   private buildScene(): void {
@@ -341,4 +601,19 @@ export function createRendererBackend(
   callbacks: RendererBackendCallbacks,
 ): RendererBackend {
   return new ThreeRendererBackend(container, options, callbacks);
+}
+
+export function createRendererBenchmarkBackend(
+  container: HTMLElement,
+  options: RendererBackendOptions,
+  callbacks: RendererBackendCallbacks,
+): RendererBenchmarkBackend {
+  const backend = new ThreeRendererBackend(container, options, callbacks);
+  return {
+    initialize: (input, initialState, observer, preGeometryGuard) =>
+      backend.initializeBenchmark(input, initialState, observer, preGeometryGuard),
+    resize: (width, height) => backend.resize(width, height),
+    dispose: (observer) => backend.disposeBenchmark(observer),
+    resourceSnapshot: () => backend.resourceSnapshot(),
+  };
 }

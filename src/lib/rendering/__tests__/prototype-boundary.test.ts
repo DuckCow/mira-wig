@@ -145,4 +145,97 @@ describe("Render Lab prototype boundary", () => {
     expect(config).not.toContain('"/admin/render-lab/strand-bundle/*"');
     expect(config).not.toContain("r2-diagnostic-v1/**/*");
   });
+
+  it("keeps R2C-A v0.3 synthetic input outside every canonical R2B carrier", () => {
+    const benchmarkInput = read("src/lib/rendering/benchmark-input.ts");
+    const runner = read("src/lib/rendering/benchmark-runner.ts");
+    const prohibited = [
+      "validateStrandAsset",
+      "loadDiagnosticStrandBundle",
+      "strand-bundle-loader",
+      "strand-bundle.ts",
+      "manifest.json",
+      "strands.bin",
+    ];
+
+    for (const source of [benchmarkInput, runner]) {
+      for (const token of prohibited) expect(source).not.toContain(token);
+    }
+    expect(benchmarkInput).toContain('canonicalR2BBundle: false');
+  });
+
+  it("adds no R2C-A navigation or customer import edge", () => {
+    const protectedSurfaces = [
+      "src/app/admin/layout.tsx",
+      "src/app/admin/page.tsx",
+      "src/app/(shop)/styles/[id]/page.tsx",
+      "src/app/(shop)/styles/[id]/VariantSelector.tsx",
+      "src/components/features/FittingModal.tsx",
+      "src/hooks/useFitting.ts",
+      "src/app/actions/fitting.ts",
+      "src/app/actions/cart.ts",
+    ];
+    for (const surface of protectedSurfaces) {
+      const source = read(surface);
+      expect(source).not.toContain("render-lab/performance");
+      expect(source).not.toContain("benchmark-runner");
+      expect(source).not.toContain("RenderPerformanceLab");
+    }
+  });
+
+  it("keeps the benchmark surface local-only and free of persistence or external requests", () => {
+    const benchmarkPaths = [
+      "src/app/admin/render-lab/performance/RenderPerformanceClient.tsx",
+      "src/app/admin/render-lab/performance/actions.ts",
+      "src/app/admin/render-lab/performance/page.tsx",
+      "src/components/rendering/RenderPerformanceLab.tsx",
+      "src/lib/rendering/benchmark-input.ts",
+      "src/lib/rendering/benchmark-measurement.ts",
+      "src/lib/rendering/benchmark-result.ts",
+      "src/lib/rendering/benchmark-runner.ts",
+    ];
+    const prohibitedNetworkOrPersistence = [
+      "localStorage",
+      "sessionStorage",
+      "navigator.sendBeacon",
+      "XMLHttpRequest",
+      "WebSocket",
+      "fetch(",
+    ];
+    const prohibitedDomainImports = [
+      "@/lib/storage",
+      "@/lib/payment",
+      "@/lib/fitting",
+      "@/lib/ai",
+      "@/lib/db",
+      "@prisma/client",
+      "@/app/(shop)",
+      "@/app/actions/cart",
+      "@/app/actions/checkout",
+    ];
+    for (const modulePath of benchmarkPaths) {
+      const source = read(modulePath);
+      for (const token of prohibitedNetworkOrPersistence) expect(source).not.toContain(token);
+      for (const token of prohibitedDomainImports) expect(source).not.toContain(token);
+    }
+  });
+
+  it("keeps normal R2B initialization observer-free and the benchmark seam separate", () => {
+    const source = read("src/lib/rendering/renderer-backend.ts");
+    const normalStart = source.indexOf("async initialize(\n    asset: StrandAsset");
+    const benchmarkStart = source.indexOf("async initializeBenchmark(", normalStart);
+    const normalInitialize = source.slice(normalStart, benchmarkStart);
+    const normalFactoryStart = source.indexOf("export function createRendererBackend(");
+    const benchmarkFactoryStart = source.indexOf(
+      "export function createRendererBenchmarkBackend(",
+      normalFactoryStart,
+    );
+    const normalFactory = source.slice(normalFactoryStart, benchmarkFactoryStart);
+
+    expect(normalStart).toBeGreaterThan(-1);
+    expect(benchmarkStart).toBeGreaterThan(normalStart);
+    expect(normalInitialize).not.toContain("BenchmarkAggregateStageObserver");
+    expect(normalInitialize).not.toContain("preGeometryGuard");
+    expect(normalFactory).not.toContain("createRendererBenchmarkBackend");
+  });
 });
