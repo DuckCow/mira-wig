@@ -1,15 +1,12 @@
 import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import type {
-  RendererBenchmarkInput,
-  RendererBenchmarkPoint,
-} from "./benchmark-input";
+import type { RendererBenchmarkInput } from "./benchmark-input";
 import type { BenchmarkAggregateStageObserver } from "./benchmark-measurement";
 import type {
   ActualRendererBackend,
   RequestedRendererBackend,
 } from "./benchmark-result";
-import type { StrandAsset, StrandPoint, StrandRecord } from "./strand-asset";
+import type { StrandAsset, StrandRecord } from "./strand-asset";
 import {
   canonicalizeVisualState,
   selectStrandsForTier,
@@ -19,8 +16,15 @@ import {
 
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MIN_VIEWPORT_SIZE = 1;
-const TUBE_SEGMENTS_PER_CONTROL_SPAN = 3;
-const TUBE_RADIAL_SEGMENTS = 4;
+export const RENDERER_BENCHMARK_TUBE_SEGMENTS_PER_CONTROL_SPAN = 3;
+export const RENDERER_BENCHMARK_TUBE_RADIAL_SEGMENTS = 4;
+
+export function rendererBenchmarkTubularSegments(pointCount: number): number {
+  if (!Number.isSafeInteger(pointCount) || pointCount < 2) {
+    throw new Error("Benchmark geometry requires at least two control points.");
+  }
+  return (pointCount - 1) * RENDERER_BENCHMARK_TUBE_SEGMENTS_PER_CONTROL_SPAN;
+}
 
 export type RendererBackendKind = "WEBGPU" | "WEBGL2";
 
@@ -68,9 +72,11 @@ export interface RendererBenchmarkResourceSnapshot {
   readonly geometries: number;
 }
 
-export interface RendererBenchmarkBackend {
+export interface RendererBenchmarkBackend<
+  Input extends RendererBenchmarkGeometryInput = RendererBenchmarkInput,
+> {
   initialize(
-    input: RendererBenchmarkInput,
+    input: Input,
     initialState: VisualState,
     observer: BenchmarkAggregateStageObserver,
     preGeometryGuard: RendererBenchmarkPreGeometryGuard,
@@ -78,6 +84,17 @@ export interface RendererBenchmarkBackend {
   resize(width: number, height: number): void;
   dispose(observer: BenchmarkAggregateStageObserver): void;
   resourceSnapshot(): RendererBenchmarkResourceSnapshot;
+}
+
+export interface RendererBenchmarkGeometryInput {
+  readonly strandCount: number;
+  readonly strands: readonly RendererBenchmarkGeometryStrand[];
+}
+
+export interface RendererBenchmarkGeometryStrand {
+  readonly controlPoints: readonly (readonly [number, number, number])[];
+  readonly width: number;
+  readonly densityRank: number;
 }
 
 export interface RendererGeometryAssembly<G, S> {
@@ -292,19 +309,14 @@ function createTubeGeometry(strand: StrandRecord): THREE.BufferGeometry {
     ([x, y, z]) => new THREE.Vector3(x, y, z),
   );
   const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
-  const tubularSegments = (points.length - 1) * TUBE_SEGMENTS_PER_CONTROL_SPAN;
+  const tubularSegments = rendererBenchmarkTubularSegments(points.length);
   return new THREE.TubeGeometry(
     curve,
     tubularSegments,
     strand.width / 2,
-    TUBE_RADIAL_SEGMENTS,
+    RENDERER_BENCHMARK_TUBE_RADIAL_SEGMENTS,
     false,
   );
-}
-
-interface RendererBenchmarkGeometryStrand {
-  readonly controlPoints: readonly StrandPoint[] | readonly RendererBenchmarkPoint[];
-  readonly width: number;
 }
 
 function createBenchmarkTubeGeometry(
@@ -314,12 +326,12 @@ function createBenchmarkTubeGeometry(
     ([x, y, z]) => new THREE.Vector3(x, y, z),
   );
   const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
-  const tubularSegments = (points.length - 1) * TUBE_SEGMENTS_PER_CONTROL_SPAN;
+  const tubularSegments = rendererBenchmarkTubularSegments(points.length);
   return new THREE.TubeGeometry(
     curve,
     tubularSegments,
     strand.width / 2,
-    TUBE_RADIAL_SEGMENTS,
+    RENDERER_BENCHMARK_TUBE_RADIAL_SEGMENTS,
     false,
   );
 }
@@ -414,7 +426,7 @@ class ThreeRendererBackend implements RendererBackend {
   }
 
   async initializeBenchmark(
-    input: RendererBenchmarkInput,
+    input: RendererBenchmarkGeometryInput,
     initialState: VisualState,
     observer: BenchmarkAggregateStageObserver,
     preGeometryGuard: RendererBenchmarkPreGeometryGuard,
@@ -607,7 +619,7 @@ export function createRendererBenchmarkBackend(
   container: HTMLElement,
   options: RendererBackendOptions,
   callbacks: RendererBackendCallbacks,
-): RendererBenchmarkBackend {
+): RendererBenchmarkBackend<RendererBenchmarkGeometryInput> {
   const backend = new ThreeRendererBackend(container, options, callbacks);
   return {
     initialize: (input, initialState, observer, preGeometryGuard) =>
