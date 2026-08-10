@@ -12,6 +12,14 @@ commerce, order, or manufacturing behavior.
   source-status requirements, and activation separation used by the documents
   below.
 
+## Payment provider protocol design
+
+- [Eximbay EX2A Pure Protocol Kernel Design / Implementation Contract v0.1](./eximbay-ex2a-pure-protocol-kernel-design-contract-v0.1.md)
+  — candidate high-risk contract for a future deterministic Eximbay `PAYMENT`
+  protocol kernel. It grants no source, network, SDK, routing, activation,
+  ingress, persistence, completion, or refund authority until independently
+  reviewed and accepted.
+
 ## Render Lab foundation
 
 - [Render Lab Prototype Decision v0.1](./render-lab-prototype-decision-v0.1.md)

@@ -1642,3 +1642,36 @@ frozen conservative predicates. No P6/T15 center, expanded campaign, S3,
 R2C-C, R2C-B, tessellation remedy, control-point remedy, or other renderer
 follow-up receives automatic authority. The S2 lifecycle closes only after
 independent review and merge of the Result Adjudication record.
+
+## 2026-08-11 — Eximbay EX2A pure protocol-kernel contract candidate
+
+### Preserved authority
+
+```text
+Classification: SOURCE_ONLY
+Current authorized change: documentation only
+Eximbay runtime: NONE
+External/network/browser/payment/refund/database authority: NONE
+Routing and fallback eligibility: DISABLED
+Sandbox/live activation: NOT AUTHORIZED
+Status ingress: UNAVAILABLE
+Refund-worker provider authority: TOSS_ONLY_EXPLICIT
+```
+
+### Selected design candidate
+
+The candidate
+[Eximbay EX2A Pure Protocol Kernel Design / Implementation Contract v0.1](../engineering/eximbay-ex2a-pure-protocol-kernel-design-contract-v0.1.md)
+freezes a future side-effect-free `PAYMENT` protocol kernel: integer/string
+USD/JPY amount encoding, one canonical ready/SDK fact set, ephemeral FGKey,
+one provider-order identity candidate per `Payment.id`, exact raw status-query
+carriage, bounded untrusted parsing, nominal verification separation, trusted
+fact validation, duplicate comparison, safe diagnostics, and inquiry-status
+labels.
+
+Concrete provider-order wire derivation remains blocked until complete current
+official constraints are source-frozen. SDK version, status transport and
+acknowledgement, provider adapters, credentials, routes, routing, completion,
+refunds, and activation are excluded. The candidate grants no implementation
+authority until independent review and accepted merge; every later EX2 slice
+requires separate authorization.
