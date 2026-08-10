@@ -42,8 +42,14 @@ commerce, order, or manufacturing behavior.
 - [R2C-A-S1 Point/Tessellation Sensitivity Source Status / As-Built v0.1](./render-runtime-point-sensitivity-source-status-v0.1.md)
   — records the exact source merged by PR #39 / merge `f2a3db9`, its mapping to
   the frozen S1 contract, Result-v1 causal-validator and cleanup behavior,
-  verification history, and the continuing boundary that the primary six-cell
-  characterization has not yet executed and grants no R2C-B authority.
+  verification history, and the historical installation-time boundary that
+  the primary six-cell characterization had not yet executed and granted no
+  R2C-B authority.
+- [R2C-A-S1 Point/Tessellation Sensitivity Result Evidence / Adjudication v0.1](./render-runtime-point-sensitivity-result-adjudication-v0.1.md)
+  — binds the reviewed primary Result v1 by filename and SHA-256, records
+  canonical validation and independent raw-evidence recomputation, preserves
+  the Chrome 151 versus declared-major 140 metadata limitation, freezes
+  `MIXED_OR_NONLINEAR` with no remedy selected, and leaves R2C-B inactive.
 - [R2C-A Minimal Renderer Characterization Source Status v0.1](./render-runtime-scaling-measurement-source-status-v0.1.md)
   — records the reviewed R2C-A v0.3 source installed by PR #36 / merge
   `9ccef3917fe22ddaa4e11f9e33e0a0b48f82af0d`, its installed invariant

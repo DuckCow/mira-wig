@@ -1433,3 +1433,82 @@ MIXED_OR_NONLINEAR
 - This decision does not authorize S1 source implementation.
 - It does not authorize R2C-B implementation or a durable architecture.
 - It does not authorize customer or product activation.
+
+## 2026-08-10 — R2C-A-S1 primary Result-v1 evidence adjudication
+
+### Result and custody identity
+
+```text
+source:
+  7ec020fd74d29c044e3ff8c57a53d8a495ae035f
+
+artifact:
+  mira-r2ca-s1-v01-2026-08-10T05-05-41.133Z.json
+
+bytes:
+  73091
+
+SHA-256:
+  84b2d4cabded90d942ce27b933e0252fecc6f5ab32825ae85bc1b0ede82df737
+
+outcome / stop:
+  COMPLETE / NONE
+
+canonical validation:
+  PASS
+```
+
+Original and archival custody copies were byte-identical. The canonical
+filename and SHA-256 are durable authority; local absolute custody paths are
+not repository authority.
+
+### Independent evidence adjudication
+
+```text
+evidence validity:
+  VALID WITH BOUNDED EVIDENCE LIMITATION
+
+limitation:
+  IMPORTANT NON-BLOCKING METADATA DEFECT
+
+actual browser evidence:
+  Chrome/151.0.0.0
+
+operator-declared browser major:
+  140
+```
+
+Exact browser-major equality was not a frozen admission gate, the raw user
+agent was retained, and all six cells ran in one stable session/backend. The
+discrepancy does not invalidate the within-session P3/P6/P8 comparison, but the
+run is Chrome 151 evidence and declared major 140 is not reliable version
+provenance. The Result-v1 artifact is not retroactively edited.
+
+Independent audit confirmed six cells in frozen order, one valid warm-up and
+five valid measured samples per cell, 30/30 `VALID/NONE` measured samples,
+AUTO requested and WEBGPU actual throughout, zero cleanup/final ownership,
+78/78 recomputed metric summaries, and exact recomputation of all serialized
+analysis fields.
+
+### Frozen disposition and authority
+
+```text
+disposition:
+  MIXED_OR_NONLINEAR
+
+prototypeTarget:
+  NONE
+
+durable remedy:
+  NOT SELECTED
+
+R2C-B:
+  NOT ACTIVATED
+```
+
+The evidence is threshold-proximate/unstable under the preregistered rules.
+Neither point reduction nor tessellation reduction is selected. After reviewed
+merge of the detailed Result Evidence / Adjudication record, the next allowable
+work is a separately reviewed Design / Experiment Contract for the smallest
+`CONTROL_POINT_VS_TESSELLATION_DECOUPLING` factorial experiment. This decision
+does not design that experiment or activate R2C-B, customer or product paths.
