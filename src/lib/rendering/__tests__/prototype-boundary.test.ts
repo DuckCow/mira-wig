@@ -180,6 +180,9 @@ describe("Render Lab prototype boundary", () => {
       expect(source).not.toContain("render-lab/performance");
       expect(source).not.toContain("benchmark-runner");
       expect(source).not.toContain("RenderPerformanceLab");
+      expect(source).not.toContain("benchmark-point-sensitivity");
+      expect(source).not.toContain("benchmark-runner-core");
+      expect(source).not.toContain("three/webgpu");
     }
   });
 
@@ -193,6 +196,11 @@ describe("Render Lab prototype boundary", () => {
       "src/lib/rendering/benchmark-measurement.ts",
       "src/lib/rendering/benchmark-result.ts",
       "src/lib/rendering/benchmark-runner.ts",
+      "src/lib/rendering/benchmark-runner-core.ts",
+      "src/lib/rendering/benchmark-point-sensitivity-input.ts",
+      "src/lib/rendering/benchmark-point-sensitivity-result.ts",
+      "src/lib/rendering/benchmark-point-sensitivity-runner.ts",
+      "src/app/admin/render-lab/performance/point-sensitivity-actions.ts",
     ];
     const prohibitedNetworkOrPersistence = [
       "localStorage",
@@ -218,6 +226,29 @@ describe("Render Lab prototype boundary", () => {
       for (const token of prohibitedNetworkOrPersistence) expect(source).not.toContain(token);
       for (const token of prohibitedDomainImports) expect(source).not.toContain(token);
     }
+  });
+
+  it("keeps S1 and the shared lifecycle core admin-only and outside canonical R2B", () => {
+    const s1Paths = [
+      "src/lib/rendering/benchmark-point-sensitivity-input.ts",
+      "src/lib/rendering/benchmark-point-sensitivity-result.ts",
+      "src/lib/rendering/benchmark-point-sensitivity-runner.ts",
+      "src/lib/rendering/benchmark-point-sensitivity-provenance.server.ts",
+      "src/lib/rendering/benchmark-runner-core.ts",
+      "src/components/rendering/RenderPerformanceLab.tsx",
+    ];
+    const prohibited = [
+      "validateStrandAsset", "loadDiagnosticStrandBundle", "strand-bundle-loader",
+      "@/lib/storage", "@/lib/payment", "@/lib/fitting", "@/lib/ai",
+      "@prisma/client", "localStorage", "sessionStorage", "navigator.sendBeacon",
+      "fetch(",
+    ];
+    for (const modulePath of s1Paths) {
+      const source = read(modulePath);
+      for (const token of prohibited) expect(source).not.toContain(token);
+    }
+    expect(read("src/lib/rendering/benchmark-point-sensitivity-input.ts"))
+      .toContain("canonicalR2BBundle: false");
   });
 
   it("keeps normal R2B initialization observer-free and the benchmark seam separate", () => {

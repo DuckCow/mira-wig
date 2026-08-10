@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { startBenchmarkProvenance } from "@/app/admin/render-lab/performance/actions";
+import { startPointSensitivityProvenance } from "@/app/admin/render-lab/performance/point-sensitivity-actions";
 import { RENDERER_BENCHMARK_SEED } from "@/lib/rendering/benchmark-input";
+import { POINT_SENSITIVITY_SEED } from "@/lib/rendering/benchmark-point-sensitivity-input";
+import {
+  pointSensitivityResultFilename,
+  serializePointSensitivityResult,
+  type PointSensitivityResult,
+} from "@/lib/rendering/benchmark-point-sensitivity-result";
+import { executePointSensitivityBenchmark } from "@/lib/rendering/benchmark-point-sensitivity-runner";
 import {
   rendererBenchmarkResultFilename,
   serializeRendererBenchmarkResult,
@@ -75,49 +83,157 @@ function downloadResult(result: RendererBenchmarkResult): void {
   URL.revokeObjectURL(url);
 }
 
+function downloadPointSensitivityResult(result: PointSensitivityResult): void {
+  const blob = new Blob([serializePointSensitivityResult(result)], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = pointSensitivityResultFilename(result);
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+type PageBenchmarkFamily = "PARENT" | "POINT_SENSITIVITY";
+
+interface PageBenchmarkRunOwner {
+  readonly family: PageBenchmarkFamily;
+  readonly controller: AbortController;
+}
+
+interface PageBenchmarkRunCallbacks<Result> {
+  readonly onStart: () => void;
+  readonly onSuccess: (result: Result) => void;
+  readonly onError: (error: unknown) => void;
+}
+
+/** @internal Owns benchmark exclusion for one mounted render-lab page. */
+export function createRenderPerformanceLabCoordinator(
+  onRunningChange: (running: boolean) => void,
+) {
+  let mounted = true;
+  let active: PageBenchmarkRunOwner | null = null;
+
+  const owns = (owner: PageBenchmarkRunOwner): boolean =>
+    mounted && active === owner;
+
+  async function settle<Result>(
+    owner: PageBenchmarkRunOwner,
+    execute: (signal: AbortSignal) => Promise<Result>,
+    callbacks: PageBenchmarkRunCallbacks<Result>,
+  ): Promise<void> {
+    try {
+      const nextResult = await execute(owner.controller.signal);
+      if (owns(owner)) callbacks.onSuccess(nextResult);
+    } catch (runError) {
+      if (owns(owner)) callbacks.onError(runError);
+    } finally {
+      if (active === owner) {
+        active = null;
+        if (mounted) onRunningChange(false);
+      }
+    }
+  }
+
+  return {
+    mount(): void {
+      mounted = true;
+    },
+    start<Result>(
+      family: PageBenchmarkFamily,
+      execute: (signal: AbortSignal) => Promise<Result>,
+      callbacks: PageBenchmarkRunCallbacks<Result>,
+    ): boolean {
+      if (!mounted || active !== null) return false;
+      const owner: PageBenchmarkRunOwner = {
+        family,
+        controller: new AbortController(),
+      };
+      active = owner;
+      onRunningChange(true);
+      callbacks.onStart();
+      void settle(owner, execute, callbacks);
+      return true;
+    },
+    cancel(reason: "CANCELLED_BY_OPERATOR" | "ROUTE_EXIT"): void {
+      active?.controller.abort(reason);
+    },
+    dispose(): void {
+      if (!mounted) return;
+      mounted = false;
+      const owner = active;
+      active = null;
+      owner?.controller.abort("ROUTE_EXIT");
+    },
+  };
+}
+
 export function RenderPerformanceLab() {
   const rootRef = useRef<HTMLDivElement>(null);
-  const controllerRef = useRef<AbortController | null>(null);
   const [operator, setOperator] = useState(DEFAULT_OPERATOR);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RendererBenchmarkResult | null>(null);
+  const [pointSensitivityResult, setPointSensitivityResult] =
+    useState<PointSensitivityResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const coordinatorRef = useRef<ReturnType<
+    typeof createRenderPerformanceLabCoordinator
+  > | null>(null);
+  if (coordinatorRef.current === null) {
+    coordinatorRef.current = createRenderPerformanceLabCoordinator(setRunning);
+  }
+  const coordinator = coordinatorRef.current;
 
-  useEffect(() => () => {
-    controllerRef.current?.abort("ROUTE_EXIT");
-    controllerRef.current = null;
-  }, []);
+  useEffect(() => {
+    coordinator.mount();
+    return () => coordinator.dispose();
+  }, [coordinator]);
 
   const update = <K extends keyof BenchmarkOperatorDeclaration>(
     key: K,
     value: BenchmarkOperatorDeclaration[K],
   ): void => setOperator((current) => ({ ...current, [key]: value }));
 
-  async function run(runKind: BenchmarkRunKind): Promise<void> {
+  function run(runKind: BenchmarkRunKind): void {
     const root = rootRef.current;
-    if (root === null || running) return;
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    setRunning(true);
-    setError(null);
-    setResult(null);
-    try {
-      const nextResult = await executeRendererBenchmark({
+    if (root === null) return;
+    coordinator.start("PARENT", (signal) => executeRendererBenchmark({
         runKind,
         operator,
         seed: RENDERER_BENCHMARK_SEED,
       }, {
         root,
-        signal: controller.signal,
+        signal,
         readProvenance: startBenchmarkProvenance,
-      });
-      setResult(nextResult);
-    } catch (runError) {
-      setError(errorMessage(runError));
-    } finally {
-      if (controllerRef.current === controller) controllerRef.current = null;
-      setRunning(false);
-    }
+      }), {
+      onStart: () => {
+        setError(null);
+        setResult(null);
+      },
+      onSuccess: setResult,
+      onError: (runError) => setError(errorMessage(runError)),
+    });
+  }
+
+  function runPointSensitivity(): void {
+    const root = rootRef.current;
+    if (root === null) return;
+    coordinator.start("POINT_SENSITIVITY", (signal) => executePointSensitivityBenchmark({
+        operator,
+        seed: POINT_SENSITIVITY_SEED,
+      }, {
+        root,
+        signal,
+        readProvenance: startPointSensitivityProvenance,
+      }), {
+      onStart: () => {
+        setError(null);
+        setPointSensitivityResult(null);
+      },
+      onSuccess: setPointSensitivityResult,
+      onError: (runError) => setError(errorMessage(runError)),
+    });
   }
 
   return (
@@ -241,7 +357,7 @@ export function RenderPerformanceLab() {
         <button
           type="button"
           disabled={!running}
-          onClick={() => controllerRef.current?.abort("CANCELLED_BY_OPERATOR")}
+          onClick={() => coordinator.cancel("CANCELLED_BY_OPERATOR")}
           className="rounded-lg border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-800 disabled:opacity-50"
         >
           Cancel
@@ -255,6 +371,39 @@ export function RenderPerformanceLab() {
           Download JSON
         </button>
       </div>
+
+      <section className="rounded-2xl border border-violet-300 bg-violet-50 p-5">
+        <h2 className="font-semibold text-violet-950">
+          R2C-A-S1 point/tessellation sensitivity
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-violet-950">
+          BENCHMARK_ONLY performance perturbation only. P3/P8은 visual fidelity
+          evidence나 product truth가 아니며 production budget 또는 후보 시각 설정을
+          뜻하지 않습니다.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => void runPointSensitivity()}
+            className="rounded-lg bg-violet-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            Start R2C-A-S1
+          </button>
+          <button
+            type="button"
+            disabled={pointSensitivityResult === null || running}
+            onClick={() => {
+              if (pointSensitivityResult !== null) {
+                downloadPointSensitivityResult(pointSensitivityResult);
+              }
+            }}
+            className="rounded-lg border border-violet-400 px-4 py-2 text-sm font-semibold text-violet-900 disabled:opacity-50"
+          >
+            Download S1 JSON
+          </button>
+        </div>
+      </section>
 
       {error !== null ? (
         <p role="alert" className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900">
@@ -281,6 +430,23 @@ export function RenderPerformanceLab() {
             {result.cells.map((cell) => (
               <li key={`${cell.strandCount}-${cell.requestedBackend}`} className="rounded-lg bg-slate-100 px-3 py-2">
                 {cell.strandCount}×6 · requested {cell.requestedBackend} · actual {cell.actualBackend ?? "UNAVAILABLE"} · {cell.cellOutcome}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+
+      {pointSensitivityResult !== null ? (
+        <section className="rounded-2xl border border-violet-200 bg-white p-5">
+          <h2 className="font-semibold text-slate-950">S1 Result v1</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {pointSensitivityResult.outcome} · {pointSensitivityResult.stopReason}
+          </p>
+          <ul className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+            {pointSensitivityResult.cells.map((cell) => (
+              <li key={`${cell.strandCount}-${cell.pointsPerStrand}`} className="rounded-lg bg-violet-50 px-3 py-2">
+                {cell.strandCount}×P{cell.pointsPerStrand} · requested AUTO · actual {cell.actualBackend ?? "UNAVAILABLE"} · {cell.cellOutcome}
               </li>
             ))}
           </ul>
