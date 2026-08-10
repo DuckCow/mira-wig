@@ -88,6 +88,7 @@ export interface RendererBenchmarkBackend<
 
 export interface RendererBenchmarkGeometryInput {
   readonly strandCount: number;
+  readonly tubularSegments?: number;
   readonly strands: readonly RendererBenchmarkGeometryStrand[];
 }
 
@@ -321,12 +322,18 @@ function createTubeGeometry(strand: StrandRecord): THREE.BufferGeometry {
 
 function createBenchmarkTubeGeometry(
   strand: RendererBenchmarkGeometryStrand,
+  explicitTubularSegments?: number,
 ): THREE.BufferGeometry {
   const points = strand.controlPoints.map(
     ([x, y, z]) => new THREE.Vector3(x, y, z),
   );
   const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
-  const tubularSegments = rendererBenchmarkTubularSegments(points.length);
+  const tubularSegments = explicitTubularSegments === undefined
+    ? rendererBenchmarkTubularSegments(points.length)
+    : explicitTubularSegments;
+  if (!Number.isSafeInteger(tubularSegments) || tubularSegments <= 0) {
+    throw new Error("Benchmark tubularSegments must be a positive safe integer.");
+  }
   return new THREE.TubeGeometry(
     curve,
     tubularSegments,
@@ -463,7 +470,8 @@ class ThreeRendererBackend implements RendererBackend {
     );
     const previousGeometry = this.strandGeometry;
     const merged = assembleRendererBenchmarkGeometry(selected, {
-      createSource: createBenchmarkTubeGeometry,
+      createSource: (strand) =>
+        createBenchmarkTubeGeometry(strand, input.tubularSegments),
       mergeSources: (sources) => mergeGeometries([...sources]),
       validateMerged: (candidate) => {
         if (candidate.getAttribute("position") === undefined) {
