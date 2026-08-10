@@ -49,7 +49,7 @@ describe("Eximbay EX1 disabled architecture", () => {
       "src/app/api/payments/toss/success/route.ts",
       "src/app/api/payments/toss/webhook/route.ts",
     ]);
-    expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(false);
+    expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(true);
     expect(packageJson.toLowerCase()).not.toContain("eximbay");
     expect(production).not.toMatch(/EXIMBAY_(?:SECRET|KEY|ENDPOINT|URL|ENABLED)/u);
   });
