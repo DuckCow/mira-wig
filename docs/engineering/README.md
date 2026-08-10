@@ -55,6 +55,12 @@ commerce, order, or manufacturing behavior.
   and 1,152 strands, freezes pre-sample browser product/major admission, keeps
   robust interaction direction descriptive unless a compatible qualitative
   crossover occurs, and leaves R2C-B inactive.
+- [R2C-A-S2 Control-Point × Longitudinal-Tessellation Decoupling Source Status / As-Built v0.1](./render-runtime-control-point-tessellation-decoupling-source-status-v0.1.md)
+  — records the exact source merged by PR #43 / merge `d5807dd`, its frozen
+  eight-cell workload, benchmark-only renderer seam, causal Result validator,
+  source-review closure, and verification evidence. Primary S2 execution has
+  not yet occurred, no decision-bearing Result exists, and R2C-B remains
+  inactive.
 - [R2C-A Minimal Renderer Characterization Source Status v0.1](./render-runtime-scaling-measurement-source-status-v0.1.md)
   — records the reviewed R2C-A v0.3 source installed by PR #36 / merge
   `9ccef3917fe22ddaa4e11f9e33e0a0b48f82af0d`, its installed invariant
