@@ -3,7 +3,26 @@
 import { useEffect, useRef, useState } from "react";
 import { startBenchmarkProvenance } from "@/app/admin/render-lab/performance/actions";
 import { startPointSensitivityProvenance } from "@/app/admin/render-lab/performance/point-sensitivity-actions";
+import { startControlPointTessellationProvenance } from "@/app/admin/render-lab/performance/control-point-tessellation-actions";
 import { RENDERER_BENCHMARK_SEED } from "@/lib/rendering/benchmark-input";
+import {
+  CONTROL_POINT_TESSELLATION_SEED,
+} from "@/lib/rendering/benchmark-control-point-tessellation-input";
+import {
+  captureRawBrowserVersionEvidence,
+  deriveBrowserVersionConclusion,
+  type ControlPointTessellationBrowserProduct,
+} from "@/lib/rendering/benchmark-control-point-tessellation-browser-admission";
+import {
+  controlPointTessellationResultFilename,
+  serializeControlPointTessellationResult,
+  type ControlPointTessellationOperatorDeclaration,
+  type ControlPointTessellationResult,
+} from "@/lib/rendering/benchmark-control-point-tessellation-result";
+import {
+  executeControlPointTessellationBenchmark,
+  type ControlPointTessellationProgress,
+} from "@/lib/rendering/benchmark-control-point-tessellation-runner";
 import { POINT_SENSITIVITY_SEED } from "@/lib/rendering/benchmark-point-sensitivity-input";
 import {
   pointSensitivityResultFilename,
@@ -40,9 +59,29 @@ const DEFAULT_OPERATOR: BenchmarkOperatorDeclaration = {
   lowPowerState: "OFF",
 };
 
+const DEFAULT_S2_OPERATOR: ControlPointTessellationOperatorDeclaration = {
+  browserEngine: "CHROMIUM_FAMILY",
+  declaredBrowserProduct: "CHROME",
+  declaredBrowserMajor: 140,
+  osFamily: "MACOS",
+  architecture: "ARM64",
+  deviceClass: "PRIMARY_REFERENCE",
+  powerMode: "AC_POWER",
+  lowPowerState: "OFF",
+};
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) return error.message;
   return "특성화 실행에 실패했습니다.";
+}
+
+function detectedBrowserLabel(): string {
+  try {
+    const detected = deriveBrowserVersionConclusion(captureRawBrowserVersionEvidence());
+    return `${detected.product} ${detected.major}`;
+  } catch {
+    return "Unrecognized / admission will fail";
+  }
 }
 
 function osFamily(value: string): BenchmarkOperatorDeclaration["osFamily"] {
@@ -71,6 +110,11 @@ function lowPowerState(value: string): BenchmarkOperatorDeclaration["lowPowerSta
   return "UNKNOWN";
 }
 
+function s2BrowserProduct(value: string): ControlPointTessellationBrowserProduct {
+  if (value === "EDGE" || value === "OPERA" || value === "CHROMIUM") return value;
+  return "CHROME";
+}
+
 function downloadResult(result: RendererBenchmarkResult): void {
   const blob = new Blob([serializeRendererBenchmarkResult(result)], {
     type: "application/json;charset=utf-8",
@@ -95,7 +139,53 @@ function downloadPointSensitivityResult(result: PointSensitivityResult): void {
   URL.revokeObjectURL(url);
 }
 
-type PageBenchmarkFamily = "PARENT" | "POINT_SENSITIVITY";
+function downloadControlPointTessellationResult(
+  result: ControlPointTessellationResult,
+): void {
+  const blob = new Blob([serializeControlPointTessellationResult(result)], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = controlPointTessellationResultFilename(result);
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function ControlPointTessellationResultPanel({
+  result,
+}: {
+  readonly result: ControlPointTessellationResult | null;
+}) {
+  if (result === null) return null;
+  return (
+    <section className="rounded-2xl border border-cyan-200 bg-white p-5">
+      <h2 className="font-semibold text-slate-950">S2 Result v1</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        {result.outcome} · {result.stopReason} ·
+        {result.analysis.disposition ?? "NO DISPOSITION"}
+      </p>
+      <ul className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+        {result.cells.map((cell) => (
+          <li
+            key={`${cell.strandCount}-${cell.pointsPerStrand}-${cell.tubularSegmentsPerStrand}`}
+            className="rounded-lg bg-cyan-50 px-3 py-2"
+          >
+            {cell.strandCount}×P{cell.pointsPerStrand}×T
+            {cell.tubularSegmentsPerStrand} · requested AUTO · actual
+            {cell.actualBackend ?? "UNAVAILABLE"} · {cell.cellOutcome}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+type PageBenchmarkFamily =
+  | "PARENT"
+  | "POINT_SENSITIVITY"
+  | "CONTROL_POINT_TESSELLATION";
 
 interface PageBenchmarkRunOwner {
   readonly family: PageBenchmarkFamily;
@@ -176,6 +266,15 @@ export function RenderPerformanceLab() {
   const [result, setResult] = useState<RendererBenchmarkResult | null>(null);
   const [pointSensitivityResult, setPointSensitivityResult] =
     useState<PointSensitivityResult | null>(null);
+  const [s2Operator, setS2Operator] = useState(DEFAULT_S2_OPERATOR);
+  const [controlPointTessellationResult, setControlPointTessellationResult] =
+    useState<ControlPointTessellationResult | null>(null);
+  const [s2Progress, setS2Progress] = useState<ControlPointTessellationProgress>({
+    completedCells: 0,
+    totalCells: 8,
+    currentCell: null,
+  });
+  const [detectedBrowser, setDetectedBrowser] = useState<string>("Not detected yet");
   const [error, setError] = useState<string | null>(null);
   const coordinatorRef = useRef<ReturnType<
     typeof createRenderPerformanceLabCoordinator
@@ -187,6 +286,7 @@ export function RenderPerformanceLab() {
 
   useEffect(() => {
     coordinator.mount();
+    setDetectedBrowser(detectedBrowserLabel());
     return () => coordinator.dispose();
   }, [coordinator]);
 
@@ -234,6 +334,32 @@ export function RenderPerformanceLab() {
       onSuccess: setPointSensitivityResult,
       onError: (runError) => setError(errorMessage(runError)),
     });
+  }
+
+  function runControlPointTessellation(): void {
+    const root = rootRef.current;
+    if (root === null) return;
+    coordinator.start(
+      "CONTROL_POINT_TESSELLATION",
+      (signal) => executeControlPointTessellationBenchmark({
+        operator: s2Operator,
+        seed: CONTROL_POINT_TESSELLATION_SEED,
+      }, {
+        root,
+        signal,
+        readProvenance: startControlPointTessellationProvenance,
+        onProgress: setS2Progress,
+      }),
+      {
+        onStart: () => {
+          setError(null);
+          setControlPointTessellationResult(null);
+          setS2Progress({ completedCells: 0, totalCells: 8, currentCell: null });
+        },
+        onSuccess: setControlPointTessellationResult,
+        onError: (runError) => setError(errorMessage(runError)),
+      },
+    );
   }
 
   return (
@@ -405,6 +531,84 @@ export function RenderPerformanceLab() {
         </div>
       </section>
 
+      <section className="rounded-2xl border border-cyan-300 bg-cyan-50 p-5">
+        <h2 className="font-semibold text-cyan-950">
+          R2C-A-S2 Control-Point × Longitudinal-Tessellation Decoupling
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-cyan-950">
+          BENCHMARK_ONLY / non-production authority. 고정 8셀(P3/P8 × T6/T21 ×
+          576/1152), 셀당 1 warm-up + 5 measured만 실행합니다. 제품 설정, 시각 품질,
+          R2C-B 또는 production remedy를 활성화하지 않습니다.
+        </p>
+        <p className="mt-2 text-sm text-cyan-900">
+          Detected actual browser evidence (informational until Start): {detectedBrowser}
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="text-sm text-cyan-950">
+            declared browser product
+            <select
+              disabled={running}
+              value={s2Operator.declaredBrowserProduct}
+              onChange={(event) => setS2Operator((current) => ({
+                ...current,
+                declaredBrowserProduct: s2BrowserProduct(event.target.value),
+              }))}
+              className="mt-1 w-full rounded-lg border border-cyan-300 px-3 py-2"
+            >
+              {(["CHROME", "EDGE", "OPERA", "CHROMIUM"] as const).map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm text-cyan-950">
+            declared browser major
+            <input
+              disabled={running}
+              type="number"
+              min={1}
+              step={1}
+              value={s2Operator.declaredBrowserMajor}
+              onChange={(event) => setS2Operator((current) => ({
+                ...current,
+                declaredBrowserMajor: Number(event.target.value),
+              }))}
+              className="mt-1 w-full rounded-lg border border-cyan-300 px-3 py-2"
+            />
+          </label>
+        </div>
+        <p className="mt-3 font-mono text-xs text-cyan-950">
+          Fixed order: 576×P3×T6 → 1152×P8×T21 → 1152×P3×T21 →
+          576×P8×T6 → 1152×P8×T6 → 576×P3×T21 → 576×P8×T21 → 1152×P3×T6
+        </p>
+        <p className="mt-2 text-sm text-cyan-900" aria-live="polite">
+          Immutable progress: {s2Progress.completedCells}/8 cells complete
+          {s2Progress.currentCell === null ? "" :
+            ` · current ${s2Progress.currentCell.strandCount}×P${s2Progress.currentCell.pointsPerStrand}×T${s2Progress.currentCell.tubularSegments}`}
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => void runControlPointTessellation()}
+            className="rounded-lg bg-cyan-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            Start R2C-A-S2
+          </button>
+          <button
+            type="button"
+            disabled={controlPointTessellationResult === null || running}
+            onClick={() => {
+              if (controlPointTessellationResult !== null) {
+                downloadControlPointTessellationResult(controlPointTessellationResult);
+              }
+            }}
+            className="rounded-lg border border-cyan-400 px-4 py-2 text-sm font-semibold text-cyan-950 disabled:opacity-50"
+          >
+            Download S2 JSON
+          </button>
+        </div>
+      </section>
+
       {error !== null ? (
         <p role="alert" className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900">
           {error}
@@ -452,6 +656,8 @@ export function RenderPerformanceLab() {
           </ul>
         </section>
       ) : null}
+
+      <ControlPointTessellationResultPanel result={controlPointTessellationResult} />
     </section>
   );
 }

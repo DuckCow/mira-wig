@@ -201,6 +201,12 @@ describe("Render Lab prototype boundary", () => {
       "src/lib/rendering/benchmark-point-sensitivity-result.ts",
       "src/lib/rendering/benchmark-point-sensitivity-runner.ts",
       "src/app/admin/render-lab/performance/point-sensitivity-actions.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-input.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-browser-admission.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-analysis.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-result.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-runner.ts",
+      "src/app/admin/render-lab/performance/control-point-tessellation-actions.ts",
     ];
     const prohibitedNetworkOrPersistence = [
       "localStorage",
@@ -249,6 +255,54 @@ describe("Render Lab prototype boundary", () => {
     }
     expect(read("src/lib/rendering/benchmark-point-sensitivity-input.ts"))
       .toContain("canonicalR2BBundle: false");
+  });
+
+  it("keeps S2 local, admin-only, non-product, non-R2B, and non-persistent", () => {
+    const s2Paths = [
+      "src/lib/rendering/benchmark-control-point-tessellation-input.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-browser-admission.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-analysis.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-result.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-runner.ts",
+      "src/lib/rendering/benchmark-control-point-tessellation-provenance.server.ts",
+      "src/app/admin/render-lab/performance/control-point-tessellation-actions.ts",
+      "src/components/rendering/RenderPerformanceLab.tsx",
+    ];
+    const prohibited = [
+      "validateStrandAsset", "loadDiagnosticStrandBundle", "strand-bundle-loader",
+      "@/lib/storage", "@/lib/payment", "@/lib/fitting", "@/lib/ai",
+      "@prisma/client", "localStorage", "sessionStorage", "navigator.sendBeacon",
+      "XMLHttpRequest", "WebSocket", "fetch(",
+    ];
+    for (const modulePath of s2Paths) {
+      const source = read(modulePath);
+      for (const token of prohibited) expect(source).not.toContain(token);
+    }
+    expect(read("src/app/admin/render-lab/performance/control-point-tessellation-actions.ts"))
+      .toContain("const guard = await requireAdmin()");
+    expect(read("src/lib/rendering/benchmark-control-point-tessellation-input.ts"))
+      .toContain("canonicalR2BBundle: false");
+  });
+
+  it("does not expose the benchmark tessellation override through normal renderer boundaries", () => {
+    const renderer = read("src/lib/rendering/renderer-backend.ts");
+    const normalInterface = renderer.slice(
+      renderer.indexOf("export interface RendererBackend {"),
+      renderer.indexOf("export interface RendererBenchmarkBackendObservation"),
+    );
+    const normalFactory = renderer.slice(
+      renderer.indexOf("export function createRendererBackend("),
+      renderer.indexOf("export function createRendererBenchmarkBackend("),
+    );
+    expect(normalInterface).not.toContain("tubularSegments");
+    expect(normalFactory).not.toContain("tubularSegments");
+    for (const customerBoundary of [
+      "src/components/rendering/RenderLabViewport.tsx",
+      "src/lib/rendering/strand-asset.ts",
+      "src/lib/rendering/strand-bundle-loader.ts",
+    ]) {
+      expect(read(customerBoundary)).not.toContain("benchmark-control-point-tessellation");
+    }
   });
 
   it("keeps normal R2B initialization observer-free and the benchmark seam separate", () => {
