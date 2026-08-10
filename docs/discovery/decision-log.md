@@ -1585,3 +1585,60 @@ authorize P6/T15, a 3×3 design, more samples, adaptive extension, S3, R2C-C or
 R2C-B. The exact cells, order, formulas, lifecycle, cleanup, evidence boundary
 and authority are frozen by
 `docs/engineering/render-runtime-control-point-tessellation-decoupling-design-contract-v0.1.md`.
+
+## 2026-08-10 — R2C-A-S2 primary Result evidence adjudication
+
+### Result and custody identity
+
+```text
+execution commit:
+  900de0cd8ea0ab0b621bb0142201fbf05b6bd451
+
+artifact:
+  mira-r2ca-s2-v01-2026-08-10T13-36-27.790Z.json
+
+bytes:
+  98,778
+
+SHA-256:
+  6fb828d1b552cda9713435e7b3d7fcaf8d6abc5d00355b581df25ed7cb2a17a9
+
+Result Adjudication:
+  docs/engineering/render-runtime-control-point-tessellation-decoupling-result-adjudication-v0.1.md
+```
+
+The original and archival custody copies were byte-identical. Canonical
+validation passed, and independent standard-library recomputation matched all
+104 metric summaries and all 89 serialized analysis fields with zero
+mismatches.
+
+### Durable disposition and authority
+
+```text
+S2 Result:
+  VALID
+
+Disposition:
+  UNRESOLVED
+
+Target:
+  NONE
+
+Renderer remedy:
+  NONE
+
+Automatic renderer follow-up:
+  NONE
+
+Default roadmap transition:
+  RETURN TO COMMERCE / PRODUCT
+
+R2C-B:
+  NOT ACTIVATED
+```
+
+The descriptive longitudinal-tessellation main effects do not override the
+frozen conservative predicates. No P6/T15 center, expanded campaign, S3,
+R2C-C, R2C-B, tessellation remedy, control-point remedy, or other renderer
+follow-up receives automatic authority. The S2 lifecycle closes only after
+independent review and merge of the Result Adjudication record.

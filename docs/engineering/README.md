@@ -58,9 +58,15 @@ commerce, order, or manufacturing behavior.
 - [R2C-A-S2 Control-Point × Longitudinal-Tessellation Decoupling Source Status / As-Built v0.1](./render-runtime-control-point-tessellation-decoupling-source-status-v0.1.md)
   — records the exact source merged by PR #43 / merge `d5807dd`, its frozen
   eight-cell workload, benchmark-only renderer seam, causal Result validator,
-  source-review closure, and verification evidence. Primary S2 execution has
-  not yet occurred, no decision-bearing Result exists, and R2C-B remains
-  inactive.
+  source-review closure, verification evidence, and the historical
+  installation-time boundary before primary execution. It grants no R2C-B
+  authority.
+- [R2C-A-S2 Control-Point × Longitudinal-Tessellation Decoupling Result Evidence / Independent Adjudication v0.1](./render-runtime-control-point-tessellation-decoupling-result-adjudication-v0.1.md)
+  — binds the completed primary Result by canonical filename, 98,778-byte
+  count, and SHA-256; records canonical validation and independent raw-evidence
+  recomputation; confirms evidence validity `VALID` and disposition
+  `UNRESOLVED`; and freezes next target `NONE`, no renderer remedy, and no
+  R2C-B activation.
 - [R2C-A Minimal Renderer Characterization Source Status v0.1](./render-runtime-scaling-measurement-source-status-v0.1.md)
   — records the reviewed R2C-A v0.3 source installed by PR #36 / merge
   `9ccef3917fe22ddaa4e11f9e33e0a0b48f82af0d`, its installed invariant
