@@ -50,6 +50,11 @@ commerce, order, or manufacturing behavior.
   canonical validation and independent raw-evidence recomputation, preserves
   the Chrome 151 versus declared-major 140 metadata limitation, freezes
   `MIXED_OR_NONLINEAR` with no remedy selected, and leaves R2C-B inactive.
+- [R2C-A-S2 Control-Point × Longitudinal-Tessellation Decoupling Design / Experiment Contract v0.1](./render-runtime-control-point-tessellation-decoupling-design-contract-v0.1.md)
+  — freezes the eight-cell P3/P8 × T6/T21 factorial characterization at 576
+  and 1,152 strands, freezes pre-sample browser product/major admission, keeps
+  robust interaction direction descriptive unless a compatible qualitative
+  crossover occurs, and leaves R2C-B inactive.
 - [R2C-A Minimal Renderer Characterization Source Status v0.1](./render-runtime-scaling-measurement-source-status-v0.1.md)
   — records the reviewed R2C-A v0.3 source installed by PR #36 / merge
   `9ccef3917fe22ddaa4e11f9e33e0a0b48f82af0d`, its installed invariant

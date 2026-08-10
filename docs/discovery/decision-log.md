@@ -1512,3 +1512,76 @@ merge of the detailed Result Evidence / Adjudication record, the next allowable
 work is a separately reviewed Design / Experiment Contract for the smallest
 `CONTROL_POINT_VS_TESSELLATION_DECOUPLING` factorial experiment. This decision
 does not design that experiment or activate R2C-B, customer or product paths.
+
+## 2026-08-10 — R2C-A-S2 control-point/tessellation decoupling design freeze
+
+### Governing completed S1 evidence
+
+```text
+source:
+  7ec020fd74d29c044e3ff8c57a53d8a495ae035f
+
+artifact SHA-256:
+  84b2d4cabded90d942ce27b933e0252fecc6f5ab32825ae85bc1b0ede82df737
+
+evidence validity:
+  VALID WITH BOUNDED EVIDENCE LIMITATION
+
+disposition / prototypeTarget:
+  MIXED_OR_NONLINEAR / NONE
+```
+
+The completed S1 evidence selects no remedy. It authorizes one bounded
+`R2C-A-S2` decoupling experiment and does not activate R2C-B.
+
+### Frozen S2 design
+
+```text
+strand counts:
+  576 / 1152
+
+control-point levels:
+  3 / 8
+
+TubeGeometry.tubularSegments levels:
+  6 / 21
+
+radialSegments:
+  4 fixed
+
+cells:
+  exact 2 × 2 × 2 crossing in the deterministic order frozen by the S2 contract
+
+sampling:
+  1 warm-up + 5 measured per cell
+```
+
+P6/T15 is intentionally not a same-session center, and no center or expanded
+campaign may be added after seeing evidence. Control-point representation and
+longitudinal tessellation are separate factors. Analysis remains independent
+at each strand count and uses the contract's conservative raw simple-effect
+and interaction ranges.
+
+Robust interaction direction is retained as descriptive nonadditivity
+evidence. It does not preempt stable factor-side evidence. Only the exact
+same-orientation qualitative point or tessellation crossover at both strand
+levels selects `INTERACTION_OR_NONADDITIVE`; all other dispositions follow the
+ordered affirmative rules and otherwise fall through to `UNRESOLVED`.
+
+Browser admission separately freezes `browserEngine`, the selected
+Chromium-family `browserProduct`, and that product's `browserMajor`. Recognized
+wrapper products take precedence over embedded Chrome/Chromium tokens;
+missing, ambiguous, conflicting, unparseable or declared-versus-actual product
+or major evidence fails admission before the first warm-up.
+
+### Authority and anti-sprawl
+
+A complete S2 result may select only one bounded later investigation class.
+It does not authorize a production setting, visual-fidelity conclusion,
+durable renderer remedy, R2C-B, or customer/product activation.
+
+An `UNRESOLVED` result selects no renderer remedy and does not automatically
+authorize P6/T15, a 3×3 design, more samples, adaptive extension, S3, R2C-C or
+R2C-B. The exact cells, order, formulas, lifecycle, cleanup, evidence boundary
+and authority are frozen by
+`docs/engineering/render-runtime-control-point-tessellation-decoupling-design-contract-v0.1.md`.
