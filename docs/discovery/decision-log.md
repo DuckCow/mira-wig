@@ -1675,3 +1675,78 @@ acknowledgement, provider adapters, credentials, routes, routing, completion,
 refunds, and activation are excluded. The candidate grants no implementation
 authority until independent review and accepted merge; every later EX2 slice
 requires separate authorization.
+
+## 2026-08-11 — Eximbay EX2A pure protocol-kernel source installation
+
+### Reviewed contract and source chain
+
+```text
+Design Contract PR / head / merge:
+  #46
+  54ac64276c243deb0929956b1bfc9bd073bbd93e
+  bd95a2bb1364715923e4639f3e1a674a5191107d
+
+source PR / reviewed head / merge:
+  #47
+  6c7d09d11f79c7d9baca21d52b18ea59c3145e42
+  685fc048c8cb6fb834593e3b1f56756817c8e9ab
+```
+
+The historical
+[EX2A Design Contract](../engineering/eximbay-ex2a-pure-protocol-kernel-design-contract-v0.1.md)
+remains unchanged as normative design authority for its lifecycle stage. The
+separate
+[EX2A Source Status / As-Built v0.1](../engineering/eximbay-ex2a-pure-protocol-kernel-source-status-v0.1.md)
+records the later installed source truth without rewriting the earlier
+contract-candidate entry.
+
+### Installed source and verification
+
+PR #47 installed exactly 20 reviewed paths: 1 modified EX1 architecture test
+and 19 added EX2A source/test paths, with 2,268 insertions and 1 deletion. The
+deterministic, side-effect-free kernel owns USD/JPY minor-unit encoding and
+inverse decoding, canonical preparation facts, ready/SDK semantic projections,
+an opaque Payment-owned provider-order candidate, exact raw status-query
+carriage and bounded parsing, safe aggregate diagnostics, nominal verified-type
+separation, conservative trusted-fact validation, duplicate classification,
+inquiry-state classification, and production isolation regression checks.
+
+All six independent source-review findings closed with no new Blocker,
+Important, or Minor finding, no contract clarification, and final source
+architecture accepted. Focused verification passed 7 test files / 122 tests,
+typecheck, and focused strict ESLint. A separately isolated clean
+`npm run verify` passed 244 test files / 5,697 tests with exit code 0 after all
+32 migrations were applied to a disposable PostgreSQL database. The exact 20
+reviewed files matched SHA-256 before and after testing with zero mismatch.
+GitHub CI run #307, run ID `31433573045`, separately concluded `success`.
+
+### Runtime authority and next gate
+
+```text
+EX2A source:
+  INSTALLED / REVIEWED
+
+Eximbay runtime/network/SDK/credentials/routes/persistence/completion:
+  NONE
+
+routing/fallback:
+  DISABLED
+
+sandbox/live activation:
+  NOT AUTHORIZED
+
+refund/void:
+  EXCLUDED
+
+refund-worker authority:
+  TOSS_ONLY_EXPLICIT
+```
+
+Provider-order wire constraints, SDK deployment identity, `status_url`
+transport and acknowledgement/retries, test credential/MID semantics,
+P000/USD/JPY merchant capability, 3DS/browser prerequisites, and refund wire
+and recovery remain unresolved re-entry gates. The next authorized analysis
+step is EX2B / EX2F prerequisite provider-evidence reconnaissance. This record
+does not authorize network calls, credentials, application routes, SDK
+invocation, provider routing, activation, completion, refund, void,
+reconciliation, order creation, or manufacturing creation.

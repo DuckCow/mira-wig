@@ -15,10 +15,15 @@ commerce, order, or manufacturing behavior.
 ## Payment provider protocol design
 
 - [Eximbay EX2A Pure Protocol Kernel Design / Implementation Contract v0.1](./eximbay-ex2a-pure-protocol-kernel-design-contract-v0.1.md)
-  — candidate high-risk contract for a future deterministic Eximbay `PAYMENT`
-  protocol kernel. It grants no source, network, SDK, routing, activation,
-  ingress, persistence, completion, or refund authority until independently
-  reviewed and accepted.
+  — historical normative high-risk contract that froze the deterministic
+  Eximbay `PAYMENT` pure-kernel design before implementation. Its original
+  candidate status remains historical and is not rewritten by later source
+  installation.
+- [Eximbay EX2A Pure Protocol Kernel Source Status / As-Built v0.1](./eximbay-ex2a-pure-protocol-kernel-source-status-v0.1.md)
+  — records the current installed and reviewed EX2A pure-kernel source from PR
+  #47, its exact evidence, limitations, and re-entry gates. It grants no
+  Eximbay network, SDK, routing, ingress, persistence, completion, refund,
+  sandbox, live, or other runtime authority.
 
 ## Render Lab foundation
 
