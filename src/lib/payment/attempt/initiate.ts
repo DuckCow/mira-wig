@@ -3,6 +3,7 @@ import {
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentInitiationOutputKind,
+  PaymentProvider,
   PaymentRemediationStatus,
   Prisma,
 } from "@prisma/client";
@@ -15,6 +16,7 @@ import {
   hasSessionSuspensionCycle,
   hasUnresolvedSessionExposure,
 } from "@/lib/payment/remediation";
+import { generateEximbayProviderOrderId } from "@/lib/payment/attempt/provider-order-id";
 import { isUsable } from "@/lib/payment/session";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import {
@@ -42,6 +44,7 @@ type InitiatedPayment = Pick<
   | "currency"
   | "idempotencyKey"
   | "routingRuleId"
+  | "providerOrderId"
   | "providerRef"
   | "providerPaymentKey"
   | "initiationOutputKind"
@@ -424,6 +427,9 @@ async function createContactAuthorizedPayment(
       attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
       amount: session.totalAmount,
       currency: session.currency,
+      providerOrderId: input.provider.code === PaymentProvider.EXIMBAY
+        ? generateEximbayProviderOrderId()
+        : null,
       idempotencyKey: initiateIdempotencyKey(session.id),
       contactIntentAt: now,
     },
@@ -705,6 +711,7 @@ function paymentSelect(): Prisma.PaymentSelect {
     currency: true,
     idempotencyKey: true,
     routingRuleId: true,
+    providerOrderId: true,
     providerRef: true,
     providerPaymentKey: true,
     initiationOutputKind: true,

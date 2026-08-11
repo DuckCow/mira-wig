@@ -536,6 +536,7 @@ model Payment {
   remediationStatus             PaymentRemediationStatus     @default(NONE)
   amount                        Int
   currency                      String
+  providerOrderId              String?
   providerRef                   String?
   providerConfirmIdempotencyKey String?                      @unique
   providerPaymentKey            String?
@@ -562,6 +563,7 @@ model Payment {
   refundAttempts                RefundAttempt[]
 
   @@unique([provider, providerPaymentKey])
+  @@unique([provider, providerOrderId])
   @@unique([checkoutSessionId, id])
   @@index([provider, providerRef])
   @@index([checkoutSessionId, status])

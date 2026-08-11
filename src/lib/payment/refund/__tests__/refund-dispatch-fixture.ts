@@ -12,6 +12,7 @@ import {
   ShippingCountry,
 } from "@prisma/client";
 import { db } from "@/lib/db";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { claimRefundAttemptForExecution } from "../claim";
 import { requestRefundAttempt } from "../request";
 
@@ -143,6 +144,9 @@ async function constructDispatchFixture(
       attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
       amount: totalAmount,
       currency: "KRW",
+      providerOrderId: provider === PaymentProvider.EXIMBAY
+        ? syntheticEximbayProviderOrderId()
+        : null,
       providerRef,
       providerPaymentKey,
       financialSucceededAt: DISPATCH_NOW,
