@@ -2105,3 +2105,71 @@ The separate
 records the complete installed truth and evidence. BF3 SDK evidence, BF4
 callback/status evidence, actual provider transport, financial verification,
 merchant/live activation, and refund/void/recovery remain separately gated.
+
+## 2026-08-11 — Eximbay EX2B1 Source Status installation and lifecycle closure
+
+### Installation identity and review disposition
+
+```text
+Source Status PR:
+  #53
+
+reviewed head:
+  918d1f8343663576f3820a8ca1a997804848c423
+
+merge:
+  0a5f06e0ca372c4cc1849c9ba8a891a42bf46c76
+
+CI:
+  #319
+  success
+
+independent documentation findings:
+  Blocker 0
+  Important 0
+  Minor 0
+
+EX2B1 Source Status:
+  INSTALLED
+
+EX2B1 lifecycle:
+  CLOSED
+```
+
+This closure means only that the bounded EX2B1 lifecycle is complete: its
+Design Contract is installed, its source is implemented, reviewed, verified,
+and merged, and its Source Status is independently reviewed, merged, and
+installed. It does not mean that the Eximbay integration is complete or that
+`/ready` HTTP, an SDK, callback handling, payments, merchant production
+capability, or refund/void/recovery is implemented or activated.
+
+### Runtime boundary and next gate
+
+```text
+provider contact:
+  NONE
+
+routing:
+  NOT AUTHORIZED
+
+credentials:
+  NONE
+
+SDK/browser handoff:
+  NOT INSTALLED
+
+callback:
+  NOT INSTALLED
+
+refund/void:
+  BLOCKED
+
+sandbox/live runtime activation:
+  NOT AUTHORIZED
+
+next gate:
+  BF3 SDK evidence
+```
+
+BF3 has not started or completed. EX2B2 remains gated by BF3, and BF4
+callback/status_url evidence remains separately gated.
