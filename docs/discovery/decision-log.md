@@ -1879,3 +1879,159 @@ synthetic family, independently of raw `Payment.id`, only after fresh
 repository reconnaissance and reviewed design authority. This adjudication
 does not freeze persistence schema. `providerRef` must not be silently
 overloaded absent a future audit proving semantic compatibility.
+
+## 2026-08-11 — Eximbay EX2B1 provider-order and provider-free `/ready` contract candidate
+
+### BF2 closure and fresh reconnaissance
+
+```text
+BF2 custody:
+  VALID_CUSTODY
+
+BF2 execution:
+  EXECUTION_CONFORMANT
+
+BF2 evidence:
+  BF2_EVIDENCE_VALID_WITH_LIMITATIONS
+
+BF2 repeat:
+  NOT AUTHORIZED
+```
+
+Fresh source reconnaissance at
+`cd51f8398980401fd573d95aff417c5028f2a5fe` confirmed that `Payment` is the
+physical provider-attempt and provider-contact owner, while one
+`CheckoutSession` may retain historical `Payment` attempts. Current
+`CONTACT_AUTHORIZED`, `CONTACTED`, `OUTCOME_UNKNOWN`, and `SUPERSEDED`
+semantics are sufficient; no new attempt owner or lifecycle state is selected.
+
+```text
+BF2 lifecycle:
+  CLOSED
+```
+
+### Frozen candidate decisions
+
+The candidate
+[EX2B1 Provider Order Identity + Provider-Free `/ready` Preparation Design Contract v0.1](../engineering/eximbay-ex2b1-provider-order-ready-preparation-design-contract-v0.1.md)
+selects:
+
+```text
+preferred persistence:
+  generic nullable Payment.providerOrderId
+
+providerRef:
+  REUSE_INCOMPATIBLE
+
+providerPaymentKey:
+  REUSE_INCOMPATIBLE
+
+idempotencyKey:
+  independent
+
+raw Payment.id:
+  not provider wire
+
+generation:
+  CSPRNG + unbiased rejection sampling
+
+identity family:
+  ^c[0-9a-z]{24}$
+
+persistence:
+  new EXIMBAY Payment creation transaction
+
+uniqueness:
+  provider-scoped and database-authoritative
+
+immutability:
+  database enforced
+
+contact order:
+  persist -> CONTACT_AUTHORIZED -> CONTACTED commit -> future contact
+```
+
+Current PrismaPg 7.8 does not expose sufficiently reliable structured named-
+constraint identity for exact provider-order collision retry authority.
+Current EX2B1 therefore generates one candidate for one authoritative creation
+operation and performs zero automatic collision-regeneration attempts. Any
+duplicate, generic `P2002`, or unrelated uniqueness failure rolls the
+transaction back and fails closed before provider contact. A future bounded
+regeneration design requires separate review and a structured primitive that
+positively distinguishes the exact provider-order constraint.
+
+The future provider-free materializer binds installed EX2A canonical facts and
+their opaque Payment-owned candidate to a separately trusted persisted
+provider-order binding. It may emit the persisted value only as wire
+`payment.order_id`; it reuses the installed EX2A amount codec and adds no
+transport, credentials, endpoint, authentication, FGKey, or SDK behavior.
+
+### Independent architecture audit — bounded corrections
+
+```text
+EX2B1 architecture:
+  ACCEPTED WITH BOUNDED CORRECTIONS
+
+EX2B1-AUD-001:
+  CORRECTED
+
+EX2B1-AUD-002:
+  CORRECTED
+
+EX2B1-AUD-003:
+  CORRECTED
+
+webhook-first EXIMBAY:
+  NOT AUTHORIZED IN THIS SLICE
+
+future genuine EXIMBAY webhook-first:
+  REQUIRES SEPARATELY REVIEWED BF4 / SCHEMA / COMPLETION EVOLUTION
+
+PrismaPg exact providerOrderId constraint discrimination:
+  NOT FEASIBLE ON CURRENT STACK
+
+automatic providerOrderId collision regeneration:
+  DISABLED
+
+collision:
+  FAIL CLOSED BEFORE CONTACT
+
+future bounded regeneration:
+  REQUIRES SEPARATELY REVIEWED STRUCTURED CONSTRAINT IDENTITY
+
+intentional EXIMBAY test fixtures:
+  MIGRATE TO VALID INSERT-TIME providerOrderId WITHOUT WEAKENING EXCLUSIONS
+```
+
+Existing non-Eximbay webhook-first behavior remains unchanged. EX2B1 may not
+fabricate an Eximbay `Payment` or merchant identity from a callback that lacks
+pre-existing correlation. Intentional Eximbay fixtures must be constructed
+validly at insertion time; tests must not mutate another provider's row into
+Eximbay or weaken refund, void, routing, factory, or activation exclusions.
+
+### Evidence and authority boundary
+
+The selected identity family is supported only by BF2's two exact accepted
+synthetic representatives. It is not Eximbay's complete grammar, does not prove
+every family member, and does not establish Prisma `Payment.id` acceptance.
+Additional provider evidence and vendor clarification are not required for this
+provider-free EX2B1 contract. BF3 SDK evidence, BF4 callback evidence, provider
+transport, Mira merchant-account capability, sandbox activation, and live
+activation remain separate.
+
+```text
+additional provider evidence:
+  not required for EX2B1 contract
+
+vendor clarification:
+  not required for EX2B1 contract
+
+BF3 / BF4 / live:
+  still separate
+```
+
+This candidate is documentation only and is not installed. It grants no source
+implementation authority until independent adversarial review and accepted
+merge; later source work still requires a separate explicit task. No provider
+request, credential, SDK, route, routing, activation, refund, void, Order, or
+ManufacturingRequest authority is created.
