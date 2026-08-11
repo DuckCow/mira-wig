@@ -2035,3 +2035,73 @@ implementation authority until independent adversarial review and accepted
 merge; later source work still requires a separate explicit task. No provider
 request, credential, SDK, route, routing, activation, refund, void, Order, or
 ManufacturingRequest authority is created.
+
+## 2026-08-11 — Eximbay EX2B1 source installation and Source Status candidate
+
+### Source installation and review closure
+
+```text
+source PR / reviewed head / merge:
+  #52
+  8ac1230992538f80a0d1fe50cfe03ee433b349d8
+  016ac179b5568f24e9467462e3a86a8ca530fd6d
+
+source findings:
+  B-01 CLOSED
+  I-01 CLOSED
+
+new Blocker / Important / Minor findings at closure:
+  0 / 0 / 0
+```
+
+PR #52 installed durable per-`Payment` Eximbay provider-order identity,
+database-enforced provider shape, provider-scoped uniqueness and immutability,
+one-candidate fail-closed collision behavior, trusted canonical-persistence
+binding, provider-free READY request materialization, and an Eximbay
+webhook-first fail-closed boundary. The broad-review provenance defect B-01
+was closed by removing caller-supplied persistence authority. I-01 was closed
+with direct PostgreSQL same-session convergence and two-session forced-
+collision tests.
+
+### Verification, runtime boundary, and lifecycle
+
+Final source verification passed Prisma validation/generation, PostgreSQL 18.4
+full migration history `33/33`, focused database and behavior suites,
+typecheck, candidate/repository lint excluding only `.local-review/**`, and
+the separately run full suite at 248 files / 5,732 tests. The reviewed 22-path
+candidate manifest remained
+`0ad9ea392d3033ef0278470e0f2f49bc84e3c018e7e7fc89f3cf39fedaae411a`
+before and after verification. Literal `npm run verify` did not complete
+because lint encountered 14 pre-existing parser errors under
+`.local-review/**`; it is not recorded as passing.
+
+CI #317 initially encountered an isolated cleanup-hook timeout in an unchanged
+Toss refund recontact test. Bounded inspection found no candidate-path semantic
+connection requiring a source correction; one failed-job-only rerun against
+the unchanged source head completed successfully.
+
+```text
+EX2B1 source:
+  MERGED / INSTALLED / REVIEWED
+
+provider contact / routing / credentials / SDK / callback / completion:
+  NONE
+
+refund / void:
+  BLOCKED
+
+test/live Eximbay runtime activation:
+  NOT AUTHORIZED
+
+Source Status candidate:
+  CREATED — PENDING INDEPENDENT DOCUMENTATION REVIEW / INSTALLATION
+
+EX2B1 lifecycle:
+  PENDING SOURCE-STATUS INSTALLATION
+```
+
+The separate
+[EX2B1 Source Status / As-Built v0.1](../engineering/eximbay-ex2b1-provider-order-ready-preparation-source-status-v0.1.md)
+records the complete installed truth and evidence. BF3 SDK evidence, BF4
+callback/status evidence, actual provider transport, financial verification,
+merchant/live activation, and refund/void/recovery remain separately gated.
