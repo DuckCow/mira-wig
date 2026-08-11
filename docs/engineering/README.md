@@ -56,6 +56,10 @@ commerce, order, or manufacturing behavior.
   PackageIntegrity-v1 custody evidence, prohibits JavaScript execution, and
   grants no current provider contact, SDK load, payment page, EX2B2 source, or
   runtime activation authority.
+- [Eximbay BF3 Static JavaScript SDK Result Evidence / Independent Adjudication v0.1](./eximbay-bf3-static-sdk-result-adjudication-v0.1.md)
+  — records one completed conformant BF3 execution, valid package admission,
+  invalid/incomplete semantic evidence, disposition
+  `BF3_EVIDENCE_INVALID_OR_INCOMPLETE`, no rerun authority, and blocked EX2B2.
 
 ## Render Lab foundation
 
