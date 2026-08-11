@@ -24,6 +24,11 @@ commerce, order, or manufacturing behavior.
   #47, its exact evidence, limitations, and re-entry gates. It grants no
   Eximbay network, SDK, routing, ingress, persistence, completion, refund,
   sandbox, live, or other runtime authority.
+- [Eximbay BF2 Shared-Test `/ready` Preflight Provider Evidence / Execution Contract v0.1](./eximbay-bf2-shared-test-ready-preflight-contract-v0.1.md)
+  — candidate contract for one separately invoked, sequential, at-most-three
+  request public shared-test `/ready` evidence action after independent review
+  and merge. EX2A Source Status remains installed source truth; BF2 is not
+  product/runtime activation and currently grants no provider contact.
 
 ## Render Lab foundation
 
