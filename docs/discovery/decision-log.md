@@ -2320,3 +2320,71 @@ closure of BF3-CLR-002 and BF3-AUD-004, and regression checking the already
 closed BF3-CLR-003. It does not reopen provider evidence, SDK canonicality,
 HTTP behavior, target inventory, static analysis, warnings, terminal state, or
 custody architecture.
+
+## 2026-08-12 — Eximbay BF3 static JavaScript SDK Result adjudication
+
+### Contract, run, and package admission
+
+```text
+contract merge:
+  5a02801379e65c3adf44726d895ac810026a1976
+
+run ID:
+  20260811T220109Z-c4779de2
+
+package admission:
+  VALID
+
+execution conformance:
+  CONFORMANT
+
+semantic result:
+  INVALID_OR_INCOMPLETE
+
+BF3 disposition:
+  BF3_EVIDENCE_INVALID_OR_INCOMPLETE
+```
+
+PackageIntegrity-v1 is 1,199 bytes with SHA-256
+`3ffabb7bffa44e16edfb3958993d1487d9b7a42a6215d945ad6eb8b34405780c`.
+The original and archive Result-v1 files are valid canonical bytes, directly
+byte-identical at 7,200 bytes, with SHA-256
+`daa413c8754969f4187079b45c722bb1a79a0da77a6725927814c8105269de5a`.
+The external evidence remains outside Git.
+
+### Source-admission anomaly and evidence ceiling
+
+Both exact test SDK URLs were contacted once and returned HTTP 200 with
+complete retained bodies. TEST V2 declared Content-Type `application/json` and
+bound 4,287 bytes; TEST V1 also declared `application/json` and bound 3,459
+bytes. The installed JavaScript media-type allowlist did not admit either
+response, so all static observations and all static comparisons remain
+`UNRESOLVED_BY_STATIC_INSPECTION`.
+
+The raw V2 and V1 bodies differ by byte count, SHA-256, and direct byte
+comparison. That establishes a raw byte difference only. It does not establish
+a semantic SDK difference, a canonical version, browser behavior, payment-page
+behavior, production path, merchant readiness, or EX2B2 readiness.
+
+### Durable boundary and next lawful gate
+
+```text
+BF3 re-run:
+  NOT AUTHORIZED
+
+EX2B2:
+  BLOCKED
+
+next lawful gate:
+  STOP PENDING NEW AUTHORITY
+
+possible separately reviewed planning continuation:
+  BF3 evidence-plan / contract revision addressing the observed Content-Type
+  anomaly
+```
+
+The completed run consumed both provider-request ordinals. The result record
+creates no new provider contact, confirmation GET, vendor contact, revised
+evidence method, SDK interpretation, SDK execution, EX2B2 design, or runtime
+activation authority. Any future evidence-plan revision neither reinterprets
+this run nor authorizes a rerun by itself.
