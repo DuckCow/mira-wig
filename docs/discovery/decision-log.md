@@ -1798,3 +1798,84 @@ manufacturing creation remain unauthorized.
 
 After BF2 execution, a separate bounded adjudication must decide whether the
 next step is vendor clarification, BF3 SDK evidence, an EX2B1 contract, or stop.
+
+## 2026-08-11 — Eximbay BF2 shared-test `/ready` Result adjudication
+
+### Contract, execution, and custody
+
+```text
+BF2 contract PR / reviewed head / merge:
+  #49
+  98f8126f545cfb3faeb2330c06347da641cb406d
+  0216042c970c285f934237b42c863045729d3420
+
+BF2 execution:
+  OCCURRED ONCE
+
+provider contacts used:
+  3 / 3
+
+Result run ID:
+  20260811T020910297Z
+
+Result bytes / SHA-256:
+  5522
+  e2efba46224b00c7d591e2875b1f7aa0fc5ff86d86a9d18f2e62802b273b95e7
+
+custody:
+  VALID_CUSTODY
+
+execution:
+  EXECUTION_CONFORMANT
+
+evidence:
+  BF2_EVIDENCE_VALID_WITH_LIMITATIONS
+
+BF2 repeat:
+  NOT AUTHORIZED
+```
+
+The original and archive sanitized Result-v1 files were separate regular
+files, 5,522 bytes each, byte-identical, and carried the same SHA-256. They
+remain external local evidence and were not copied into the repository.
+
+### Supported observations and boundaries
+
+All three exact shared-test `/ready` contacts were `OBSERVED_ACCEPTED` under
+the BF2 preparation predicate:
+
+1. numeric baseline, USD `"1.00"`, no forced payment method;
+2. synthetic `c` + 24-lowercase-base36 representative, P000, USD `"1.00"`;
+3. a distinct synthetic representative in the same family, P000, JPY `"1"`.
+
+These are accepted preparation responses, not successful payments. They do
+not prove the complete Eximbay `order_id` grammar, acceptance of all family
+members or Prisma-created `Payment.id` values, Mira merchant-account
+capability, SDK behavior, callbacks, 3DS, authorization, capture, settlement,
+refund, production routing, or live activation.
+
+### Durable disposition and next gate
+
+```text
+BF2 final disposition:
+  BF2 RESULT VALID WITH LIMITATIONS — NEXT DESIGN GATE MAY PROCEED
+
+next:
+  EX2B1 — Provider Order Identity + Server-Side /ready Preparation
+  Design Contract
+
+BF3 SDK:
+  KEEP SEPARATE BEFORE EX2B2
+
+BF4 callback:
+  EVIDENCE STILL REQUIRED
+
+merchant-account/live:
+  SEPARATE / NOT AUTHORIZED
+```
+
+EX2B1 may design a Mira-controlled provider-order identity using the selected
+synthetic family, independently of raw `Payment.id`, only after fresh
+repository reconnaissance and reviewed design authority. This adjudication
+does not freeze persistence schema. `providerRef` must not be silently
+overloaded absent a future audit proving semantic compatibility.

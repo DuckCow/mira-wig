@@ -25,10 +25,15 @@ commerce, order, or manufacturing behavior.
   Eximbay network, SDK, routing, ingress, persistence, completion, refund,
   sandbox, live, or other runtime authority.
 - [Eximbay BF2 Shared-Test `/ready` Preflight Provider Evidence / Execution Contract v0.1](./eximbay-bf2-shared-test-ready-preflight-contract-v0.1.md)
-  — candidate contract for one separately invoked, sequential, at-most-three
-  request public shared-test `/ready` evidence action after independent review
-  and merge. EX2A Source Status remains installed source truth; BF2 is not
-  product/runtime activation and currently grants no provider contact.
+  — historical normative execution authority and history for one separately
+  invoked, sequential, at-most-three-request public shared-test `/ready`
+  evidence action. It is not product/runtime activation.
+- [Eximbay BF2 Shared-Test `/ready` Preflight Result Evidence / Independent Adjudication v0.1](./eximbay-bf2-ready-preflight-result-adjudication-v0.1.md)
+  — binds the actual first shared-test Result by run ID, basename, byte count,
+  and SHA-256; records valid custody, conformant execution, three exact
+  accepted preparation observations, evidence limitations, explicit
+  non-conclusions, and the EX2B1 design-contract gate. It grants no production
+  or runtime activation.
 
 ## Render Lab foundation
 
