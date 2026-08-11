@@ -1750,3 +1750,51 @@ step is EX2B / EX2F prerequisite provider-evidence reconnaissance. This record
 does not authorize network calls, credentials, application routes, SDK
 invocation, provider routing, activation, completion, refund, void,
 reconciliation, order creation, or manufacturing creation.
+
+## 2026-08-11 — Eximbay BF2 shared-test `/ready` preflight contract candidate
+
+### Lifecycle and provider-recon disposition
+
+- EX2A lifecycle is closed through its installed Source Status / As-Built
+  record;
+- the prerequisite provider-evidence reconnaissance completed with the
+  disposition that a bounded provider test must precede full EX2B;
+- full EX2B remains blocked; and
+- the selected first external evidence action is a public shared-test
+  `POST /v1/payments/ready` preflight.
+
+### Candidate external boundary
+
+The candidate
+[BF2 Shared-Test `/ready` Preflight Provider Evidence / Execution Contract v0.1](../engineering/eximbay-bf2-shared-test-ready-preflight-contract-v0.1.md)
+freezes a maximum of three strictly sequential, adaptive `/ready` requests
+under current public shared-test credentials, fresh never-reused order IDs,
+bounded timeouts, no retries or redirects, sanitized evidence capture, and
+immediate raw-FGKey disposal.
+
+The baseline must succeed before a synthetic lowercase CUID1-like
+representative plus P000/USD request. Request 3-A uses P000/JPY only after
+conclusive Request-2 acceptance. Request 3-B removes P000 while retaining the
+synthetic representative family and canonical USD amount only after a
+conclusive, bounded, Branch-B-eligible Request-2 rejection. Request-2 transport
+ambiguity or an ineligible explicit rejection stops without Request 3. This is
+bounded discrimination, not proof of root cause. Acceptance never proves the
+complete Eximbay `order_id` grammar or authorizes `Payment.id` as the final wire
+value.
+
+Sanitized local Result-v1 custody in predeclared non-repository `original/` and
+`archive/` locations is mandatory before any provider contact. The final
+byte-identical artifacts bind the adaptive path and provider-request count;
+raw responses, credentials, and FGKeys are excluded.
+
+### Current authority and next gate
+
+This authoring task is documentation only. No Eximbay provider contact is
+authorized before independent review and merge, and even then execution
+requires a separate explicit task. SDK loading, payment-page invocation,
+callback creation, payment, verification, completion, inquiry, refund, void,
+reconciliation, live access, routing, persistence, order creation, and
+manufacturing creation remain unauthorized.
+
+After BF2 execution, a separate bounded adjudication must decide whether the
+next step is vendor clarification, BF3 SDK evidence, an EX2B1 contract, or stop.
