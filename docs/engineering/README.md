@@ -35,13 +35,18 @@ commerce, order, or manufacturing behavior.
   non-conclusions, and the EX2B1 design-contract gate. It grants no production
   or runtime activation.
 - [Eximbay EX2B1 Provider Order Identity + Provider-Free `/ready` Preparation Design Contract v0.1](./eximbay-ex2b1-provider-order-ready-preparation-design-contract-v0.1.md)
-  — candidate next-lifecycle contract for a Payment-owned persisted provider
-  order identity and provider-free server-side `/ready` request materialization.
-  Its bounded audit corrections make collisions fail closed without automatic
-  regeneration and prohibit Eximbay webhook-first row fabrication. It is not
-  installed; remains provider-free, network-free, and runtime-disabled; and
-  grants no current source, provider-contact, credential, SDK, routing,
-  callback, sandbox, live, refund, or void authority.
+  — historical normative high-risk contract for a Payment-owned persisted
+  provider-order identity and provider-free server-side `/ready` request
+  materialization. Its bounded audit corrections make collisions fail closed
+  without automatic regeneration and prohibit Eximbay webhook-first row
+  fabrication.
+- [Eximbay EX2B1 Provider Order Identity + Provider-Free `/ready` Preparation Source Status / As-Built v0.1](./eximbay-ex2b1-provider-order-ready-preparation-source-status-v0.1.md)
+  — records the reviewed EX2B1 source installed by PR #52, including durable
+  per-Payment identity, database invariants, trusted persisted binding,
+  provider-free READY preparation, review closure, verification evidence, and
+  deferred gates. It grants no provider contact, credential, SDK, routing,
+  callback, completion, refund, void, test/live runtime activation, or merchant
+  capability.
 
 ## Render Lab foundation
 
