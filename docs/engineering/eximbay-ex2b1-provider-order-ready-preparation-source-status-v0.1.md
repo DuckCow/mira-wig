@@ -31,10 +31,10 @@ FINAL SOURCE VERIFICATION:
   PASS WITH THE LITERAL npm run verify EXCEPTION IN SECTION 13
 
 EX2B1 SOURCE STATUS RECORD:
-  PENDING REVIEW / INSTALLATION
+  INDEPENDENTLY REVIEWED / MERGED / INSTALLED
 
 EX2B1 LIFECYCLE:
-  PENDING SOURCE-STATUS INSTALLATION
+  CLOSED
 
 EXIMBAY RUNTIME AUTHORITY:
   NONE
@@ -84,7 +84,7 @@ activated:
   NO
 
 this Source Status independently reviewed and installed:
-  NO — review and installation pending
+  YES
 ```
 
 The historical Design Contract retains its original candidate/status text.
@@ -188,6 +188,41 @@ POST_VERIFICATION manifest
 Verification therefore did not alter the reviewed candidate bytes. This is a
 verification-run candidate-content manifest. It is not a repository-wide hash
 and is not a Git object hash.
+
+### 3.4 Source Status installation identity
+
+Repository and GitHub history establish the completed documentation review and
+installation:
+
+```text
+Source Status documentation PR:
+  #53
+
+reviewed documentation head:
+  918d1f8343663576f3820a8ca1a997804848c423
+
+documentation merge:
+  0a5f06e0ca372c4cc1849c9ba8a891a42bf46c76
+
+documentation CI:
+  #319
+  completed / success
+
+independent documentation review:
+  BLOCKER 0
+  IMPORTANT 0
+  MINOR 0
+  EX2B1 SOURCE STATUS ACCEPTED
+
+pre-installation candidate state:
+  INDEPENDENTLY REVIEWED BEFORE INSTALLATION
+
+installation readiness at that historical point:
+  READY_FOR_DOCUMENTATION_INSTALLATION
+```
+
+These identities install this Source Status record. They do not alter or
+reinterpret the source PR #52 identities in Section 3.2.
 
 ## 4. Exact installed source scope
 
@@ -558,8 +593,10 @@ NEW MINOR:
   0
 ```
 
-These are durable source-review outcomes. They do not claim that this Source
-Status candidate has already received independent documentation review.
+These are durable source-review outcomes. When this Source Status candidate was
+authored, they correctly did not claim that the candidate had already received
+independent documentation review. That later review and installation are now
+recorded separately in Section 3.4.
 
 ## 14. Concurrent PostgreSQL proof
 
@@ -859,39 +896,51 @@ Standard.
 
 ## 21. Next lifecycle gate
 
-The next gate for this artifact is:
+The Source Status review and installation gate is complete:
 
 ```text
-independent EX2B1 Source Status / As-Built documentation review
-```
+independent documentation review:
+  COMPLETED
 
-That review must verify source/status fidelity, hashes and PR/CI/test counts,
-lifecycle wording, exclusion boundaries, and absence of unsupported claims. It
-must not reopen the already merged source architecture.
-
-Only a reviewed merge of this Source Status can install the final lifecycle
-closure declaration. Until then:
-
-```text
-Source implementation:
-  INSTALLED
-
-Source review findings:
-  CLOSED
-
-Final source verification:
-  PASS WITH THE DISCLOSED LITERAL VERIFY EXCEPTION
-
-Source Status record:
-  PENDING REVIEW / INSTALLATION
+Source Status installation:
+  COMPLETED BY PR #53
 
 EX2B1 lifecycle:
-  PENDING SOURCE-STATUS INSTALLATION
+  CLOSED
 ```
+
+`EX2B1 LIFECYCLE CLOSED` means only that the bounded EX2B1 lifecycle is
+complete: the Design Contract is installed, the source is implemented,
+reviewed, verified, and merged, and this Source Status is independently
+reviewed, merged, and installed. It does not mean that the Eximbay integration
+is complete or that `/ready` HTTP, an SDK, callback handling, payment
+activation, merchant production capability, or refund/void/recovery is
+implemented.
+
+The next separately gated Eximbay lifecycle work is:
+
+```text
+BF3:
+  SDK evidence/reconciliation
+
+EX2B2:
+  remains gated by BF3
+
+BF4:
+  callback/status_url evidence remains separately gated
+```
+
+This transition does not start or design BF3, EX2B2, or BF4 and grants no
+SDK, browser, network, provider-contact, routing, or runtime authority.
 
 ## Verdict
 
 ```text
-EX2B1 SOURCE STATUS / AS-BUILT v0.1 CANDIDATE COMPLETE
-— READY FOR INDEPENDENT DOCUMENTATION REVIEW
+EX2B1 SOURCE STATUS / AS-BUILT v0.1
+INDEPENDENTLY REVIEWED / INSTALLED
+
+EX2B1 LIFECYCLE CLOSED
+
+EXIMBAY RUNTIME AUTHORITY: NONE
+EXIMBAY SANDBOX / LIVE RUNTIME ACTIVATION: NOT AUTHORIZED
 ```
