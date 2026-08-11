@@ -47,6 +47,15 @@ commerce, order, or manufacturing behavior.
   deferred gates. It grants no provider contact, credential, SDK, routing,
   callback, completion, refund, void, test/live runtime activation, or merchant
   capability.
+- [Eximbay BF3 Static JavaScript SDK Evidence / Execution Contract v0.1](./eximbay-bf3-static-javascript-sdk-evidence-contract-v0.1.md)
+  — candidate high-risk contract for two sequential credential-free static
+  GETs, TEST V2 then TEST V1, only after reviewed merge and separate explicit
+  invocation. It preserves the current official v1/v2 conflict, keeps the
+  canonical SDK unresolved, separates SDK-asset and REST-API version axes,
+  separates immutable semantic Result-v1 from non-recursive
+  PackageIntegrity-v1 custody evidence, prohibits JavaScript execution, and
+  grants no current provider contact, SDK load, payment page, EX2B2 source, or
+  runtime activation authority.
 
 ## Render Lab foundation
 

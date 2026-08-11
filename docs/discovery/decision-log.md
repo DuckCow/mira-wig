@@ -2173,3 +2173,150 @@ next gate:
 
 BF3 has not started or completed. EX2B2 remains gated by BF3, and BF4
 callback/status_url evidence remains separately gated.
+
+## 2026-08-11 — Eximbay BF3 static JavaScript SDK evidence contract candidate
+
+### Lifecycle and task authority
+
+```text
+EX2B1 lifecycle:
+  CLOSED
+
+next separately gated work:
+  BF3 SDK evidence / reconciliation
+
+task classification:
+  EVIDENCE_COLLECTION_CONTRACT
+
+current task-level authorization:
+  DOCUMENTATION_ONLY
+
+current provider-contact authority:
+  NONE
+
+BF3 contract:
+  CANDIDATE
+
+BF3 provider execution:
+  NOT AUTHORIZED
+
+BF3 result:
+  NONE
+
+BF3 SDK canonical version:
+  UNRESOLVED
+
+EX2B2:
+  NOT AUTHORIZED
+```
+
+The candidate
+[BF3 Static JavaScript SDK Evidence / Execution Contract v0.1](../engineering/eximbay-bf3-static-javascript-sdk-evidence-contract-v0.1.md)
+does not reopen EX2B1 and does not load or execute an SDK. Only focused
+canonical Result-v1 byte-determinism closure and merge, followed by a separate
+explicit BF3 execution task, may grant the bounded static-resource contacts
+below. BF3-CLR-001 and BF3-CLR-003 are closed. The bounded canonical-byte
+correction resolves the sole remaining dependency of BF3-CLR-002 and
+BF3-AUD-004, subject to that final focused review.
+
+### Current official evidence and unresolved conflict
+
+Fresh official-document review on 2026-08-11 confirmed that the dedicated
+JavaScript SDK page and common payment-page preparation page show the test v2
+SDK. The PAYMENT, PAYER_AUTH, and AUTHORIZE flow pages each show test v2 in SDK
+Preparation and test v1 in Payment Page Initiation. No inspected explicit
+current-version or deprecation notice resolves the conflict.
+
+The common page publishes the production base origin, but the inspected current
+documentation does not explicitly establish either exact production asset
+path. Accordingly, production v1/v2 SDK paths are not authorized targets,
+optional probes, fallbacks, discovery requests, or Result-v1 slots.
+
+### Frozen candidate execution boundary
+
+After reviewed merge and separate invocation, the contract may authorize one
+sequential execution with at most two total provider HTTP requests: one
+credential-free GET to TEST V2, then one to TEST V1:
+
+```text
+https://api-test.eximbay.com/v2/javascriptSDK.js
+https://api-test.eximbay.com/v1/javascriptSDK.js
+```
+
+No production SDK path is probed, and no unused request ordinal may be
+reassigned.
+
+Automatic retries and redirect following are disabled. TLS verification,
+timeouts, a 262,144-byte streaming ceiling, identity content encoding, exact
+byte counts, SHA-256, external original/archive custody, and inert offline
+inspection are mandatory. JavaScript execution, browser script loading,
+`EXIMBAY.request_pay()`, `/ready`, credentials, payment-page invocation,
+callbacks, source changes, and runtime activation remain prohibited.
+
+Result-v1 freezes only semantic execution/evidence truth before packaging and
+is serialized exactly once. A separate non-recursive PackageIntegrity-v1
+records Result creation, original/archive write and verification, exact-byte
+equality, and later package custody truth without changing Result-v1.
+
+### Adjudication and next gate
+
+SDK asset version and REST `/v1/payments/...` version remain independent axes.
+Asset reachability alone cannot establish canonicality. After decision-grade
+Result-v1 and PackageIntegrity-v1 admission, independent later adjudication
+must choose v2 supported for EX2B2 design, v1 supported for EX2B2 design,
+vendor clarification required, or invalid/incomplete semantic evidence.
+Package failure denies admission without changing Result-v1.
+
+A supported BF3 disposition authorizes only a later EX2B2 design contract to
+adopt the selected exact test SDK candidate. It does not authorize SDK source
+implementation, SDK execution, provider runtime, merchant production
+capability, or customer activation.
+
+### Bounded canonical JSON byte-profile correction
+
+```text
+correction classification:
+  DOCUMENTATION_ONLY
+  BOUNDED_CANONICAL_BYTE_ENCODING_CORRECTION
+
+canonical profile:
+  BF3_CANONICAL_JSON_UTF8_V1
+
+applies identically to:
+  Result-v1
+  PackageIntegrity-v1
+
+BF3-CLR-003:
+  CLOSED
+
+BF3-CLR-002:
+  CORRECTED — PENDING FINAL FOCUSED CLOSURE
+
+BF3-AUD-004:
+  CORRECTED — PENDING FINAL FOCUSED CLOSURE
+
+BF3 provider execution:
+  NOT AUTHORIZED
+```
+
+The profile freezes the typed JSON data model, required member presence,
+existing schema and array order, one Unicode-scalar string escape algorithm,
+literal UTF-8 printable Unicode, integer lexical forms, exact millisecond UTC
+timestamps, two-space/LF layout, BOM prohibition, the single final LF, and the
+complete Result-v1 hashing boundary. It also freezes local scalar and nested
+artifact preflight vectors that must pass before any later provider contact.
+
+The decisive U+FFFD ambiguity is closed: a semantic U+FFFD is emitted only as
+literal UTF-8 `EF BF BD` inside the JSON string, never as `\uFFFD` or `\ufffd`.
+The PackageIntegrity-v1 record uses the same profile but remains non-recursive;
+Result-v1 remains ignorant of its own write, archive, verification, and package
+outcome. No README serialization detail was needed because its existing
+candidate summary remains accurate.
+
+After this correction, equal schema-valid semantic values plus the already
+frozen field and array order determine exactly one byte sequence for each
+artifact. One final review is limited to canonical Result-v1 byte determinism,
+closure of BF3-CLR-002 and BF3-AUD-004, and regression checking the already
+closed BF3-CLR-003. It does not reopen provider evidence, SDK canonicality,
+HTTP behavior, target inventory, static analysis, warnings, terminal state, or
+custody architecture.
