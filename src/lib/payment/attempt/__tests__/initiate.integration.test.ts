@@ -28,6 +28,21 @@ import { createCheckoutSession, expireStale, type CheckoutShippingInput } from "
 import { initiatePaymentAttempt } from "../initiate";
 
 const initiationProviders = vi.hoisted(() => new Map<string, PaymentInitiationProvider>());
+const providerOrderEntropy = vi.hoisted(() => {
+  const chunks: Uint8Array[] = [];
+  return { chunks, calls: 0 };
+});
+
+vi.mock("node:crypto", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...original,
+    randomBytes: (size: number) => {
+      providerOrderEntropy.calls += 1;
+      return providerOrderEntropy.chunks.shift() ?? original.randomBytes(size);
+    },
+  };
+});
 
 vi.mock("@/lib/payment/providers/initiation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/payment/providers/initiation")>()),
@@ -40,6 +55,7 @@ vi.mock("@/lib/payment/providers/initiation", async (importOriginal) => ({
 
 type PaymentAttemptCoordinationPoint =
   | "BEFORE_AUTHORIZATION_LOCK"
+  | "BEFORE_AUTHORIZATION_COMMIT"
   | "AFTER_AUTHORIZATION_LOCK"
   | "AFTER_AUTHORIZATION_COMMIT"
   | "BEFORE_CONTACT_CLAIM_COMMIT"
@@ -77,6 +93,8 @@ describe("payment initiate providerRef persistence", () => {
 
   beforeEach(async () => {
     initiationProviders.clear();
+    providerOrderEntropy.chunks.length = 0;
+    providerOrderEntropy.calls = 0;
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
@@ -147,6 +165,327 @@ describe("payment initiate providerRef persistence", () => {
     const payment = await onlyPayment(session.sessionId);
     expect(payment.providerRef).toBeNull();
     expect(payment.providerPaymentKey).toBeNull();
+    expect(payment.providerOrderId).toBeNull();
+  });
+
+  it("commits one EXIMBAY providerOrderId with CONTACT_AUTHORIZED before contact claim", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const barrier = coordinationBarrier();
+    const coordination = coordinationAt("AFTER_AUTHORIZATION_COMMIT", barrier);
+    providerOrderEntropy.chunks.push(entropyChunk(0));
+    const pending = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls, PaymentProvider.EXIMBAY),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.contact-ordering",
+    }, coordination);
+
+    await barrier.reached;
+    try {
+      const authorized = await onlyPayment(session.sessionId);
+      expect(authorized).toMatchObject({
+        provider: PaymentProvider.EXIMBAY,
+        providerOrderId: `c${"0".repeat(24)}`,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+        contactStartedAt: null,
+      });
+      expect(calls).toHaveLength(0);
+    } finally {
+      barrier.release();
+    }
+
+    await expect(pending).resolves.toMatchObject({ provider: PaymentProvider.EXIMBAY });
+    const contacted = await onlyPayment(session.sessionId);
+    expect(contacted).toMatchObject({
+      providerOrderId: `c${"0".repeat(24)}`,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    });
+    expect(contacted.contactStartedAt).not.toBeNull();
+    expect(providerOrderEntropy.calls).toBe(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reuses the same EXIMBAY Payment and providerOrderId without another generator call", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider = fakeProvider({ kind: "ready" }, calls, PaymentProvider.EXIMBAY);
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.compatible-reentry",
+    };
+    providerOrderEntropy.chunks.push(entropyChunk(1));
+
+    const first = await initiatePaymentAttemptForTest(db, input);
+    const firstPayment = await onlyPayment(session.sessionId);
+    const second = await initiatePaymentAttemptForTest(db, input);
+    const secondPayment = await onlyPayment(session.sessionId);
+
+    expect(second.paymentId).toBe(first.paymentId);
+    expect(secondPayment.providerOrderId).toBe(firstPayment.providerOrderId);
+    expect(secondPayment.providerOrderId).toBe(`c${"1".repeat(24)}`);
+    expect(secondPayment.providerOrderId).not.toBe(secondPayment.id);
+    expect(secondPayment.providerOrderId).not.toBe(secondPayment.idempotencyKey);
+    expect(providerOrderEntropy.calls).toBe(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("deterministically converges simultaneous compatible EXIMBAY starts under the session row lock", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider = fakeProvider({ kind: "ready" }, calls, PaymentProvider.EXIMBAY);
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.concurrent-compatible",
+    };
+    const beforeFirstAuthorizationCommit = coordinationBarrier();
+    const observer = await openSessionLockObserver("eximbay-compatible");
+    providerOrderEntropy.chunks.push(entropyChunk(7));
+    let released = false;
+    try {
+      const first = initiatePaymentAttemptForTest(
+        db,
+        input,
+        coordinationAt("BEFORE_AUTHORIZATION_COMMIT", beforeFirstAuthorizationCommit),
+      );
+      await beforeFirstAuthorizationCommit.reached;
+      const second = initiatePaymentAttemptForTest(db, input);
+      const waiting = await waitForSessionLockWait(observer);
+
+      expect(waiting.state).toBe("active");
+      expect(waiting.waitEventType).toBe("Lock");
+      expect(waiting.blockingPids.length).toBeGreaterThan(0);
+      expect(providerOrderEntropy.calls).toBe(1);
+      beforeFirstAuthorizationCommit.release();
+      released = true;
+
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+      const [firstObservation, secondObservation] = await Promise.all([
+        db.payment.findUniqueOrThrow({
+          where: { id: firstResult.paymentId },
+          select: { providerOrderId: true },
+        }),
+        db.payment.findUniqueOrThrow({
+          where: { id: secondResult.paymentId },
+          select: { providerOrderId: true },
+        }),
+      ]);
+      const rows = await db.payment.findMany({
+        where: { checkoutSessionId: session.sessionId },
+        select: {
+          id: true,
+          providerOrderId: true,
+          attemptLifecycle: true,
+          blockingEndedAt: true,
+        },
+      });
+
+      expect(firstResult.paymentId).toBe(secondResult.paymentId);
+      expect(firstObservation.providerOrderId).toBe(`c${"7".repeat(24)}`);
+      expect(secondObservation.providerOrderId).toBe(firstObservation.providerOrderId);
+      expect(rows).toEqual([{
+        id: firstResult.paymentId,
+        providerOrderId: firstObservation.providerOrderId,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        blockingEndedAt: null,
+      }]);
+      expect(providerOrderEntropy.calls).toBe(1);
+      expect(calls).toHaveLength(1);
+    } finally {
+      if (!released) beforeFirstAuthorizationCommit.release();
+      await observer.end();
+    }
+  });
+
+  it("retires an uncontacted EXIMBAY identity with its superseded row and allocates a fresh one", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const firstCalls: PaymentInitiateInput[] = [];
+    const replacementCalls: PaymentInitiateInput[] = [];
+    const barrier = coordinationBarrier();
+    providerOrderEntropy.chunks.push(entropyChunk(2), entropyChunk(3));
+    const firstPending = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, firstCalls, PaymentProvider.EXIMBAY),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.superseded-old",
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", barrier));
+
+    await barrier.reached;
+    const oldPayment = await onlyPayment(session.sessionId);
+    const replacement = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, replacementCalls, PaymentProvider.EXIMBAY),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.superseded-new",
+    });
+    barrier.release();
+
+    await expect(firstPending).rejects.toMatchObject({ code: "ATTEMPT_STATE_CONFLICT" });
+    const rows = await db.payment.findMany({
+      where: { checkoutSessionId: session.sessionId },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.id === oldPayment.id)).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      providerOrderId: `c${"2".repeat(24)}`,
+    });
+    expect(rows.find((row) => row.id === replacement.paymentId)).toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      providerOrderId: `c${"3".repeat(24)}`,
+    });
+    expect(providerOrderEntropy.calls).toBe(2);
+    expect(firstCalls).toHaveLength(0);
+    expect(replacementCalls).toHaveLength(1);
+  });
+
+  it("fails a duplicate EXIMBAY providerOrderId closed without regeneration or contact authority", async () => {
+    const firstSession = await submitSessionWithOneLine(ctx);
+    const secondSession = await submitSessionWithOneLine(ctx);
+    const firstCalls: PaymentInitiateInput[] = [];
+    const secondCalls: PaymentInitiateInput[] = [];
+    providerOrderEntropy.chunks.push(entropyChunk(4), entropyChunk(4));
+
+    await initiatePaymentAttemptForTest(db, {
+      sessionId: firstSession.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, firstCalls, PaymentProvider.EXIMBAY),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.collision-first",
+    });
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: secondSession.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, secondCalls, PaymentProvider.EXIMBAY),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.collision-second",
+    })).rejects.toMatchObject({ code: "P2002" });
+
+    expect(providerOrderEntropy.calls).toBe(2);
+    expect(firstCalls).toHaveLength(1);
+    expect(secondCalls).toHaveLength(0);
+    await expect(db.payment.count({ where: { checkoutSessionId: secondSession.sessionId } }))
+      .resolves.toBe(0);
+  });
+
+  it("forces a concurrent two-session EXIMBAY collision through the provider-order unique index", async () => {
+    const firstSession = await submitSessionWithOneLine(ctx);
+    await db.cartItem.deleteMany({ where: { userId: ctx.userId } });
+    const secondSession = await submitUsSessionWithOneLine(ctx);
+    const firstCalls: PaymentInitiateInput[] = [];
+    const secondCalls: PaymentInitiateInput[] = [];
+    const sharedProviderOrderId = `c${"8".repeat(24)}`;
+    const beforeFirstAuthorizationCommit = coordinationBarrier();
+    const observer = await openSessionLockObserver("eximbay-provider-order-collision");
+    providerOrderEntropy.chunks.push(entropyChunk(8), entropyChunk(8));
+    let released = false;
+    try {
+      const first = initiatePaymentAttemptForTest(db, {
+        sessionId: firstSession.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, firstCalls, PaymentProvider.EXIMBAY),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: "test.eximbay.concurrent-collision-first",
+      }, coordinationAt("BEFORE_AUTHORIZATION_COMMIT", beforeFirstAuthorizationCommit));
+      await beforeFirstAuthorizationCommit.reached;
+      const secondOutcome = initiatePaymentAttemptForTest(db, {
+        sessionId: secondSession.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, secondCalls, PaymentProvider.EXIMBAY),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: "test.eximbay.concurrent-collision-second",
+      }).then(
+        (value) => ({ kind: "fulfilled" as const, value }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      );
+      const waiting = await waitForPaymentInsertLockWait(observer);
+
+      expect(waiting.state).toBe("active");
+      expect(waiting.waitEventType).toBe("Lock");
+      expect(waiting.blockingPids.length).toBeGreaterThan(0);
+      expect(waiting.query).toContain("Payment");
+      expect(providerOrderEntropy.calls).toBe(2);
+      beforeFirstAuthorizationCommit.release();
+      released = true;
+
+      const [firstResult, secondResult] = await Promise.all([first, secondOutcome]);
+      const collisionRows = await db.payment.findMany({
+        where: { provider: PaymentProvider.EXIMBAY, providerOrderId: sharedProviderOrderId },
+        select: {
+          id: true,
+          checkoutSessionId: true,
+          attemptLifecycle: true,
+          contactStartedAt: true,
+        },
+      });
+
+      expect(secondResult).toMatchObject({ kind: "rejected", error: { code: "P2002" } });
+      expect(collisionRows).toHaveLength(1);
+      expect(collisionRows[0]).toMatchObject({
+        id: firstResult.paymentId,
+        checkoutSessionId: firstSession.sessionId,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      });
+      expect(collisionRows[0]?.contactStartedAt).toBeInstanceOf(Date);
+      await expect(db.payment.count({
+        where: { checkoutSessionId: secondSession.sessionId },
+      })).resolves.toBe(0);
+      expect(providerOrderEntropy.calls).toBe(2);
+      expect(firstCalls).toHaveLength(1);
+      expect(secondCalls).toHaveLength(0);
+    } finally {
+      if (!released) beforeFirstAuthorizationCommit.release();
+      await observer.end();
+    }
+  });
+
+  it("does not reinterpret an unrelated unique violation as provider-order collision authority", async () => {
+    const firstSession = await submitSessionWithOneLine(ctx);
+    const secondSession = await submitSessionWithOneLine(ctx);
+    const routingRuleId = "test.eximbay.unrelated-unique";
+    const firstCalls: PaymentInitiateInput[] = [];
+    const secondCalls: PaymentInitiateInput[] = [];
+    providerOrderEntropy.chunks.push(entropyChunk(5), entropyChunk(6));
+    await db.$executeRaw(Prisma.sql`
+      CREATE UNIQUE INDEX "Payment_ex2b1_unrelated_routing_rule_test_key"
+      ON "Payment" ("routingRuleId")
+      WHERE "routingRuleId" = 'test.eximbay.unrelated-unique'
+    `);
+    try {
+      await initiatePaymentAttemptForTest(db, {
+        sessionId: firstSession.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, firstCalls, PaymentProvider.EXIMBAY),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId,
+      });
+      await expect(initiatePaymentAttemptForTest(db, {
+        sessionId: secondSession.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, secondCalls, PaymentProvider.EXIMBAY),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId,
+      })).rejects.toMatchObject({ code: "P2002" });
+
+      expect(providerOrderEntropy.calls).toBe(2);
+      expect(firstCalls).toHaveLength(1);
+      expect(secondCalls).toHaveLength(0);
+      await expect(db.payment.count({ where: { checkoutSessionId: secondSession.sessionId } }))
+        .resolves.toBe(0);
+    } finally {
+      await db.$executeRaw(Prisma.sql`
+        DROP INDEX IF EXISTS "Payment_ex2b1_unrelated_routing_rule_test_key"
+      `);
+    }
   });
 
   it("records OUTCOME_UNKNOWN after provider contact failure and blocks every recontact", async () => {
@@ -1231,10 +1570,15 @@ function coordinatePaymentTransactions(
   coordination: PaymentAttemptTestCoordination | undefined,
 ) {
   if (!coordination) return null;
-  const coordinatesAuthorization = coordination.includes("AFTER_AUTHORIZATION_LOCK")
-    || coordination.includes("AFTER_AUTHORIZATION_COMMIT");
-  const coordinatesContactClaim = coordination.includes("BEFORE_CONTACT_CLAIM_COMMIT")
-    || coordination.includes("AFTER_CONTACT_CLAIM_COMMIT");
+  const coordinatesAuthorization = coordinationIncludesAny(coordination, [
+    "BEFORE_AUTHORIZATION_COMMIT",
+    "AFTER_AUTHORIZATION_LOCK",
+    "AFTER_AUTHORIZATION_COMMIT",
+  ]);
+  const coordinatesContactClaim = coordinationIncludesAny(coordination, [
+    "BEFORE_CONTACT_CLAIM_COMMIT",
+    "AFTER_CONTACT_CLAIM_COMMIT",
+  ]);
   if (!coordinatesAuthorization && !coordinatesContactClaim) return null;
   const transaction = client.$transaction.bind(client);
   const transactionSpy = vi.spyOn(client, "$transaction");
@@ -1244,7 +1588,13 @@ function coordinatePaymentTransactions(
   }
   if (coordinatesAuthorization) {
     transactionSpy.mockImplementationOnce(async (operation) => {
-      const result = await transaction(operation);
+      const result = coordination.includes("BEFORE_AUTHORIZATION_COMMIT")
+        ? await transaction(async (tx) => {
+          const pending = await operation(tx);
+          await coordination.waitAt("BEFORE_AUTHORIZATION_COMMIT");
+          return pending;
+        })
+        : await transaction(operation);
       await coordination.waitAt("AFTER_AUTHORIZATION_LOCK");
       await coordination.waitAt("AFTER_AUTHORIZATION_COMMIT");
       return result;
@@ -1266,6 +1616,13 @@ function coordinatePaymentTransactions(
   return transactionSpy;
 }
 
+function coordinationIncludesAny(
+  coordination: PaymentAttemptTestCoordination,
+  points: readonly PaymentAttemptCoordinationPoint[],
+): boolean {
+  return points.some((point) => coordination.includes(point));
+}
+
 function testAdapterContext(input: TestInitiationInput): ProviderFactoryContext {
   return {
     provider: input.provider.code,
@@ -1282,14 +1639,19 @@ function testAdapterContext(input: TestInitiationInput): ProviderFactoryContext 
 function fakeProvider(
   initiateResult: PaymentInitiateResult,
   calls: PaymentInitiateInput[] = [],
+  code: PaymentProvider = PaymentProvider.TOSS,
 ): PaymentInitiationProvider {
   return {
-    code: PaymentProvider.TOSS,
+    code,
     initiate: (input: PaymentInitiateInput) => {
       calls.push(input);
       return Promise.resolve(initiateResult);
     },
   };
+}
+
+function entropyChunk(byte: number): Uint8Array {
+  return Uint8Array.from({ length: 48 }, () => byte);
 }
 
 function failingProvider(calls: PaymentInitiateInput[]): PaymentInitiationProvider {
@@ -1442,6 +1804,40 @@ async function submitSessionWithOneLine(context: TestContext) {
   });
 }
 
+async function submitUsSessionWithOneLine(context: TestContext) {
+  await db.market.upsert({
+    where: { code: MarketCode.US },
+    update: {
+      currency: "USD",
+      shippableCountries: [ShippingCountry.US],
+      defaultLocale: "en",
+      isActive: true,
+    },
+    create: {
+      code: MarketCode.US,
+      currency: "USD",
+      shippableCountries: [ShippingCountry.US],
+      defaultLocale: "en",
+      isActive: true,
+    },
+  });
+  const variant = await createCatalogVariant(context, { amount: 12_000, stock: 5 });
+  await db.wigStyleMarket.create({
+    data: { wigStyleId: variant.styleId, marketCode: MarketCode.US, isActive: true },
+  });
+  await db.variantMarketPrice.create({
+    data: { variantId: variant.id, marketCode: MarketCode.US, amount: 100 },
+  });
+  await db.cartItem.create({
+    data: { userId: context.userId, wigStyleId: variant.styleId, variantId: variant.id, quantity: 1 },
+  });
+  return createCheckoutSession(db, {
+    userId: context.userId,
+    marketCode: MarketCode.US,
+    shipping: validUsShipping(),
+  });
+}
+
 async function moveSessionExpiryIntoPast<T extends { sessionId: string; expiresAt: Date }>(session: T): Promise<T> {
   const expiresAt = new Date("2026-07-06T00:00:00.000Z");
   await db.checkoutSession.update({
@@ -1455,6 +1851,7 @@ interface SessionLockWaitEvidence {
   state: string;
   waitEventType: string | null;
   blockingPids: number[];
+  query: string;
 }
 
 async function openSessionLockObserver(label: string): Promise<Client> {
@@ -1473,7 +1870,8 @@ async function waitForSessionLockWait(observer: Client): Promise<SessionLockWait
     const result = await observer.query<SessionLockWaitEvidence>(`
       SELECT a.state,
              a.wait_event_type AS "waitEventType",
-             pg_blocking_pids(a.pid) AS "blockingPids"
+             pg_blocking_pids(a.pid) AS "blockingPids",
+             a.query
       FROM pg_stat_activity a
       WHERE a.datname = current_database()
         AND a.state = 'active'
@@ -1486,6 +1884,27 @@ async function waitForSessionLockWait(observer: Client): Promise<SessionLockWait
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   throw new Error("Timed out waiting for CheckoutSession row-lock evidence");
+}
+
+async function waitForPaymentInsertLockWait(observer: Client): Promise<SessionLockWaitEvidence> {
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
+    const result = await observer.query<SessionLockWaitEvidence>(`
+      SELECT a.state,
+             a.wait_event_type AS "waitEventType",
+             pg_blocking_pids(a.pid) AS "blockingPids",
+             a.query
+      FROM pg_stat_activity a
+      WHERE a.datname = current_database()
+        AND a.pid <> pg_backend_pid()
+        AND a.state = 'active'
+        AND a.wait_event_type = 'Lock'
+        AND cardinality(pg_blocking_pids(a.pid)) > 0
+    `);
+    const waiting = result.rows[0];
+    if (waiting) return waiting;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for Payment unique-index lock evidence");
 }
 
 async function createUncontactedAuthorizedPayment(
@@ -1586,6 +2005,18 @@ function validShipping(): CheckoutShippingInput {
     administrativeArea: "서울특별시",
     city: "강남구",
     addressLine1: "테헤란로 1",
+  };
+}
+
+function validUsShipping(): CheckoutShippingInput {
+  return {
+    recipientName: "Synthetic Buyer",
+    phone: "+1-202-555-0100",
+    country: ShippingCountry.US,
+    postalCode: "10001",
+    administrativeArea: "NY",
+    city: "New York",
+    addressLine1: "1 Test Avenue",
   };
 }
 

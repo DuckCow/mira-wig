@@ -13,6 +13,7 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { REFUND_REQUEST_REASON_MAX_CODE_POINTS } from "../invariants";
 import {
   requestRefundAttempt,
@@ -715,6 +716,9 @@ async function createPayment(
       checkoutSessionId: sessionId,
       provider,
       mode,
+      providerOrderId: provider === PaymentProvider.EXIMBAY
+        ? syntheticEximbayProviderOrderId()
+        : null,
       ...paymentFixture,
       idempotencyKey: `payment_idem_${randomUUID()}`,
     },

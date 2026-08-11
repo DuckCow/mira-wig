@@ -1,6 +1,7 @@
 import {
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
+  PaymentProvider,
   PaymentRemediationStatus,
   Prisma,
 } from "@prisma/client";
@@ -23,6 +24,13 @@ export class PaymentCaptureClaimConflictError extends Error {
   constructor() {
     super("Pending payment capture claim conflict");
     this.name = "PaymentCaptureClaimConflictError";
+  }
+}
+
+export class EximbayWebhookFirstCaptureError extends Error {
+  constructor() {
+    super("EXIMBAY capture requires a pre-existing correlated Payment attempt");
+    this.name = "EximbayWebhookFirstCaptureError";
   }
 }
 
@@ -69,6 +77,9 @@ async function createWebhookFirstCapture(
   tx: CaptureTx,
   facts: CaptureFacts,
 ): Promise<CapturedPayment> {
+  if (facts.provider === PaymentProvider.EXIMBAY) {
+    throw new EximbayWebhookFirstCaptureError();
+  }
   const blocking = await tx.payment.findFirst({
     where: { checkoutSessionId: facts.checkoutSessionId, blockingEndedAt: null },
     select: { id: true },

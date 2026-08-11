@@ -1,5 +1,7 @@
 import {
   OrderStatus,
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
   Prisma,
@@ -15,6 +17,7 @@ import {
 import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { acquireRefundExecutionLease } from "../acquire-lease";
 import {
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
@@ -188,25 +191,7 @@ describe("fenced refund execution observation persistence", () => {
 
   it("rejects Eximbay E4 before evidence handling with no command or evidence mutation", async () => {
     const prepared = await prepareAuthorized(fixtures);
-    await Promise.all([
-      db.payment.update({
-        where: { id: prepared.fixture.paymentId },
-        data: { provider: PaymentProvider.EXIMBAY },
-      }),
-      db.refundAttempt.update({
-        where: { id: prepared.fixture.refundAttemptId },
-        data: { provider: PaymentProvider.EXIMBAY },
-      }),
-      db.refundExecutionDispatchAttempt.update({
-        where: {
-          commandId_ordinal: {
-            commandId: prepared.fixture.commandId,
-            ordinal: prepared.dispatchAttempt,
-          },
-        },
-        data: { provider: PaymentProvider.EXIMBAY },
-      }),
-    ]);
+    await replaceWithValidEximbayPayment(prepared);
     const before = await redactedDispatchAuthorizationState(prepared.fixture);
     const evidenceBefore = await db.refundExecutionEvidence.count({
       where: { commandId: prepared.fixture.commandId },
@@ -854,6 +839,53 @@ async function trackedFixture(
   const fixture = await createDispatchFixture(options);
   fixtures.push(fixture);
   return fixture;
+}
+
+async function replaceWithValidEximbayPayment(prepared: Prepared): Promise<void> {
+  const original = await db.payment.findUniqueOrThrow({
+    where: { id: prepared.fixture.paymentId },
+    select: { id: true, checkoutSessionId: true, mode: true, amount: true, currency: true },
+  });
+  const replacementId = await db.$transaction(async (tx) => {
+    const replacement = await tx.payment.create({
+      data: {
+        checkoutSessionId: original.checkoutSessionId,
+        provider: PaymentProvider.EXIMBAY,
+        mode: original.mode,
+        status: PaymentAttemptStatus.SUCCEEDED,
+        attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+        amount: original.amount,
+        currency: original.currency,
+        providerOrderId: syntheticEximbayProviderOrderId(),
+        providerRef: `provider_ref_eximbay_${crypto.randomUUID()}`,
+        providerPaymentKey: `provider_payment_eximbay_${crypto.randomUUID()}`,
+        idempotencyKey: `payment_eximbay_${crypto.randomUUID()}`,
+        financialSucceededAt: OBSERVED_AT,
+        blockingEndedAt: OBSERVED_AT,
+      },
+      select: { id: true },
+    });
+    await tx.order.update({
+      where: { id: prepared.fixture.orderId },
+      data: { paymentId: replacement.id },
+    });
+    await tx.refundAttempt.update({
+      where: { id: prepared.fixture.refundAttemptId },
+      data: { paymentId: replacement.id, provider: PaymentProvider.EXIMBAY },
+    });
+    await tx.refundExecutionDispatchAttempt.update({
+      where: {
+        commandId_ordinal: {
+          commandId: prepared.fixture.commandId,
+          ordinal: prepared.dispatchAttempt,
+        },
+      },
+      data: { provider: PaymentProvider.EXIMBAY },
+    });
+    await tx.payment.delete({ where: { id: original.id } });
+    return replacement.id;
+  });
+  prepared.fixture.paymentId = replacementId;
 }
 
 async function addSucceededSibling(

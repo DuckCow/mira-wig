@@ -14,6 +14,7 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import {
   buildRefundExecutionClaimOperationKey,
   claimRefundAttemptForExecution,
@@ -686,6 +687,9 @@ async function createPayment(
         : PaymentAttemptLifecycle.TERMINAL_FAILURE,
       amount: options.paymentAmount ?? amount,
       currency: options.paymentCurrency ?? currency,
+      providerOrderId: provider === PaymentProvider.EXIMBAY
+        ? syntheticEximbayProviderOrderId()
+        : null,
       providerPaymentKey: options.providerPaymentKey === undefined
         ? `provider_payment_${randomUUID()}`
         : options.providerPaymentKey,

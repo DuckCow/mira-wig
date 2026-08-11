@@ -15,10 +15,16 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
 import { PaymentMethod } from "@/lib/payment/providers/routing";
 import { createCheckoutSession, transitionCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
-import { completeFromCapture, recordCapture, type CaptureFacts } from "@/lib/payment/complete";
+import {
+  completeFromCapture,
+  EximbayWebhookFirstCaptureError,
+  recordCapture,
+  type CaptureFacts,
+} from "@/lib/payment/complete";
 
 interface TestContext {
   userId: string;
@@ -511,6 +517,65 @@ describe("payment completion core", () => {
 
     expect(payment.mode).toBe(PaymentMode.LIVE);
     expect(persisted).toEqual({ mode: PaymentMode.LIVE, providerPaymentKey: facts.providerPaymentKey });
+  });
+
+  it("fails EXIMBAY webhook-first capture closed without fabricating a Payment or providerOrderId", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const facts = captureFacts(ctx, session, { provider: PaymentProvider.EXIMBAY });
+
+    await expect(recordCapture(db, facts)).rejects.toBeInstanceOf(EximbayWebhookFirstCaptureError);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("allows an explicitly correlated existing EXIMBAY attempt without replacing its identities", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const providerOrderId = syntheticEximbayProviderOrderId();
+    const providerRef = `eximbay_ref_${randomUUID()}`;
+    const providerConfirmIdempotencyKey = `eximbay_confirm_${randomUUID()}`;
+    const idempotencyKey = `eximbay_attempt_${randomUUID()}`;
+    const payment = await db.payment.create({
+      data: {
+        checkoutSessionId: session.sessionId,
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+        status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        amount: session.totalAmount,
+        currency: session.currency,
+        providerOrderId,
+        providerRef,
+        providerConfirmIdempotencyKey,
+        idempotencyKey,
+        contactIntentAt: new Date(),
+        contactStartedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    const facts = captureFacts(ctx, session, {
+      paymentId: payment.id,
+      provider: PaymentProvider.EXIMBAY,
+    });
+
+    await expect(recordCapture(db, facts)).resolves.toMatchObject({
+      id: payment.id,
+      providerPaymentKey: facts.providerPaymentKey,
+    });
+    await expect(db.payment.findUniqueOrThrow({
+      where: { id: payment.id },
+      select: {
+        providerOrderId: true,
+        providerRef: true,
+        providerPaymentKey: true,
+        providerConfirmIdempotencyKey: true,
+        idempotencyKey: true,
+      },
+    })).resolves.toEqual({
+      providerOrderId,
+      providerRef,
+      providerPaymentKey: facts.providerPaymentKey,
+      providerConfirmIdempotencyKey,
+      idempotencyKey,
+    });
   });
 
   it("capture mode mismatch is terminal, void-less, and does not claim or duplicate the pending attempt", async () => {
