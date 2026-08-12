@@ -2546,3 +2546,46 @@ uncertainty. It does not design or authorize the identified offline ECMAScript
 grammar / bounded source-shape candidate method. Header request-context,
 controlled-browser, and vendor-clarification gates are deferred while that
 lower-cost deterministic avenue remains; they are not permanently excluded.
+
+## 2026-08-12 — Eximbay BF3-R1 lifecycle closure / authority reconciliation
+
+The earlier BF3-R1 contract and E1 result-record candidate/pending wording is
+preserved as a chronological pre-installation snapshot. PR #57 subsequently
+installed the independently reviewed BF3-R1 retained-byte evidence contract at
+merge `dc253973ee5e20c1e7710cf722589e2f58d70ed4`. PR #58 subsequently installed
+the independently reviewed BF3-R1 E1 result/adjudication record at merge
+`482bfbb20063eaf525756f159d9532d3abb9e938`.
+
+An additive
+[BF3-R1 Lifecycle Closure / Authority Reconciliation v0.1](../engineering/eximbay-bf3-r1-lifecycle-closure-v0.1.md)
+was authored as a candidate to reconcile those stale embedded lifecycle
+labels. The contract and result-record installation facts are already true
+independently of this candidate. The closure is pending focused review and is
+not installed. If that review closes and the reviewed candidate is subsequently
+merged, the actual merge SHA and exact merge-time closure-file byte count and
+SHA-256 become its external installation authority. A future BF3-R2 contract
+must bind and independently verify those actual values before using the closure
+as upstream lifecycle authority. The closure's eventual authority is additive
+and lifecycle-status-only; the historical files and all technical BF3-R1
+evidence, execution facts, methods, hashes, evidence ceilings, and boundaries
+remain unchanged.
+
+```text
+next lawful gate:
+  NO_PROVIDER_CONTACT_NEEDED_YET
+
+BF3-R1 E1 re-execution:
+  NOT AUTHORIZED
+
+provider contact:
+  NOT AUTHORIZED
+
+BF3-R2:
+  CANDIDATE / NOT INSTALLED / NOT EXECUTED
+
+BF3-R1 lifecycle closure:
+  CANDIDATE / PENDING FOCUSED REVIEW / NOT INSTALLED
+
+EX2B2:
+  BLOCKED
+```

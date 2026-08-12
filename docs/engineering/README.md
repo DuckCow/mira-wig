@@ -61,16 +61,20 @@ commerce, order, or manufacturing behavior.
   invalid/incomplete semantic evidence, disposition
   `BF3_EVIDENCE_INVALID_OR_INCOMPLETE`, no rerun authority, and blocked EX2B2.
 - [Eximbay BF3-R1 Content-Type Anomaly Retained-Byte Derived-Evidence Contract v0.1](./eximbay-bf3-r1-content-type-anomaly-retained-byte-evidence-contract-v0.1.md)
-  — candidate zero-provider-contact retained-byte derived-evidence contract.
-  Seven bounded review corrections are pending focused closure; the candidate
-  authorizes no current provider contact or execution, preserves the historical
-  BF3 run as immutable, and keeps EX2B2 blocked.
+  — installed, review-closed zero-provider-contact retained-byte
+  derived-evidence contract. It authorizes no current provider contact,
+  preserves the historical BF3 run as immutable, and keeps EX2B2 blocked.
 - [Eximbay BF3-R1 E1 Derived-Evidence Result Evidence / Independent Adjudication v0.1](./eximbay-bf3-r1-derived-evidence-result-adjudication-v0.1.md)
-  — candidate durable result record for the completed BF3-R1 E1 run: package
-  valid, execution conformant, derived semantic evidence complete/admitted,
-  re-execution not authorized, next lawful gate
-  `NO_PROVIDER_CONTACT_NEEDED_YET`, and EX2B2 blocked. Pending one independent
-  result-record documentation review before installation.
+  — installed, review-closed durable result record for the completed BF3-R1 E1
+  run: package valid, execution conformant, derived semantic evidence
+  complete/admitted, re-execution not authorized, next lawful gate
+  `NO_PROVIDER_CONTACT_NEEDED_YET`, and EX2B2 blocked.
+- [Eximbay BF3-R1 Lifecycle Closure / Authority Reconciliation v0.1](./eximbay-bf3-r1-lifecycle-closure-v0.1.md)
+  — candidate additive current-lifecycle reconciliation for the independently
+  installed and review-closed BF3-R1 contract and result/adjudication record.
+  The closure itself is pending focused review and is not installed; only after
+  successful review and merge may external Git merge history plus exact merged
+  file identity establish its lifecycle-status-only authority.
 
 ## Render Lab foundation
 
