@@ -2461,3 +2461,88 @@ authorized next review:
 The correction changes no historical BF3 artifact or disposition and grants no
 provider contact, retained SDK interpretation, derived execution, JavaScript
 execution, browser execution, vendor contact, BF3 rerun, or EX2B2 authority.
+
+## 2026-08-12 — Eximbay BF3-R1 E1 derived-evidence Result adjudication candidate
+
+### Run, package, execution, and admitted semantic result
+
+```text
+BF3-R1 E1 execution:
+  COMPLETE
+
+derived run ID:
+  20260812T003616Z-88533a1e
+
+package:
+  VALID
+
+execution:
+  CONFORMANT
+
+derived semantic evidence:
+  COMPLETE / ADMITTED
+
+DerivedEvidence outcome:
+  DERIVED_TEXT_EVIDENCE_COMPLETE
+```
+
+The candidate durable
+[BF3-R1 E1 Derived-Evidence Result Evidence / Independent Adjudication v0.1](../engineering/eximbay-bf3-r1-derived-evidence-result-adjudication-v0.1.md)
+binds the external three-file package by exact run identity, canonical
+basenames, byte counts, SHA-256 values, distinct original/archive filesystem
+identities, and direct byte equality. The external evidence remains outside
+Git. This result record is pending one independent documentation/evidence-
+binding review before installation.
+
+### Bounded static result
+
+For both retained exact bodies, strict UTF-8 decoding succeeded, the required
+SDK-related literals were observed as adjudicated, the production-origin
+literal was not observed, and the frozen RFC 8259 JSON grammar recognizer
+failed. The historical transport record established `Content-Type:
+application/json` for both exact captured responses. Therefore the bounded
+captured Content-Type/body-grammar mismatch is observed for those historical
+responses under the frozen recognizer.
+
+These observations do not establish valid JavaScript, runtime behavior,
+browser compatibility, SDK canonicality, current response equivalence,
+provider misconfiguration, or EX2B2 readiness. SDK asset version and REST API
+path version remain separate axes.
+
+### Lifecycle boundary and next lawful gate
+
+```text
+next lawful gate:
+  NO_PROVIDER_CONTACT_NEEDED_YET
+
+BF3-R1 E1 re-execution:
+  NOT AUTHORIZED
+
+provider contact:
+  NOT AUTHORIZED
+
+JavaScript execution:
+  NONE
+
+browser execution:
+  NONE
+
+historical BF3 result:
+  IMMUTABLE
+
+historical BF3 disposition:
+  BF3_EVIDENCE_INVALID_OR_INCOMPLETE
+
+EX2B2:
+  BLOCKED
+
+next repository step:
+  INDEPENDENT REVIEW OF DURABLE RESULT RECORD
+```
+
+`NO_PROVIDER_CONTACT_NEEDED_YET` records that a separately reviewed local,
+zero-contact, non-executing static evidence method may still reduce material
+uncertainty. It does not design or authorize the identified offline ECMAScript
+grammar / bounded source-shape candidate method. Header request-context,
+controlled-browser, and vendor-clarification gates are deferred while that
+lower-cost deterministic avenue remains; they are not permanently excluded.

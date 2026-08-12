@@ -65,6 +65,12 @@ commerce, order, or manufacturing behavior.
   Seven bounded review corrections are pending focused closure; the candidate
   authorizes no current provider contact or execution, preserves the historical
   BF3 run as immutable, and keeps EX2B2 blocked.
+- [Eximbay BF3-R1 E1 Derived-Evidence Result Evidence / Independent Adjudication v0.1](./eximbay-bf3-r1-derived-evidence-result-adjudication-v0.1.md)
+  — candidate durable result record for the completed BF3-R1 E1 run: package
+  valid, execution conformant, derived semantic evidence complete/admitted,
+  re-execution not authorized, next lawful gate
+  `NO_PROVIDER_CONTACT_NEEDED_YET`, and EX2B2 blocked. Pending one independent
+  result-record documentation review before installation.
 
 ## Render Lab foundation
 
