@@ -70,11 +70,23 @@ commerce, order, or manufacturing behavior.
   complete/admitted, re-execution not authorized, next lawful gate
   `NO_PROVIDER_CONTACT_NEEDED_YET`, and EX2B2 blocked.
 - [Eximbay BF3-R1 Lifecycle Closure / Authority Reconciliation v0.1](./eximbay-bf3-r1-lifecycle-closure-v0.1.md)
-  — candidate additive current-lifecycle reconciliation for the independently
+  — installed lifecycle authority through PR #59 merge
+  `dc0c90b66ea4e1d901e152714e4c9b8959bb6bb7` for the independently
   installed and review-closed BF3-R1 contract and result/adjudication record.
-  The closure itself is pending focused review and is not installed; only after
-  successful review and merge may external Git merge history plus exact merged
-  file identity establish its lifecycle-status-only authority.
+  Its exact merge-time file identity is `10013` bytes and SHA-256
+  `53ab1638326a6e377aa92eec25257afde50fd3a7b5b79fdf4fed30c2db392880`.
+- [Eximbay BF3-R2 Offline ECMAScript Syntax / Bounded Source-Shape Evidence Contract v0.1](./eximbay-bf3-r2-offline-ecmascript-source-shape-evidence-contract-v0.1.md)
+  — final corrected candidate after the installed PR #59 BF3-R1 lifecycle
+  closure. BF3R2-AUD-001 and BF3R2-AUD-003..010 are closed. The AUD-002 exact
+  Harness V4 count/SHA correction is complete and awaits one final focused
+  closure review. Harness V4, Launcher V3, and Process Matrix V2 are frozen;
+  the 10-vector production-schema regression rejected wrong positive count and
+  alternate valid SHA while accepting the exact derived harness identity, and
+  the 31-vector process matrix passed. Synthetic authority cannot create
+  production evidence, PackageIntegrity, or `PACKAGE_VALID`. BF3-R2 is not
+  installed or authorized for execution; retained SDK parsing/compile/evaluation
+  and provider/browser activity remain none, the canonical SDK is unresolved,
+  and EX2B2 remains blocked.
 
 ## Render Lab foundation
 
