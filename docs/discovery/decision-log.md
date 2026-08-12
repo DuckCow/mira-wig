@@ -2589,3 +2589,210 @@ BF3-R1 lifecycle closure:
 EX2B2:
   BLOCKED
 ```
+
+## 2026-08-12 — Eximbay BF3-R2 bounded correction candidate after lifecycle installation
+
+The prior BF3-R2 broad-review history remains chronological and is not
+rewritten. PR #59 subsequently installed the BF3-R1 lifecycle closure at merge
+`dc0c90b66ea4e1d901e152714e4c9b8959bb6bb7`. The exact merge-time closure
+file was independently recomputed as `10013` bytes with SHA-256
+`53ab1638326a6e377aa92eec25257afde50fd3a7b5b79fdf4fed30c2db392880`;
+the corrected BF3-R2 candidate binds all four lifecycle authority fields and
+admits no README, decision-log, filename, working-tree, or stale-result
+fallback.
+
+The corrected
+[BF3-R2 Offline ECMAScript Syntax / Bounded Source-Shape Evidence Contract v0.1](../engineering/eximbay-bf3-r2-offline-ecmascript-source-shape-evidence-contract-v0.1.md)
+embeds the exact reviewed decision-bearing harness and macOS deny-network
+profile, freezes startup/environment/module-resolution admission, separates
+Espree parse completion from later source-shape failure, corrects Program range
+and UTF-16 half-open occurrence semantics, binds the complete ordered method
+identity set, freezes a host-visible non-evaluation sentinel, and requires safe
+integer/count bounds. Synthetic-only preflight reproduced original vectors A–G
+and the new correction vectors without reading either retained SDK body.
+
+```text
+BF3R2-AUD-001:
+  CLOSED THROUGH INSTALLED LIFECYCLE CLOSURE PR #59
+
+installed lifecycle closure merge:
+  dc0c90b66ea4e1d901e152714e4c9b8959bb6bb7
+
+exact lifecycle closure file identity:
+  10013 BYTES
+  SHA-256 53ab1638326a6e377aa92eec25257afde50fd3a7b5b79fdf4fed30c2db392880
+
+BF3R2-AUD-002..010:
+  BOUNDED CORRECTIONS AUTHORED / PENDING FOCUSED CLOSURE
+
+BF3-R2:
+  CORRECTED CANDIDATE / UNINSTALLED / UNEXECUTED
+
+BF3-R2 execution:
+  NOT AUTHORIZED
+
+retained SDK evaluation:
+  NOT AUTHORIZED
+
+provider / browser:
+  NOT AUTHORIZED / NONE
+
+EXIMBAY SDK canonical version:
+  UNRESOLVED
+
+EX2B2:
+  BLOCKED
+
+next:
+  ONE FOCUSED BF3R2 AUD-002..010 CLOSURE REVIEW
+```
+
+## 2026-08-12 — Eximbay BF3-R2 bounded AUD-002/AUD-003 correction
+
+The immediately preceding corrected-candidate entry remains chronological.
+The focused review left only AUD-002 and AUD-003 open. This bounded correction
+does not reopen AUD-001 or AUD-004 through AUD-010 and grants no BF3-R2
+execution authority.
+
+The contract now embeds separately hashed exact artifacts:
+
+```text
+BF3R2_POSIX_PRE_NODE_LAUNCHER_V2:
+  12127 bytes
+  SHA-256 77f34c9c8520994beed63cae440344226540337eccefeb2011b42b0109e2862c
+
+BF3R2_ANALYSIS_HARNESS_V3:
+  104234 bytes
+  SHA-256 9c7ee711397a4697c72595742f4d4f37fb1ca9ab32d698766ea6302ad228f7af
+
+BF3R2_SELF_ERASING_STARTUP_CONTAMINATION_REGRESSION_V1:
+  417 bytes
+  SHA-256 c02bc8e0861a668b1ded6d8f8263b5fcb8190e5b00c2328d56ee20cf7d845bd5
+
+BF3R2_ACTUAL_LAUNCHER_PROCESS_MATRIX_V1:
+  13072 bytes
+  SHA-256 6ae7e615a21a644a41c5a2f4d8b38ed3a292e4ade661cdad3ab683a89cad1355
+```
+
+The launcher, not mutable Node state, owns primary startup admission. It
+constructs a fixed `/usr/bin/env -i` -> `/usr/bin/sandbox-exec` -> Node argv,
+accepts exact production grammar plus a separately enumerated TEST-ONLY vector
+grammar, binds FD 3 parent/token and clean-launch acknowledgement, classifies
+every launcher/child/receipt/cleanup failure, and writes external launch
+authority only after exact receipt validation and temporary-state cleanup.
+Node `execArgv`, environment, and cache inspection remain defense in depth. The
+exact startup fixture contaminated a direct Node invocation, but that process
+failed external launch admission at 65 with no production artifact; the exact
+reviewed launcher rejected the same startup control at 64 before Node.
+
+The production evidence validator is exact, recursive, and closed for every
+nested object, including complete `upstreamAuthority` and
+`executionEnvironment`. Eight negative schema vectors reject missing/extra
+nested fields, wrong enum/hash/count/identity, `syntheticFixture`, and complete
+synthetic authority substitution before production package admission.
+Synthetic analysis now creates only TEST-ONLY result/package-check schemas and
+cannot emit production evidence, production PackageIntegrity, or
+`PACKAGE_VALID`. The 31-vector actual-launcher process matrix verified process
+exit, stdout/stderr, file sets, launch records, temporary cleanup, direct and
+reviewed startup regression, and production artifact non-admission. Production
+PackageIntegrity still represents only read-back-verified `PACKAGE_VALID`;
+failed durable writes remain terminal state plus actual file set.
+
+```text
+BF3R2-AUD-001:
+  CLOSED / REGRESSION PASS
+BF3R2-AUD-002:
+  CORRECTED
+BF3R2-AUD-003:
+  CORRECTED
+BF3R2-AUD-004..010:
+  CLOSED / REGRESSION PASS
+
+BF3-R2:
+  CORRECTED CANDIDATE / UNINSTALLED / UNEXECUTED
+BF3-R2 execution:
+  NOT AUTHORIZED
+retained SDK parse / vm.Script / evaluation:
+  NONE
+provider / browser / external network:
+  NONE
+EXIMBAY SDK canonical version:
+  UNRESOLVED
+EX2B2:
+  BLOCKED
+next:
+  ONE FOCUSED BF3R2 AUD-002/AUD-003 CLOSURE REVIEW
+```
+
+## 2026-08-12 — Eximbay BF3-R2 H4 final corrected candidate synchronization
+
+The preceding BF3-R2 review and correction entries remain chronological and
+unchanged. H4 synchronized the final execution-authoritative identities and
+method descriptions outside the three frozen embedded regions, then ran only
+the already-defined TEST-ONLY synthetic validation. BF3-R2 production
+execution and retained SDK parsing, compile-only construction, and evaluation
+remain unauthorized.
+
+```text
+BF3R2_ANALYSIS_HARNESS_V4:
+  107473 bytes
+  SHA-256 fbc8642fa193f8e2282898d68ab065be179c7d354b07df1c2f46408709e5a521
+
+BF3R2_POSIX_PRE_NODE_LAUNCHER_V3:
+  12533 bytes
+  SHA-256 5c1128131238ea25e30fcdd62d9ff1373462ef545116d50fbda200281c63a72f
+
+BF3R2_PROCESS_TERMINAL_MATRIX_V2:
+  13492 bytes
+  SHA-256 a95bc37edfe2efaa111283358ff98bb770c4b6be1157cc99d28cfdcbd8658ec1
+```
+
+Production `admittedHarnessIdentity` is derived only from the exact Harness V4
+bytes extracted from the reviewed installed contract. Production validation
+requires `executionEnvironment.harnessByteCount` and
+`executionEnvironment.harnessSha256` to equal that derived identity. Caller
+fields and synthetic authority cannot define it.
+
+The exact clean TEST-ONLY launch exited `0`, printed
+`BF3R2_SYNTHETIC_HELPER_REGRESSION_PASS 18`,
+`BF3R2_SYNTHETIC_VECTOR_PASS NONE SOURCE_SHAPE_EVIDENCE_COMPLETE`, and
+`BF3R2_SYNTHETIC_LAUNCH_OBSERVED`, and recorded:
+
+```text
+productionNegativeSchemaVectorCount: 10
+productionEvidenceOutcome: NOT_CREATED
+productionPackageIntegrityOutcome: NOT_CREATED
+productionPackageAdmissionOutcome: PROHIBITED
+```
+
+The exact positive Harness V4 identity passed its production equality check.
+The wrong positive safe byte count and syntactically valid alternate 64-hex
+SHA-256 both failed production validation. No production semantic evidence,
+PackageIntegrity, or `PACKAGE_VALID` admission was reachable. The exact Process
+Matrix V2 then exited `0` with
+`BF3R2_PROCESS_TERMINAL_MATRIX_PASS 31`. Closed-finding regressions for
+BF3R2-AUD-001 and BF3R2-AUD-003..010 passed without reopening their designs.
+
+```text
+BF3R2-AUD-001:
+  CLOSED / REGRESSION PASS
+BF3R2-AUD-002:
+  CORRECTED / READY FOR ONE FOCUSED CLOSURE REVIEW
+BF3R2-AUD-003..010:
+  CLOSED / REGRESSION PASS
+
+BF3-R2:
+  FINAL CORRECTED CANDIDATE / UNINSTALLED
+BF3-R2 execution:
+  NOT AUTHORIZED
+retained SDK parse / vm.Script / evaluation:
+  NONE
+provider / browser / external network:
+  NONE
+EXIMBAY SDK canonical version:
+  UNRESOLVED
+EX2B2:
+  BLOCKED
+next:
+  ONE BF3R2-AUD-002 FOCUSED CLOSURE REVIEW ONLY
+```
