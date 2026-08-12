@@ -45,6 +45,8 @@ describe("Eximbay EX1 disabled architecture", () => {
 
     expect(routes).toEqual([
       "src/app/api/payments/paypal/webhook/route.ts",
+      "src/app/api/payments/status/[checkoutSessionId]/__tests__/route.integration.test.ts",
+      "src/app/api/payments/status/[checkoutSessionId]/route.ts",
       "src/app/api/payments/toss/success/__tests__/route.test.ts",
       "src/app/api/payments/toss/success/route.ts",
       "src/app/api/payments/toss/webhook/route.ts",
