@@ -2388,3 +2388,76 @@ creates no new provider contact, confirmation GET, vendor contact, revised
 evidence method, SDK interpretation, SDK execution, EX2B2 design, or runtime
 activation authority. Any future evidence-plan revision neither reinterprets
 this run nor authorizes a rerun by itself.
+
+## 2026-08-12 — Eximbay BF3-R1 retained-byte evidence contract candidate
+
+### Historical state and observed anomaly
+
+```text
+historical BF3 result:
+  INSTALLED / IMMUTABLE
+
+BF3 disposition:
+  BF3_EVIDENCE_INVALID_OR_INCOMPLETE
+
+observed anomaly:
+  both exact historical responses declared application/json
+```
+
+The historical BF3 contract, conformant execution, valid package, immutable
+Result-v1, warnings, terminal outcome, stop reason, disposition, and no-rerun
+boundary remain unchanged.
+
+### Selected evidence architecture
+
+Current standards research distinguishes browser classic-script MIME behavior
+from offline inert-byte textual evidence. The selected immediate architecture
+is a zero-provider-contact derived-evidence contract that first re-verifies the
+exact retained original/archive identities, then—only if both pass—permits
+the frozen fatal UTF-8 decode-without-BOM method, five atomic exact literal
+predicates, and language-neutral RFC 8259 grammar recognition without
+JavaScript execution. The retained historical PackageIntegrity-v1 and
+Result-v1 are part of the same global upstream gate, and future derived output
+uses distinct original/archive custody plus a non-recursive integrity record.
+
+```text
+provider contact:
+  NOT AUTHORIZED
+
+browser execution:
+  NOT AUTHORIZED
+
+derived execution:
+  NOT YET AUTHORIZED — REQUIRES INDEPENDENT REVIEW, MERGE, AND SEPARATE INVOCATION
+
+canonical SDK selection:
+  UNRESOLVED / NOT AUTHORIZED BY DERIVED EXECUTION
+
+EX2B2:
+  BLOCKED
+```
+
+Browser request-context equivalence, `X-Content-Type-Options`, and
+`Cross-Origin-Resource-Policy` remain unresolved. A later provider header or
+browser evidence action is planning-only and would require a new separately
+reviewed contract.
+
+### Independent review and bounded-correction status
+
+```text
+independent broad review:
+  COMPLETED
+
+findings:
+  BF3R1-AUD-001 THROUGH BF3R1-AUD-007
+
+bounded corrections:
+  APPLIED / PENDING FOCUSED CLOSURE
+
+authorized next review:
+  FOCUSED CLOSURE OF THOSE SEVEN FINDINGS ONLY
+```
+
+The correction changes no historical BF3 artifact or disposition and grants no
+provider contact, retained SDK interpretation, derived execution, JavaScript
+execution, browser execution, vendor contact, BF3 rerun, or EX2B2 authority.

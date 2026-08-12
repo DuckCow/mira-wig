@@ -60,6 +60,11 @@ commerce, order, or manufacturing behavior.
   — records one completed conformant BF3 execution, valid package admission,
   invalid/incomplete semantic evidence, disposition
   `BF3_EVIDENCE_INVALID_OR_INCOMPLETE`, no rerun authority, and blocked EX2B2.
+- [Eximbay BF3-R1 Content-Type Anomaly Retained-Byte Derived-Evidence Contract v0.1](./eximbay-bf3-r1-content-type-anomaly-retained-byte-evidence-contract-v0.1.md)
+  — candidate zero-provider-contact retained-byte derived-evidence contract.
+  Seven bounded review corrections are pending focused closure; the candidate
+  authorizes no current provider contact or execution, preserves the historical
+  BF3 run as immutable, and keeps EX2B2 blocked.
 
 ## Render Lab foundation
 
