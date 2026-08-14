@@ -1,19 +1,28 @@
 import Link from "next/link";
+import { getStorefrontContext } from "@/lib/market";
+import { messagesFor } from "@/lib/market/messages";
+import { siteVariantPath } from "@/lib/market/site-variant";
 
-export default function StyleNotFound() {
+export default async function StyleNotFound() {
+  const context = await getStorefrontContext();
+  const messages = messagesFor(context.locale);
+  const stylesHref = siteVariantPath(
+    { marketCode: context.marketCode, locale: context.locale },
+    "/styles",
+  );
   return (
     <main className="max-w-5xl mx-auto px-4 py-20 flex flex-col items-center text-center">
       <p className="text-gray-900 font-semibold text-lg mb-2">
-        스타일을 찾을 수 없습니다
+        {messages.detail.notFoundTitle}
       </p>
       <p className="text-gray-400 text-sm mb-6">
-        삭제되었거나 존재하지 않는 스타일입니다.
+        {messages.detail.notFoundDescription}
       </p>
       <Link
-        href="/styles"
+        href={stylesHref}
         className="px-6 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700"
       >
-        스타일 목록으로
+        {messages.detail.back}
       </Link>
     </main>
   );

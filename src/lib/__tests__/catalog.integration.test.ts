@@ -112,6 +112,25 @@ describe("catalog market pricing", () => {
     expect(cartItem?.variantId).toBe(variant.id);
     expect(cartItem?.price).toBe(catalogPrice);
   });
+
+  it("fails catalog and cart projection closed when the Market is inactive", async () => {
+    const style = await createStyle(ctx, { markets: [MarketCode.US] });
+    const variant = await createVariant(ctx, { styleId: style.id, marketPrices: { US: 2_999 } });
+    await addToCart(ctx.userId, variant.id, style.id, 1, MarketCode.US);
+    await db.market.update({ where: { code: MarketCode.US }, data: { isActive: false } });
+
+    try {
+      await expect(getWigStyles({}, MarketCode.US)).resolves.not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: style.id })]),
+      );
+      await expect(getWigStyleById(style.id, MarketCode.US)).resolves.toBeNull();
+      await expect(getCart(ctx.userId, MarketCode.US)).resolves.toEqual([
+        expect.objectContaining({ variantId: variant.id, unavailableCode: "STYLE_UNPUBLISHED" }),
+      ]);
+    } finally {
+      await db.market.update({ where: { code: MarketCode.US }, data: { isActive: true } });
+    }
+  });
 });
 
 function makeContext(): TestContext {

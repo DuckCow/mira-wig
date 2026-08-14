@@ -81,8 +81,33 @@ describe("login callback resolver", () => {
   it.each([
     "/%5Cevil.example",
     "/%2F%2Fevil.example",
-  ])("preserves accepted percent-encoded literal %s", (value) => {
-    expect(resolveLoginCallbackUrl(value)).toBe(value);
+    "/%252F%252Fevil.example",
+    "/styles/%2e%2e/admin",
+    "/styles/%252e%252e/admin",
+  ])("rejects encoded authority changes or traversal %s", (value) => {
+    expect(resolveLoginCallbackUrl(value)).toBe(FALLBACK);
+  });
+
+  it("preserves an encoded ID that cannot change authority or traverse", () => {
+    expect(resolveLoginCallbackUrl("/styles/a%2Fb?q=1")).toBe("/styles/a%2Fb?q=1");
+  });
+
+  it.each([3, 4])("rejects %i-layer encoded callback authority and traversal", (depth) => {
+    expect(resolveLoginCallbackUrl(`/${nestedEncode("//evil.example", depth)}`)).toBe(FALLBACK);
+    expect(resolveLoginCallbackUrl(`/orders/${nestedEncode("..", depth)}/admin`)).toBe(FALLBACK);
+  });
+
+  it("preserves a safe callback pathname, query, and browser fragment exactly", () => {
+    const callback = "/orders/order%2Fencoded?tab=refund&return=%2Fstyles#customer-refund-intakes";
+    expect(resolveLoginCallbackUrl(callback)).toBe(callback);
+  });
+
+  it("rejects reserved login targets even when their first segment is recursively encoded", () => {
+    expect(resolveLoginCallbackUrl(`/${nestedEncode("l%6fgin", 2)}?next=/orders`)).toBe(FALLBACK);
+  });
+
+  it("rejects recursive encoding beyond the decode bound", () => {
+    expect(resolveLoginCallbackUrl(`/orders/${nestedEncode("safe/id", 6)}`)).toBe(FALLBACK);
   });
 
   it("bounds the callback by JavaScript UTF-16 code units", () => {
@@ -130,3 +155,11 @@ describe("login callback resolver", () => {
     expect(resolveLoginCallbackUrl(value)).toBe(value);
   });
 });
+
+function nestedEncode(value: string, depth: number): string {
+  let encoded = value;
+  for (let currentDepth = 0; currentDepth < depth; currentDepth += 1) {
+    encoded = encodeURIComponent(encoded);
+  }
+  return encoded;
+}

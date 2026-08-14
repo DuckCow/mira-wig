@@ -12,6 +12,7 @@ import {
   type CommerceIntegrityFailureCode,
 } from "./commerce-integrity";
 import type { MarketCode } from "./market/types";
+import { MARKET_CONFIGS } from "./market/types";
 
 // ── 에러 타입 ─────────────────────────────────────────────────
 
@@ -53,6 +54,29 @@ export interface CartItemView {
   unavailableMessage: string | null;
 }
 
+export type MarketSwitchLineClassification = "UNCHANGED" | "REPRICED" | "UNAVAILABLE" | "TARGET_PROJECTION";
+
+export interface MarketSwitchLineImpact {
+  cartItemId: string;
+  variantId: string;
+  styleName: string;
+  quantity: number;
+  currentUnitAmount: number | null;
+  targetUnitAmount: number | null;
+  targetAvailable: boolean;
+  targetUnavailableCode: CommerceIntegrityFailureCode | null;
+  classification: MarketSwitchLineClassification;
+}
+
+export interface MarketSwitchImpact {
+  currentMarket: MarketCode | null;
+  targetMarket: MarketCode;
+  currentCurrency: string | null;
+  targetCurrency: string;
+  lines: MarketSwitchLineImpact[];
+  fingerprint: string;
+}
+
 // ── 내부 헬퍼 ────────────────────────────────────────────────
 
 type CartRow = Awaited<ReturnType<typeof fetchCartRows>>[number];
@@ -85,7 +109,7 @@ async function fetchCartRows(userId: string, marketCode: MarketCode) {
           coverImageKey: true,
           isActive: true,
           availableMarkets: {
-            where: { marketCode, isActive: true },
+            where: { marketCode, isActive: true, market: { isActive: true } },
             select: { marketCode: true },
             take: 1,
           },
@@ -135,6 +159,82 @@ export async function getCartItemCount(userId: string): Promise<number> {
   return db.cartItem.count({ where: { userId } });
 }
 
+export async function getMarketSwitchImpact(
+  userId: string,
+  currentMarket: MarketCode,
+  targetMarket: MarketCode,
+): Promise<MarketSwitchImpact> {
+  const [currentItems, targetItems] = await Promise.all([
+    getCart(userId, currentMarket),
+    getCart(userId, targetMarket),
+  ]);
+  const targetById = new Map(targetItems.map((item) => [item.id, item]));
+  const lines = currentItems.map((current): MarketSwitchLineImpact => {
+    const target = targetById.get(current.id);
+    if (!target) throw new Error(`Cart projection lost item ${current.id}.`);
+    const targetAvailable = target.price !== null && target.unavailableCode === null;
+    const classification: MarketSwitchLineClassification = !targetAvailable
+      ? "UNAVAILABLE"
+      : current.price === target.price
+        ? "UNCHANGED"
+        : "REPRICED";
+    return {
+      cartItemId: current.id,
+      variantId: current.variantId,
+      styleName: current.styleName,
+      quantity: current.quantity,
+      currentUnitAmount: current.price,
+      targetUnitAmount: target.price,
+      targetAvailable,
+      targetUnavailableCode: target.unavailableCode,
+      classification,
+    };
+  });
+  const impactWithoutFingerprint = {
+    currentMarket,
+    targetMarket,
+    currentCurrency: MARKET_CONFIGS[currentMarket].currency.code,
+    targetCurrency: MARKET_CONFIGS[targetMarket].currency.code,
+    lines,
+  };
+  return {
+    ...impactWithoutFingerprint,
+    fingerprint: JSON.stringify(impactWithoutFingerprint),
+  };
+}
+
+export async function getMarketAdmissionImpact(
+  userId: string,
+  targetMarket: MarketCode,
+): Promise<MarketSwitchImpact> {
+  const targetItems = await getCart(userId, targetMarket);
+  const lines = targetItems.map((target): MarketSwitchLineImpact => {
+    const targetAvailable = target.price !== null && target.unavailableCode === null;
+    return {
+      cartItemId: target.id,
+      variantId: target.variantId,
+      styleName: target.styleName,
+      quantity: target.quantity,
+      currentUnitAmount: null,
+      targetUnitAmount: target.price,
+      targetAvailable,
+      targetUnavailableCode: target.unavailableCode,
+      classification: targetAvailable ? "TARGET_PROJECTION" : "UNAVAILABLE",
+    };
+  });
+  const impactWithoutFingerprint = {
+    currentMarket: null,
+    targetMarket,
+    currentCurrency: null,
+    targetCurrency: MARKET_CONFIGS[targetMarket].currency.code,
+    lines,
+  };
+  return {
+    ...impactWithoutFingerprint,
+    fingerprint: JSON.stringify(impactWithoutFingerprint),
+  };
+}
+
 export async function addToCart(
   userId: string,
   variantId: string,
@@ -154,7 +254,7 @@ export async function addToCart(
         select: {
           isActive: true,
           availableMarkets: {
-            where: { marketCode, isActive: true },
+            where: { marketCode, isActive: true, market: { isActive: true } },
             select: { marketCode: true },
             take: 1,
           },
@@ -214,7 +314,7 @@ export async function updateQuantity(
         select: {
           isActive: true,
           availableMarkets: {
-            where: { marketCode, isActive: true },
+            where: { marketCode, isActive: true, market: { isActive: true } },
             select: { marketCode: true },
             take: 1,
           },

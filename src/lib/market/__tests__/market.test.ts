@@ -9,6 +9,14 @@ import {
   formatPrice,
   resolveMarketCode,
 } from "../types";
+import { Locale, preferredEnabledLocale } from "../locale";
+import { resolveRootLocale, resolveRootMarket } from "../resolution";
+import {
+  ENABLED_SITE_VARIANTS,
+  equivalentSiteVariantPath,
+  resolveRouteSiteVariant,
+  siteVariantPath,
+} from "../site-variant";
 
 // ── formatPrice ───────────────────────────────────────────────
 
@@ -44,6 +52,18 @@ describe("formatPrice — 2-decimal (USD)", () => {
   it("큰 금액도 올바르게 변환한다 (12999 → $129.99)", () => {
     const result = formatPrice(12999, CURRENCY_META.USD);
     expect(result).toContain("129.99");
+  });
+});
+
+describe("formatPrice — locale is independent from currency", () => {
+  it("keeps USD amount and currency while applying Korean formatting", () => {
+    const english = formatPrice(123_456, CURRENCY_META.USD, Locale.EN);
+    const korean = formatPrice(123_456, CURRENCY_META.USD, Locale.KO);
+
+    expect(english).toContain("1,234.56");
+    expect(korean).toContain("1,234.56");
+    expect(english).toContain("$");
+    expect(korean).toContain("US$");
   });
 });
 
@@ -126,5 +146,51 @@ describe("MARKET_CONFIGS 통화 메타데이터", () => {
   it("JP 마켓은 JPY zero-decimal이다", () => {
     expect(MARKET_CONFIGS.JP.currency.code).toBe("JPY");
     expect(MARKET_CONFIGS.JP.currency.decimals).toBe(0);
+  });
+});
+
+describe("Market × Locale resolution", () => {
+  it("contains exactly the six explicitly enabled variants", () => {
+    expect(ENABLED_SITE_VARIANTS).toEqual([
+      { marketCode: "KR", locale: "ko" },
+      { marketCode: "KR", locale: "en" },
+      { marketCode: "US", locale: "en" },
+      { marketCode: "US", locale: "ko" },
+      { marketCode: "JP", locale: "ja" },
+      { marketCode: "JP", locale: "en" },
+    ]);
+  });
+
+  it("preserves market and deterministically falls back for a disabled pair", () => {
+    expect(resolveRouteSiteVariant("jp", "ko")).toEqual({
+      kind: "FALLBACK",
+      variant: { marketCode: "JP", locale: "ja" },
+    });
+    expect(resolveRouteSiteVariant("xx", "en")).toEqual({ kind: "INVALID" });
+  });
+
+  it("explicit market cookie beats GeoIP and GeoIP remains inference", () => {
+    expect(resolveRootMarket("JP", "US")).toEqual({ marketCode: "JP", source: "EXPLICIT_COOKIE" });
+    expect(resolveRootMarket(undefined, "KR")).toEqual({ marketCode: "KR", source: "GEO" });
+  });
+
+  it("skips inactive cookie and Geo candidates and fails when no Market is active", () => {
+    expect(resolveRootMarket("US", "JP", ["KR"])).toEqual({ marketCode: "KR", source: "DEFAULT" });
+    expect(resolveRootMarket("US", "JP", ["JP"])).toEqual({ marketCode: "JP", source: "GEO" });
+    expect(() => resolveRootMarket("US", "JP", [])).toThrow("No active Market");
+  });
+
+  it("locale cookie beats Accept-Language and language is restricted to the market allowlist", () => {
+    expect(resolveRootLocale("ko", "en;q=1", "US")).toEqual({ locale: "ko", source: "EXPLICIT_COOKIE" });
+    expect(resolveRootLocale(undefined, "ja;q=1,en;q=0.8", "US")).toEqual({ locale: "en", source: "ACCEPT_LANGUAGE" });
+    expect(preferredEnabledLocale("ja;q=1,ko;q=0.8", ["en", "ko"])).toBe("ko");
+  });
+
+  it("builds and switches only the explicit public prefix", () => {
+    expect(siteVariantPath({ marketCode: "US", locale: "ko" }, "/styles/a")).toBe("/us/ko/styles/a");
+    expect(equivalentSiteVariantPath("/kr/ko/styles/a", { marketCode: "JP", locale: "ja" }))
+      .toBe("/jp/ja/styles/a");
+    expect(equivalentSiteVariantPath("/checkout/return/id", { marketCode: "JP", locale: "ja" }))
+      .toBe("/checkout/return/id");
   });
 });

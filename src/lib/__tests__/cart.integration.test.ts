@@ -6,6 +6,8 @@ import {
   addToCart,
   getCart,
   getCartItemCount,
+  getMarketAdmissionImpact,
+  getMarketSwitchImpact,
   removeFromCart,
   updateQuantity,
 } from "@/lib/cart";
@@ -233,6 +235,68 @@ describe("cart pricing", () => {
       shipping: validShipping(ShippingCountry.US),
     })).rejects.toMatchObject({ code: "STYLE_UNPUBLISHED" });
     await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
+  });
+
+  it("previews exact repricing and unavailability without deleting cart rows", async () => {
+    const repriced = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000, US: 2_999 } });
+    const unavailable = await createCatalogVariant(ctx, { marketPrices: { KR: 18_000 } });
+    await addToCart(ctx.userId, repriced.id, repriced.styleId, 2, MarketCode.KR);
+    await addToCart(ctx.userId, unavailable.id, unavailable.styleId, 1, MarketCode.KR);
+
+    const impact = await getMarketSwitchImpact(ctx.userId, MarketCode.KR, MarketCode.US);
+
+    expect(impact).toMatchObject({
+      currentMarket: "KR",
+      targetMarket: "US",
+      currentCurrency: "KRW",
+      targetCurrency: "USD",
+    });
+    expect(impact.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: repriced.id, currentUnitAmount: 12_000, targetUnitAmount: 2_999, classification: "REPRICED", targetAvailable: true }),
+      expect.objectContaining({ variantId: unavailable.id, currentUnitAmount: 18_000, targetUnitAmount: null, classification: "UNAVAILABLE", targetAvailable: false }),
+    ]));
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(2);
+  });
+
+  it("changes the impact fingerprint when price facts change", async () => {
+    const variant = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000, US: 2_999 } });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    const before = await getMarketSwitchImpact(ctx.userId, MarketCode.KR, MarketCode.US);
+
+    await db.variantMarketPrice.update({
+      where: { variantId_marketCode: { variantId: variant.id, marketCode: MarketCode.US } },
+      data: { amount: 3_499 },
+    });
+    const after = await getMarketSwitchImpact(ctx.userId, MarketCode.KR, MarketCode.US);
+
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+    expect(after.lines[0]?.targetUnitAmount).toBe(3_499);
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("projects target facts for an unconfirmed cart without inventing current price authority", async () => {
+    const available = await createCatalogVariant(ctx, { marketPrices: { US: 2_999 } });
+    const unavailable = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000 } });
+    await db.cartItem.createMany({
+      data: [
+        { userId: ctx.userId, wigStyleId: available.styleId, variantId: available.id, quantity: 2 },
+        { userId: ctx.userId, wigStyleId: unavailable.styleId, variantId: unavailable.id, quantity: 1 },
+      ],
+    });
+
+    const impact = await getMarketAdmissionImpact(ctx.userId, MarketCode.US);
+
+    expect(impact).toMatchObject({
+      currentMarket: null,
+      currentCurrency: null,
+      targetMarket: "US",
+      targetCurrency: "USD",
+    });
+    expect(impact.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: available.id, currentUnitAmount: null, targetUnitAmount: 2_999, classification: "TARGET_PROJECTION", targetAvailable: true }),
+      expect.objectContaining({ variantId: unavailable.id, currentUnitAmount: null, targetUnitAmount: null, classification: "UNAVAILABLE", targetAvailable: false }),
+    ]));
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(2);
   });
 });
 

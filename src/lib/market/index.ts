@@ -9,7 +9,7 @@
 // 클라이언트에서 types.ts의 순수 유틸만 필요하면 직접 import.
 // ============================================================
 
-export { getCurrentMarket, getCurrentMarketCode } from "./resolve";
+export { getAuthenticationLocale, getCurrentMarket, getCurrentMarketCode, getStorefrontContext } from "./resolve";
 
 export {
   MarketCode,
@@ -24,3 +24,17 @@ export {
   type MarketConfig,
   type CurrencyMeta,
 } from "./types";
+
+export { Locale, LOCALES, LOCALE_COOKIE, isLocale, preferredEnabledLocale, type Locale as LocaleCode } from "./locale";
+export {
+  ENABLED_SITE_VARIANTS,
+  enabledLocalesForMarket,
+  equivalentSiteVariantPath,
+  fallbackLocaleForMarket,
+  isEnabledSiteVariant,
+  resolveRouteSiteVariant,
+  siteVariantPath,
+  type SiteVariant,
+} from "./site-variant";
+export { resolveRootLocale, resolveRootMarket, type RootLocaleResolution, type RootMarketResolution } from "./resolution";
+export { NoActiveMarketException, getActiveMarketCodes, getActiveSiteVariants, isActiveMarket } from "./active-market";

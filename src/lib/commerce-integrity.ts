@@ -21,7 +21,7 @@ export interface VariantPurchasabilityFacts {
 export function stylePublishedInMarketWhere(marketCode: string): Prisma.WigStyleWhereInput {
   return {
     isActive: true,
-    availableMarkets: { some: { marketCode, isActive: true } },
+    availableMarkets: { some: { marketCode, isActive: true, market: { isActive: true } } },
   };
 }
 

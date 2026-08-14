@@ -2,9 +2,12 @@
 
 import { useTransition } from "react";
 import { removeFromCart, updateCartQuantity } from "@/app/actions/cart";
+import { messagesFor } from "@/lib/market/messages";
+import type { Locale } from "@/lib/market/locale";
 
-export function RemoveButton({ cartItemId }: { cartItemId: string }) {
+export function RemoveButton({ cartItemId, locale }: { cartItemId: string; locale: Locale }) {
   const [isPending, startTransition] = useTransition();
+  const messages = messagesFor(locale).cart;
   return (
     <button
       type="button"
@@ -17,7 +20,7 @@ export function RemoveButton({ cartItemId }: { cartItemId: string }) {
       }}
       className="text-sm text-red-500 hover:text-red-700 disabled:opacity-40"
     >
-      {isPending ? "삭제 중…" : "삭제"}
+      {isPending ? messages.removing : messages.remove}
     </button>
   );
 }
@@ -26,32 +29,37 @@ export function QuantityControl({
   cartItemId,
   current,
   max,
+  marketCode,
+  locale,
   disabled = false,
 }: {
   cartItemId: string;
   current: number;
   max: number;
+  marketCode: string;
+  locale: Locale;
   disabled?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
+  const messages = messagesFor(locale).cart;
 
   function update(next: number) {
     if (next < 1 || next > max) return;
     startTransition(async () => {
-      await updateCartQuantity(cartItemId, next);
+      await updateCartQuantity(cartItemId, next, marketCode);
     });
   }
 
   return (
     <div
       className="flex items-center border border-gray-300 rounded-lg overflow-hidden"
-      aria-label="수량 조절"
+      aria-label={messages.quantityControl}
     >
       <button
         type="button"
         onClick={() => { update(current - 1); }}
         disabled={disabled || current <= 1 || isPending}
-        aria-label="수량 줄이기"
+        aria-label={messages.decreaseQuantity}
         className="px-2.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 text-sm"
       >
         −
@@ -63,7 +71,7 @@ export function QuantityControl({
         type="button"
         onClick={() => { update(current + 1); }}
         disabled={disabled || current >= max || isPending}
-        aria-label="수량 늘리기"
+        aria-label={messages.increaseQuantity}
         className="px-2.5 py-1 text-gray-600 hover:bg-gray-100 disabled:opacity-40 text-sm"
       >
         +

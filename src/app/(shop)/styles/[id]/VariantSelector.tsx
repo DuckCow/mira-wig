@@ -2,12 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { WigVariantDetail } from "@/lib/catalog.types";
-import { getLengthLabel, getCurlLabel } from "@/lib/wig-option-labels";
 import { addToCart } from "@/app/actions/cart";
 import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import type { Locale } from "@/lib/market/locale";
+import { localizedCurlLabel, localizedLengthLabel } from "@/lib/market/catalog-presentation";
+import { messagesFor } from "@/lib/market/messages";
+import { MarketConfirmation } from "@/components/features/MarketConfirmation";
 import { getFittingLocale } from "@/lib/fitting/locale";
 import { FittingModal } from "@/components/features/FittingModal";
+import { loginHref, withStorefrontHandoff } from "@/lib/market/request-context";
 import {
   getAvailableColors,
   getAvailableLengths,
@@ -84,13 +89,16 @@ function OptionPanels({
   onColor,
   onLength,
   onCurl,
+  locale,
 }: {
   variants: WigVariantDetail[];
   sel: Selection;
   onColor: (c: string) => void;
   onLength: (l: string) => void;
   onCurl: (c: string) => void;
+  locale: Locale;
 }) {
+  const messages = messagesFor(locale).product;
   const colors = getAvailableColors(variants);
   const lengths = getAvailableLengths(variants, sel.color);
   const curls = getAvailableCurls(variants, sel.color, sel.length);
@@ -98,7 +106,7 @@ function OptionPanels({
   return (
     <div className="space-y-5">
       <fieldset>
-        <legend className="text-sm font-medium text-gray-700 mb-2">색상</legend>
+        <legend className="text-sm font-medium text-gray-700 mb-2">{messages.color}</legend>
         <div className="flex flex-wrap gap-2">
           {colors.map((v) => (
             <ColorButton key={v.color} variant={v} selected={sel.color === v.color} onSelect={() => onColor(v.color)} />
@@ -107,19 +115,19 @@ function OptionPanels({
       </fieldset>
 
       <fieldset>
-        <legend className="text-sm font-medium text-gray-700 mb-2">길이</legend>
+        <legend className="text-sm font-medium text-gray-700 mb-2">{messages.length}</legend>
         <div className="flex flex-wrap gap-2">
           {["short", "medium", "long"].map((len) => (
-            <OptionButton key={len} label={getLengthLabel(len)} selected={sel.length === len} disabled={!lengths.includes(len)} onSelect={() => onLength(len)} />
+            <OptionButton key={len} label={localizedLengthLabel(len, locale)} selected={sel.length === len} disabled={!lengths.includes(len)} onSelect={() => onLength(len)} />
           ))}
         </div>
       </fieldset>
 
       <fieldset>
-        <legend className="text-sm font-medium text-gray-700 mb-2">컬</legend>
+        <legend className="text-sm font-medium text-gray-700 mb-2">{messages.curl}</legend>
         <div className="flex flex-wrap gap-2">
           {["straight", "wavy", "curly"].map((curl) => (
-            <OptionButton key={curl} label={getCurlLabel(curl)} selected={sel.curl === curl} disabled={!curls.includes(curl)} onSelect={() => onCurl(curl)} />
+            <OptionButton key={curl} label={localizedCurlLabel(curl, locale)} selected={sel.curl === curl} disabled={!curls.includes(curl)} onSelect={() => onCurl(curl)} />
           ))}
         </div>
       </fieldset>
@@ -133,18 +141,21 @@ function QuantityStepper({
   quantity,
   maxStock,
   onChange,
+  locale,
 }: {
   quantity: number;
   maxStock: number;
   onChange: (n: number) => void;
+  locale: Locale;
 }) {
+  const messages = messagesFor(locale).product;
   return (
     <div className="flex items-center gap-3">
-      <label htmlFor="quantity" className="text-sm font-medium text-gray-700">수량</label>
+      <label htmlFor="quantity" className="text-sm font-medium text-gray-700">{messages.quantity}</label>
       <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
-        <button type="button" onClick={() => onChange(quantity - 1)} disabled={quantity <= 1} aria-label="수량 줄이기" className="px-3 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-40">−</button>
+        <button type="button" onClick={() => onChange(quantity - 1)} disabled={quantity <= 1} aria-label={messages.decreaseQuantity} className="px-3 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-40">−</button>
         <input id="quantity" type="number" min={1} max={maxStock} value={quantity} onChange={(e) => onChange(Math.max(1, Number(e.target.value)))} className="w-12 text-center text-sm py-1.5 border-x border-gray-300 focus:outline-none" />
-        <button type="button" onClick={() => onChange(quantity + 1)} disabled={quantity >= maxStock} aria-label="수량 늘리기" className="px-3 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-40">+</button>
+        <button type="button" onClick={() => onChange(quantity + 1)} disabled={quantity >= maxStock} aria-label={messages.increaseQuantity} className="px-3 py-1.5 text-gray-600 hover:bg-gray-100 disabled:opacity-40">+</button>
       </div>
     </div>
   );
@@ -152,12 +163,13 @@ function QuantityStepper({
 
 // ── 피드백 메시지 ────────────────────────────────────────────
 
-function FeedbackMessage({ feedback }: { feedback: { ok: boolean; msg: string } | null }) {
+function FeedbackMessage({ feedback, marketCode, locale }: { feedback: { ok: boolean; msg: string } | null; marketCode: MarketCode; locale: Locale }) {
   if (!feedback) return null;
+  const messages = messagesFor(locale).product;
   return (
     <p role="status" aria-live="polite" className={`text-sm text-center ${feedback.ok ? "text-green-600" : "text-red-500"}`}>
       {feedback.msg}
-      {feedback.ok && <a href="/cart" className="ml-2 underline">장바구니 보기</a>}
+      {feedback.ok && <Link href={withStorefrontHandoff("/cart", { marketCode, locale })} className="ml-2 underline">{messages.viewCart}</Link>}
     </p>
   );
 }
@@ -172,6 +184,8 @@ function AddToCartPanel({
   marketCode,
   onQuantityChange,
   onAddToCart,
+  locale,
+  marketConfirmed,
 }: {
   variant: WigVariantDetail | null;
   quantity: number;
@@ -180,28 +194,41 @@ function AddToCartPanel({
   marketCode: MarketCode;
   onQuantityChange: (n: number) => void;
   onAddToCart: () => void;
+  locale: Locale;
+  marketConfirmed: boolean;
 }) {
-  const { currency } = MARKET_CONFIGS[marketCode];
-  const canAdd = variant !== null && variant.stock > 0 && variant.price !== null && !isPending;
+  const messages = messagesFor(locale);
+  const canAdd = purchasableVariant(variant) && !isPending;
   return (
     <div className="space-y-4">
       {variant && (
         <p className="text-lg font-semibold text-gray-900">
-          {variant.price === null ? "이 마켓에서 가격 미제공" : formatPrice(variant.price, currency)}
-          {variant.stock === 0 && <span className="ml-2 text-sm font-normal text-red-500">품절</span>}
+          {displayVariantPrice(variant, marketCode, locale)}
+          {variant.stock === 0 ? <span className="ml-2 text-sm font-normal text-red-500">{messages.product.soldOut}</span> : null}
         </p>
       )}
 
-      <QuantityStepper quantity={quantity} maxStock={variant?.stock ?? 99} onChange={onQuantityChange} />
+      <QuantityStepper quantity={quantity} maxStock={variant?.stock ?? 99} onChange={onQuantityChange} locale={locale} />
 
-      <button type="button" onClick={onAddToCart} disabled={!canAdd} aria-busy={isPending}
+      {!marketConfirmed ? <p className="text-sm text-amber-700">{messages.marketConfirmation.required}</p> : null}
+
+      <button type="button" onClick={onAddToCart} disabled={!canAdd || !marketConfirmed} aria-busy={isPending}
         className="w-full py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-        {isPending ? "담는 중…" : "장바구니 담기"}
+        {isPending ? messages.product.adding : messages.product.addToCart}
       </button>
 
-      <FeedbackMessage feedback={feedback} />
+      <FeedbackMessage feedback={feedback} marketCode={marketCode} locale={locale} />
     </div>
   );
+}
+
+function purchasableVariant(variant: WigVariantDetail | null): variant is WigVariantDetail {
+  return variant !== null && variant.stock > 0 && variant.price !== null;
+}
+
+function displayVariantPrice(variant: WigVariantDetail, marketCode: MarketCode, locale: Locale): string {
+  if (variant.price === null) return messagesFor(locale).styles.priceUnavailable;
+  return formatPrice(variant.price, MARKET_CONFIGS[marketCode].currency, locale);
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────
@@ -210,10 +237,14 @@ export function VariantSelector({
   variants,
   wigStyleId,
   marketCode,
+  locale,
+  currentMarketCode,
 }: {
   variants: WigVariantDetail[];
   wigStyleId: string;
   marketCode: MarketCode;
+  locale: Locale;
+  currentMarketCode: MarketCode | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -221,20 +252,22 @@ export function VariantSelector({
   const [quantity, setQuantity] = useState(1);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [isFittingOpen, setIsFittingOpen] = useState(false);
+  const [isMarketConfirmed, setMarketConfirmed] = useState(currentMarketCode === marketCode);
 
   const selected = findSelectedVariant(variants, sel);
-  const t = getFittingLocale(MARKET_CONFIGS[marketCode].defaultLocale);
+  const t = getFittingLocale(locale);
 
   function handleAddToCart() {
     if (!selected) return;
     startTransition(async () => {
-      const result = await addToCart(selected.id, wigStyleId, quantity);
+      const result = await addToCart(marketCode, selected.id, wigStyleId, quantity);
       if (result.success) {
-        setFeedback({ ok: true, msg: "장바구니에 담았습니다." });
-      } else if (result.error === "로그인이 필요합니다.") {
-        router.push("/login");
+        setFeedback({ ok: true, msg: messagesFor(locale).product.added });
+      } else if (result.errorCode === "UNAUTHORIZED") {
+        const returnTarget = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        router.push(loginHref(returnTarget, { marketCode, locale }));
       } else {
-        setFeedback({ ok: false, msg: result.error });
+        setFeedback({ ok: false, msg: cartActionErrorMessage(result.errorCode, locale) });
       }
     });
   }
@@ -247,6 +280,7 @@ export function VariantSelector({
         onColor={(c) => { setSel({ color: c, length: null, curl: null }); setFeedback(null); }}
         onLength={(l) => { setSel((s) => ({ ...s, length: l, curl: null })); setFeedback(null); }}
         onCurl={(c) => { setSel((s) => ({ ...s, curl: c })); setFeedback(null); }}
+        locale={locale}
       />
 
       {selected && (
@@ -267,16 +301,37 @@ export function VariantSelector({
         marketCode={marketCode}
         onQuantityChange={setQuantity}
         onAddToCart={() => { void handleAddToCart(); }}
+        locale={locale}
+        marketConfirmed={isMarketConfirmed}
       />
+
+      {!isMarketConfirmed ? (
+        <MarketConfirmation
+          currentMarketCode={currentMarketCode}
+          targetMarketCode={marketCode}
+          locale={locale}
+          onConfirmed={() => setMarketConfirmed(true)}
+        />
+      ) : null}
 
       {isFittingOpen && selected && (
         <FittingModal
           variantId={selected.id}
           wigStyleId={wigStyleId}
+          marketCode={marketCode}
+          locale={locale}
           t={t}
           onClose={() => setIsFittingOpen(false)}
         />
       )}
     </div>
   );
+}
+
+function cartActionErrorMessage(errorCode: string, locale: Locale): string {
+  const messages = messagesFor(locale);
+  if (errorCode === "MARKET_CONFIRMATION_REQUIRED") return messages.marketConfirmation.required;
+  if (errorCode === "MARKET_CHANGED") return messages.selector.impactChanged;
+  if (errorCode === "UNAUTHORIZED") return messages.login.title;
+  return messages.cart.unavailableNotice;
 }

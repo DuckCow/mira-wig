@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { siteBaseUrl } from "@/lib/market/seo";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -17,5 +18,6 @@ export default function robots(): MetadataRoute.Robots {
         "/login",
       ],
     },
+    sitemap: new URL("/sitemap.xml", siteBaseUrl()).toString(),
   };
 }

@@ -20,6 +20,7 @@ export interface FittingLocale {
   cta: string;
   modalTitle: string;
   uploadPrompt: string;
+  selectPhoto: string;
   uploading: string;
   starting: string;
   processing: string;
@@ -37,6 +38,7 @@ const KO: FittingLocale = {
   cta: "써보기",
   modalTitle: "가상 피팅",
   uploadPrompt: "얼굴 사진을 업로드하세요 (jpg/png/webp, 최대 10MB)",
+  selectPhoto: "사진 선택",
   uploading: "사진 업로드 중…",
   starting: "피팅 준비 중…",
   processing: "가발을 합성하고 있습니다…",
@@ -66,6 +68,7 @@ const EN: FittingLocale = {
   cta: "Try it on",
   modalTitle: "Virtual Try-On",
   uploadPrompt: "Upload your photo (jpg/png/webp, max 10MB)",
+  selectPhoto: "Choose Photo",
   uploading: "Uploading photo…",
   starting: "Preparing fitting…",
   processing: "Applying wig…",
@@ -95,6 +98,7 @@ const JA: FittingLocale = {
   cta: "試着する",
   modalTitle: "バーチャル試着",
   uploadPrompt: "顔写真をアップロード（jpg/png/webp、最大10MB）",
+  selectPhoto: "写真を選択",
   uploading: "写真をアップロード中…",
   starting: "試着を準備中…",
   processing: "ウィッグを合成中…",

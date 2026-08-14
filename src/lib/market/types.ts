@@ -3,6 +3,8 @@
 // DB 코드 없음 — 클라이언트 컴포넌트도 안전하게 import 가능
 // ============================================================
 
+import { LOCALE_INTL, type Locale } from "./locale";
+
 // ── 마켓 코드 ─────────────────────────────────────────────────
 
 export const MarketCode = {
@@ -49,7 +51,7 @@ export interface MarketConfig {
   label: string;
   currency: CurrencyMeta;
   shippableCountries: string[];
-  defaultLocale: string;
+  defaultLocale: Locale;
 }
 
 export const MARKET_CONFIGS: Record<MarketCode, MarketConfig> = {
@@ -88,10 +90,14 @@ export function isMarketCode(value: string): value is MarketCode {
 // currency.decimals 기준으로 표시 단위로 나눈 뒤 Intl 포맷 적용
 // 절대 규칙: zero-decimal 통화에 소수점이 붙지 않아야 한다
 
-export function formatPrice(amount: number, currency: CurrencyMeta): string {
+export function formatPrice(
+  amount: number,
+  currency: CurrencyMeta,
+  locale?: Locale,
+): string {
   const divisor = Math.pow(10, currency.decimals);
   const value = amount / divisor;
-  return new Intl.NumberFormat(currency.locale, {
+  return new Intl.NumberFormat(locale ? LOCALE_INTL[locale] : currency.locale, {
     style: "currency",
     currency: currency.code,
     minimumFractionDigits: currency.decimals,

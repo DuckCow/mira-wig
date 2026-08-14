@@ -5,13 +5,15 @@ import { CheckoutForm } from "./CheckoutForm";
 import type { CheckoutCartItem } from "./checkout-summary";
 import { getSession } from "@/lib/session";
 import { getCart } from "@/lib/cart";
-import { getCurrentMarketCode } from "@/lib/market";
+import { getStorefrontContext } from "@/lib/market";
 import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types";
 import { configuredPaymentMode } from "@/lib/payment/mode";
 import { PaymentMode } from "@/lib/payment/providers/routing";
-import { getLengthLabel, getCurlLabel } from "@/lib/wig-option-labels";
+import { localizedVariantOptionLabel } from "@/lib/market/catalog-presentation";
 import type { CartItemView } from "@/lib/cart";
 import type { MarketCode } from "@/lib/market/types";
+import { loginHref, withStorefrontHandoff } from "@/lib/market/request-context";
+import { messagesFor } from "@/lib/market/messages";
 
 function pricedItems(items: CartItemView[]): CartItemView[] {
   return items.filter((item) => item.price !== null && item.unavailableCode === null);
@@ -24,13 +26,13 @@ function productSubtotal(items: CartItemView[]): number {
   }, 0);
 }
 
-function checkoutItems(items: CartItemView[]): CheckoutCartItem[] {
+function checkoutItems(items: CartItemView[], locale: Parameters<typeof localizedVariantOptionLabel>[3]): CheckoutCartItem[] {
   return items.map((item) => {
     if (item.price === null) throw new Error("Checkout received an unpriced cart line.");
     return {
       id: item.id,
       styleName: item.styleName,
-      optionLabel: `${item.color} / ${getLengthLabel(item.length)} / ${getCurlLabel(item.curl)}`,
+      optionLabel: localizedVariantOptionLabel(item.color, item.length, item.curl, locale),
       quantity: item.quantity,
       unitAmount: item.price,
       lineSubtotal: item.price * item.quantity,
@@ -55,30 +57,33 @@ function mockPaymentEnabled(): boolean {
 }
 
 export default async function CheckoutPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-
-  const marketCode = await getCurrentMarketCode();
+  const [session, context] = await Promise.all([getSession(), getStorefrontContext()]);
+  const presentationVariant = { marketCode: context.marketCode, locale: context.locale };
+  if (!session) redirect(loginHref(context.requestTarget, presentationVariant));
+  if (!context.confirmedMarketCode) redirect(withStorefrontHandoff("/cart", presentationVariant));
+  const marketCode = context.confirmedMarketCode;
+  const variant = { marketCode, locale: context.locale };
   const items = await getCart(session.user.id, marketCode);
-  if (items.length === 0) redirect("/cart");
-  if (pricedItems(items).length !== items.length) redirect("/cart");
+  if (items.length === 0) redirect(withStorefrontHandoff("/cart", variant));
+  if (pricedItems(items).length !== items.length) redirect(withStorefrontHandoff("/cart", variant));
 
   const market = MARKET_CONFIGS[marketCode];
+  const messages = messagesFor(context.locale).checkout;
   const subtotal = productSubtotal(items);
-  const cartLines = checkoutItems(items);
+  const cartLines = checkoutItems(items, context.locale);
 
   return (
     <main className="max-w-5xl mx-auto px-4 py-8">
-      <nav aria-label="뒤로가기" className="mb-6">
-        <Link href="/cart" className="text-sm text-gray-500 hover:text-gray-900">
-          ← 장바구니
+      <nav aria-label={messages.back} className="mb-6">
+        <Link href={withStorefrontHandoff("/cart", variant)} className="text-sm text-gray-500 hover:text-gray-900">
+          ← {messages.back}
         </Link>
       </nav>
 
       <header className="mb-6 space-y-2">
-        <h1 className="text-2xl font-bold text-gray-900">주문서 작성</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{messages.title}</h1>
         <p className="text-sm text-gray-500">
-          상품 합계 {formatPrice(subtotal, market.currency)} 기준으로 배송지를 입력합니다.
+          {messages.introBeforeAmount} {formatPrice(subtotal, market.currency, context.locale)} {messages.introAfterAmount}
         </p>
       </header>
 
@@ -91,6 +96,7 @@ export default async function CheckoutPage() {
         cartItems={cartLines}
         productSubtotal={subtotal}
         mockPaymentEnabled={mockPaymentEnabled()}
+        locale={context.locale}
       />
     </main>
   );
