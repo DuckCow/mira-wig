@@ -2937,3 +2937,143 @@ BF4:
 No `/ready` HTTP, SDK network load or execution, `EXIMBAY.request_pay`,
 credential use, callback, merchant capability, refund/cancel/void, financial
 completion, runtime, or activation authority is created.
+
+## 2026-08-14 — Eximbay EX2B2 READY transport + SDK handoff design candidate
+
+At post-BF3-VCL installed baseline
+`624342ebcf8a0c8c54f10d016f8185cdf7d89de8`, EX2B2 had design-only authority.
+The new documentation candidate separates server READY transport/response
+admission from browser SDK v2 loading and handoff. It does not claim source is
+installed or reviewed.
+
+Selected design dispositions:
+
+```text
+environment owner:
+  persisted Payment.mode
+  server config is a fail-closed matching interlock
+
+READY:
+  REST /v1 endpoint selected from trusted mode
+  canonical EX2A facts + non-forgeable EX2B1 persisted-order binding
+  all local construction before markContactStarted
+  one contact only after durable CONTACTED
+  strict bounded response admission
+
+ambiguity:
+  OUTCOME_UNKNOWN
+  no blind automatic READY recontact
+  all post-contact non-2xx unknown by default
+
+readyFgkey:
+  separate ephemeral one-time browser-safe channel
+  not persisted, logged, providerRef, or providerPaymentKey
+  durable generic READY alone is non-actionable
+
+statusFgkey / callbackFgkey:
+  newly generated later status-result value
+  BF4-owned; not compared with readyFgkey
+
+SDK:
+  canonical v2
+  final SDK wire uses the same non-forgeable persisted-order authority as READY
+  pure projectEximbaySdk alone is not final wire authority
+  fixed trusted mode-to-source mapping
+  one document loader / one invocation latch
+
+financial truth:
+  neither request_pay nor return_url
+  existing local finalized Payment/Order evidence only
+```
+
+The current official flow-page inconsistency remains retained:
+
+```text
+SDK Preparation -> v2
+Payment Page Initiation -> residual v1 snippet
+```
+
+readyFgkey TTL/reuse, READY retry/idempotency, merchant capability, directly
+documented exact production SDK asset availability, and recovery after lost
+handoff remain authority gaps with fail-closed boundaries. BF4 separately owns
+status callback verification, duplicate/order handling, and completion.
+
+Implementation slicing is S1 pure/injected transport, parser, and trusted SDK
+wire materialization; S2 dormant server HTTP/config; S3 two-channel mocked
+browser handoff/loader; separately authorized E1A READY evidence; optional
+non-completing E1B SDK-surface evidence; BF4; then separately authorized E2
+end-to-end sandbox. EXIMBAY routing remains disabled throughout source-only
+slices.
+
+```text
+candidate status:
+  DOCUMENTATION ONLY / D1R CORRECTIONS APPLIED
+  HUMAN CLOSURE REVIEW: PASS
+  INSTALLATION STATUS: READY FOR DOCUMENTATION INSTALLATION
+
+reviewed semantic packet:
+  WIG_PAY_EXIM_EX2B2_D1_REVIEW_v0_2.zip
+  SHA-256 d74574873370b79c2db955fd8cedc4332f23b8625a280e5e20885167980b46c0
+
+source implementation:
+  NOT AUTHORIZED
+
+provider contact:
+  NONE / NOT AUTHORIZED
+
+SDK load or execution:
+  NONE / NOT AUTHORIZED
+
+sandbox/live/customer activation:
+  NONE / NOT AUTHORIZED
+
+BF4:
+  SEPARATE / DEFERRED
+```
+
+### D1R bounded independent-review correction
+
+The D1 candidate was not installed. Independent review found two blockers,
+four important findings, and one minor finding. This bounded correction closes
+them by design invariant without rewriting earlier installed history:
+
+```text
+EX2B2-D1R-B01:
+  CLOSED_BY_CORRECTED_DESIGN
+  final READY and SDK wire order_id share the same non-forgeable persisted
+  Payment.providerOrderId binding authority
+
+EX2B2-D1R-B02:
+  CLOSED_BY_CORRECTED_DESIGN
+  durable READY metadata and fresh transient readyFgkey handoff are separate;
+  lost/re-entered handoff is non-actionable and cannot trigger READY/request_pay
+
+EX2B2-D1R-I01:
+  CLOSED_BY_CORRECTED_DESIGN
+  readyFgkey != newly generated BF4 statusFgkey; /v1/payments/verify is BF4 only
+
+EX2B2-D1R-I02:
+  CLOSED_BY_CORRECTED_DESIGN
+  E1A READY-only; E1B non-completing SDK surface; E2 after BF4
+
+EX2B2-D1R-I03:
+  CLOSED_BY_CORRECTED_DESIGN
+  post-contact 3xx/4xx/429/5xx -> OUTCOME_UNKNOWN by default
+
+EX2B2-D1R-I04:
+  CLOSED_BY_CORRECTED_DESIGN
+  serialized browser package is untrusted; freezing is defensive only
+
+EX2B2-D1R-M01:
+  CLOSED_BY_CORRECTED_DESIGN
+  unsupported nesting promise removed; exact byte/root/primitive/duplicate
+  protections retained
+
+new Payment.attemptLifecycle state:
+  NOT REQUIRED
+  CONTACTED + READY plus an explicit non-actionable lost-handoff service result
+  deterministically represents durable truth without persisting ephemeral state
+
+next:
+  DOCUMENTATION INSTALLATION
+```

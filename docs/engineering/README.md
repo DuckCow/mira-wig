@@ -94,6 +94,14 @@ commerce, order, or manufacturing behavior.
   vendor-email environment bullets as a pending conflict, and unblocks EX2B2
   for Design Contract work only. It grants no source, provider-contact,
   SDK/browser, credential, sandbox, live, or BF4 authority.
+- [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Design Contract v0.1](./eximbay-ex2b2-ready-transport-sdk-handoff-design-contract-v0.1.md)
+  — human-reviewed documentation-only high-risk Design Contract, ready for
+  installation, separating server-side READY transport from the browser SDK v2
+  handoff, with no source or runtime authority.
+- [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Threat / Failure Model v0.1](./eximbay-ex2b2-ready-transport-sdk-handoff-threat-model-v0.1.md)
+  — human-reviewed documentation-only Threat / Failure Model, ready for
+  installation, for the same bounded design; it grants no provider contact,
+  SDK load/execution, or activation authority.
 
 ## Render Lab foundation
 
