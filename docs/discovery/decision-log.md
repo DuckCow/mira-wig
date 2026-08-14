@@ -2796,3 +2796,144 @@ EX2B2:
 next:
   ONE BF3R2-AUD-002 FOCUSED CLOSURE REVIEW ONLY
 ```
+
+## 2026-08-14 — Eximbay vendor clarification / canonical SDK authority reconciliation
+
+### Admitted first-party version authority
+
+Direct Eximbay vendor clarification states:
+
+```text
+JavaScript SDK:
+  v2
+
+REST/payment API:
+  v1
+```
+
+Current dedicated SDK and top-level payment-preparation documentation shows:
+
+```text
+test origin:
+  https://api-test.eximbay.com
+
+production origin:
+  https://api.eximbay.com
+
+SDK example:
+  /v2/javascriptSDK.js
+
+Payment Ready:
+  /v1/payments/ready
+```
+
+Current official PAYMENT, PAYER_AUTH, and AUTHORIZE flow pages retain this
+internal SDK-version inconsistency:
+
+```text
+SDK Preparation:
+  /v2/javascriptSDK.js
+
+later Payment Page Initiation snippet:
+  /v1/javascriptSDK.js
+
+residual official-document conflict:
+  RETAINED / NOT CANONICAL AFTER DIRECT VENDOR CLARIFICATION
+```
+
+The v1 initiation snippets are not silently reinterpreted as REST `/v1`
+examples. Canonical SDK v2 is selected because the direct vendor clarification
+explicitly selects JavaScript SDK v2 and the dedicated SDK/top-level
+preparation documentation also uses v2, not because every current official
+page is internally consistent. The remaining conflicting snippets are an
+observable documentation ambiguity only. A later vendor correction materially
+contradicting v2 requires re-adjudication.
+
+SDK asset version and REST API path version remain separate axes. JavaScript
+SDK v2 with REST `/v1/...` is not a version contradiction.
+
+### Environment conflict reconciliation
+
+The vendor email's final two environment bullets swap the test and production
+origins. That fragment contradicts the same email's exact `api-test` SDK
+example, the current official SDK/API environment tables, and current official
+READY examples. The fragment is retained as evidence but is not admitted as
+environment mapping. The user has asked the vendor whether the bullets were
+reversed; the clarification reply remains pending. A later materially
+contradictory reply requires re-adjudication.
+
+The current source-design dispositions are:
+
+```text
+canonical SDK for EX2B2 design:
+  v2
+
+canonical SDK basis:
+  direct vendor clarification explicitly selects JavaScript SDK v2
+  + dedicated SDK/top-level preparation documentation uses v2
+
+residual flow-page SDK conflict:
+  SDK Preparation -> v2
+  later Payment Page Initiation snippet -> v1
+  RETAINED / NOT CANONICAL
+
+API path family:
+  v1
+
+exact test SDK asset:
+  https://api-test.eximbay.com/v2/javascriptSDK.js
+
+production SDK candidate:
+  https://api.eximbay.com/v2/javascriptSDK.js
+
+production candidate classification:
+  OFFICIAL_DOC_COMPOSITION_FOR_SOURCE_DESIGN
+```
+
+The production candidate is composed from the official production base origin
+and current official v2 SDK path. It is not represented as a directly
+documented exact production asset or literal vendor quote.
+
+### Historical preservation and next gate
+
+The durable
+[vendor clarification / official-document authority adjudication](../engineering/eximbay-bf3-vendor-clarification-authority-adjudication-v0.1.md)
+preserves every historical BF3, BF3-R1, and BF3-R2 artifact and result. New
+first-party authority resolves the narrow canonical-version question without
+making prior evidence say what it never established.
+
+```text
+EX2B1 lifecycle:
+  HISTORICALLY CLOSED
+
+BF3/R1/R2 history:
+  PRESERVED
+
+BF3-R2 further execution for the canonical-SDK version question:
+  NOT REQUIRED AFTER ADMISSION OF THE NEW AUTHORITY
+
+BF3-R2 execution:
+  STILL UNAUTHORIZED / UNEXECUTED
+
+EX2B2:
+  UNBLOCKED FOR DESIGN CONTRACT ONLY
+
+EX2B2 source implementation:
+  NOT AUTHORIZED
+
+provider contact:
+  NOT AUTHORIZED
+
+SDK/browser runtime:
+  NOT AUTHORIZED
+
+sandbox/live activation:
+  NOT AUTHORIZED
+
+BF4:
+  SEPARATE / STILL GATED
+```
+
+No `/ready` HTTP, SDK network load or execution, `EXIMBAY.request_pay`,
+credential use, callback, merchant capability, refund/cancel/void, financial
+completion, runtime, or activation authority is created.
