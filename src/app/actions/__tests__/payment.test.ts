@@ -48,10 +48,29 @@ import type {
 } from "@/lib/payment/providers/types";
 
 type TestProviderResolver = (input: ProviderFactoryContext) => PaymentProviderPort;
+interface StorefrontBoundary {
+  marketCookie: string | undefined;
+  headers: Headers;
+}
 const providerResolver = vi.hoisted(() => vi.fn<TestProviderResolver>());
+const storefrontBoundary = vi.hoisted<StorefrontBoundary>(() => ({
+  marketCookie: "KR",
+  headers: new Headers(),
+}));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
-vi.mock("@/lib/market/resolve", () => ({ getCurrentMarketCode: vi.fn() }));
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(() => Promise.resolve({
+    get: (name: string) => name === "mira-market" && storefrontBoundary.marketCookie
+      ? { name, value: storefrontBoundary.marketCookie }
+      : undefined,
+  })),
+  headers: vi.fn(() => Promise.resolve(storefrontBoundary.headers)),
+}));
+vi.mock("@/lib/market/active-market", () => ({
+  NoActiveMarketException: class NoActiveMarketException extends Error {},
+  getActiveMarketCodes: vi.fn().mockResolvedValue(["KR", "US", "JP"]),
+}));
 vi.mock("@/lib/payment/providers/resolve", async (importOriginal) => {
   return {
     ...(await importOriginal<typeof import("@/lib/payment/providers/resolve")>()),
@@ -67,7 +86,6 @@ vi.mock("@/lib/payment/complete", async (importOriginal) => {
   return { ...actual, completeFromCapture: vi.fn(actual.completeFromCapture) };
 });
 
-import { getCurrentMarketCode } from "@/lib/market/resolve";
 import { completeFromCapture } from "@/lib/payment/complete";
 import { getSession } from "@/lib/session";
 import {
@@ -78,7 +96,6 @@ import {
 } from "../payment";
 
 const mockGetSession = vi.mocked(getSession);
-const mockGetCurrentMarketCode = vi.mocked(getCurrentMarketCode);
 const mockResolveProvider = providerResolver;
 const mockCompleteFromCapture = vi.mocked(completeFromCapture);
 const ORIGINAL_MOCK_MODE = process.env.PAYMENT_MOCK_MODE;
@@ -128,6 +145,7 @@ interface VariantOptions {
   amount?: number;
   stock?: number;
   fulfillmentType?: FulfillmentType;
+  marketCode?: MarketCode;
 }
 
 interface PendingPaymentOptions {
@@ -159,11 +177,16 @@ describe("payment actions", () => {
     delete process.env.TOSS_SANDBOX_SECRET_KEY;
     delete process.env.TOSS_LIVE_SECRET_KEY;
     delete process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+    storefrontBoundary.marketCookie = "KR";
+    storefrontBoundary.headers = new Headers({
+      "x-mira-context-attested": "proxy-v1",
+      "x-mira-pathname": "/checkout",
+      "x-mira-request-target": "/checkout",
+    });
     ctx = makeContext();
     await ensureMarkets();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
     mockGetSession.mockResolvedValue(makeSession(ctx.userId));
-    mockGetCurrentMarketCode.mockResolvedValue(MarketCode.KR);
     mockResolveProvider.mockImplementation((input) => createMockPaymentProvider(input.provider));
   });
 
@@ -194,6 +217,84 @@ describe("payment actions", () => {
     expect(payment.mode).toBe(PersistedPaymentMode.SANDBOX);
     expect(payment.idempotencyKey).toMatch(`initiate:${session.sessionId}:`);
     expect(mockResolveProvider).toHaveBeenCalledWith(expectedResolverContext());
+  });
+
+  it("keeps owned-session admission stable across remembered, absent, transient, and hostile storefront context", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const provider = createMockPaymentProvider(PaymentProvider.TOSS);
+    const initiate = vi.fn((input: Parameters<typeof provider.initiate>[0]) => provider.initiate(input));
+    mockResolveProvider.mockReturnValue({ ...provider, initiate });
+    storefrontBoundary.marketCookie = "JP";
+    storefrontBoundary.headers = new Headers({
+      "x-mira-context-attested": "proxy-v1",
+      "x-mira-context-source": "TRANSIENT_PUBLIC",
+      "x-mira-transient-market": "US",
+      "x-mira-transient-locale": "en",
+      "x-mira-geo-country": "JP",
+      "x-mira-route-market": "JP",
+    });
+
+    const first = await initiatePayment(session.sessionId);
+    storefrontBoundary.marketCookie = undefined;
+    storefrontBoundary.headers = new Headers({
+      "x-mira-route-market": "US",
+      "x-vercel-ip-country": "US",
+    });
+    const second = await initiatePayment(session.sessionId);
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(first).toMatchObject(second);
+    expect(mockResolveProvider).toHaveBeenCalledTimes(2);
+    expect(mockResolveProvider.mock.calls).toEqual([
+      [expectedResolverContext()],
+      [expectedResolverContext()],
+    ]);
+    expect(initiate).toHaveBeenCalledTimes(1);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+  });
+
+  it("routes from the persisted session Market, currency, and amount instead of browser context", async () => {
+    const session = await submitSessionForMarket(ctx, MarketCode.US);
+    storefrontBoundary.marketCookie = "KR";
+    storefrontBoundary.headers = new Headers({
+      "x-mira-context-attested": "hostile",
+      "x-mira-route-market": "KR",
+      "x-vercel-ip-country": "JP",
+    });
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result).toMatchObject({ success: true, provider: PaymentProvider.PAYPAL });
+    expect(mockResolveProvider).toHaveBeenCalledWith(expectedResolverContext({
+      provider: PaymentProvider.PAYPAL,
+      market: MarketCode.US,
+      method: PaymentMethod.PAYPAL_WALLET,
+      currency: "USD",
+      ruleId: "d1a.us.paypal_wallet.usd",
+    }));
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      provider: PaymentProvider.PAYPAL,
+      amount: 2_999,
+      currency: "USD",
+    });
+  });
+
+  it("keeps owned sessions in different Markets independently payable", async () => {
+    const kr = await submitSessionForMarket(ctx, MarketCode.KR);
+    await db.cartItem.deleteMany({ where: { userId: ctx.userId } });
+    const us = await submitSessionForMarket(ctx, MarketCode.US);
+    storefrontBoundary.marketCookie = "JP";
+
+    const [krResult, usResult] = await Promise.all([
+      initiatePayment(kr.sessionId),
+      initiatePayment(us.sessionId),
+    ]);
+
+    expect(krResult).toMatchObject({ success: true, provider: PaymentProvider.TOSS });
+    expect(usResult).toMatchObject({ success: true, provider: PaymentProvider.PAYPAL });
+    await expect(paymentCount(kr.sessionId)).resolves.toBe(1);
+    await expect(paymentCount(us.sessionId)).resolves.toBe(1);
   });
 
   it("initiate action does not expose providerRef when provider returns one", async () => {
@@ -421,8 +522,54 @@ describe("payment actions", () => {
     const otherResult = await initiatePayment(owned.sessionId);
     expect(otherResult.success).toBe(false);
     if (!otherResult.success) expect(otherResult.errorCode).toBe("SESSION_UNAVAILABLE");
+    const missingResult = await initiatePayment(`missing_${randomUUID()}`);
+    expect(missingResult).toEqual(otherResult);
     await expect(paymentCount(expired.sessionId)).resolves.toBe(0);
     await expect(paymentCount(owned.sessionId)).resolves.toBe(0);
+    mockResolveProvider.mockClear();
+    await initiatePayment(owned.sessionId);
+    await initiatePayment(`missing_${randomUUID()}`);
+    expect(mockResolveProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps C0 Market deactivation before contact provider-free and residue-free", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const initiate = vi.fn();
+    mockResolveProvider.mockReturnValueOnce({
+      ...createMockPaymentProvider(PaymentProvider.TOSS),
+      initiate,
+    });
+    await db.market.update({ where: { code: MarketCode.KR }, data: { isActive: false } });
+
+    const result = await initiatePayment(session.sessionId);
+
+    expect(result).toMatchObject({ success: false, errorCode: "SESSION_TERMS_STALE" });
+    expect(mockResolveProvider).toHaveBeenCalledTimes(1);
+    expect(initiate).not.toHaveBeenCalled();
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("does not reroute or recreate a persisted contacted attempt after Market deactivation", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session, { provider: PaymentProvider.TOSS });
+    await db.market.update({ where: { code: MarketCode.KR }, data: { isActive: false } });
+    storefrontBoundary.marketCookie = "US";
+    const inputs: PaymentConfirmInput[] = [];
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, { inputs }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result).toMatchObject({ success: true, provider: PaymentProvider.TOSS, paymentId: payment.id });
+    expect(inputs).toEqual([expect.objectContaining({
+      paymentId: payment.id,
+      amount: session.totalAmount,
+      currency: session.currency,
+      provider: PaymentProvider.TOSS,
+    })]);
+    await expect(paymentCount(session.sessionId)).resolves.toBe(1);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
   });
 
   it("confirm fails closed before adapter resolution when current LIVE mode meets SANDBOX attempt", async () => {
@@ -1173,6 +1320,8 @@ function makeSession(userId: string): Session {
 
 async function ensureMarkets(): Promise<void> {
   await upsertMarket(MarketCode.KR, "KRW", [ShippingCountry.KR], "ko");
+  await upsertMarket(MarketCode.US, "USD", [ShippingCountry.US], "en");
+  await upsertMarket(MarketCode.JP, "JPY", [ShippingCountry.JP], "ja");
 }
 
 async function upsertMarket(
@@ -1189,17 +1338,27 @@ async function upsertMarket(
 }
 
 async function submitSessionWithOneLine(context: TestContext, now?: Date) {
-  const variant = await createCatalogVariant(context, { amount: 12_000, stock: 5 });
+  return submitSessionForMarket(context, MarketCode.KR, now);
+}
+
+async function submitSessionForMarket(
+  context: TestContext,
+  marketCode: MarketCode,
+  now?: Date,
+) {
+  const amount = marketCode === MarketCode.KR ? 12_000 : marketCode === MarketCode.US ? 2_999 : 5_000;
+  const variant = await createCatalogVariant(context, { amount, stock: 5, marketCode });
   await addCart(context, variant, 1);
   return createCheckoutSession(db, {
     userId: context.userId,
-    marketCode: MarketCode.KR,
-    shipping: validShipping(),
+    marketCode,
+    shipping: validShipping(marketCode),
     now,
   });
 }
 
 async function createCatalogVariant(context: TestContext, options: VariantOptions) {
+  const marketCode = options.marketCode ?? MarketCode.KR;
   const style = await db.wigStyle.create({
     data: {
       name: `B3 Style ${randomUUID()}`,
@@ -1207,7 +1366,7 @@ async function createCatalogVariant(context: TestContext, options: VariantOption
       tags: [],
       imageKeys: [],
       coverImageKey: "catalog/b3-cover.png",
-      availableMarkets: { create: { marketCode: MarketCode.KR, isActive: true } },
+      availableMarkets: { create: { marketCode, isActive: true } },
     },
     select: { id: true },
   });
@@ -1231,7 +1390,7 @@ async function createVariant(context: TestContext, styleId: string, options: Var
   });
   context.variantIds.push(variant.id);
   await db.variantMarketPrice.create({
-    data: { variantId: variant.id, marketCode: MarketCode.KR, amount: options.amount ?? 12_000 },
+    data: { variantId: variant.id, marketCode: options.marketCode ?? MarketCode.KR, amount: options.amount ?? 12_000 },
   });
   return { id: variant.id, styleId };
 }
@@ -1246,7 +1405,29 @@ async function addCart(
   });
 }
 
-function validShipping(): CheckoutShippingInput {
+function validShipping(marketCode: MarketCode = MarketCode.KR): CheckoutShippingInput {
+  if (marketCode === MarketCode.US) {
+    return {
+      recipientName: "Jane Doe",
+      phone: "+1 415-555-0123",
+      country: ShippingCountry.US,
+      postalCode: "94105",
+      administrativeArea: "CA",
+      city: "San Francisco",
+      addressLine1: "1 Market Street",
+    };
+  }
+  if (marketCode === MarketCode.JP) {
+    return {
+      recipientName: "山田花子",
+      phone: "090-1234-5678",
+      country: ShippingCountry.JP,
+      postalCode: "100-0001",
+      administrativeArea: "東京都",
+      city: "千代田区",
+      addressLine1: "丸の内1-1",
+    };
+  }
   return {
     recipientName: "홍길동",
     phone: "010-1234-5678",

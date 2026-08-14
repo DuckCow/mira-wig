@@ -12,6 +12,10 @@ import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
 import { fittingStorage } from "@/lib/storage";
+import { getStorefrontContext } from "@/lib/market";
+import { messagesFor, type StorefrontMessages } from "@/lib/market/messages";
+import { loginHref } from "@/lib/market/request-context";
+import { siteVariantPath } from "@/lib/market/site-variant";
 
 type PageParams = Promise<{ id: string }>;
 
@@ -20,19 +24,21 @@ type PageParams = Promise<{ id: string }>;
 function FittingImagePair({
   sourceUrl,
   resultUrl,
+  messages,
 }: {
   sourceUrl: string | null;
   resultUrl: string | null;
+  messages: StorefrontMessages["savedFitting"];
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       {sourceUrl && (
         <figure>
-          <figcaption className="text-xs text-center text-gray-500 mb-2">원본</figcaption>
+          <figcaption className="text-xs text-center text-gray-500 mb-2">{messages.source}</figcaption>
           <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
             <Image
               src={sourceUrl}
-              alt="원본 사진"
+              alt={messages.source}
               fill
               unoptimized
               loading="eager"
@@ -44,11 +50,11 @@ function FittingImagePair({
       )}
       {resultUrl && (
         <figure>
-          <figcaption className="text-xs text-center text-gray-500 mb-2">피팅</figcaption>
+          <figcaption className="text-xs text-center text-gray-500 mb-2">{messages.result}</figcaption>
           <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
             <Image
               src={resultUrl}
-              alt="피팅 결과"
+              alt={messages.result}
               fill
               unoptimized
               loading="eager"
@@ -66,21 +72,25 @@ function FittingStatusSection({
   status,
   sourceUrl,
   resultUrl,
+  messages,
 }: {
   status: string;
   sourceUrl: string | null;
   resultUrl: string | null;
+  messages: StorefrontMessages["savedFitting"];
 }) {
-  if (status === "PENDING") return <p className="text-sm text-gray-500">아직 처리 중입니다. 잠시 후 새로고침하세요.</p>;
-  if (status === "FAILED") return <p className="text-sm text-red-500">피팅에 실패했습니다.</p>;
-  return <FittingImagePair sourceUrl={sourceUrl} resultUrl={resultUrl} />;
+  if (status === "PENDING") return <p className="text-sm text-gray-500">{messages.pending}</p>;
+  if (status === "FAILED") return <p className="text-sm text-red-500">{messages.failed}</p>;
+  return <FittingImagePair sourceUrl={sourceUrl} resultUrl={resultUrl} messages={messages} />;
 }
 
 // ── 페이지 ────────────────────────────────────────────────────
 
 export default async function FittingResultPage({ params }: { params: PageParams }) {
-  const [{ id }, session] = await Promise.all([params, getSession()]);
-  if (!session) redirect("/login");
+  const [{ id }, session, context] = await Promise.all([params, getSession(), getStorefrontContext()]);
+  const variant = { marketCode: context.marketCode, locale: context.locale };
+  if (!session) redirect(loginHref(context.requestTarget, variant));
+  const messages = messagesFor(context.locale).savedFitting;
 
   const fitting = await db.fitting.findUnique({
     where: { id },
@@ -110,22 +120,22 @@ export default async function FittingResultPage({ params }: { params: PageParams
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8">
-      <nav aria-label="뒤로가기" className="mb-6">
-        <Link href={`/styles/${fitting.variant.wigStyle.id}`} className="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
+      <nav aria-label={messages.back} className="mb-6">
+        <Link href={siteVariantPath(variant, `/styles/${encodeURIComponent(fitting.variant.wigStyle.id)}`)} className="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
           ← {fitting.variant.wigStyle.name}
         </Link>
       </nav>
 
-      <h1 className="text-xl font-bold text-gray-900 mb-2">피팅 결과</h1>
+      <h1 className="text-xl font-bold text-gray-900 mb-2">{messages.title}</h1>
       <p className="text-sm text-gray-500 mb-6">
         {fitting.variant.color} · {fitting.variant.length} · {fitting.variant.curl}
       </p>
 
-      <FittingStatusSection status={fitting.status} sourceUrl={sourceUrl} resultUrl={resultUrl} />
+      <FittingStatusSection status={fitting.status} sourceUrl={sourceUrl} resultUrl={resultUrl} messages={messages} />
 
       <div className="mt-8">
-        <Link href={`/styles/${fitting.variant.wigStyle.id}`} className="inline-block px-6 py-2.5 bg-gray-900 text-white rounded-xl text-sm hover:bg-gray-700 transition-colors">
-          상품 페이지로 돌아가기
+        <Link href={siteVariantPath(variant, `/styles/${encodeURIComponent(fitting.variant.wigStyle.id)}`)} className="inline-block px-6 py-2.5 bg-gray-900 text-white rounded-xl text-sm hover:bg-gray-700 transition-colors">
+          {messages.returnToProduct}
         </Link>
       </div>
     </main>

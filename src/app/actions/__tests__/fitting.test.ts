@@ -15,6 +15,18 @@ const mockStartFitting = vi.fn();
 const mockPollFitting = vi.fn();
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(() => Promise.resolve({ get: (name: string) => name === "mira-market" ? { name, value: "KR" } : undefined })),
+  headers: vi.fn(() => Promise.resolve(new Headers({
+    "x-mira-context-attested": "proxy-v1",
+    "x-mira-pathname": "/fitting/test",
+    "x-mira-request-target": "/fitting/test",
+  }))),
+}));
+vi.mock("@/lib/market/active-market", () => ({
+  NoActiveMarketException: class NoActiveMarketException extends Error {},
+  getActiveMarketCodes: vi.fn().mockResolvedValue(["KR", "US", "JP"]),
+}));
 
 vi.mock("@/lib/storage", () => ({
   fittingStorage: {
@@ -26,10 +38,6 @@ vi.mock("@/lib/storage", () => ({
     }),
     getViewUrl: vi.fn().mockResolvedValue("https://mock-bucket/view"),
   },
-}));
-
-vi.mock("@/lib/market", () => ({
-  getCurrentMarketCode: vi.fn().mockResolvedValue("KR"),
 }));
 
 vi.mock("@/lib/fitting", () => ({

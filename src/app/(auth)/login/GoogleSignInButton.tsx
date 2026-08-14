@@ -2,21 +2,25 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
+import type { Locale } from "@/lib/market/locale";
+import { messagesFor } from "@/lib/market/messages";
 
 type GoogleSignInButtonProps = {
   callbackUrl: string;
+  locale: Locale;
 };
 
-export function GoogleSignInButton({ callbackUrl }: GoogleSignInButtonProps) {
+export function GoogleSignInButton({ callbackUrl, locale }: GoogleSignInButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messages = messagesFor(locale).login;
 
   async function handleSignIn() {
     setLoading(true);
     setError(null);
     const result = await signIn("google", { callbackUrl });
     if (result?.error) {
-      setError("로그인 중 오류가 발생했습니다. 다시 시도해 주세요.");
+      setError(messages.error);
       setLoading(false);
     }
   }
@@ -35,7 +39,7 @@ export function GoogleSignInButton({ callbackUrl }: GoogleSignInButtonProps) {
         ) : (
           <GoogleIcon />
         )}
-        {loading ? "로그인 중…" : "구글로 계속하기"}
+        {loading ? messages.loading : messages.continueGoogle}
       </button>
 
       {error && (

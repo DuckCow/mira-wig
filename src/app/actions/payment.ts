@@ -9,7 +9,6 @@ import {
 } from "@prisma/client";
 import type { CheckoutSession, Payment } from "@prisma/client";
 import { db } from "@/lib/db";
-import { getCurrentMarketCode } from "@/lib/market/resolve";
 import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
@@ -48,7 +47,7 @@ type PaymentActionBoundedState = {
 }[PaymentActionBoundedKind];
 type PaymentActionNonSuccess = PaymentActionFailure | PaymentActionBoundedState;
 type BoundaryResult =
-  | { success: true; userId: string; marketCode: string; session: ActionSession }
+  | { success: true; userId: string; session: ActionSession }
   | PaymentActionFailure;
 type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionNonSuccess;
 type PendingConfirmPayment = Pick<
@@ -117,7 +116,11 @@ export async function initiatePayment(checkoutSessionId: string, input: Initiate
   try {
     const boundary = await resolveBoundary(checkoutSessionId);
     if (!boundary.success) return boundary;
-    const provider = resolveActionProvider(boundary.session, boundary.marketCode, input.method);
+    const provider = resolveActionProvider(
+      boundary.session,
+      boundary.session.marketCode,
+      input.method,
+    );
     if (!provider.success) return actionError(provider.errorCode, provider.retryable);
     const result = await initiatePaymentAttempt(db, {
       sessionId: checkoutSessionId,
@@ -144,7 +147,7 @@ export async function confirmPayment(
     if (!payment.success) return payment;
     const provider = resolveActionConfirmAdapter({
       session: boundary.session,
-      marketCode: boundary.marketCode,
+      marketCode: boundary.session.marketCode,
       method: input.method,
       payment: payment.payment,
     });
@@ -163,18 +166,13 @@ async function resolveBoundary(
   const session = await getSession();
   if (!session?.user.id) return actionError("UNAUTHORIZED", false);
 
-  const marketCode = await getCurrentMarketCode();
   const checkoutSession = await loadActionSession(checkoutSessionId);
   if (!checkoutSession || checkoutSession.userId !== session.user.id) {
-    return actionError("SESSION_UNAVAILABLE", false);
-  }
-  if (checkoutSession.marketCode !== marketCode) {
     return actionError("SESSION_UNAVAILABLE", false);
   }
   return {
     success: true as const,
     userId: session.user.id,
-    marketCode,
     session: checkoutSession,
   };
 }

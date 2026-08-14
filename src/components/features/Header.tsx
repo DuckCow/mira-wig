@@ -1,19 +1,35 @@
+"use client";
+
 import Link from "next/link";
-import { getSession } from "@/lib/session";
-import { getCartItemCount } from "@/lib/cart";
-import { getCurrentMarketCode } from "@/lib/market";
+import { messagesFor } from "@/lib/market/messages";
+import { siteVariantPath, type SiteVariant } from "@/lib/market/site-variant";
+import { loginHref, withStorefrontHandoff } from "@/lib/market/request-context";
 import { SignOutButton } from "./SignOutButton";
 import { MarketSelector } from "./MarketSelector";
+import type { MarketCode } from "@/lib/market/types";
 
-async function CartLink({ userId }: { userId: string }) {
-  const count = await getCartItemCount(userId);
+export interface HeaderUser {
+  id: string;
+  name: string | null;
+  image: string | null;
+}
+
+export interface HeaderProps {
+  user: HeaderUser | null;
+  cartItemCount: number;
+  variant: SiteVariant;
+  requestTarget: string;
+  activeMarketCodes: readonly MarketCode[];
+}
+
+function CartLink({ count, label, variant }: { count: number; label: string; variant: SiteVariant }) {
   return (
     <Link
-      href="/cart"
-      aria-label={`장바구니 (${count}개)`}
+      href={withStorefrontHandoff("/cart", variant)}
+      aria-label={`${label} (${count})`}
       className="relative text-sm text-gray-700 hover:text-gray-900"
     >
-      장바구니
+      {label}
       {count > 0 && (
         <span
           aria-hidden="true"
@@ -29,18 +45,21 @@ async function CartLink({ userId }: { userId: string }) {
 function UserMenu({
   name,
   image,
-  userId,
+  cartItemCount,
+  variant,
 }: {
   name: string;
   image: string | null;
-  userId: string;
+  cartItemCount: number;
+  variant: SiteVariant;
 }) {
+  const messages = messagesFor(variant.locale);
   return (
     <div className="flex items-center gap-4">
-      <Link href="/orders" className="text-sm text-gray-700 hover:text-gray-900">
-        내 주문
+      <Link href={withStorefrontHandoff("/orders", variant)} className="text-sm text-gray-700 hover:text-gray-900">
+        {messages.nav.orders}
       </Link>
-      <CartLink userId={userId} />
+      <CartLink count={cartItemCount} label={messages.nav.cart} variant={variant} />
       <span
         className="flex items-center gap-2 text-sm text-gray-700"
         aria-live="polite"
@@ -49,7 +68,7 @@ function UserMenu({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={image}
-            alt={`${name} 프로필`}
+            alt={`${name} ${messages.nav.profile}`}
             width={28}
             height={28}
             className="rounded-full"
@@ -58,43 +77,41 @@ function UserMenu({
         )}
         <span>{name}</span>
       </span>
-      <SignOutButton />
+      <SignOutButton label={messages.nav.signOut} callbackUrl={withStorefrontHandoff("/login", variant)} />
     </div>
   );
 }
 
-export async function Header() {
-  const [session, marketCode] = await Promise.all([
-    getSession(),
-    getCurrentMarketCode(),
-  ]);
+export function Header({ user, cartItemCount, variant, requestTarget, activeMarketCodes }: HeaderProps) {
+  const messages = messagesFor(variant.locale);
 
   return (
     <header className="sticky top-0 z-10 bg-white border-b border-gray-200">
       <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
         <Link
-          href="/styles"
+          href={siteVariantPath(variant)}
           className="text-lg font-bold text-gray-900 tracking-tight"
-          aria-label="Mira 홈으로"
+          aria-label={messages.nav.home}
         >
           Mira
         </Link>
 
-        <nav aria-label="사용자 메뉴" className="flex items-center gap-3">
-          <MarketSelector current={marketCode} />
+        <nav aria-label={messages.selector.label} className="flex items-center gap-3">
+          <MarketSelector currentMarket={variant.marketCode} currentLocale={variant.locale} activeMarketCodes={activeMarketCodes} />
 
-          {session ? (
+          {user ? (
             <UserMenu
-              name={session.user.name ?? "사용자"}
-              image={session.user.image ?? null}
-              userId={session.user.id}
+              name={user.name ?? messages.nav.defaultUser}
+              image={user.image}
+              cartItemCount={cartItemCount}
+              variant={variant}
             />
           ) : (
             <Link
-              href="/login"
+              href={loginHref(requestTarget, variant)}
               className="text-sm font-medium text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg px-4 py-1.5"
             >
-              로그인
+              {messages.nav.login}
             </Link>
           )}
         </nav>

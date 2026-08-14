@@ -14,6 +14,10 @@ import Link from "next/link";
 import { useFitting, type FittingStage } from "@/hooks/useFitting";
 import { addToCart } from "@/app/actions/cart";
 import { type ClientErrorCode, type FittingLocale } from "@/lib/fitting/locale";
+import type { MarketCode } from "@/lib/market/types";
+import type { Locale } from "@/lib/market/locale";
+import { withStorefrontHandoff } from "@/lib/market/request-context";
+import { messagesFor } from "@/lib/market/messages";
 
 // ── 파일 선택기 ───────────────────────────────────────────────
 
@@ -33,7 +37,7 @@ function FilePicker({
         onClick={() => inputRef.current?.click()}
         className="px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-700 transition-colors"
       >
-        사진 선택
+        {t.selectPhoto}
       </button>
       <input
         ref={inputRef}
@@ -74,11 +78,15 @@ function ResultView({
   t,
   wigStyleId,
   variantId,
+  marketCode,
+  locale,
 }: {
   stage: Extract<FittingStage, { step: "result" }>;
   t: FittingLocale;
   wigStyleId: string;
   variantId: string;
+  marketCode: MarketCode;
+  locale: Locale;
 }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -86,8 +94,13 @@ function ResultView({
   function handleAddToCart() {
     setError(null);
     startTransition(async () => {
-      const result = await addToCart(variantId, wigStyleId, 1);
-      if (!result.success) setError(result.error);
+      const result = await addToCart(marketCode, variantId, wigStyleId, 1);
+      if (!result.success) {
+        const messages = messagesFor(locale);
+        setError(result.errorCode === "MARKET_CONFIRMATION_REQUIRED"
+          ? messages.marketConfirmation.required
+          : messages.cart.unavailableNotice);
+      }
     });
   }
 
@@ -127,7 +140,7 @@ function ResultView({
       </div>
 
       <Link
-        href={`/fitting/${stage.fittingId}`}
+        href={withStorefrontHandoff(`/fitting/${encodeURIComponent(stage.fittingId)}`, { marketCode, locale })}
         className="block text-xs text-center text-gray-400 underline hover:text-gray-600"
       >
         {t.viewSaved}
@@ -183,11 +196,15 @@ function ErrorView({
 export function FittingModal({
   variantId,
   wigStyleId,
+  marketCode,
+  locale,
   t,
   onClose,
 }: {
   variantId: string;
   wigStyleId: string;
+  marketCode: MarketCode;
+  locale: Locale;
   t: FittingLocale;
   onClose: () => void;
 }) {
@@ -210,6 +227,8 @@ export function FittingModal({
             t={t}
             wigStyleId={wigStyleId}
             variantId={variantId}
+            marketCode={marketCode}
+            locale={locale}
           />
         );
       case "error":

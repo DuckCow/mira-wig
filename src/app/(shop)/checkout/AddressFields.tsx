@@ -3,6 +3,8 @@
 import type { CountryFormConfig } from "@/lib/order/address-config";
 import type { CheckoutShippingInput } from "@/lib/payment/session/types";
 import type { AddressKey } from "./types";
+import type { Locale } from "@/lib/market/locale";
+import { messagesFor } from "@/lib/market/messages";
 
 // ── 단일 필드 ─────────────────────────────────────────────────
 
@@ -56,14 +58,16 @@ export interface AddressFieldsProps {
   onBlur: (field: AddressKey, domValue: string) => void;
   errors: Partial<Record<AddressKey, string>>;
   config: CountryFormConfig;
+  locale: Locale;
 }
 
-export function AddressFields({ values, onChange, onBlur, errors, config }: AddressFieldsProps) {
+export function AddressFields({ values, onChange, onBlur, errors, config, locale }: AddressFieldsProps) {
+  const messages = messagesFor(locale).checkout;
   return (
     <div className="space-y-4">
       <Field
         id="recipientName"
-        label="받는 분 이름"
+        label={messages.recipientName}
         value={values.recipientName}
         onChange={(v) => onChange("recipientName", v)}
         onBlur={(v) => onBlur("recipientName", v)}
@@ -73,7 +77,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
 
       <Field
         id="phone"
-        label={`전화번호 (${config.phonePrefix})`}
+        label={`${messages.phone} (${config.phonePrefix})`}
         value={values.phone}
         onChange={(v) => onChange("phone", v)}
         onBlur={(v) => onBlur("phone", v)}
@@ -84,7 +88,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
 
       <Field
         id="postalCode"
-        label={config.postalCodeLabel}
+        label={messages.postalCode}
         value={values.postalCode}
         onChange={(v) => onChange("postalCode", v)}
         onBlur={(v) => onBlur("postalCode", v)}
@@ -96,7 +100,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
       {config.administrativeAreaOptions ? (
         <div>
           <label htmlFor="administrativeArea" className="block text-sm font-medium text-gray-700 mb-1">
-            {config.administrativeAreaLabel}
+            {messages.administrativeArea}
             {config.administrativeAreaRequired && <span className="text-red-500 ml-0.5" aria-hidden="true">*</span>}
           </label>
           <select
@@ -113,7 +117,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
               errors.administrativeArea ? "border-red-400" : "border-gray-300"
             }`}
           >
-            <option value="">선택하세요</option>
+            <option value="">{messages.select}</option>
             {config.administrativeAreaOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
@@ -125,7 +129,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
       ) : (
         <Field
           id="administrativeArea"
-          label={config.administrativeAreaLabel}
+          label={messages.administrativeArea}
           value={values.administrativeArea}
           onChange={(v) => onChange("administrativeArea", v)}
           onBlur={(v) => onBlur("administrativeArea", v)}
@@ -136,7 +140,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
 
       <Field
         id="city"
-        label={config.cityLabel}
+        label={messages.city}
         value={values.city}
         onChange={(v) => onChange("city", v)}
         onBlur={(v) => onBlur("city", v)}
@@ -146,7 +150,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
 
       <Field
         id="addressLine1"
-        label="주소"
+        label={messages.addressLine1}
         value={values.addressLine1}
         onChange={(v) => onChange("addressLine1", v)}
         onBlur={(v) => onBlur("addressLine1", v)}
@@ -156,7 +160,7 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
 
       <Field
         id="addressLine2"
-        label="상세주소 (선택)"
+        label={messages.addressLine2}
         value={values.addressLine2 ?? ""}
         onChange={(v) => onChange("addressLine2", v)}
         onBlur={(v) => onBlur("addressLine2", v)}
@@ -164,11 +168,11 @@ export function AddressFields({ values, onChange, onBlur, errors, config }: Addr
 
       <Field
         id="memo"
-        label="배송 메모 (선택)"
+        label={messages.memo}
         value={values.memo ?? ""}
         onChange={(v) => onChange("memo", v)}
         onBlur={(v) => onBlur("memo", v)}
-        placeholder="경비실 맡겨주세요 등"
+        placeholder={messages.memoPlaceholder}
       />
     </div>
   );

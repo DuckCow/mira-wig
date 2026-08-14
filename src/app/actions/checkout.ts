@@ -1,7 +1,8 @@
 "use server";
 
 import { ShippingCountry } from "@prisma/client";
-import { getCurrentMarketCode } from "@/lib/market/resolve";
+import { getStorefrontContext } from "@/lib/market/resolve";
+import { isMarketCode } from "@/lib/market/types";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import {
@@ -12,9 +13,10 @@ import {
   type SessionErrorCode,
 } from "@/lib/payment/session";
 
-export type CheckoutActionErrorCode = SessionErrorCode | "UNAUTHORIZED";
+export type CheckoutActionErrorCode = SessionErrorCode | "UNAUTHORIZED" | "MARKET_CHANGED" | "MARKET_CONFIRMATION_REQUIRED";
 
 export interface CheckoutActionInput {
+  expectedMarketCode: string;
   recipientName: string;
   phone: string;
   country: string;
@@ -36,17 +38,38 @@ export async function createCheckoutSessionAction(
   const session = await getSession();
   if (!session?.user.id) return unauthorized();
 
+  const context = await getStorefrontContext();
+  if (context.confirmedMarketCode === null) return marketConfirmationRequired();
+  if (!isMarketCode(input.expectedMarketCode)) return marketChanged();
+  const marketCode = context.confirmedMarketCode;
+  if (marketCode !== input.expectedMarketCode) return marketChanged();
+
   const shipping = toShippingInput(input);
   if (!shipping) return invalidCountry();
 
   try {
-    const marketCode = await getCurrentMarketCode();
     const created = await createCheckoutSession(db, { userId: session.user.id, marketCode, shipping });
     return { success: true, session: created };
   } catch (e) {
     if (e instanceof SessionException) return sessionError(e);
     throw e;
   }
+}
+
+function marketConfirmationRequired(): CheckoutActionResult {
+  return {
+    success: false,
+    errorCode: "MARKET_CONFIRMATION_REQUIRED",
+    error: "Delivery region confirmation is required.",
+  };
+}
+
+function marketChanged(): CheckoutActionResult {
+  return {
+    success: false,
+    errorCode: "MARKET_CHANGED",
+    error: "배송 지역이 변경되었습니다. 현재 장바구니와 주문서를 다시 확인해 주세요.",
+  };
 }
 
 function toShippingInput(input: CheckoutActionInput): CheckoutShippingInput | null {

@@ -1,5 +1,7 @@
 import { StyleCard } from "@/components/features/StyleCard";
 import type { MarketCode } from "@/lib/market/types";
+import type { Locale } from "@/lib/market/locale";
+import { messagesFor } from "@/lib/market/messages";
 import {
   ManualItemRelationsActivationConfigError,
   type ManualItemRelationsActivationEnv,
@@ -14,9 +16,10 @@ import type {
 } from "@/lib/manual-item-relations/types";
 import { catalogStorage } from "@/lib/storage";
 
-const GROUP_LABELS: Readonly<Record<ManualStyleRelationPurpose, string>> = {
-  SIMILAR_STYLE: "비슷한 스타일",
-  COMPARE_WITH: "함께 비교해 보세요",
+const GROUP_LABELS: Readonly<Record<Locale, Record<ManualStyleRelationPurpose, string>>> = {
+  ko: { SIMILAR_STYLE: "비슷한 스타일", COMPARE_WITH: "함께 비교해 보세요" },
+  en: { SIMILAR_STYLE: "Similar styles", COMPARE_WITH: "Compare with" },
+  ja: { SIMILAR_STYLE: "似ているスタイル", COMPARE_WITH: "比較する" },
 };
 
 interface RelatedStyleViewItem {
@@ -70,22 +73,24 @@ async function resolveViewGroups(groups: ManualRelatedStyleGroups): Promise<Rela
 export function RelatedStylesSectionView({
   groups,
   marketCode,
+  locale,
 }: {
   groups: RelatedStyleViewGroups;
   marketCode: MarketCode;
+  locale: Locale;
 }) {
   const hasItems = MANUAL_RELATED_STYLE_GROUP_ORDER.some(
     (purpose) => groups[purpose].length > 0,
   );
   if (!hasItems) return null;
   return (
-    <section aria-label="관련 스타일" className="mt-12 space-y-8">
+    <section aria-label={messagesFor(locale).detail.relatedStyles} className="mt-12 space-y-8">
       {MANUAL_RELATED_STYLE_GROUP_ORDER.map((purpose) => {
         const styles = groups[purpose];
         if (styles.length === 0) return null;
         return (
           <div key={purpose}>
-            <h2 className="text-xl font-bold text-gray-900 mb-4">{GROUP_LABELS[purpose]}</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-4">{GROUP_LABELS[locale][purpose]}</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {styles.map((style) => (
                 <StyleCard
@@ -97,6 +102,7 @@ export function RelatedStylesSectionView({
                   imageUrl={style.imageUrl}
                   basePrice={style.basePrice}
                   marketCode={marketCode}
+                  locale={locale}
                 />
               ))}
             </div>
@@ -110,11 +116,13 @@ export function RelatedStylesSectionView({
 export async function RelatedStylesSection({
   sourceStyleId,
   marketCode,
+  locale,
 }: {
   sourceStyleId: string;
   marketCode: MarketCode;
+  locale: Locale;
 }) {
   const groups = await loadRelatedStylesForPdp(sourceStyleId, marketCode);
   const viewGroups = await resolveViewGroups(groups);
-  return <RelatedStylesSectionView groups={viewGroups} marketCode={marketCode} />;
+  return <RelatedStylesSectionView groups={viewGroups} marketCode={marketCode} locale={locale} />;
 }

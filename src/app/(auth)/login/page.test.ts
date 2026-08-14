@@ -4,15 +4,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type GoogleButtonProps = {
   callbackUrl: string;
+  locale: "ko" | "en" | "ja";
 };
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn<() => Promise<Session | null>>(),
+  getAuthenticationLocale: vi.fn<() => Promise<"ko" | "en" | "ja">>(),
+  getStorefrontContext: vi.fn(),
   redirect: vi.fn((path: string): never => { throw new Error(`REDIRECT:${path}`); }),
   GoogleSignInButton: vi.fn((_props: GoogleButtonProps) => null),
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: mocks.getSession }));
+vi.mock("@/lib/market", () => ({
+  getAuthenticationLocale: mocks.getAuthenticationLocale,
+  getStorefrontContext: mocks.getStorefrontContext,
+}));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("./GoogleSignInButton", () => ({
   GoogleSignInButton: mocks.GoogleSignInButton,
@@ -24,6 +31,17 @@ describe("login page callback boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSession.mockResolvedValue(null);
+    mocks.getAuthenticationLocale.mockResolvedValue("ko");
+    mocks.getStorefrontContext.mockResolvedValue({
+      marketCode: "KR",
+      confirmedMarketCode: null,
+      locale: "ko",
+      marketSource: "DEFAULT",
+      localeSource: "MARKET_DEFAULT",
+      marketConfirmed: false,
+      pathname: "/login",
+      requestTarget: "/login",
+    });
   });
 
   it("resolves the session before consuming searchParams", async () => {
@@ -74,7 +92,7 @@ describe("login page callback boundary", () => {
   ])("passes only the fallback for unauthenticated invalid callback %#", async (callbackUrl) => {
     const element = await LoginPage({ searchParams: resolvedSearchParams(callbackUrl) });
 
-    expect(googleButtonCallback(element)).toBe("/styles");
+    expect(googleButtonCallback(element)).toBe("/kr/ko/styles");
     expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
@@ -91,9 +109,9 @@ describe("login page callback boundary", () => {
     mocks.getSession.mockResolvedValue(authenticatedSession());
 
     await expect(LoginPage({ searchParams: resolvedSearchParams("/\\evil.example") }))
-      .rejects.toThrow("REDIRECT:/styles");
+      .rejects.toThrow("REDIRECT:/kr/ko/styles");
 
-    expect(mocks.redirect).toHaveBeenCalledWith("/styles");
+    expect(mocks.redirect).toHaveBeenCalledWith("/kr/ko/styles");
   });
 
   it("preserves query and fragment for an authenticated redirect", async () => {
@@ -104,6 +122,27 @@ describe("login page callback boundary", () => {
       .rejects.toThrow(`REDIRECT:${callbackUrl}`);
 
     expect(mocks.redirect).toHaveBeenCalledWith(callbackUrl);
+  });
+
+  it("renders a zero-active login and preserves an exact payment-return callback", async () => {
+    const { NoActiveMarketException } = await import("@/lib/market/active-market");
+    mocks.getStorefrontContext.mockRejectedValue(new NoActiveMarketException());
+    mocks.getAuthenticationLocale.mockResolvedValue("ja");
+    const callbackUrl = "/checkout/return/session_123?paymentKey=opaque#status";
+
+    const element = await LoginPage({ searchParams: resolvedSearchParams(callbackUrl) });
+
+    expect(googleButtonCallback(element)).toBe(callbackUrl);
+    expect(googleButtonProps(element)).toEqual({ callbackUrl, locale: "ja" });
+  });
+
+  it("uses a deterministic market-neutral fallback when zero Markets are active", async () => {
+    const { NoActiveMarketException } = await import("@/lib/market/active-market");
+    mocks.getStorefrontContext.mockRejectedValue(new NoActiveMarketException());
+
+    const element = await LoginPage({ searchParams: resolvedSearchParams("//evil.example") });
+
+    expect(googleButtonCallback(element)).toBe("/global");
   });
 });
 
@@ -138,14 +177,18 @@ function resolvedSearchParams(
 }
 
 function googleButtonCallback(node: ReactNode): string | null {
+  return googleButtonProps(node)?.callbackUrl ?? null;
+}
+
+function googleButtonProps(node: ReactNode): GoogleButtonProps | null {
   if (isValidElement<GoogleButtonProps>(node) && node.type === mocks.GoogleSignInButton) {
-    return node.props.callbackUrl;
+    return node.props;
   }
   if (!isValidElement<{ children?: ReactNode }>(node)) return null;
 
   for (const child of Children.toArray(node.props.children)) {
-    const callbackUrl = googleButtonCallback(child);
-    if (callbackUrl !== null) return callbackUrl;
+    const props = googleButtonProps(child);
+    if (props !== null) return props;
   }
   return null;
 }

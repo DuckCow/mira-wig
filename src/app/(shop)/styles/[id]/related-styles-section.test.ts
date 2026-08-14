@@ -21,6 +21,7 @@ describe("related styles PDP section", () => {
     expect(renderToStaticMarkup(React.createElement(RelatedStylesSectionView, {
       groups: EMPTY,
       marketCode: "KR",
+      locale: "ko",
     }))).toBe("");
   });
 
@@ -39,10 +40,11 @@ describe("related styles PDP section", () => {
     const html = renderToStaticMarkup(React.createElement(RelatedStylesSectionView, {
       groups,
       marketCode: "KR",
+      locale: "ko",
     }));
     expect(html).toContain("비슷한 스타일");
     expect(html).not.toContain("함께 비교해 보세요");
-    expect(html).toContain('href="/styles/exact-target"');
+    expect(html).toContain('href="/kr/ko/styles/exact-target"');
     expect(html).not.toContain("variant");
     expect(html).not.toContain("internalRationale");
   });
