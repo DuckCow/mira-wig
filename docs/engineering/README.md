@@ -87,6 +87,13 @@ commerce, order, or manufacturing behavior.
   installed or authorized for execution; retained SDK parsing/compile/evaluation
   and provider/browser activity remain none, the canonical SDK is unresolved,
   and EX2B2 remains blocked.
+- [Eximbay BF3 Vendor Clarification / Current Official Documentation Authority Adjudication v0.1](./eximbay-bf3-vendor-clarification-authority-adjudication-v0.1.md)
+  — human-reviewed documentation-only adjudication that preserves all BF3/BF3-R1/BF3-R2
+  history, reconciles direct vendor clarification with current official
+  documentation as JavaScript SDK v2 plus REST API v1, records the swapped
+  vendor-email environment bullets as a pending conflict, and unblocks EX2B2
+  for Design Contract work only. It grants no source, provider-contact,
+  SDK/browser, credential, sandbox, live, or BF4 authority.
 
 ## Render Lab foundation
 
