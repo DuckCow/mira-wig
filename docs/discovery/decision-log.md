@@ -3077,3 +3077,70 @@ new Payment.attemptLifecycle state:
 next:
   DOCUMENTATION INSTALLATION
 ```
+
+## 2026-08-15 — Eximbay EX2B2-S1 READY kernel source merge and P8 source-status candidate
+
+EX2B2-S1 is MERGED / INSTALLED / REVIEWED. The historical design authority
+was installed by PR #65 at merge
+`82bb1589a7c221773104f5320beeab77dac6646a`, from reviewed head
+`b7539525323d6d7d441b7f9a3352ad04a7d26707`; design post-merge CI #344 was
+successful. Source PR #66 (`feat(payment): add Eximbay EX2B2 S1 ready kernel`)
+was reviewed at head `5dac5d92916cd539f15b7f2cda8f41f56cad4041` and merged to
+main at `2bc5ad6ece6c429c2ad1375a99cb5ccfacc3dadd`, whose first parent is the
+design merge. The source candidate was one commit, three paths, 1,405
+additions, and zero deletions:
+
+```text
+src/lib/payment/eximbay/ready-kernel.ts
+src/lib/payment/eximbay/__tests__/ready-kernel.integration.test.ts
+src/lib/payment/eximbay/__tests__/s1-isolation.test.ts
+```
+
+PR CI #345 (run ID `31846538344`) completed successfully at the exact reviewed
+source head. Post-merge main CI #346 (run ID `31847182344`, push on `main`)
+completed successfully at exact merge `2bc5ad6ece6c429c2ad1375a99cb5ccfacc3dadd`.
+
+The final reviewed source-closure packet was
+`WIG_PAY_EXIM_EX2B2_S1_REVIEW_v0_3.zip`, SHA-256
+`38ec4f46e1e5b15224fddae1b35f7f85dc69d676716045ca627951952dfc6ead`, 41,813
+bytes, 15 entries. Initial independent review found BLOCKER 1, IMPORTANT 3,
+and MINOR 1: missing exact success/plan binding, missing outbound byte bound,
+missing response chunk-event bound, incomplete clean-baseline build
+attribution, and insufficiently explicit sensitivity of the credential-free
+plan body. S1R closed those five findings with bounded source corrections.
+S1R2 dispositioned `S1R2-I01` as IMPORTANT and
+`DEFERRED_BY_INSTALLED_BOUNDARY_TO_S2`: S1 proves only its closed
+caller-supplied mode and exact endpoint mapping, not provenance from persisted
+`Payment.mode`.
+
+Final independent source closure is PASS with open S1 source blocker 0 and
+important 0. The S1 source provides deterministic READY plan construction,
+bounded strict response admission, exact plan/success provenance, and final
+persisted-order SDK-wire data materialization through an injected transport
+port. It does not install provider networking, credentials, SDK loading or
+execution, `EXIMBAY.request_pay`, initiation integration, BF4, routing, or
+activation.
+
+```text
+runtime authority:
+  NONE
+
+P8 Source Status:
+  CANDIDATE FOR INDEPENDENT DOCUMENT REVIEW
+
+next lawful gate:
+  P8 independent documentation review/install
+
+EX2B2-S2:
+  NOT AUTHORIZED BY THIS RECORD; separate persisted-mode/config/credential
+  pre-contact authority is mandatory
+
+provider contact:
+  NOT AUTHORIZED
+
+SDK execution:
+  NOT AUTHORIZED
+
+activation:
+  NOT AUTHORIZED
+```
