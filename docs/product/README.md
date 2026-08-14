@@ -47,3 +47,13 @@ one exists. For manual item relations, the frozen
 [source-status/as-built record](../discovery/manual-item-relations-source-status-v0.1.md),
 and the [operations runbook](../operations/manual-item-relations-operations-v0.1.md)
 remain the authorities for their declared scopes.
+
+## Market × Locale storefront
+
+- [Market × Locale Site Variant Design Contract v0.1](./market-locale-site-variant-design-contract-v0.1.md) — pre-implementation/frozen design authority for the declared scope; does not prove source installation or activation.
+- [Market × Locale Storefront Source Status v0.1](./market-locale-site-variant-source-status-v0.1.md) — current reviewed Phase-1 descriptive source authority naming the reviewed head, merge, installed invariants, validation, limitations, and re-entry gates; does not authorize deployment or customer activation.
+- [Product Decision Log](./decision-log.md)
+  — records the Phase-1 adjudicated decisions and A1–A4/D1 material review
+  corrections; grants no deployment/customer/provider activation.
+- [Market × Locale payment session-identity boundary v0.1](../payment_policy/market-locale-payment-session-identity-boundary-v0.1.md) — narrow current-state payment boundary record: persisted CheckoutSession / Payment facts control existing payment, not storefront presentation.
+- [Market, Language, and Shipping Country Policy v1](../market_policy/market_language_shipping_policy_v1.md) — earlier product/design record for Market/language/shipping-country separation; its historical implementation-facts section is not current source status.
