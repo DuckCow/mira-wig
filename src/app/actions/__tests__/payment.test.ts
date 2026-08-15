@@ -52,10 +52,18 @@ interface StorefrontBoundary {
   marketCookie: string | undefined;
   headers: Headers;
 }
+interface S3ActionTestControl {
+  attempt: ((...args: unknown[]) => Promise<unknown>) | null;
+  materialize: ((...args: unknown[]) => Promise<unknown>) | null;
+}
 const providerResolver = vi.hoisted(() => vi.fn<TestProviderResolver>());
 const storefrontBoundary = vi.hoisted<StorefrontBoundary>(() => ({
   marketCookie: "KR",
   headers: new Headers(),
+}));
+const s3ActionControl = vi.hoisted<S3ActionTestControl>(() => ({
+  attempt: null,
+  materialize: null,
 }));
 
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
@@ -81,6 +89,30 @@ vi.mock("@/lib/payment/providers/initiation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/payment/providers/initiation")>()),
   resolveInitiationProvider: providerResolver,
 }));
+vi.mock("@/lib/payment/attempt/initiate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/payment/attempt/initiate")>();
+  return {
+    ...actual,
+    initiatePaymentAttemptWithTransientAuthority: (
+      client: Parameters<typeof actual.initiatePaymentAttemptWithTransientAuthority>[0],
+      input: Parameters<typeof actual.initiatePaymentAttemptWithTransientAuthority>[1],
+    ) => s3ActionControl.attempt
+      ? s3ActionControl.attempt(client, input)
+      : actual.initiatePaymentAttemptWithTransientAuthority(client, input),
+  };
+});
+vi.mock("@/lib/payment/eximbay/sdk-handoff", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/payment/eximbay/sdk-handoff")>();
+  return {
+    ...actual,
+    materializeFreshEximbayReadyHandoff: (
+      paymentId: Parameters<typeof actual.materializeFreshEximbayReadyHandoff>[0],
+      authority: Parameters<typeof actual.materializeFreshEximbayReadyHandoff>[1],
+    ) => s3ActionControl.materialize
+      ? s3ActionControl.materialize(paymentId, authority)
+      : actual.materializeFreshEximbayReadyHandoff(paymentId, authority),
+  };
+});
 vi.mock("@/lib/payment/complete", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payment/complete")>();
   return { ...actual, completeFromCapture: vi.fn(actual.completeFromCapture) };
@@ -90,8 +122,9 @@ import { completeFromCapture } from "@/lib/payment/complete";
 import { getSession } from "@/lib/session";
 import {
   confirmPayment as confirmPaymentAction,
-  initiatePayment,
+  initiatePayment as initiatePaymentAction,
   type ConfirmPaymentInput,
+  type InitiatePaymentInput,
   type PaymentActionResult,
 } from "../payment";
 
@@ -112,6 +145,18 @@ function confirmPayment(
   input: ConfirmPaymentInput = {},
 ) {
   return confirmPaymentAction(checkoutSessionId, input);
+}
+
+async function initiatePayment(
+  checkoutSessionId: string,
+  input: InitiatePaymentInput = {},
+): Promise<PaymentActionResult> {
+  const execution = await initiatePaymentAction(checkoutSessionId, input);
+  expect(execution.channel).toBe("DURABLE_ONLY");
+  if (execution.channel !== "DURABLE_ONLY") {
+    throw new Error("Unexpected fresh Eximbay handoff in durable action regression");
+  }
+  return execution.durable;
 }
 
 function expectProviderNeutralNonSuccess(result: PaymentActionResult): void {
@@ -170,6 +215,8 @@ describe("payment actions", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    s3ActionControl.attempt = null;
+    s3ActionControl.materialize = null;
     mockResolveProvider.mockReset();
     process.env.PAYMENT_MOCK_MODE = "success";
     delete process.env.PAYMENT_MOCK_FORCE_FAIL;
@@ -191,6 +238,8 @@ describe("payment actions", () => {
   });
 
   afterEach(async () => {
+    s3ActionControl.attempt = null;
+    s3ActionControl.materialize = null;
     mockResolveProvider.mockImplementation((input) => createMockPaymentProvider(input.provider));
     PROVIDER_REGISTRY.TOSS.liveEnabled = ORIGINAL_TOSS_LIVE_ENABLED;
     restoreEnv("TOSS_SANDBOX_SECRET_KEY", ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
@@ -217,6 +266,115 @@ describe("payment actions", () => {
     expect(payment.mode).toBe(PersistedPaymentMode.SANDBOX);
     expect(payment.idempotencyKey).toMatch(`initiate:${session.sessionId}:`);
     expect(mockResolveProvider).toHaveBeenCalledWith(expectedResolverContext());
+  });
+
+  it("wraps ordinary initiation in DURABLE_ONLY without changing the durable result", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+
+    const execution = await initiatePaymentAction(session.sessionId);
+
+    expect(execution).toMatchObject({
+      channel: "DURABLE_ONLY",
+      durable: {
+        kind: "READY",
+        success: true,
+        provider: PaymentProvider.TOSS,
+      },
+    });
+  });
+
+  it("returns only the exact fresh Eximbay package after the transient attempt owner", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const paymentId = `synthetic_s3_payment_${randomUUID()}`;
+    const authority = Object.freeze({ secretAuthoritySentinel: "NEVER_SERIALIZE_AUTHORITY" });
+    const handoff = syntheticS3Handoff(paymentId);
+    s3ActionControl.attempt = () => Promise.resolve({
+      channel: "FRESH_EXIMBAY_READY",
+      durable: {
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+        status: PaymentAttemptStatus.INITIATED,
+        initiateResult: { kind: "ready" },
+      },
+      freshAuthority: authority,
+    });
+    const materialize = vi.fn((..._args: unknown[]) => Promise.resolve(handoff));
+    s3ActionControl.materialize = materialize;
+
+    const execution = await initiatePaymentAction(session.sessionId);
+
+    expect(execution).toEqual({
+      channel: "FRESH_EXIMBAY_READY",
+      durable: {
+        kind: "READY",
+        success: true,
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+      },
+      transientHandoff: handoff,
+    });
+    expect(materialize).toHaveBeenCalledWith(paymentId, authority);
+    const serialized = JSON.stringify(execution);
+    expect(serialized).not.toContain("NEVER_SERIALIZE_AUTHORITY");
+    expect(serialized).not.toMatch(/freshAuthority|prepared(?:Contact|Plan|Success)|Authorization|api[_-]?key|providerRef|providerPaymentKey|statusFgkey|callbackFgkey/iu);
+  });
+
+  it("keeps durable Eximbay READY re-entry durable-only and skips handoff materialization", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const paymentId = `synthetic_s3_reentry_${randomUUID()}`;
+    s3ActionControl.attempt = () => Promise.resolve({
+      channel: "DURABLE_ONLY",
+      durable: {
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+        status: PaymentAttemptStatus.INITIATED,
+        initiateResult: { kind: "ready" },
+      },
+    });
+    const materialize = vi.fn((..._args: unknown[]) => Promise.resolve(syntheticS3Handoff(paymentId)));
+    s3ActionControl.materialize = materialize;
+
+    await expect(initiatePaymentAction(session.sessionId)).resolves.toEqual({
+      channel: "DURABLE_ONLY",
+      durable: {
+        kind: "READY",
+        success: true,
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+      },
+    });
+    expect(materialize).not.toHaveBeenCalled();
+  });
+
+  it("falls back to durable Eximbay READY without leaking materialization failure detail", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const paymentId = `synthetic_s3_failure_${randomUUID()}`;
+    const authority = Object.freeze({ secretAuthoritySentinel: "NEVER_SERIALIZE_FAILURE_AUTHORITY" });
+    const failureSentinel = `S3_INTERNAL_FAILURE_${randomUUID()}`;
+    s3ActionControl.attempt = () => Promise.resolve({
+      channel: "FRESH_EXIMBAY_READY",
+      durable: {
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+        status: PaymentAttemptStatus.INITIATED,
+        initiateResult: { kind: "ready" },
+      },
+      freshAuthority: authority,
+    });
+    s3ActionControl.materialize = () => Promise.reject(new Error(failureSentinel));
+
+    const execution = await initiatePaymentAction(session.sessionId);
+
+    expect(execution).toEqual({
+      channel: "DURABLE_ONLY",
+      durable: {
+        kind: "READY",
+        success: true,
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+      },
+    });
+    expect(JSON.stringify(execution)).not.toMatch(new RegExp(`${failureSentinel}|NEVER_SERIALIZE_FAILURE_AUTHORITY`, "u"));
   });
 
   it("keeps owned-session admission stable across remembered, absent, transient, and hostile storefront context", async () => {
@@ -1709,6 +1867,32 @@ async function statusOf(sessionId: string): Promise<CheckoutSessionStatus> {
   const session = await db.checkoutSession.findUnique({ where: { id: sessionId }, select: { status: true } });
   if (!session) throw new Error(`Missing checkout session ${sessionId}`);
   return session.status;
+}
+
+function syntheticS3Handoff(paymentId: string) {
+  return Object.freeze({
+    kind: "EXIMBAY_READY_HANDOFF_V1",
+    paymentId,
+    mode: "SANDBOX",
+    sdkGeneration: "v2",
+    payload: Object.freeze({
+      fgkey: "SYNTHETIC_ACTION_FGKEY",
+      payment: Object.freeze({
+        transaction_type: "PAYMENT",
+        order_id: `synthetic-order-${paymentId}`,
+        currency: "USD",
+        amount: "1.00",
+        lang: "EN",
+        payment_method: "P000",
+      }),
+      merchant: Object.freeze({ mid: "SYNTHETIC_ACTION_MID" }),
+      buyer: Object.freeze({ name: "Synthetic Buyer", email: "synthetic@example.test" }),
+      url: Object.freeze({
+        return_url: "https://payments.example.test/return",
+        status_url: "https://payments.example.test/status",
+      }),
+    }),
+  });
 }
 
 function restoreMockMode(): void {

@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { confirmPayment, initiatePayment, type PaymentActionResult } from "@/app/actions/payment";
+import {
+  confirmPayment,
+  initiatePayment,
+  type InitiatePaymentActionResult,
+  type PaymentActionResult,
+} from "@/app/actions/payment";
 import type { Locale } from "@/lib/market/locale";
 import type { MarketCode } from "@/lib/market/types";
 import { messagesFor, type StorefrontMessages } from "@/lib/market/messages";
@@ -153,10 +158,22 @@ export async function runMockPayment(
 ) {
   const messages = messagesFor(locale).checkout.payment;
   const initiated = await initiatePayment(checkoutSessionId, { method: MOCK_METHOD });
-  if (!handleInitiationResult(initiated, setState, messages)) return;
+  if (!handleInitiationExecution(initiated, setState, messages)) return;
 
   const confirmed = await confirmPayment(checkoutSessionId, { method: MOCK_METHOD });
   handleConfirmationResult(confirmed, setState, messages);
+}
+
+function handleInitiationExecution(
+  execution: InitiatePaymentActionResult,
+  setState: (state: PaymentState) => void,
+  messages: StorefrontMessages["checkout"]["payment"],
+): boolean {
+  if (execution.channel !== "DURABLE_ONLY") {
+    setState({ kind: "failed", message: messages.unavailableMock });
+    return false;
+  }
+  return handleInitiationResult(execution.durable, setState, messages);
 }
 
 function handleInitiationResult(

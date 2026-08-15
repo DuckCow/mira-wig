@@ -17,6 +17,7 @@ const PROHIBITED_MEMBER = /^(?:create|createMany|delete|deleteMany|executeRaw|up
 const S1_IMPORTERS = [
   "src/lib/payment/eximbay/ready-contact.ts",
   "src/lib/payment/eximbay/ready-http.ts",
+  "src/lib/payment/eximbay/sdk-handoff.ts",
 ] as const;
 
 describe("EX2B2-S1 source isolation", () => {
@@ -84,7 +85,10 @@ describe("EX2B2-S1 source isolation", () => {
   it("keeps current S2 production ownership exact", () => {
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/ready-contact.ts"),
-      ["src/lib/payment/attempt/initiate.ts"],
+      [
+        "src/lib/payment/attempt/initiate.ts",
+        "src/lib/payment/eximbay/sdk-handoff.ts",
+      ],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/ready-http.ts"),
@@ -93,6 +97,45 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/eximbay/ready-contact.ts",
       ],
     );
+  });
+
+  it("locks the dormant S3 server, neutral contract, and browser importer graph exactly", () => {
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/providers/eximbay/amount.ts"),
+      [
+        "src/lib/payment/eximbay/sdk-handoff.ts",
+        "src/lib/payment/providers/eximbay/index.ts",
+        "src/lib/payment/providers/eximbay/preparation.ts",
+        "src/lib/payment/providers/eximbay/trusted-facts.ts",
+      ],
+    );
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/eximbay/sdk-handoff.ts"),
+      ["src/app/actions/payment.ts"],
+    );
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/eximbay/sdk-loader.ts"),
+      ["src/lib/payment/eximbay/sdk-invocation.ts"],
+    );
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/eximbay/sdk-invocation.ts"),
+      [],
+    );
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/eximbay/sdk-handoff-contract.ts"),
+      [
+        "src/app/actions/payment.ts",
+        "src/lib/payment/eximbay/sdk-handoff.ts",
+        "src/lib/payment/eximbay/sdk-invocation.ts",
+        "src/lib/payment/eximbay/sdk-loader.ts",
+      ],
+    );
+  });
+
+  it("keeps checkout free of dormant browser SDK authority", () => {
+    const checkout = readFileSync(join(ROOT, "src/app/(shop)/checkout/PaymentMethodSection.tsx"), "utf8");
+
+    expect(checkout).not.toMatch(/sdk-(?:loader|invocation)|request_pay/u);
   });
 });
 
