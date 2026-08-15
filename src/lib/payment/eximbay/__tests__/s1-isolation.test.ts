@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +14,10 @@ const ALLOWED_IMPORTS = new Set([
 const PROHIBITED_IMPORT = /^(?:node:)?(?:dns|http|https|net|tls)(?:\/|$)|^(?:axios|cross-fetch|got|node-fetch|superagent|undici)(?:\/|$)|(?:\/|^)(?:actions|api|attempt|complete|credentials|factory|refund|routing|void|webhook)(?:\/|$)/u;
 const PROHIBITED_RUNTIME_IDENTIFIER = /^(?:fetch|XMLHttpRequest|WebSocket|EventSource|window|document|localStorage|sessionStorage)$/u;
 const PROHIBITED_MEMBER = /^(?:create|createMany|delete|deleteMany|executeRaw|update|updateMany|upsert)$/u;
+const S1_IMPORTERS = [
+  "src/lib/payment/eximbay/ready-contact.ts",
+  "src/lib/payment/eximbay/ready-http.ts",
+] as const;
 
 describe("EX2B2-S1 source isolation", () => {
   it("limits the exact S1 production graph to the installed EX2A/EX2B1 seams and language primitives", () => {
@@ -48,20 +52,47 @@ describe("EX2B2-S1 source isolation", () => {
     expect(source).not.toMatch(/projectEximbaySdk/u);
   });
 
-  it("adds no production reachability and preserves the installed EX2B1 source as the sole allowed dependency", () => {
+  it("allows only the exact reviewed S2 modules to consume S1 while preserving S1 dependencies", () => {
     const source = productionSource();
-    const repositoryFiles = ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined);
-    const importers = repositoryFiles.filter((absolutePath) => {
-      const normalized = absolutePath.replaceAll("\\", "/");
-      if (normalized.includes("/__tests__/")) return false;
-      if (normalized.endsWith("/ready-kernel.ts")) return false;
-      const contents = readFileSync(absolutePath, "utf8");
-      return contents.includes("payment/eximbay/ready-kernel") || contents.includes("../ready-kernel");
-    });
+    const importers = productionImportersOf("src/lib/payment/eximbay/ready-kernel.ts");
 
     expect(source).toContain('from "./ready"');
     expect(source).not.toContain("@/lib/db");
-    expect(importers).toEqual([]);
+    expectExactImporterAllowlist(importers, S1_IMPORTERS);
+  });
+
+  it.each([
+    ["alias with single quotes", "import x from '@/lib/payment/eximbay/ready-kernel';"],
+    ["relative form", "import x from './eximbay/ready-kernel';"],
+    ["dynamic import", "const x = import('@/lib/payment/eximbay/ready-kernel');"],
+    ["require", "const x = require('./eximbay/ready-kernel');"],
+  ])("detects an unexpected %s importer syntax", (_label, source) => {
+    expect(sourceImportsTarget(
+      "src/lib/payment/unexpected.ts",
+      source,
+      "src/lib/payment/eximbay/ready-kernel.ts",
+    )).toBe(true);
+  });
+
+  it("rejects an unexpected production path from the exact allowlist", () => {
+    expect(() => expectExactImporterAllowlist(
+      [...S1_IMPORTERS, "src/lib/payment/unexpected.ts"],
+      S1_IMPORTERS,
+    )).toThrowError("UNEXPECTED_PRODUCTION_IMPORTER");
+  });
+
+  it("keeps current S2 production ownership exact", () => {
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/eximbay/ready-contact.ts"),
+      ["src/lib/payment/attempt/initiate.ts"],
+    );
+    expectExactImporterAllowlist(
+      productionImportersOf("src/lib/payment/eximbay/ready-http.ts"),
+      [
+        "src/lib/payment/eximbay/ready-config.ts",
+        "src/lib/payment/eximbay/ready-contact.ts",
+      ],
+    );
   });
 });
 
@@ -97,4 +128,94 @@ function inspectDurableWrite(node: ts.Node, violations: string[]): void {
   if (PROHIBITED_MEMBER.test(node.expression.name.text)) {
     violations.push(`durable-write:${node.expression.name.text}`);
   }
+}
+
+function productionImportersOf(targetRelativePath: string): string[] {
+  return ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined)
+    .flatMap((absolutePath) => {
+      const importer = repositoryRelativePath(absolutePath);
+      if (importer.includes("/__tests__/") || importer === targetRelativePath) return [];
+      const source = readFileSync(absolutePath, "utf8");
+      return sourceImportsTarget(importer, source, targetRelativePath) ? [importer] : [];
+    })
+    .sort();
+}
+
+function sourceImportsTarget(
+  importerRelativePath: string,
+  source: string,
+  targetRelativePath: string,
+): boolean {
+  const sourceFile = ts.createSourceFile(importerRelativePath, source, ts.ScriptTarget.ESNext, true);
+  let found = false;
+  function visit(node: ts.Node): void {
+    const specifier = importedModuleSpecifier(node);
+    if (specifier && resolvesToTarget(importerRelativePath, specifier, targetRelativePath)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return found;
+}
+
+function importedModuleSpecifier(node: ts.Node): string | null {
+  return declarationModuleSpecifier(node)
+    ?? importEqualsModuleSpecifier(node)
+    ?? callModuleSpecifier(node);
+}
+
+function declarationModuleSpecifier(node: ts.Node): string | null {
+  if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) return null;
+  if (!node.moduleSpecifier || !ts.isStringLiteralLike(node.moduleSpecifier)) return null;
+  return node.moduleSpecifier.text;
+}
+
+function importEqualsModuleSpecifier(node: ts.Node): string | null {
+  if (!ts.isImportEqualsDeclaration(node)) return null;
+  if (!ts.isExternalModuleReference(node.moduleReference)) return null;
+  const expression = node.moduleReference.expression;
+  if (!expression || !ts.isStringLiteralLike(expression)) return null;
+  return expression.text;
+}
+
+function callModuleSpecifier(node: ts.Node): string | null {
+  if (!ts.isCallExpression(node) || node.arguments.length !== 1) return null;
+  const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+  const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
+  const argument = node.arguments[0];
+  if ((!isDynamicImport && !isRequire) || !argument || !ts.isStringLiteralLike(argument)) return null;
+  return argument.text;
+}
+
+function resolvesToTarget(
+  importerRelativePath: string,
+  specifier: string,
+  targetRelativePath: string,
+): boolean {
+  const importerAbsolutePath = resolve(ROOT, importerRelativePath);
+  const resolvedSpecifier = specifier.startsWith("@/")
+    ? resolve(ROOT, "src", specifier.slice(2))
+    : specifier.startsWith(".")
+      ? resolve(dirname(importerAbsolutePath), specifier)
+      : null;
+  if (!resolvedSpecifier) return false;
+  return moduleIdentity(resolvedSpecifier) === moduleIdentity(resolve(ROOT, targetRelativePath));
+}
+
+function moduleIdentity(path: string): string {
+  return path.replace(/\.(?:[cm]?[jt]sx?)$/u, "").replaceAll("\\", "/");
+}
+
+function repositoryRelativePath(absolutePath: string): string {
+  return relative(ROOT, absolutePath).replaceAll("\\", "/");
+}
+
+function expectExactImporterAllowlist(
+  actual: readonly string[],
+  allowed: readonly string[],
+): void {
+  if (actual.length === allowed.length && actual.every((path, index) => path === allowed[index])) return;
+  throw new Error(`UNEXPECTED_PRODUCTION_IMPORTER:${actual.join(",")}`);
 }
