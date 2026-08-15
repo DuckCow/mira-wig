@@ -19,11 +19,15 @@ commerce, order, or manufacturing behavior.
   Eximbay `PAYMENT` pure-kernel design before implementation. Its original
   candidate status remains historical and is not rewritten by later source
   installation.
-- [Eximbay EX2A Pure Protocol Kernel Source Status / As-Built v0.1](./eximbay-ex2a-pure-protocol-kernel-source-status-v0.1.md)
-  — records the current installed and reviewed EX2A pure-kernel source from PR
-  #47, its exact evidence, limitations, and re-entry gates. It grants no
-  Eximbay network, SDK, routing, ingress, persistence, completion, refund,
-  sandbox, live, or other runtime authority.
+- [Eximbay EX2A Pure Protocol Kernel Source Status / As-Built v0.2](./eximbay-ex2a-pure-protocol-kernel-source-status-v0.2.md)
+  — current reviewed full EX2A Source Status / As-Built for the unchanged pure
+  protocol kernel and the new S3 amount-decoder reachability. P8 final
+  documentation closure is PASS (0 blocker / 0 important / 0 minor). It grants
+  no provider contact, SDK, routing, persistence,
+  completion, credential, BF4, sandbox/live, or activation authority.
+- [Eximbay EX2A Pure Protocol Kernel Source Status / As-Built v0.1 (historical)](./eximbay-ex2a-pure-protocol-kernel-source-status-v0.1.md)
+  — preserved predecessor recording the installation-time source truth and
+  pending documentation-review disposition; it is not rewritten by P8.
 - [Eximbay BF2 Shared-Test `/ready` Preflight Provider Evidence / Execution Contract v0.1](./eximbay-bf2-shared-test-ready-preflight-contract-v0.1.md)
   — historical normative execution authority and history for one separately
   invoked, sequential, at-most-three-request public shared-test `/ready`
@@ -103,13 +107,14 @@ commerce, order, or manufacturing behavior.
   — human-reviewed documentation-only Threat / Failure Model installed with
   the same design authority; it grants no provider contact, SDK load/execution,
   or activation authority.
-- [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.2](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.2.md)
-  — current S1 reachability truth. The same S1 production kernel remains
-  installed and unchanged, while reviewed S2 is now the exact downstream
-  production importer under the AST/module-identity allowlist. S2 owns the
-  persisted-mode pre-contact gate; S1 remains a pure/injected kernel with no
-  provider networking, credentials, SDK loading/execution, BF4, routing, or
-  activation authority.
+- [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.3](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.3.md)
+  — current reviewed reachability As-Built after the reviewed S3 merge. The
+  same S1 kernel remains unchanged; S2 and the S3 server handoff are exact
+  downstream importers. P8 final documentation closure is PASS (0/0/0). S1
+  remains pure/injected with no
+  concrete network, credential, SDK, BF4, routing, or activation ownership.
+- [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.2 (historical)](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.2.md)
+  — preserved predecessor for the pre-S3 reachability graph.
 - [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.1 (historical)](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.1.md)
   — preserved predecessor recording the original installed S1 source and its
   then-current no-production-importer boundary; it is not the current
@@ -121,13 +126,20 @@ commerce, order, or manufacturing behavior.
   source is now recorded as installed and dormant by the S2 Source Status;
   provider contact, SDK/BF4 behavior, routing, and activation remain
   unauthorized.
-- [Eximbay EX2B2-S2 READY Contact Source Status / As-Built v0.1](./eximbay-ex2b2-s2-ready-contact-source-status-v0.1.md)
-  — records the reviewed S2 concrete contact-capable source merged by PR #69 /
-  merge `bb2ab48176e9b6a5216e870616f4730fe9a85825`, its exact 14 installed path
-  identities, canonical purchaser/configuration/CAS/HTTP/outcome/one-shot
-  custody behavior, and closed I1R findings. It is installed and dormant;
-  routing, provider contact, SDK/request_pay, BF4/status completion, sandbox or
-  live runtime, and customer activation remain unauthorized.
+- [Eximbay EX2B2-S2 READY Contact Source Status / As-Built v0.2](./eximbay-ex2b2-s2-ready-contact-source-status-v0.2.md)
+  — current reviewed contact/handoff As-Built for dormant S2 source and its S3
+  transient channel. S2 owns mode-bound MID/API-key resolution and opaque
+  Authorization custody, but no real values or provider use are approved. P8
+  final documentation closure is PASS (0/0/0); routing, SDK/request_pay, BF4
+  and activation remain unauthorized.
+- [Eximbay EX2B2-S2 READY Contact Source Status / As-Built v0.1 (historical)](./eximbay-ex2b2-s2-ready-contact-source-status-v0.1.md)
+  — preserved predecessor recording the original S2 installation.
+- [Eximbay EX2B2-S3 Browser Handoff Source Status / As-Built v0.1](./eximbay-ex2b2-s3-browser-handoff-source-status-v0.1.md)
+  — current reviewed installed-dormant browser-handoff As-Built: trusted
+  one-shot handoff plus concrete SDK-load-capable browser source. Tests use
+  synthetic fake DOM/global seams; the application consumer is zero and no
+  real SDK was fetched. P8 final documentation closure is PASS (0/0/0), and
+  routing/request_pay/BF4/activation remain unauthorized.
 
 ## Render Lab foundation
 

@@ -3264,3 +3264,71 @@ downstream production importer, so the historical S1 v0.1 no-production-
 importer statement is preserved as historical and not current reachability
 truth. The next lawful gates are separately authorized evidence/integration
 slices, not this documentation-only P8.
+
+## 2026-08-15 — Eximbay EX2B2-S3 reviewed source installation + P8 current As-Built refresh
+
+The exact reviewed S3 source candidate was installed by source PR #71. The
+reviewed source head was `d66b34a001e4868e887912eb8c1a1fe1b523688b` and the
+normal merge to current `main` was
+`7d619c893f05ccc163dafb7eb6f07c16c055b0d0`. The reviewed source packet was
+`WIG_PAY_EXIM_EX2B2_S3_I1_SOURCE_REVIEW_v0_2.zip`, 44290 bytes, SHA-256
+`c717b8be4a18052995a82c004d6113f93c9e2a60b5315e04be88f9d5e4aac42a`; the
+reviewed full diff was 138121 bytes, SHA-256
+`e9f9922aa4a77604dea45b472fe6aee2b41473b55d0585badfd305cbb3899ad9`.
+
+Final independent S3 source closure passed with BLOCKER 0, IMPORTANT 0, and
+MINOR 0. PR CI `31888938288` and post-merge main CI `31889295693` passed. The
+installed candidate is exactly 16 paths (7 ADD, 9 MODIFY). It is dormant and
+non-authoritative: routing remains disabled; no provider contact, real SDK
+load, real `EXIMBAY.request_pay`, credentials, BF4/status behavior, CSP/header
+activation, or customer runtime was used or enabled.
+
+The S3 merge establishes the current reachability consequences for the earlier
+records. EX2A remains the full unchanged pure protocol kernel; the only new
+EX2A reachability is `sdk-handoff.ts` consuming `decodeEximbayAmount(...)` for
+locked Payment amount/currency lineage comparison. S1's kernel bytes remain
+unchanged while the exact production importer allowlists now include the S2
+modules and S3 server handoff. S2 retains canonical purchaser, persisted mode,
+atomic MID/API-key resolution, opaque Authorization custody, one-shot contact,
+conservative outcome, and transient FreshAuthority custody; no real credential
+value or provider use is approved. S3 consumes that authority once and does
+not make durable READY actionable. Its production loader is concrete SDK-load-
+capable source; fake DOM/global tests are synthetic, the current application
+consumer is zero, and no real SDK was fetched or executed.
+
+This independently reviewed P8 refresh records the four current Source Status versions:
+
+```text
+EX2A Source Status v0.2 — current pure-kernel As-Built
+S1  Source Status v0.3 — current importer/reachability As-Built
+S2  Source Status v0.2 — current contact/handoff As-Built
+S3  Source Status v0.1 — current installed dormant browser-handoff As-Built
+```
+
+Every historical predecessor remains byte-for-byte preserved and linked as
+historical; no source, test, schema, config, routing, CSP, CI, or dependency
+path is changed by this documentation refresh.
+
+Initial independent P8 documentation review disposition was BLOCKER 0,
+IMPORTANT 4, MINOR 1. The bounded corrections close the authored
+defects as follows: P8R-I01 restores the full EX2A scope and correct next gate;
+P8R-I02 records the production attempt-channel delta and exact S2 credential
+ownership; P8R-I03 records the concrete dormant loader, fixed source/class,
+state behavior and correction history; P8R-I04 restores governing,
+limitations, rollback and change-control metadata; P8R-M01 applies HIGH risk
+taxonomy and consistent lifecycle wording. Corrections are applied. Final
+independent documentation closure is:
+
+```text
+PASS — BLOCKER 0 / IMPORTANT 0 / MINOR 0
+```
+
+The final reviewed packet is
+`WIG_PAY_EXIM_EX2B2_S3_P8_REVIEW_v0_2.zip`, 39039 bytes, SHA-256
+`ef4fb2b8111974733fd853e174cc9d0cc3568187a5a1ad64a6eca2ebaf275d61`.
+The final-reviewed six-path diff is 41757 bytes, SHA-256
+`16abae6ab46d052b064a19ae0bb26111adffc8f72fbaf935fec3b9848652bf51`.
+
+D22 remains `S1 -> S2 -> S3 -> E1A -> E1B`. After this reviewed P8 Source
+Status refresh is installed, the next D22 gate is separately authorized E1A.
+E1A is not authorized by this entry.
