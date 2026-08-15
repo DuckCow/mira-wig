@@ -103,21 +103,31 @@ commerce, order, or manufacturing behavior.
   — human-reviewed documentation-only Threat / Failure Model installed with
   the same design authority; it grants no provider contact, SDK load/execution,
   or activation authority.
-- [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.1](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.1.md)
-  — records the reviewed S1 source merged by PR #66 / merge
-  `2bc5ad6ece6c429c2ad1375a99cb5ccfacc3dadd`: deterministic READY plan
-  construction, bounded strict response admission, exact plan/success
-  provenance, and final persisted-order SDK-wire materialization. It does not
-  install provider networking, credentials, SDK loading/execution, generic
-  initiation integration, BF4, routing, or sandbox/live activation; persisted
-  `Payment.mode` provenance remains the mandatory S2 pre-contact gate.
+- [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.2](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.2.md)
+  — current S1 reachability truth. The same S1 production kernel remains
+  installed and unchanged, while reviewed S2 is now the exact downstream
+  production importer under the AST/module-identity allowlist. S2 owns the
+  persisted-mode pre-contact gate; S1 remains a pure/injected kernel with no
+  provider networking, credentials, SDK loading/execution, BF4, routing, or
+  activation authority.
+- [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.1 (historical)](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.1.md)
+  — preserved predecessor recording the original installed S1 source and its
+  then-current no-production-importer boundary; it is not the current
+  reachability truth.
 - [Eximbay EX2B2-S2 READY Contact Design Contract v0.1](./eximbay-ex2b2-s2-ready-contact-design-contract-v0.1.md)
   — freezes the human-adjudicated S2 canonical purchaser, market/method,
   persisted-mode/config/credential, public-origin, exact contact-claim, one-shot
-  HTTP, conservative outcome, and durable/transient READY rules. It installs no
-  S2 source, provider contact, SDK/BF4 behavior, routing, or activation; after
-  reviewed merge its next gate is one separately bounded S2 implementation
-  task.
+  HTTP, conservative outcome, and durable/transient READY rules. Its reviewed
+  source is now recorded as installed and dormant by the S2 Source Status;
+  provider contact, SDK/BF4 behavior, routing, and activation remain
+  unauthorized.
+- [Eximbay EX2B2-S2 READY Contact Source Status / As-Built v0.1](./eximbay-ex2b2-s2-ready-contact-source-status-v0.1.md)
+  — records the reviewed S2 concrete contact-capable source merged by PR #69 /
+  merge `bb2ab48176e9b6a5216e870616f4730fe9a85825`, its exact 14 installed path
+  identities, canonical purchaser/configuration/CAS/HTTP/outcome/one-shot
+  custody behavior, and closed I1R findings. It is installed and dormant;
+  routing, provider contact, SDK/request_pay, BF4/status completion, sandbox or
+  live runtime, and customer activation remain unauthorized.
 
 ## Render Lab foundation
 
