@@ -3228,3 +3228,39 @@ next gate:
   after independently reviewed documentation merge, one separately issued
   bounded S2 Implementation Task Contract
 ```
+
+## 2026-08-15 — Eximbay EX2B2-S2 source installation and P8 Source Status refresh
+
+The exact reviewed S2 source candidate was installed by source PR #69. The
+reviewed head was `002e1c778e650dc66767ef5dab5d1a7a3573b0ed` and the normal
+merge to `main` was `bb2ab48176e9b6a5216e870616f4730fe9a85825`. The final
+review packet was `WIG_PAY_EXIM_EX2B2_S2_I1_SOURCE_REVIEW_v0_2.zip`, 34,015
+bytes, SHA-256
+`fe79dc2b625c042705b3f49912965c8ec1770fd3c8308bd88fe0949ffe27e518`.
+
+Final independent source closure was PASS with zero blocker, zero important,
+and zero minor findings. The bounded I1R findings were all closed:
+
+```text
+I1R-I01  generic lifecycle predicates restored to baseline; Eximbay-specific
+         claim/OUTCOME_UNKNOWN predicates retained
+I1R-I02  syntax-aware S1 importer detection and exact allowlists installed
+I1R-I03  exact PreparedEximbayReadyContact consumed before transport
+I1R-M01  redaction evidence corrected; invalid canonical User.email pre-contact
+         and zero-fetch coverage installed
+```
+
+PR CI run `31872599036` and post-merge main CI run `31872952017` completed
+successfully at their exact reviewed identities. The installed S2 source is
+dormant: routing, provider contact, SDK/request_pay, BF4/status completion,
+sandbox/live runtime, and customer activation remain unauthorized.
+
+This P8 lifecycle correction installs the new current
+[S2 Source Status / As-Built v0.1](../engineering/eximbay-ex2b2-s2-ready-contact-source-status-v0.1.md)
+and advances S1 to
+[Source Status / As-Built v0.2](../engineering/eximbay-ex2b2-s1-ready-kernel-source-status-v0.2.md).
+S1 production source bytes remain unchanged; reviewed S2 is now its exact
+downstream production importer, so the historical S1 v0.1 no-production-
+importer statement is preserved as historical and not current reachability
+truth. The next lawful gates are separately authorized evidence/integration
+slices, not this documentation-only P8.
