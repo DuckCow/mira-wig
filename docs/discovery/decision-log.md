@@ -3144,3 +3144,87 @@ SDK execution:
 activation:
   NOT AUTHORIZED
 ```
+
+## 2026-08-15 — Eximbay EX2B2-S2 canonical fact / mode / transport design closure
+
+The exact human-adjudicated D0R packet was
+`WIG_PAY_EXIM_EX2B2_S2_D0_REVIEW_v0_2.zip`, 30,088 bytes, SHA-256
+`7c1c9d8e3eb42d0f048d1f57cf2e738e0c0a041eca3ddd09c5dbfd63d68fe6c5`.
+Its final independent byte-level closure passed with BLOCKER 0, IMPORTANT 0,
+and MINOR 0. Human policy adjudication is complete, and D0R-I01 is closed.
+
+The S2 Design Contract candidate freezes these application policies and becomes
+installed authority only after independent review and merge:
+
+```text
+purchaser:
+  owned CheckoutSession -> canonical User.name and User.email
+  shipping recipientName is never a buyerName fallback
+
+User.name activation boundary:
+  initial account creation is Google OAuth only
+  normalized-nonblank persistence is not proven at this baseline
+  activation remains blocked until the invariant or a reviewed correction /
+  collection path exists
+  S2 still reloads and rejects invalid canonical purchaser facts pre-contact
+
+language:
+  JP market -> JP
+  US market -> EN
+  other market -> pre-contact reject
+  market-default policy, not storefront-locale parity
+
+method:
+  server-validated CARD -> P000 only
+
+environment/config:
+  persisted Payment.mode owns an existing attempt
+  same-mode atomic MID/API-key pair
+  existing Eximbay mode mismatch preserves the exact uncontacted Payment and
+  providerOrderId before generic supersession
+
+origin:
+  dedicated strict HTTPS PAYMENT_PUBLIC_ORIGIN
+  no request/header/NEXTAUTH_URL fallback
+
+contact:
+  complete S1 plan with zero bytes
+  exact owner/session/Payment freshness claim
+  CONTACTED commits before exactly one 15-second, zero-retry, no-redirect
+  transport attempt
+
+post-contact:
+  every unclassified result and every non-0000 provider result is
+  OUTCOME_UNKNOWN
+  exact admitted 0000 is READY only, never financial success
+
+READY custody:
+  durable generic READY is non-actionable and contains no readyFgkey
+  exact fresh S1 plan + exact trusted success identity may remain only in the
+  same server-memory continuation for future S3 consumption
+  loss never authorizes same-attempt recontact
+```
+
+D0R-I01 is closed by preserving the exact fresh S1 plan/success pair internally
+without persisting, serializing, logging, reconstructing, or exposing it from
+S2. S3, not S2, owns trusted SDK-wire browser handoff and
+`EXIMBAY.request_pay`; BF4, not S2, owns the reserved status path, verification,
+duplicates, acknowledgement, and financial completion.
+
+```text
+S2 source:
+  UNIMPLEMENTED / NOT AUTHORIZED BY DOCUMENT EXISTENCE ALONE
+
+provider contact:
+  NONE
+
+routing:
+  DISABLED / UNCHANGED
+
+SDK / BF4 / sandbox / live / customer activation:
+  NONE
+
+next gate:
+  after independently reviewed documentation merge, one separately issued
+  bounded S2 Implementation Task Contract
+```

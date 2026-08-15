@@ -111,6 +111,13 @@ commerce, order, or manufacturing behavior.
   install provider networking, credentials, SDK loading/execution, generic
   initiation integration, BF4, routing, or sandbox/live activation; persisted
   `Payment.mode` provenance remains the mandatory S2 pre-contact gate.
+- [Eximbay EX2B2-S2 READY Contact Design Contract v0.1](./eximbay-ex2b2-s2-ready-contact-design-contract-v0.1.md)
+  — freezes the human-adjudicated S2 canonical purchaser, market/method,
+  persisted-mode/config/credential, public-origin, exact contact-claim, one-shot
+  HTTP, conservative outcome, and durable/transient READY rules. It installs no
+  S2 source, provider contact, SDK/BF4 behavior, routing, or activation; after
+  reviewed merge its next gate is one separately bounded S2 implementation
+  task.
 
 ## Render Lab foundation
 
