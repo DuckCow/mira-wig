@@ -17,13 +17,23 @@ import {
   hasUnresolvedSessionExposure,
 } from "@/lib/payment/remediation";
 import { generateEximbayProviderOrderId } from "@/lib/payment/attempt/provider-order-id";
+import {
+  assertPreparedEximbayReadyContact,
+  EximbayReadyContactError,
+  executePreparedEximbayReadyContact,
+  prepareEximbayReadyContact,
+  type EximbayReadyContactExecution,
+  type EximbayReadyFetch,
+  type PreparedEximbayReadyContact,
+} from "@/lib/payment/eximbay/ready-contact";
 import { isUsable } from "@/lib/payment/session";
+import type { ProviderEnv } from "@/lib/payment/providers/credentials";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import {
   ProviderResolveException,
   resolveInitiationProvider,
 } from "@/lib/payment/providers/initiation";
-import type { PaymentMode } from "@/lib/payment/providers/routing";
+import type { PaymentMethod, PaymentMode } from "@/lib/payment/providers/routing";
 import type {
   PaymentInitiationProvider,
   PaymentInitiateResult,
@@ -49,9 +59,12 @@ type InitiatedPayment = Pick<
   | "providerPaymentKey"
   | "initiationOutputKind"
   | "initiationApproveUrl"
+  | "initiationCompletedAt"
   | "contactIntentAt"
   | "contactStartedAt"
   | "financialSucceededAt"
+  | "blockingEndedAt"
+  | "suspendedByPaymentId"
 >;
 
 type InitiateDecision =
@@ -90,6 +103,11 @@ export interface InitiatePaymentAttemptInput {
   adapterContext: ProviderFactoryContext;
   now?: Date;
   contactBoundaryClock?: ContactBoundaryClock;
+  eximbayReady?: Readonly<{
+    env?: ProviderEnv;
+    fetchImpl?: EximbayReadyFetch;
+    afterPrepared?: () => void | Promise<void>;
+  }>;
 }
 
 interface RuntimeInitiationInput {
@@ -97,9 +115,11 @@ interface RuntimeInitiationInput {
   userId: string;
   provider: PaymentInitiationProvider;
   mode: PaymentMode;
+  method: PaymentMethod;
   routingRuleId: string;
   now?: Date;
   contactBoundaryClock?: ContactBoundaryClock;
+  eximbayReady?: InitiatePaymentAttemptInput["eximbayReady"];
 }
 
 export interface InitiatePaymentAttemptResult {
@@ -127,9 +147,11 @@ export async function initiatePaymentAttempt(
     userId: input.userId,
     provider,
     mode: input.adapterContext.mode,
+    method: input.adapterContext.method,
     routingRuleId: input.adapterContext.ruleId,
     now: input.now,
     contactBoundaryClock: input.contactBoundaryClock,
+    eximbayReady: input.eximbayReady,
   });
 }
 
@@ -140,8 +162,18 @@ async function contactProviderForAttempt(
   const authorizationNow = input.now ?? new Date();
   const decision = await client.$transaction((tx) => authorizeContact(tx, input, authorizationNow));
   if (decision.kind === "reuse") return toResult(decision.payment, decision.initiateResult);
+  if (decision.payment.provider === PaymentProvider.EXIMBAY) {
+    return contactEximbayForAttempt(client, decision.payment, input);
+  }
+  return contactGenericProviderForAttempt(client, decision.payment, input);
+}
 
-  const claim = await markContactStarted(client, decision.payment, input);
+async function contactGenericProviderForAttempt(
+  client: PrismaClient,
+  payment: InitiatedPayment,
+  input: RuntimeInitiationInput,
+): Promise<InitiatePaymentAttemptResult> {
+  const claim = await markContactStarted(client, payment, input, null);
   if (claim.kind === "sessionNotUsable") throw sessionNotUsable();
   if (claim.kind === "lost") return toResult(claim.payment, claim.initiateResult);
   const contacted = claim.payment;
@@ -164,6 +196,35 @@ async function contactProviderForAttempt(
     initiateResult,
     requireContactStartedAt(contacted),
   );
+}
+
+async function contactEximbayForAttempt(
+  client: PrismaClient,
+  payment: InitiatedPayment,
+  input: RuntimeInitiationInput,
+): Promise<InitiatePaymentAttemptResult> {
+  const prepared = await prepareEximbayContact(client, payment, input);
+  await input.eximbayReady?.afterPrepared?.();
+  const claim = await claimPreparedEximbayContact(client, payment, input, prepared);
+  if (claim.kind === "sessionNotUsable") throw sessionNotUsable();
+  if (claim.kind === "lost") return toResult(claim.payment, claim.initiateResult);
+  return contactEximbay(client, claim.payment, prepared);
+}
+
+async function claimPreparedEximbayContact(
+  client: PrismaClient,
+  payment: InitiatedPayment,
+  input: RuntimeInitiationInput,
+  prepared: PreparedEximbayReadyContact,
+): Promise<ContactClaim> {
+  try {
+    return await markContactStarted(client, payment, input, prepared);
+  } catch (error) {
+    if (error instanceof EximbayReadyContactError) {
+      throw new PaymentInitiateException("ATTEMPT_STATE_CONFLICT", "Prepared payment facts changed before contact.");
+    }
+    throw error;
+  }
 }
 
 async function authorizeContact(
@@ -191,6 +252,12 @@ async function decideForCurrent(
   input: RuntimeInitiationInput,
   now: Date,
 ): Promise<InitiateDecision> {
+  if (isEximbayModeMismatchBeforeSupersession(current, input)) {
+    throw new PaymentInitiateException(
+      "ATTEMPT_STATE_CONFLICT",
+      "The existing Eximbay attempt mode does not match the requested mode.",
+    );
+  }
   if (isCompatibleAttempt(current, input, session)) {
     return decideCompatible(tx, current, session);
   }
@@ -201,6 +268,16 @@ async function decideForCurrent(
   await validateCommerceAtContactBoundary(tx, session);
   await supersedeUncontactedAuthorized(tx, current, now);
   return { kind: "contact", payment: await createContactAuthorizedPayment(tx, session, input, now) };
+}
+
+function isEximbayModeMismatchBeforeSupersession(
+  current: InitiatedPayment,
+  input: RuntimeInitiationInput,
+): boolean {
+  return current.provider === PaymentProvider.EXIMBAY
+    && input.provider.code === PaymentProvider.EXIMBAY
+    && isUncontactedAuthorized(current)
+    && current.mode !== input.mode;
 }
 
 async function decideCompatible(
@@ -441,6 +518,7 @@ async function markContactStarted(
   client: PrismaClient,
   payment: InitiatedPayment,
   input: RuntimeInitiationInput,
+  prepared: PreparedEximbayReadyContact | null,
 ): Promise<ContactClaim> {
   return client.$transaction(async (tx) => {
     await lockCheckoutSession(tx, payment.checkoutSessionId);
@@ -459,8 +537,9 @@ async function markContactStarted(
       throw remediationRequired();
     }
     await validateCommerceAtContactBoundary(tx, session);
+    await assertEximbayPreparedFactsStillCurrent(tx, payment.id, session, input, prepared);
     const result = await tx.payment.updateMany({
-      where: uncontactedPaymentClaimWhere(payment),
+      where: contactClaimWhere(payment, prepared),
       data: {
         attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
         contactStartedAt: contactBoundaryNow,
@@ -470,6 +549,45 @@ async function markContactStarted(
       return lostContactClaim(await requirePayment(tx, payment.id));
     }
     return { kind: "claimed", payment: await requirePayment(tx, payment.id) };
+  });
+}
+
+function contactClaimWhere(
+  payment: InitiatedPayment,
+  prepared: PreparedEximbayReadyContact | null,
+): Prisma.PaymentWhereInput {
+  if (prepared) return strictEximbayUncontactedPaymentClaimWhere(payment);
+  return uncontactedPaymentClaimWhere(payment);
+}
+
+async function assertEximbayPreparedFactsStillCurrent(
+  tx: InitiateTx,
+  paymentId: string,
+  session: InitiateSession,
+  input: RuntimeInitiationInput,
+  prepared: PreparedEximbayReadyContact | null,
+): Promise<void> {
+  if (!prepared) return;
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "User" WHERE "id" = ${session.userId} FOR UPDATE
+  `);
+  const buyer = await tx.user.findUnique({
+    where: { id: session.userId },
+    select: { id: true, name: true, email: true },
+  });
+  if (!buyer) throw new PaymentInitiateException("SESSION_UNAVAILABLE", "Checkout owner is unavailable.");
+  const currentPayment = await requirePayment(tx, paymentId);
+  assertPreparedEximbayReadyContact(prepared, {
+    payment: currentPayment,
+    session: {
+      id: session.id,
+      userId: session.userId,
+      marketCode: session.marketCode,
+      currency: session.currency,
+      totalAmount: session.totalAmount,
+    },
+    buyer,
+    method: input.method,
   });
 }
 
@@ -530,6 +648,20 @@ function uncontactedPaymentClaimWhere(payment: InitiatedPayment): Prisma.Payment
   };
 }
 
+function strictEximbayUncontactedPaymentClaimWhere(
+  payment: InitiatedPayment,
+): Prisma.PaymentWhereInput {
+  return {
+    ...uncontactedPaymentClaimWhere(payment),
+    provider: payment.provider,
+    mode: payment.mode,
+    providerOrderId: payment.providerOrderId,
+    amount: payment.amount,
+    currency: payment.currency,
+    routingRuleId: payment.routingRuleId,
+  };
+}
+
 function lostContactClaim(payment: InitiatedPayment): ContactClaim {
   const persisted = persistedInitiationResult(payment);
   if (persisted) return { kind: "lost", payment, initiateResult: persisted };
@@ -553,6 +685,95 @@ async function markOutcomeUnknown(client: PrismaClient, paymentId: string): Prom
       errorMessage: "Provider initiation outcome is unresolved.",
     },
   });
+}
+
+async function markEximbayOutcomeUnknown(client: PrismaClient, paymentId: string): Promise<void> {
+  await client.payment.updateMany({
+    where: {
+      id: paymentId,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      providerPaymentKey: null,
+      initiationOutputKind: null,
+      blockingEndedAt: null,
+    },
+    data: {
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      errorCode: "PROVIDER_INITIATE_OUTCOME_UNKNOWN",
+      errorMessage: "Provider initiation outcome is unresolved.",
+    },
+  });
+}
+
+async function prepareEximbayContact(
+  client: PrismaClient,
+  payment: InitiatedPayment,
+  input: RuntimeInitiationInput,
+): Promise<PreparedEximbayReadyContact> {
+  try {
+    return await prepareEximbayReadyContact(client, {
+      paymentId: payment.id,
+      checkoutSessionId: payment.checkoutSessionId,
+      userId: input.userId,
+      mode: input.mode,
+      method: input.method,
+      env: input.eximbayReady?.env,
+      fetchImpl: input.eximbayReady?.fetchImpl,
+    });
+  } catch (error) {
+    if (error instanceof EximbayReadyContactError
+      && error.code === "SESSION_NOT_FOUND") {
+      throw new PaymentInitiateException("SESSION_UNAVAILABLE", "Checkout session is unavailable.");
+    }
+    if (error instanceof EximbayReadyContactError) {
+      throw new PaymentInitiateException("ATTEMPT_STATE_CONFLICT", "Payment attempt changed before contact.");
+    }
+    throw new PaymentInitiateException("PROVIDER_UNAVAILABLE", "Eximbay READY preparation is unavailable.");
+  }
+}
+
+async function contactEximbay(
+  client: PrismaClient,
+  contacted: InitiatedPayment,
+  prepared: PreparedEximbayReadyContact,
+): Promise<InitiatePaymentAttemptResult> {
+  let execution: EximbayReadyContactExecution;
+  try {
+    execution = await executePreparedEximbayReadyContact(prepared);
+  } catch {
+    return transitionEximbayToOutcomeUnknown(client, contacted.id);
+  }
+  if (execution.kind === "notAdmitted") {
+    return transitionEximbayToOutcomeUnknown(client, contacted.id);
+  }
+  try {
+    return await persistInitiationOutput(
+      client,
+      contacted,
+      { kind: "ready" },
+      requireContactStartedAt(contacted),
+    );
+  } catch {
+    return transitionEximbayToOutcomeUnknown(client, contacted.id);
+  }
+}
+
+async function transitionEximbayToOutcomeUnknown(
+  client: PrismaClient,
+  paymentId: string,
+): Promise<never> {
+  try {
+    await markEximbayOutcomeUnknown(client, paymentId);
+  } catch {
+    throw outcomeUnknown();
+  }
+  throw outcomeUnknown();
+}
+
+function outcomeUnknown(): PaymentInitiateException {
+  return new PaymentInitiateException(
+    "ATTEMPT_OUTCOME_UNKNOWN",
+    "Provider contact outcome is unknown; this attempt requires reconciliation.",
+  );
 }
 
 async function persistInitiationOutput(
@@ -716,9 +937,12 @@ function paymentSelect(): Prisma.PaymentSelect {
     providerPaymentKey: true,
     initiationOutputKind: true,
     initiationApproveUrl: true,
+    initiationCompletedAt: true,
     contactIntentAt: true,
     contactStartedAt: true,
     financialSucceededAt: true,
+    blockingEndedAt: true,
+    suspendedByPaymentId: true,
   };
 }
 

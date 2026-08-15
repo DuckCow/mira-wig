@@ -2,7 +2,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { PaymentProvider } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { PaymentMode } from "../routing";
+import { ProviderCapability } from "../capabilities";
+import { credentialChecksForProvider } from "../credentials";
+import { createInitiationProvider } from "../factory";
+import { PaymentMethod, PaymentMode } from "../routing";
 import { normalizeRefundRequestFingerprintInput } from "../../refund/refund-request-fingerprint";
 
 const ROOT = process.cwd();
@@ -38,7 +41,7 @@ describe("Eximbay EX1 disabled architecture", () => {
     }
   });
 
-  it("adds no Eximbay route, adapter, SDK dependency, credential, endpoint, or deployment key", () => {
+  it("adds no Eximbay route, adapter, SDK dependency, or activation/deployment key", () => {
     const routes = repositoryFiles(join(ROOT, "src/app/api/payments"));
     const packageJson = source("package.json");
     const production = productionSource();
@@ -53,7 +56,36 @@ describe("Eximbay EX1 disabled architecture", () => {
     ]);
     expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(true);
     expect(packageJson.toLowerCase()).not.toContain("eximbay");
-    expect(production).not.toMatch(/EXIMBAY_(?:SECRET|KEY|ENDPOINT|URL|ENABLED)/u);
+    expect(production).not.toMatch(/EXIMBAY_(?:EXTERNAL_)?ENABLED/u);
+    expect(production).not.toMatch(/(?:javascriptSDK\.js|EXIMBAY\.request_pay|request_pay)/u);
+  });
+
+  it("keeps routing and factory reachability disabled even when every dormant S2 config name is present", () => {
+    const env = {
+      EXIMBAY_SANDBOX_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
+      EXIMBAY_SANDBOX_MID: "synthetic-sandbox-mid",
+      EXIMBAY_LIVE_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
+      EXIMBAY_LIVE_MID: "synthetic-live-mid",
+      PAYMENT_PUBLIC_ORIGIN: "https://payments.example.test/",
+    };
+    const context = {
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+      market: "US",
+      method: PaymentMethod.CARD,
+      currency: "USD",
+      ruleId: "synthetic.eximbay.disabled",
+      credentials: credentialChecksForProvider({
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+        capability: ProviderCapability.ACTION_ADAPTER,
+      }, env),
+      liveGuard: { kind: "blocked" as const, liveEnabled: false as const, reason: "disabled" },
+    };
+
+    expect(context.credentials).toEqual([]);
+    expect(() => createInitiationProvider(context, { env }))
+      .toThrowError(expect.objectContaining({ code: "PROVIDER_NOT_ENABLED" }));
   });
 
   it("preserves exact Toss-only refund runtime authority", () => {

@@ -5,6 +5,11 @@ import { PaymentMode, type PaymentMode as PaymentModeValue } from "./routing";
 
 export const TOSS_SANDBOX_SECRET_KEY = "TOSS_SANDBOX_SECRET_KEY";
 export const TOSS_LIVE_SECRET_KEY = "TOSS_LIVE_SECRET_KEY";
+export const EXIMBAY_SANDBOX_API_KEY = "EXIMBAY_SANDBOX_API_KEY";
+export const EXIMBAY_SANDBOX_MID = "EXIMBAY_SANDBOX_MID";
+export const EXIMBAY_LIVE_API_KEY = "EXIMBAY_LIVE_API_KEY";
+export const EXIMBAY_LIVE_MID = "EXIMBAY_LIVE_MID";
+export const PAYMENT_PUBLIC_ORIGIN = "PAYMENT_PUBLIC_ORIGIN";
 
 export type ProviderEnv = Readonly<Record<string, string | undefined>>;
 

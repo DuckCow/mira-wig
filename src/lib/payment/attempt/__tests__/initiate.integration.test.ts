@@ -28,6 +28,7 @@ import { createCheckoutSession, expireStale, type CheckoutShippingInput } from "
 import { initiatePaymentAttempt } from "../initiate";
 
 const initiationProviders = vi.hoisted(() => new Map<string, PaymentInitiationProvider>());
+const eximbayCallRecords = new WeakMap<PaymentInitiationProvider, PaymentInitiateInput[]>();
 const providerOrderEntropy = vi.hoisted(() => {
   const chunks: Uint8Array[] = [];
   return { chunks, calls: 0 };
@@ -97,7 +98,9 @@ describe("payment initiate providerRef persistence", () => {
     providerOrderEntropy.calls = 0;
     ctx = makeContext();
     await ensureMarkets();
-    await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
+    await db.user.create({
+      data: { id: ctx.userId, name: "Synthetic Eximbay Buyer", email: `${ctx.userId}@example.test` },
+    });
   });
 
   afterEach(async () => {
@@ -169,7 +172,7 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("commits one EXIMBAY providerOrderId with CONTACT_AUTHORIZED before contact claim", async () => {
-    const session = await submitSessionWithOneLine(ctx);
+    const session = await submitUsSessionWithOneLine(ctx);
     const calls: PaymentInitiateInput[] = [];
     const barrier = coordinationBarrier();
     const coordination = coordinationAt("AFTER_AUTHORIZATION_COMMIT", barrier);
@@ -208,7 +211,7 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("reuses the same EXIMBAY Payment and providerOrderId without another generator call", async () => {
-    const session = await submitSessionWithOneLine(ctx);
+    const session = await submitUsSessionWithOneLine(ctx);
     const calls: PaymentInitiateInput[] = [];
     const provider = fakeProvider({ kind: "ready" }, calls, PaymentProvider.EXIMBAY);
     const input = {
@@ -235,7 +238,7 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("deterministically converges simultaneous compatible EXIMBAY starts under the session row lock", async () => {
-    const session = await submitSessionWithOneLine(ctx);
+    const session = await submitUsSessionWithOneLine(ctx);
     const calls: PaymentInitiateInput[] = [];
     const provider = fakeProvider({ kind: "ready" }, calls, PaymentProvider.EXIMBAY);
     const input = {
@@ -305,7 +308,7 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("retires an uncontacted EXIMBAY identity with its superseded row and allocates a fresh one", async () => {
-    const session = await submitSessionWithOneLine(ctx);
+    const session = await submitUsSessionWithOneLine(ctx);
     const firstCalls: PaymentInitiateInput[] = [];
     const replacementCalls: PaymentInitiateInput[] = [];
     const barrier = coordinationBarrier();
@@ -349,8 +352,8 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("fails a duplicate EXIMBAY providerOrderId closed without regeneration or contact authority", async () => {
-    const firstSession = await submitSessionWithOneLine(ctx);
-    const secondSession = await submitSessionWithOneLine(ctx);
+    const firstSession = await submitUsSessionWithOneLine(ctx);
+    const secondSession = await submitUsSessionWithOneLine(ctx);
     const firstCalls: PaymentInitiateInput[] = [];
     const secondCalls: PaymentInitiateInput[] = [];
     providerOrderEntropy.chunks.push(entropyChunk(4), entropyChunk(4));
@@ -378,9 +381,9 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("forces a concurrent two-session EXIMBAY collision through the provider-order unique index", async () => {
-    const firstSession = await submitSessionWithOneLine(ctx);
+    const firstSession = await submitUsSessionWithOneLine(ctx);
     await db.cartItem.deleteMany({ where: { userId: ctx.userId } });
-    const secondSession = await submitUsSessionWithOneLine(ctx);
+    const secondSession = await submitJpSessionWithOneLine(ctx);
     const firstCalls: PaymentInitiateInput[] = [];
     const secondCalls: PaymentInitiateInput[] = [];
     const sharedProviderOrderId = `c${"8".repeat(24)}`;
@@ -449,8 +452,8 @@ describe("payment initiate providerRef persistence", () => {
   });
 
   it("does not reinterpret an unrelated unique violation as provider-order collision authority", async () => {
-    const firstSession = await submitSessionWithOneLine(ctx);
-    const secondSession = await submitSessionWithOneLine(ctx);
+    const firstSession = await submitUsSessionWithOneLine(ctx);
+    const secondSession = await submitUsSessionWithOneLine(ctx);
     const routingRuleId = "test.eximbay.unrelated-unique";
     const firstCalls: PaymentInitiateInput[] = [];
     const secondCalls: PaymentInitiateInput[] = [];
@@ -522,6 +525,73 @@ describe("payment initiate providerRef persistence", () => {
     expect(payment.providerRef).toBeNull();
     expect(payment.providerPaymentKey).toBeNull();
     expect(calls).toHaveLength(1);
+  });
+
+  it("preserves the baseline generic contact claim when non-commerce identity fields drift", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const authorized = coordinationBarrier();
+    const pending = initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.generic.baseline-claim",
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", authorized));
+    await authorized.reached;
+    const payment = await onlyPayment(session.sessionId);
+    await db.payment.update({
+      where: { id: payment.id },
+      data: {
+        provider: PaymentProvider.PAYPAL,
+        mode: PaymentMode.LIVE,
+        routingRuleId: "test.generic.drifted-after-authorization",
+      },
+    });
+    authorized.release();
+
+    await expect(pending).resolves.toMatchObject({ initiateResult: { kind: "ready" } });
+    expect(calls).toHaveLength(1);
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      provider: PaymentProvider.PAYPAL,
+      mode: PaymentMode.LIVE,
+      providerOrderId: null,
+      routingRuleId: "test.generic.drifted-after-authorization",
+    });
+  });
+
+  it("preserves baseline generic OUTCOME_UNKNOWN semantics when output appears before failure handling", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider: PaymentInitiationProvider = {
+      code: PaymentProvider.TOSS,
+      initiate: async (input) => {
+        calls.push(input);
+        await db.payment.update({
+          where: { id: input.paymentId },
+          data: {
+            initiationOutputKind: PaymentInitiationOutputKind.READY,
+            initiationCompletedAt: new Date(),
+          },
+        });
+        throw new Error("synthetic generic post-output failure");
+      },
+    };
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.generic.baseline-outcome-unknown",
+    })).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+
+    expect(calls).toHaveLength(1);
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      initiationOutputKind: PaymentInitiationOutputKind.READY,
+    });
   });
 
   it("final capture sets providerPaymentKey while preserving providerRef", async () => {
@@ -1559,6 +1629,9 @@ async function initiatePaymentAttemptForTest(
       contactBoundaryClock: contactBoundaryNow
         ? () => new Date(contactBoundaryNow.getTime())
         : undefined,
+      eximbayReady: input.provider.code === PaymentProvider.EXIMBAY
+        ? syntheticEximbayReadyDependencies(input.provider)
+        : undefined,
     });
   } finally {
     coordinatedAfterCommit?.mockRestore();
@@ -1641,11 +1714,42 @@ function fakeProvider(
   calls: PaymentInitiateInput[] = [],
   code: PaymentProvider = PaymentProvider.TOSS,
 ): PaymentInitiationProvider {
-  return {
+  const provider: PaymentInitiationProvider = {
     code,
     initiate: (input: PaymentInitiateInput) => {
       calls.push(input);
       return Promise.resolve(initiateResult);
+    },
+  };
+  if (code === PaymentProvider.EXIMBAY) eximbayCallRecords.set(provider, calls);
+  return provider;
+}
+
+function syntheticEximbayReadyDependencies(provider: PaymentInitiationProvider) {
+  return {
+    env: {
+      EXIMBAY_SANDBOX_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
+      EXIMBAY_SANDBOX_MID: "synthetic-sandbox-mid",
+      PAYMENT_PUBLIC_ORIGIN: "https://payments.example.test/",
+    },
+    fetchImpl: () => {
+      const calls = eximbayCallRecords.get(provider);
+      calls?.push({
+        checkoutSessionId: "s2-owned",
+        paymentId: "s2-owned",
+        provider: PaymentProvider.EXIMBAY,
+        amount: 0,
+        currency: "USD",
+        idempotencyKey: "s2-owned",
+      });
+      return Promise.resolve(new Response(JSON.stringify({
+        rescode: "0000",
+        resmsg: "synthetic",
+        fgkey: "synthetic-ready-fgkey",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
     },
   };
 }
@@ -1838,6 +1942,40 @@ async function submitUsSessionWithOneLine(context: TestContext) {
   });
 }
 
+async function submitJpSessionWithOneLine(context: TestContext) {
+  await db.market.upsert({
+    where: { code: MarketCode.JP },
+    update: {
+      currency: "JPY",
+      shippableCountries: [ShippingCountry.JP],
+      defaultLocale: "ja",
+      isActive: true,
+    },
+    create: {
+      code: MarketCode.JP,
+      currency: "JPY",
+      shippableCountries: [ShippingCountry.JP],
+      defaultLocale: "ja",
+      isActive: true,
+    },
+  });
+  const variant = await createCatalogVariant(context, { amount: 12_000, stock: 5 });
+  await db.wigStyleMarket.create({
+    data: { wigStyleId: variant.styleId, marketCode: MarketCode.JP, isActive: true },
+  });
+  await db.variantMarketPrice.create({
+    data: { variantId: variant.id, marketCode: MarketCode.JP, amount: 100 },
+  });
+  await db.cartItem.create({
+    data: { userId: context.userId, wigStyleId: variant.styleId, variantId: variant.id, quantity: 1 },
+  });
+  return createCheckoutSession(db, {
+    userId: context.userId,
+    marketCode: MarketCode.JP,
+    shipping: validJpShipping(),
+  });
+}
+
 async function moveSessionExpiryIntoPast<T extends { sessionId: string; expiresAt: Date }>(session: T): Promise<T> {
   const expiresAt = new Date("2026-07-06T00:00:00.000Z");
   await db.checkoutSession.update({
@@ -2016,6 +2154,18 @@ function validUsShipping(): CheckoutShippingInput {
     postalCode: "10001",
     administrativeArea: "NY",
     city: "New York",
+    addressLine1: "1 Test Avenue",
+  };
+}
+
+function validJpShipping(): CheckoutShippingInput {
+  return {
+    recipientName: "Synthetic Buyer",
+    phone: "+81-3-1234-5678",
+    country: ShippingCountry.JP,
+    postalCode: "100-0001",
+    administrativeArea: "Tokyo",
+    city: "Chiyoda",
     addressLine1: "1 Test Avenue",
   };
 }
