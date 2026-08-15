@@ -10,6 +10,12 @@ import { normalizeRefundRequestFingerprintInput } from "../../refund/refund-requ
 
 const ROOT = process.cwd();
 const MIGRATION = "prisma/migrations/20260803100000_eximbay_ex1_provider_identity/migration.sql";
+const S3_LOADER = "src/lib/payment/eximbay/sdk-loader.ts";
+const S3_INVOCATION = "src/lib/payment/eximbay/sdk-invocation.ts";
+const S3_SDK_SOURCES = [
+  "https://api-test.eximbay.com/v2/javascriptSDK.js",
+  "https://api.eximbay.com/v2/javascriptSDK.js",
+] as const;
 
 describe("Eximbay EX1 disabled architecture", () => {
   it("adds only the fourth provider enum identity through one canonical migration", () => {
@@ -41,7 +47,7 @@ describe("Eximbay EX1 disabled architecture", () => {
     }
   });
 
-  it("adds no Eximbay route, adapter, SDK dependency, or activation/deployment key", () => {
+  it("keeps reviewed dormant S3 SDK authority path-exact without route, dependency, or activation", () => {
     const routes = repositoryFiles(join(ROOT, "src/app/api/payments"));
     const packageJson = source("package.json");
     const production = productionSource();
@@ -57,7 +63,25 @@ describe("Eximbay EX1 disabled architecture", () => {
     expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(true);
     expect(packageJson.toLowerCase()).not.toContain("eximbay");
     expect(production).not.toMatch(/EXIMBAY_(?:EXTERNAL_)?ENABLED/u);
-    expect(production).not.toMatch(/(?:javascriptSDK\.js|EXIMBAY\.request_pay|request_pay)/u);
+    for (const sdkSource of S3_SDK_SOURCES) {
+      expect(productionPathsContaining(sdkSource)).toEqual([S3_LOADER]);
+    }
+    expect(productionPathsMatching(/(?:EXIMBAY\.request_pay|request_pay|requestPay)/u)).toEqual([
+      S3_INVOCATION,
+      S3_LOADER,
+    ]);
+  });
+
+  it("keeps dormant S3 browser modules unreachable from checkout and customer clients", () => {
+    const paymentMethod = source("src/app/(shop)/checkout/PaymentMethodSection.tsx");
+    const customerClientConsumers = productionPathsMatching(/sdk-(?:loader|invocation)/u)
+      .filter((path) => path.endsWith(".tsx"))
+      .filter((path) => path.startsWith("src/app/(shop)/") || path.startsWith("src/components/"));
+    const securityConfiguration = [source("next.config.ts"), source("src/proxy.ts")].join("\n");
+
+    expect(paymentMethod).not.toMatch(/sdk-(?:loader|invocation)|request_pay/u);
+    expect(customerClientConsumers).toEqual([]);
+    expect(securityConfiguration).not.toMatch(/(?:api-test\.)?eximbay\.com|EXIMBAY/iu);
   });
 
   it("keeps routing and factory reachability disabled even when every dormant S2 config name is present", () => {
@@ -110,6 +134,18 @@ function productionFiles(): readonly string[] {
   return repositoryFiles(join(ROOT, "src"), true)
     .filter((path) => /\.(?:ts|tsx)$/u.test(path))
     .map((path) => join(ROOT, path));
+}
+
+function productionPathsContaining(value: string): string[] {
+  return productionFiles()
+    .filter((path) => readFileSync(path, "utf8").includes(value))
+    .map((path) => relative(ROOT, path));
+}
+
+function productionPathsMatching(pattern: RegExp): string[] {
+  return productionFiles()
+    .filter((path) => pattern.test(readFileSync(path, "utf8")))
+    .map((path) => relative(ROOT, path));
 }
 
 function repositoryFiles(root: string, excludeTests = false): string[] {

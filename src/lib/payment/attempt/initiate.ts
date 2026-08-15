@@ -24,6 +24,7 @@ import {
   prepareEximbayReadyContact,
   type EximbayReadyContactExecution,
   type EximbayReadyFetch,
+  type FreshEximbayReadyAuthority,
   type PreparedEximbayReadyContact,
 } from "@/lib/payment/eximbay/ready-contact";
 import { isUsable } from "@/lib/payment/session";
@@ -129,10 +130,40 @@ export interface InitiatePaymentAttemptResult {
   initiateResult: PaymentInitiateResult;
 }
 
+type FreshEximbayReadyAttemptResult = InitiatePaymentAttemptResult & {
+  readonly provider: typeof PaymentProvider.EXIMBAY;
+  readonly initiateResult: Extract<PaymentInitiateResult, { kind: "ready" }>;
+};
+
+export type InitiatePaymentAttemptExecution =
+  | Readonly<{
+      channel: "DURABLE_ONLY";
+      durable: InitiatePaymentAttemptResult;
+    }>
+  | Readonly<{
+      channel: "FRESH_EXIMBAY_READY";
+      durable: FreshEximbayReadyAttemptResult;
+      freshAuthority: FreshEximbayReadyAuthority;
+    }>;
+
 export async function initiatePaymentAttempt(
   client: PrismaClient,
   input: InitiatePaymentAttemptInput,
 ): Promise<InitiatePaymentAttemptResult> {
+  return (await executePaymentAttempt(client, input)).durable;
+}
+
+export function initiatePaymentAttemptWithTransientAuthority(
+  client: PrismaClient,
+  input: InitiatePaymentAttemptInput,
+): Promise<InitiatePaymentAttemptExecution> {
+  return executePaymentAttempt(client, input);
+}
+
+async function executePaymentAttempt(
+  client: PrismaClient,
+  input: InitiatePaymentAttemptInput,
+): Promise<InitiatePaymentAttemptExecution> {
   let provider: PaymentInitiationProvider;
   try {
     provider = resolveInitiationProvider(input.adapterContext);
@@ -158,14 +189,16 @@ export async function initiatePaymentAttempt(
 async function contactProviderForAttempt(
   client: PrismaClient,
   input: RuntimeInitiationInput,
-): Promise<InitiatePaymentAttemptResult> {
+): Promise<InitiatePaymentAttemptExecution> {
   const authorizationNow = input.now ?? new Date();
   const decision = await client.$transaction((tx) => authorizeContact(tx, input, authorizationNow));
-  if (decision.kind === "reuse") return toResult(decision.payment, decision.initiateResult);
+  if (decision.kind === "reuse") {
+    return durableOnly(toResult(decision.payment, decision.initiateResult));
+  }
   if (decision.payment.provider === PaymentProvider.EXIMBAY) {
     return contactEximbayForAttempt(client, decision.payment, input);
   }
-  return contactGenericProviderForAttempt(client, decision.payment, input);
+  return durableOnly(await contactGenericProviderForAttempt(client, decision.payment, input));
 }
 
 async function contactGenericProviderForAttempt(
@@ -202,12 +235,14 @@ async function contactEximbayForAttempt(
   client: PrismaClient,
   payment: InitiatedPayment,
   input: RuntimeInitiationInput,
-): Promise<InitiatePaymentAttemptResult> {
+): Promise<InitiatePaymentAttemptExecution> {
   const prepared = await prepareEximbayContact(client, payment, input);
   await input.eximbayReady?.afterPrepared?.();
   const claim = await claimPreparedEximbayContact(client, payment, input, prepared);
   if (claim.kind === "sessionNotUsable") throw sessionNotUsable();
-  if (claim.kind === "lost") return toResult(claim.payment, claim.initiateResult);
+  if (claim.kind === "lost") {
+    return durableOnly(toResult(claim.payment, claim.initiateResult));
+  }
   return contactEximbay(client, claim.payment, prepared);
 }
 
@@ -735,7 +770,7 @@ async function contactEximbay(
   client: PrismaClient,
   contacted: InitiatedPayment,
   prepared: PreparedEximbayReadyContact,
-): Promise<InitiatePaymentAttemptResult> {
+): Promise<InitiatePaymentAttemptExecution> {
   let execution: EximbayReadyContactExecution;
   try {
     execution = await executePreparedEximbayReadyContact(prepared);
@@ -746,12 +781,28 @@ async function contactEximbay(
     return transitionEximbayToOutcomeUnknown(client, contacted.id);
   }
   try {
-    return await persistInitiationOutput(
+    const durable = await persistInitiationOutput(
       client,
       contacted,
       { kind: "ready" },
       requireContactStartedAt(contacted),
     );
+    if (durable.provider !== PaymentProvider.EXIMBAY
+      || durable.initiateResult.kind !== "ready") {
+      throw new PaymentInitiateException(
+        "ATTEMPT_STATE_CONFLICT",
+        "Persisted Eximbay READY result is inconsistent.",
+      );
+    }
+    return Object.freeze({
+      channel: "FRESH_EXIMBAY_READY",
+      durable: Object.freeze({
+        ...durable,
+        provider: PaymentProvider.EXIMBAY,
+        initiateResult: durable.initiateResult,
+      }),
+      freshAuthority: execution.freshAuthority,
+    });
   } catch {
     return transitionEximbayToOutcomeUnknown(client, contacted.id);
   }
@@ -863,6 +914,10 @@ function toResult(
   initiateResult: PaymentInitiateResult,
 ): InitiatePaymentAttemptResult {
   return { paymentId: payment.id, provider: payment.provider, status: payment.status, initiateResult };
+}
+
+function durableOnly(durable: InitiatePaymentAttemptResult): InitiatePaymentAttemptExecution {
+  return Object.freeze({ channel: "DURABLE_ONLY", durable });
 }
 
 async function requirePayment(

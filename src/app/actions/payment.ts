@@ -12,7 +12,13 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { completeFromCapture } from "@/lib/payment/complete";
 import type { CaptureFacts, CompleteFromCaptureResult } from "@/lib/payment/complete";
-import { initiatePaymentAttempt, PaymentInitiateException } from "@/lib/payment/attempt/initiate";
+import {
+  type InitiatePaymentAttemptExecution,
+  initiatePaymentAttemptWithTransientAuthority,
+  PaymentInitiateException,
+} from "@/lib/payment/attempt/initiate";
+import { materializeFreshEximbayReadyHandoff } from "@/lib/payment/eximbay/sdk-handoff";
+import type { EximbayReadyHandoffV1 } from "@/lib/payment/eximbay/sdk-handoff-contract";
 import {
   hasSessionSuspensionCycle,
   hasUnresolvedSessionExposure,
@@ -71,6 +77,22 @@ export type PaymentActionResult =
   | { kind: "REDIRECT"; success: true; orderId?: string; paymentId: string; provider: PaymentProvider; redirectTo: string }
   | PaymentActionNonSuccess;
 
+type FreshEximbayReadyActionResult =
+  Extract<PaymentActionResult, { kind: "READY"; success: true }> & {
+    readonly provider: typeof PaymentProvider.EXIMBAY;
+  };
+
+export type InitiatePaymentActionResult =
+  | Readonly<{
+      channel: "DURABLE_ONLY";
+      durable: PaymentActionResult;
+    }>
+  | Readonly<{
+      channel: "FRESH_EXIMBAY_READY";
+      durable: FreshEximbayReadyActionResult;
+      transientHandoff: EximbayReadyHandoffV1;
+    }>;
+
 export type PaymentActionErrorCode =
   | "UNAUTHORIZED"
   | "SESSION_UNAVAILABLE"
@@ -112,25 +134,70 @@ const PUBLIC_PAYMENT_ERROR_MESSAGES: Record<PaymentActionErrorCode, string> = {
   PAYMENT_FAILED: "Payment could not be completed.",
 };
 
-export async function initiatePayment(checkoutSessionId: string, input: InitiatePaymentInput = {}): Promise<PaymentActionResult> {
+export async function initiatePayment(
+  checkoutSessionId: string,
+  input: InitiatePaymentInput = {},
+): Promise<InitiatePaymentActionResult> {
   try {
-    const boundary = await resolveBoundary(checkoutSessionId);
-    if (!boundary.success) return boundary;
-    const provider = resolveActionProvider(
-      boundary.session,
-      boundary.session.marketCode,
-      input.method,
-    );
-    if (!provider.success) return actionError(provider.errorCode, provider.retryable);
-    const result = await initiatePaymentAttempt(db, {
-      sessionId: checkoutSessionId,
-      userId: boundary.userId,
-      adapterContext: provider.adapterContext,
-    });
-    return initiateSuccess(result.paymentId, result.provider, result.initiateResult);
+    const prepared = await prepareInitiationAction(checkoutSessionId, input);
+    if (!prepared.success) return durableAction(prepared.durable);
+    return await translateInitiationExecution(prepared.execution);
   } catch (e) {
-    if (e instanceof PaymentInitiateException) return initiateError(e);
-    return actionError("PAYMENT_FAILED", false);
+    if (e instanceof PaymentInitiateException) return durableAction(initiateError(e));
+    return durableAction(actionError("PAYMENT_FAILED", false));
+  }
+}
+
+async function prepareInitiationAction(
+  checkoutSessionId: string,
+  input: InitiatePaymentInput,
+): Promise<
+  | Readonly<{ success: true; execution: InitiatePaymentAttemptExecution }>
+  | Readonly<{ success: false; durable: PaymentActionResult }>
+> {
+  const boundary = await resolveBoundary(checkoutSessionId);
+  if (!boundary.success) return { success: false, durable: boundary };
+  const provider = resolveActionProvider(boundary.session, boundary.session.marketCode, input.method);
+  if (!provider.success) {
+    return { success: false, durable: actionError(provider.errorCode, provider.retryable) };
+  }
+  const execution = await initiatePaymentAttemptWithTransientAuthority(db, {
+    sessionId: checkoutSessionId,
+    userId: boundary.userId,
+    adapterContext: provider.adapterContext,
+  });
+  return { success: true, execution };
+}
+
+async function translateInitiationExecution(
+  execution: InitiatePaymentAttemptExecution,
+): Promise<InitiatePaymentActionResult> {
+  const durable = initiateSuccess(
+    execution.durable.paymentId,
+    execution.durable.provider,
+    execution.durable.initiateResult,
+  );
+  if (execution.channel === "DURABLE_ONLY") return durableAction(durable);
+  if (durable.kind !== "READY" || durable.provider !== PaymentProvider.EXIMBAY) {
+    return durableAction(durable);
+  }
+  try {
+    const transientHandoff = await materializeFreshEximbayReadyHandoff(
+      execution.durable.paymentId,
+      execution.freshAuthority,
+    );
+    if (transientHandoff.paymentId !== durable.paymentId) return durableAction(durable);
+    const freshDurable: FreshEximbayReadyActionResult = Object.freeze({
+      ...durable,
+      provider: PaymentProvider.EXIMBAY,
+    });
+    return Object.freeze({
+      channel: "FRESH_EXIMBAY_READY",
+      durable: freshDurable,
+      transientHandoff,
+    });
+  } catch {
+    return durableAction(durable);
   }
 }
 
@@ -428,6 +495,10 @@ function initiateError(e: PaymentInitiateException): PaymentActionResult {
     return boundedState("REMEDIATION_REQUIRED", e.code, false);
   }
   return actionError(e.code, false);
+}
+
+function durableAction(durable: PaymentActionResult): InitiatePaymentActionResult {
+  return Object.freeze({ channel: "DURABLE_ONLY", durable });
 }
 
 function actionError(errorCode: PaymentActionErrorCode, retryable: boolean): PaymentActionFailure {

@@ -25,7 +25,11 @@ import type {
   PaymentInitiationProvider,
 } from "@/lib/payment/providers/types";
 import { createCheckoutSession, expireStale, type CheckoutShippingInput } from "@/lib/payment/session";
-import { initiatePaymentAttempt } from "../initiate";
+import {
+  initiatePaymentAttempt,
+  initiatePaymentAttemptWithTransientAuthority,
+  type InitiatePaymentAttemptInput,
+} from "../initiate";
 
 const initiationProviders = vi.hoisted(() => new Map<string, PaymentInitiationProvider>());
 const eximbayCallRecords = new WeakMap<PaymentInitiationProvider, PaymentInitiateInput[]>();
@@ -75,6 +79,7 @@ interface TestInitiationInput {
   routingRuleId: string;
   now?: Date;
   contactBoundaryNow?: Date;
+  eximbayReady?: InitiatePaymentAttemptInput["eximbayReady"];
 }
 
 interface TestContext {
@@ -82,6 +87,10 @@ interface TestContext {
   styleIds: string[];
   variantIds: string[];
 }
+
+type TestEximbayReadyFetch = NonNullable<
+  NonNullable<InitiatePaymentAttemptInput["eximbayReady"]>["fetchImpl"]
+>;
 
 interface VariantOptions {
   amount?: number;
@@ -1609,6 +1618,141 @@ describe("payment initiate providerRef persistence", () => {
     expect(second).toMatchObject({ paymentId: first.paymentId, initiateResult: { kind: "ready", providerRef: "persisted" } });
     expect(calls).toHaveLength(1);
   });
+
+  it("returns fresh Eximbay authority only after CONTACTED plus durable READY persistence", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.fresh");
+
+    const execution = await initiatePaymentAttemptExecutionForTest(db, input);
+
+    expect(execution.channel).toBe("FRESH_EXIMBAY_READY");
+    if (execution.channel !== "FRESH_EXIMBAY_READY") throw new Error("Expected fresh authority");
+    const persisted = await onlyPayment(session.sessionId);
+    expect(persisted).toMatchObject({
+      id: execution.durable.paymentId,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      initiationOutputKind: PaymentInitiationOutputKind.READY,
+    });
+    expect(persisted.initiationCompletedAt?.getTime()).toBe(persisted.contactStartedAt?.getTime());
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns durable-only on Eximbay READY re-entry without another fetch", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.ready-reentry");
+
+    const first = await initiatePaymentAttemptExecutionForTest(db, input);
+    const second = await initiatePaymentAttemptExecutionForTest(db, input);
+
+    expect(first.channel).toBe("FRESH_EXIMBAY_READY");
+    expect(second).toMatchObject({
+      channel: "DURABLE_ONLY",
+      durable: { initiateResult: { kind: "ready" } },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns durable-only inProgress while a contacted Eximbay attempt has no output", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchBarrier = coordinationBarrier();
+    const fetchImpl = vi.fn(async () => {
+      await fetchBarrier.wait();
+      return syntheticReadyResponse();
+    });
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.contacted-no-output");
+    const pending = initiatePaymentAttemptExecutionForTest(db, input);
+    await fetchBarrier.reached;
+
+    const reentry = await initiatePaymentAttemptExecutionForTest(db, input);
+
+    expect(reentry).toMatchObject({
+      channel: "DURABLE_ONLY",
+      durable: { initiateResult: { kind: "inProgress" } },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    fetchBarrier.release();
+    await expect(pending).resolves.toMatchObject({ channel: "FRESH_EXIMBAY_READY" });
+  });
+
+  it("returns no authority after OUTCOME_UNKNOWN and never fetches again", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchImpl = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      rescode: "9999",
+      resmsg: "synthetic rejection",
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.outcome-unknown");
+
+    await expect(initiatePaymentAttemptExecutionForTest(db, input))
+      .rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+    await expect(initiatePaymentAttemptExecutionForTest(db, input))
+      .rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not return authority when durable READY persistence fails and never refetches", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.persistence-failure");
+    const update = vi.spyOn(db.payment, "updateMany");
+    update.mockRejectedValueOnce(new Error("synthetic READY persistence failure"));
+
+    await expect(initiatePaymentAttemptExecutionForTest(db, input))
+      .rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+    await expect(initiatePaymentAttemptExecutionForTest(db, input))
+      .rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    update.mockRestore();
+  });
+
+  it("lets the legacy durable-only API discard authority without recovery or recontact", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.legacy-drop");
+
+    const legacy = await initiatePaymentAttemptForTest(db, input);
+    const reentry = await initiatePaymentAttemptExecutionForTest(db, input);
+
+    expect(legacy.initiateResult).toEqual({ kind: "ready" });
+    expect(reentry).toMatchObject({
+      channel: "DURABLE_ONLY",
+      durable: { paymentId: legacy.paymentId, initiateResult: { kind: "ready" } },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([PaymentProvider.MOCK, PaymentProvider.TOSS, PaymentProvider.PAYPAL])(
+    "keeps %s initiation on the baseline durable-only channel",
+    async (providerCode) => {
+      const session = await submitSessionWithOneLine(ctx);
+      const calls: PaymentInitiateInput[] = [];
+      const execution = await initiatePaymentAttemptExecutionForTest(db, {
+        sessionId: session.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, calls, providerCode),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: `test.transient.baseline.${providerCode.toLowerCase()}`,
+      });
+
+      expect(execution).toMatchObject({
+        channel: "DURABLE_ONLY",
+        durable: { provider: providerCode, status: PaymentAttemptStatus.INITIATED, initiateResult: { kind: "ready" } },
+      });
+      expect(calls).toHaveLength(1);
+      await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+        provider: providerCode,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        initiationOutputKind: PaymentInitiationOutputKind.READY,
+      });
+    },
+  );
 });
 
 async function initiatePaymentAttemptForTest(
@@ -1630,12 +1774,32 @@ async function initiatePaymentAttemptForTest(
         ? () => new Date(contactBoundaryNow.getTime())
         : undefined,
       eximbayReady: input.provider.code === PaymentProvider.EXIMBAY
-        ? syntheticEximbayReadyDependencies(input.provider)
+        ? input.eximbayReady ?? syntheticEximbayReadyDependencies(input.provider)
         : undefined,
     });
   } finally {
     coordinatedAfterCommit?.mockRestore();
   }
+}
+
+async function initiatePaymentAttemptExecutionForTest(
+  client: typeof db,
+  input: TestInitiationInput,
+) {
+  initiationProviders.set(input.routingRuleId, input.provider);
+  const contactBoundaryNow = input.contactBoundaryNow;
+  return initiatePaymentAttemptWithTransientAuthority(client, {
+    sessionId: input.sessionId,
+    userId: input.userId,
+    adapterContext: testAdapterContext(input),
+    now: input.now,
+    contactBoundaryClock: contactBoundaryNow
+      ? () => new Date(contactBoundaryNow.getTime())
+      : undefined,
+    eximbayReady: input.provider.code === PaymentProvider.EXIMBAY
+      ? input.eximbayReady ?? syntheticEximbayReadyDependencies(input.provider)
+      : undefined,
+  });
 }
 
 function coordinatePaymentTransactions(
@@ -1752,6 +1916,40 @@ function syntheticEximbayReadyDependencies(provider: PaymentInitiationProvider) 
       }));
     },
   };
+}
+
+function transientEximbayInput(
+  sessionId: string,
+  userId: string,
+  fetchImpl: TestEximbayReadyFetch,
+  routingRuleId: string,
+): TestInitiationInput {
+  return {
+    sessionId,
+    userId,
+    provider: fakeProvider({ kind: "ready" }, [], PaymentProvider.EXIMBAY),
+    mode: PaymentMode.SANDBOX,
+    routingRuleId,
+    eximbayReady: {
+      env: {
+        EXIMBAY_SANDBOX_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
+        EXIMBAY_SANDBOX_MID: "synthetic-sandbox-mid",
+        PAYMENT_PUBLIC_ORIGIN: "https://payments.example.test/",
+      },
+      fetchImpl,
+    },
+  };
+}
+
+function syntheticReadyResponse(): Response {
+  return new Response(JSON.stringify({
+    rescode: "0000",
+    resmsg: "synthetic",
+    fgkey: "synthetic-ready-fgkey",
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function entropyChunk(byte: number): Uint8Array {

@@ -8,6 +8,10 @@ vi.mock("@/app/actions/payment", () => ({
 }));
 
 import { confirmPayment, initiatePayment } from "@/app/actions/payment";
+import type {
+  InitiatePaymentActionResult,
+  PaymentActionResult,
+} from "@/app/actions/payment";
 import { runMockPayment, type PaymentState } from "./PaymentMethodSection";
 
 const mockInitiatePayment = vi.mocked(initiatePayment);
@@ -23,7 +27,7 @@ describe("checkout payment result handling", () => {
     ["OUTCOME_UNKNOWN", "outcomeUnknown"],
     ["REMEDIATION_REQUIRED", "remediationRequired"],
   ] as const)("does not confirm an initiation result in %s", async (kind, expectedState) => {
-    mockInitiatePayment.mockResolvedValue({
+    mockInitiatePayment.mockResolvedValue(durableInitiation({
       kind,
       success: false,
       errorCode: kind === "IN_PROGRESS"
@@ -33,7 +37,7 @@ describe("checkout payment result handling", () => {
           : "SESSION_REMEDIATION_REQUIRED",
       error: "raw-provider-payload-must-not-render",
       retryable: false,
-    });
+    }));
     const states: PaymentState[] = [];
 
     await runMockPayment("checkout-session", (state) => states.push(state));
@@ -45,12 +49,12 @@ describe("checkout payment result handling", () => {
   });
 
   it("confirms only READY and completes with the confirmation's persisted identity", async () => {
-    mockInitiatePayment.mockResolvedValue({
+    mockInitiatePayment.mockResolvedValue(durableInitiation({
       kind: "READY",
       success: true,
       paymentId: "payment-ready",
       provider: PaymentProvider.MOCK,
-    });
+    }));
     mockConfirmPayment.mockResolvedValue({
       kind: "READY",
       success: true,
@@ -71,15 +75,61 @@ describe("checkout payment result handling", () => {
     });
   });
 
+  it("fails closed on an unexpected fresh Eximbay channel and never confirms", async () => {
+    const unexpectedFresh: InitiatePaymentActionResult = {
+      channel: "FRESH_EXIMBAY_READY",
+      durable: {
+        kind: "READY",
+        success: true,
+        paymentId: "unexpected-fresh-payment",
+        provider: PaymentProvider.EXIMBAY,
+      },
+      transientHandoff: {
+        kind: "EXIMBAY_READY_HANDOFF_V1",
+        paymentId: "unexpected-fresh-payment",
+        mode: "SANDBOX",
+        sdkGeneration: "v2",
+        payload: {
+          fgkey: "SYNTHETIC_UI_FGKEY_NEVER_RENDER",
+          payment: {
+            transaction_type: "PAYMENT",
+            order_id: "synthetic-ui-order",
+            currency: "USD",
+            amount: "1.00",
+            lang: "EN",
+            payment_method: "P000",
+          },
+          merchant: { mid: "SYNTHETIC_UI_MID_NEVER_RENDER" },
+          buyer: { name: "Synthetic Buyer", email: "synthetic-ui@example.test" },
+          url: {
+            return_url: "https://payments.example.test/return",
+            status_url: "https://payments.example.test/status",
+          },
+        },
+      },
+    };
+    mockInitiatePayment.mockResolvedValue(unexpectedFresh);
+    const states: PaymentState[] = [];
+
+    await runMockPayment("checkout-session", (state) => states.push(state));
+
+    expect(mockConfirmPayment).not.toHaveBeenCalled();
+    expect(states.at(-1)).toEqual({
+      kind: "failed",
+      message: "사용 가능한 테스트 결제 수단이 없습니다.",
+    });
+    expect(JSON.stringify(states)).not.toMatch(/SYNTHETIC_UI|synthetic-ui|EXIMBAY/u);
+  });
+
   it("does not propagate a hostile initiation message into UI state or confirmation", async () => {
     const sentinel = `initiation-ui-secret-${randomUUID()}?next=/attacker`;
-    mockInitiatePayment.mockResolvedValue({
+    mockInitiatePayment.mockResolvedValue(durableInitiation({
       kind: "FAILED",
       success: false,
       errorCode: "PAYMENT_FAILED",
       error: sentinel,
       retryable: false,
-    });
+    }));
     const states: PaymentState[] = [];
 
     await runMockPayment("checkout-session", (state) => states.push(state));
@@ -94,12 +144,12 @@ describe("checkout payment result handling", () => {
 
   it("does not propagate a hostile completion message into UI state or navigation material", async () => {
     const sentinel = `completion-ui-secret-${randomUUID()}&redirect=https://attacker.invalid`;
-    mockInitiatePayment.mockResolvedValue({
+    mockInitiatePayment.mockResolvedValue(durableInitiation({
       kind: "READY",
       success: true,
       paymentId: "payment-ready",
       provider: PaymentProvider.MOCK,
-    });
+    }));
     mockConfirmPayment.mockResolvedValue({
       kind: "FAILED",
       success: false,
@@ -128,13 +178,13 @@ describe("checkout payment result handling", () => {
     "mock-provider failure",
     "eximbay_reference",
   ])("removes embedded provider provenance from failed UI state: %s", async (error) => {
-    mockInitiatePayment.mockResolvedValue({
+    mockInitiatePayment.mockResolvedValue(durableInitiation({
       kind: "FAILED",
       success: false,
       errorCode: "PAYMENT_FAILED",
       error,
       retryable: false,
-    });
+    }));
     const states: PaymentState[] = [];
 
     await runMockPayment("checkout-session", (state) => states.push(state));
@@ -146,6 +196,10 @@ describe("checkout payment result handling", () => {
     expectProviderNamesAbsent(states);
   });
 });
+
+function durableInitiation(durable: PaymentActionResult): InitiatePaymentActionResult {
+  return { channel: "DURABLE_ONLY", durable };
+}
 
 function expectProviderNamesAbsent(states: PaymentState[]): void {
   const values = collectStringValues(states);
