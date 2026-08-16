@@ -3364,3 +3364,69 @@ reopened absent a new higher-authority change. This decision and its linked
 [Source Status / As-Built](../engineering/eximbay-ex2b2-e1a-contract-source-status-v0.1.md)
 grant no H1 execution, provider-contact, credential, database, SDK,
 `request_pay`, routing, or activation authority.
+
+## 2026-08-16 — Eximbay MIRA-PUBLIC-READY-1 closure and E1A track retirement
+
+### Frozen execution identity and admitted result
+
+```text
+execution source:
+  e19edce4cec21d5640ab48cb4c8f295b3b4ef767
+
+execution tree:
+  ce8e16bc5ebb86c59a3b4d2f01e56574314dd1a8
+
+MIRA-PUBLIC-READY-1:
+  CLOSED / ADMITTED
+
+provider contacts:
+  1
+
+automatic retries:
+  0
+
+contactedBefore:
+  true
+
+HTTP status / media type:
+  200 / application/json
+
+provider result:
+  READY_ADMITTED
+
+durable lifecycle:
+  INITIATED / CONTACTED / READY
+
+fresh authority created:
+  true
+
+bounded financial or customer side effects:
+  NONE
+
+SDK / request_pay / BF4:
+  NONE
+
+external sanitized Result bytes:
+  1258
+
+external sanitized Result SHA-256:
+  69d644f0003f24846779cfaf3cd06ee06ecd930a984d5515aeb727e6a56ef9f0
+```
+
+The admitted execution used exactly one READY provider contact and no retry.
+It created fresh authority and durably recorded `INITIATED`, `CONTACTED`, and
+`READY`. It did not invoke an SDK, `request_pay`, or BF4, and produced no
+bounded financial or customer side effect.
+
+### Retirement and future authority
+
+The account-bound E1A track tied to
+`e19edce4cec21d5640ab48cb4c8f295b3b4ef767` is **RETIRED**. Account-bound E1A
+is deferred. H1 v0.6 is historical, reviewed, external-only material and has
+no standing invocation authority; this record does not claim that H1 is
+installed.
+
+Any future E1A re-entry requires a fresh rebind to then-current `main` and
+explicit human authority. Historical contracts remain unchanged, and this
+closure creates no provider contact, SDK, `request_pay`, BF4, routing, or
+activation authority.
