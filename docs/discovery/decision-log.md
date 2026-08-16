@@ -3332,3 +3332,35 @@ The final-reviewed six-path diff is 41757 bytes, SHA-256
 D22 remains `S1 -> S2 -> S3 -> E1A -> E1B`. After this reviewed P8 Source
 Status refresh is installed, the next D22 gate is separately authorized E1A.
 E1A is not authorized by this entry.
+
+## 2026-08-16 — Eximbay EX2B2-E1A D1R3 execution-assurance reconciliation installed
+
+E1A Execution Contract v0.1 could overstate user-space workflow evidence as
+malicious-same-user executable attestation. Higher-precedence EX2B2 threat
+authority instead retains process compromise and compromised server code as
+residual risks. D1R3 therefore reconciled the claim to trusted-local-
+operator/host workflow and artifact evidence without weakening the installed
+H1 operational controls.
+
+Independent D1R3 review passed with BLOCKER 0, IMPORTANT 0, and MINOR 0. PR #74
+installed the exact reviewed v0.2 bytes: reviewed head
+`c8bf5e1db94bde9e1f5e45b8138d2ebb16df264d`, merge
+`be49d616eddf2b8e9aa16e09f22796064c877e29`, and successful post-merge CI run
+`31929728330`. The installed contract is
+[E1A Execution Contract v0.2](../engineering/eximbay-ex2b2-e1a-ready-transport-evidence-execution-contract-v0.2.md),
+SHA-256
+`14d19c6fe327b0bb38fc0dae04fcb04848117a0657ad978eee5279d90004b29f`;
+the reviewed D1R3 packet SHA-256 is
+`822096be479db1ed2bbd3d98bb3e8ad4fde3054a27fb3aeb44f3a283302a1656`.
+
+Version v0.2 now supersedes v0.1 for future E1A H1 and E1A invocation
+authority. Version v0.1 remains immutable historical review evidence.
+H1R4-D01 is closed. The next work is limited to one separately authorized,
+zero-contact H1R5 correction of H1R4-B01, H1R4-I01, and H1R4-I02 using the
+installed v0.2 authority.
+
+External attestation and malicious-same-user threat architecture must not be
+reopened absent a new higher-authority change. This decision and its linked
+[Source Status / As-Built](../engineering/eximbay-ex2b2-e1a-contract-source-status-v0.1.md)
+grant no H1 execution, provider-contact, credential, database, SDK,
+`request_pay`, routing, or activation authority.
