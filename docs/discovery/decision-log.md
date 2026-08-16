@@ -3430,3 +3430,49 @@ Any future E1A re-entry requires a fresh rebind to then-current `main` and
 explicit human authority. Historical contracts remain unchanged, and this
 closure creates no provider contact, SDK, `request_pay`, BF4, routing, or
 activation authority.
+
+## 2026-08-16 — Eximbay EX2B2 E1A/E1B independent evidence branches
+
+The human architecture decision for the EX2B2 Design Contract v0.2
+changes only the prospective evidence sequence:
+
+```text
+PREVIOUS PARENT SEQUENCE:
+  S1 -> S2 -> S3 -> E1A -> E1B
+
+ADJUDICATED CHANGE:
+  S1 -> S2 -> S3
+                +-> E1A
+                +-> E1B
+```
+
+E1A and E1B answer different evidence questions. E1A is merchant/account-bound
+READY transport-capability evidence. E1B is credential-free, non-completing
+public TEST v2 SDK load/global/callable evidence and consumes no READY
+authority, FGKey, MID/API key/Authorization, Payment state, merchant capability,
+or `request_pay` authority. Therefore E1A is not a physical or authority
+dependency of bounded E1B after Design Contract v0.2 is human-reviewed and
+installed.
+
+```text
+MIRA-PUBLIC-READY-1:
+  CLOSED / ADMITTED
+  separate evidence; not E1B prerequisite
+
+account-bound E1A:
+  DEFERRED / NOT SATISFIED
+
+E1B:
+  NOT EXECUTED
+  requires reviewed installation + separate human invocation
+
+E2:
+  BLOCKED pending BF4 readiness + separately adjudicated merchant/sandbox authority
+```
+
+This entry is durable evidence of the human adjudication; the detailed
+normative semantics belong to Design Contract v0.2 and become governing through
+reviewed installation. E1B still requires a separate human invocation after
+installation. This entry creates no provider/API/SDK contact, credential or
+Payment-state use, `request_pay`, BF4/completion, routing, LIVE, customer, or
+activation authority and does not rewrite historical E1A evidence.
