@@ -11,6 +11,15 @@ commerce, order, or manufacturing behavior.
   — defines the Medium/High-risk artifact lifecycle, change control,
   source-status requirements, and activation separation used by the documents
   below.
+- [Mira AI Engineering Governance v0.1](./ai-engineering-governance-v0.1.md)
+  — repository-wide model-agnostic governance for Mira software work, including
+  authority/truth separation, safety supremacy, build-first defaults, minimum
+  sufficient structure, proportional review, verification, and publication
+  authority.
+- [Mira Backend / High-Risk Engineering Governance v0.1](./mira-backend-high-risk-governance-v0.1.md)
+  — overlay for payment, authorization, credentials, sensitive data, durable
+  state, destructive operations, concurrency, external effects, jobs, and
+  production activation.
 
 ## Payment provider protocol design
 
