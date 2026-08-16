@@ -140,6 +140,13 @@ commerce, order, or manufacturing behavior.
   synthetic fake DOM/global seams; the application consumer is zero and no
   real SDK was fetched. P8 final documentation closure is PASS (0/0/0), and
   routing/request_pay/BF4/activation remain unauthorized.
+- [Eximbay EX2B2-E1A D1R3 Contract Reconciliation Source Status / As-Built v0.1](./eximbay-ex2b2-e1a-contract-source-status-v0.1.md)
+  — records E1A Execution Contract v0.2 installed by PR #74 / merge
+  `be49d616eddf2b8e9aa16e09f22796064c877e29` and D1R3 closed. Version v0.2
+  supersedes v0.1 for future E1A H1/invocation authority while v0.1 remains
+  historical evidence. H1 remains unclosed and grants no invocation authority;
+  remaining correction scope is H1R4-B01/I01/I02. No provider contact,
+  SDK/request_pay, routing, or activation authority is granted.
 
 ## Render Lab foundation
 
