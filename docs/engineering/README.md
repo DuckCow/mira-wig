@@ -107,11 +107,17 @@ commerce, order, or manufacturing behavior.
   vendor-email environment bullets as a pending conflict, and unblocks EX2B2
   for Design Contract work only. It grants no source, provider-contact,
   SDK/browser, credential, sandbox, live, or BF4 authority.
-- [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Design Contract v0.1](./eximbay-ex2b2-ready-transport-sdk-handoff-design-contract-v0.1.md)
-  — human-reviewed documentation-only high-risk Design Contract, installed by
-  PR #65 / merge `82bb1589a7c221773104f5320beeab77dac6646a`, separating
-  server-side READY transport from the browser SDK v2 handoff, with no source
-  or runtime authority.
+- [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Design Contract v0.2](./eximbay-ex2b2-ready-transport-sdk-handoff-design-contract-v0.2.md)
+  — reviewed normative overlay and sole owner of the E1A/E1B branch
+  sequencing delta: after S3, account-bound E1A and credential-free,
+  non-completing E1B become independent evidence branches. It otherwise
+  preserves v0.1 and grants no source, provider-contact, SDK, runtime, routing,
+  LIVE, or activation authority.
+- [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Design Contract v0.1 (historical predecessor)](./eximbay-ex2b2-ready-transport-sdk-handoff-design-contract-v0.1.md)
+  — installed human-reviewed Design Contract from PR #65 / merge
+  `82bb1589a7c221773104f5320beeab77dac6646a`. It remained immutable and governing
+  until reviewed v0.2 installation, then became the historical predecessor;
+  v0.2 preserves all semantics except the explicit branch-sequencing delta.
 - [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Threat / Failure Model v0.1](./eximbay-ex2b2-ready-transport-sdk-handoff-threat-model-v0.1.md)
   — human-reviewed documentation-only Threat / Failure Model installed with
   the same design authority; it grants no provider contact, SDK load/execution,
@@ -143,12 +149,26 @@ commerce, order, or manufacturing behavior.
   and activation remain unauthorized.
 - [Eximbay EX2B2-S2 READY Contact Source Status / As-Built v0.1 (historical)](./eximbay-ex2b2-s2-ready-contact-source-status-v0.1.md)
   — preserved predecessor recording the original S2 installation.
-- [Eximbay EX2B2-S3 Browser Handoff Source Status / As-Built v0.1](./eximbay-ex2b2-s3-browser-handoff-source-status-v0.1.md)
-  — current reviewed installed-dormant browser-handoff As-Built: trusted
-  one-shot handoff plus concrete SDK-load-capable browser source. Tests use
-  synthetic fake DOM/global seams; the application consumer is zero and no
-  real SDK was fetched. P8 final documentation closure is PASS (0/0/0), and
-  routing/request_pay/BF4/activation remain unauthorized.
+- [Eximbay EX2B2-E1B SDK Surface Execution Contract v0.1](./eximbay-ex2b2-e1b-sdk-surface-execution-contract-v0.1.md)
+  — reviewed bounded one-shot execution contract subordinate to Design
+  Contract v0.2; it cannot broaden or supersede the governing design. After
+  both contracts are reviewed and installed, the next gate may only be one
+  separately human-authorized, credential-free, non-completing TEST v2 SDK
+  load/global/callable observation. `request_pay = PROHIBITED / 0`; no
+  execution has occurred.
+- [Eximbay EX2B2-S3 Browser Handoff Source Status / As-Built v0.2](./eximbay-ex2b2-s3-browser-handoff-source-status-v0.2.md)
+  — reviewed descriptive successor and current-on-install S3 source-truth
+  record. It preserves unchanged reviewed/dormant source, records admitted
+  MIRA-PUBLIC-READY-1 and deferred/not-satisfied account-bound E1A, and links
+  Design Contract v0.2 as the sole normative branch owner plus the subordinate
+  E1B execution contract. This Source Status grants no execution authority; no
+  SDK asset was fetched and `request_pay` remains 0.
+- [Eximbay EX2B2-S3 Browser Handoff Source Status / As-Built v0.1 (historical predecessor)](./eximbay-ex2b2-s3-browser-handoff-source-status-v0.1.md)
+  — preserved reviewed installed-dormant browser-handoff predecessor: trusted
+  one-shot handoff plus concrete SDK-load-capable browser source. Tests used
+  synthetic fake DOM/global seams; the application consumer was zero and no
+  real SDK was fetched. It remained the current installed record until the
+  reviewed v0.2 merge; it is not rewritten by the successor.
 - [Eximbay EX2B2-E1A D1R3 Contract Reconciliation Source Status / As-Built v0.1](./eximbay-ex2b2-e1a-contract-source-status-v0.1.md)
   — records E1A Execution Contract v0.2 installed by PR #74 / merge
   `be49d616eddf2b8e9aa16e09f22796064c877e29` and D1R3 closed. Installed v0.2
