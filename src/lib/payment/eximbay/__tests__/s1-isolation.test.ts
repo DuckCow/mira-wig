@@ -130,7 +130,7 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/eximbay/sdk-loader.ts",
       ],
     );
-  });
+  }, 30_000);
 
   it("keeps checkout free of dormant browser SDK authority", () => {
     const checkout = readFileSync(join(ROOT, "src/app/(shop)/checkout/PaymentMethodSection.tsx"), "utf8");

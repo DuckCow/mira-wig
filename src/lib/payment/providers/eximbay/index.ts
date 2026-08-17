@@ -50,4 +50,7 @@ export {
   type EximbayPaymentMode,
   type EximbayProviderOrderCandidate,
 } from "./types";
-export type { ProviderVerifiedEximbayStatus } from "./verified-status";
+export {
+  requireProviderVerifiedEximbayStatus,
+  type ProviderVerifiedEximbayStatus,
+} from "./verified-status";

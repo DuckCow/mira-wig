@@ -6,7 +6,10 @@ import {
   type EximbayPaymentMode,
   type EximbayProviderOrderCandidate,
 } from "./types";
-import type { ProviderVerifiedEximbayStatus } from "./verified-status";
+import {
+  requireProviderVerifiedEximbayStatus,
+  type ProviderVerifiedEximbayStatus,
+} from "./verified-status";
 
 export interface ExpectedEximbayPaymentFacts {
   readonly paymentIdentity: string;
@@ -38,6 +41,7 @@ export function validateTrustedEximbayFacts(
   verified: ProviderVerifiedEximbayStatus,
   expected: ExpectedEximbayPaymentFacts,
 ): TrustedEximbayCompletionCandidate {
+  requireProviderVerifiedEximbayStatus(verified);
   requireSuccessfulSale(verified);
   requireExpectedCorrelation(verified, expected);
   const amountMinor = requireExpectedMoney(verified, expected);
