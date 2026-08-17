@@ -3636,3 +3636,50 @@ documents remain immutable historical predecessors. This bounded
 correction creates no source, schema, migration, provider/API/SDK contact,
 credential, `request_pay`, routing, E2, or activation authority. The next gate
 is `SEPARATELY AUTHORIZED BF4 I1 REBIND/CORRECTION + IMPLEMENTATION CORRECTNESS CLOSURE`.
+
+## 2026-08-18 — Agent governance moves from process-heavy to boundary-heavy
+
+The human adjudicated a prospective simplification of Mira agent governance.
+
+```text
+KEEP:
+  human/task authority
+  current-source truth
+  frozen safety/correctness invariants
+  Git/provider/activation authority
+  project-specific domain facts
+  high-risk overlay when materially applicable
+  non-retroactivity
+
+REMOVE OR RELAX:
+  mandatory reading of long general governance on every routine task
+  mode-specific durable prompt files
+  risk-label-driven artifact sets
+  default P0-P11 lifecycle
+  routine independent review
+  repeated plans/RFCs/evidence packages/harnesses for confidence
+  embedded changelog and temporary project status in AGENTS.md
+```
+
+Operational structure:
+
+```text
+compact AGENTS.md core/router
++ one task MODE declaration
++ conditional high-risk overlay
++ conditional domain authority
++ bounded task prompt
+```
+
+Task modes remain short (`BUILD`, `DIAGNOSE`, `DESIGN`, `REVIEW`, `PUBLISH`);
+no separate mode-document family is created.
+
+Feature Documentation Standard v0.2 supersedes v0.1 prospectively.
+Artifacts are admitted only when they close a concrete failure, authority,
+operation, activation, recovery, or evidence need. Existing contracts,
+source-status records, evidence, and historical semantics remain unchanged.
+
+This decision changes repository collaboration/process documentation only. It
+does not change application source, schema, runtime, provider contact,
+credentials, production activation, or any existing exact-baseline execution
+track.
