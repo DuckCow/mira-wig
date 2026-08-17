@@ -95,6 +95,30 @@ describe.sequential("Eximbay BF4 dormant engine integration", () => {
     await expect(db.payment.count()).resolves.toBe(paymentCount);
   });
 
+  it("applies a required SANDBOX caller ceiling before config, claim, or transport", async () => {
+    await db.payment.update({
+      where: { id: fixture.paymentId },
+      data: { mode: PaymentMode.LIVE },
+    });
+    const transport = vi.fn<EximbayBf4Fetch>();
+
+    const result = await process(fixture.raw, transport);
+
+    expect(result).toEqual({
+      kind: "conflict",
+      acknowledgement: { kind: "NON_SUCCESS_EVIDENCE_GATED" },
+    });
+    expect(transport).not.toHaveBeenCalled();
+    await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } }))
+      .resolves.toBe(0);
+    await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+      .resolves.toMatchObject({
+        mode: PaymentMode.LIVE,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        providerPaymentKey: null,
+      });
+  });
+
   it("commits both contact markers before fake transport, admits exact SALE, and completes exactly once", async () => {
     const observedStages: string[] = [];
     const transport = vi.fn<EximbayBf4Fetch>(async (input) => {
@@ -577,6 +601,7 @@ async function process(raw: string, transport: EximbayBf4Fetch) {
   const input: ProcessEximbayBf4StatusInput = {
     exactRawQuery: raw,
     receivedAt: RECEIVED_AT,
+    modeCeiling: PaymentMode.SANDBOX,
     env: syntheticEnv(),
     transport,
     now: monotonicClock(),
