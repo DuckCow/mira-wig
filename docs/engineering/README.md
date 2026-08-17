@@ -123,7 +123,8 @@ commerce, order, or manufacturing behavior.
   the same design authority; it grants no provider contact, SDK load/execution,
   or activation authority.
 - [Eximbay BF4 `status_url` Verification / Retrieval / Completion Design Contract v0.1](./eximbay-bf4-status-verification-completion-design-contract-v0.1.md)
-  — reviewed normative design contract for a dedicated dormant BF4 orchestrator.
+  — immutable historical predecessor to the current v0.2 BF4 design for a
+  dedicated dormant BF4 orchestrator.
   It records no schema change under the closed `PaymentEvent.raw` envelope and
   exact transition table, keeps `completeFromCapture` as the only commerce
   finalizer, and requires `/verify` integrity plus authoritative retrieval
@@ -132,14 +133,33 @@ commerce, order, or manufacturing behavior.
   contact, SDK/runtime, routing, or activation authority; E1B is closed/admitted,
   E2 remains blocked, and the next gate is a separately authorized dormant BF4
   source implementation task.
+- [Eximbay BF4 `status_url` Verification / Retrieval / Completion Design Contract v0.2](./eximbay-bf4-status-verification-completion-design-contract-v0.2.md)
+  — current normative BF4 design and narrow successor correcting only authoritative `SALE`
+  money-mismatch durable ownership: the unresolved pre-success Payment remains
+  `OUTCOME_UNKNOWN` with remediation `NONE`, while the existing BF4
+  PaymentEvent mismatch stage owns provider-observed reconciliation evidence;
+  `transaction_type=PAYMENT` is required and, when Payment is transition-safe,
+  both owners commit in one local transaction. It is paired with Threat / Failure
+  Model v0.2. This current design grants no source, schema, provider,
+  credential, routing, or activation authority; BF4 I1 remains preserved,
+  paused, and not implementation-admitted pending a separately authorized I1
+  rebind/correction and implementation correctness closure; E2 remains blocked.
+- [Eximbay BF4 `status_url` Verification / Retrieval / Completion Threat / Failure Model v0.2](./eximbay-bf4-status-verification-completion-threat-model-v0.2.md)
+  — current normative companion successor replacing only the v0.1 T-BF4-17
+  pre-success remediation claim and closing the mismatch event/Payment crash
+  split. The Design/Threat v0.2 pair passed human targeted closure and is
+  ready for documentation installation; both v0.1 files remain immutable
+  historical predecessors. It grants no source, schema, provider, credential,
+  routing, E2, or activation authority.
 - [Eximbay BF4 `status_url` Verification / Retrieval / Completion Threat / Failure Model v0.1](./eximbay-bf4-status-verification-completion-threat-model-v0.1.md)
-  — reviewed companion threat / failure model covering hostile raw input, claim
+  — immutable historical predecessor to the current v0.2 companion, covering hostile raw input, claim
   poisoning, duplicate/crash contact ceilings, verification/retrieval ambiguity,
   identity and money authority, raw-data custody, generic-completion isolation,
   acknowledgement loss, transport gaps, dormancy, and unsafe operator re-entry.
   Targeted correctness review is PASS and documentation installation is ready;
   no source/runtime, provider, schema, SDK, `request_pay`, E2, or activation
-  authority is granted.
+  authority is granted. Its T-BF4-17 money-mismatch remediation phrase is
+  superseded by the v0.2 companion; this v0.1 file remains unchanged.
 - [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.3](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.3.md)
   — current reviewed reachability As-Built after the reviewed S3 merge. The
   same S1 kernel remains unchanged; S2 and the S3 server handoff are exact
