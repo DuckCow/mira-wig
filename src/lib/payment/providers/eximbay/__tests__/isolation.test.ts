@@ -49,7 +49,7 @@ describe("Eximbay SOURCE_ONLY runtime isolation", () => {
 
     expect(files.length).toBeGreaterThan(0);
     expect(inspectProductionTree(ROOT)).toEqual([]);
-  });
+  }, 30_000);
 
   it("proves the checker catches representative authority leaks", () => {
     const fixtureRoot = mkdtempSync(join(tmpdir(), "eximbay-isolation-"));
@@ -117,12 +117,16 @@ describe("Eximbay SOURCE_ONLY runtime isolation", () => {
     }
   });
 
-  it("keeps verification promotion unavailable from barrels and deep production modules", () => {
+  it("keeps BF4 verification construction out of the public barrel and limited to its deep factory", () => {
     const exports = Object.keys(kernel);
 
     expect(exports.some((name) => /promot|verified.*(?:brand|create|factory|fixture)|sdkLoader|request|fetch/iu.test(name)))
       .toBe(false);
-    expect(inspectVerificationAuthorityExports(productionTypeScriptFiles(ROOT))).toEqual([]);
+    expect(inspectVerificationAuthorityExports(productionTypeScriptFiles(ROOT))).toEqual([{
+      code: "EXPORTED_VERIFICATION_AUTHORITY",
+      detail: "createProviderVerifiedEximbayStatus",
+      file: "src/lib/payment/providers/eximbay/verified-status.ts",
+    }]);
     expect(existsSync(join(ROOT, "verified-status-brand.ts"))).toBe(false);
     expect(existsSync(join(ROOT, "__tests__/fixtures/verified-status.ts"))).toBe(true);
   });

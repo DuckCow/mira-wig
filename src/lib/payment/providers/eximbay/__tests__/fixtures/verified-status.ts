@@ -1,5 +1,8 @@
 import type { EximbayPaymentMode } from "../../types";
-import type { ProviderVerifiedEximbayStatus } from "../../verified-status";
+import {
+  createProviderVerifiedEximbayStatus,
+  type ProviderVerifiedEximbayStatus,
+} from "../../verified-status";
 
 export interface VerifiedStatusFixtureInput {
   transactionType?: string;
@@ -96,7 +99,15 @@ interface VerifiedStatusFixtureShape {
 function unsafeVerifiedStatusFixture(
   fixture: VerifiedStatusFixtureShape,
 ): ProviderVerifiedEximbayStatus {
-  // The EX2A contract permits this test-only cast; production exposes no promotion authority.
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  return Object.freeze(fixture) as ProviderVerifiedEximbayStatus;
+  return createProviderVerifiedEximbayStatus({
+    transactionType: fixture.transactionType,
+    rescode: fixture.rescode,
+    mid: fixture.mid,
+    orderId: fixture.orderId,
+    currency: fixture.currency,
+    amount: fixture.amount,
+    correlation: fixture.correlation,
+    ...(fixture.status === undefined ? {} : { status: fixture.status }),
+    ...(fixture.transactionId === undefined ? {} : { transactionId: fixture.transactionId }),
+  });
 }
