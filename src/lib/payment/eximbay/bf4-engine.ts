@@ -17,6 +17,7 @@ import {
   type UnverifiedEximbayStatus,
 } from "@/lib/payment/providers/eximbay";
 import { createProviderVerifiedEximbayStatus } from "@/lib/payment/providers/eximbay/verified-status";
+import type { EximbayPaymentMode } from "@/lib/payment/providers/eximbay/types";
 import {
   requireEximbayBf4ConfigFacts,
   resolveEximbayBf4Config,
@@ -56,6 +57,7 @@ export type EximbayBf4Acknowledgement =
 export interface ProcessEximbayBf4StatusInput {
   readonly exactRawQuery: string;
   readonly receivedAt: Date;
+  readonly modeCeiling: EximbayPaymentMode;
   readonly env: ProviderEnv;
   readonly transport: EximbayBf4Fetch;
   readonly now?: () => Date;
@@ -83,6 +85,7 @@ export async function processEximbayBf4Status(
   const parsed = parseUnverifiedEximbayStatus(input.exactRawQuery);
   const payment = await correlateEximbayBf4Payment(client, parsed.fields.order_id ?? "");
   if (!payment) return noEvent("notCorrelated");
+  if (payment.mode !== input.modeCeiling) return noEvent("conflict");
   const config = resolveEximbayBf4Config(payment.mode, input.env);
   const envelope = initialEnvelope(parsed, input.receivedAt);
   const claim = await claimEximbayBf4Event(client, payment, envelope);

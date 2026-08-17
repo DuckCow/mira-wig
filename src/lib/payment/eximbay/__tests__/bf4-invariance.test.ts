@@ -13,11 +13,12 @@ const BF4_SOURCE = [
   "src/lib/payment/eximbay/bf4-engine.ts",
   "src/lib/payment/eximbay/bf4-envelope.ts",
   "src/lib/payment/eximbay/bf4-event.ts",
+  "src/lib/payment/eximbay/bf4-status-route.ts",
 ];
 
 describe("Eximbay BF4 I1 dormancy invariants", () => {
-  it("keeps the public status route absent and EXIMBAY routing disabled", () => {
-    expect(existsSync(join(ROOT, "src/app/api/payments/eximbay/status"))).toBe(false);
+  it("installs the default-off public status route while EXIMBAY checkout routing stays disabled", () => {
+    expect(existsSync(join(ROOT, "src/app/api/payments/eximbay/status/route.ts"))).toBe(true);
     expect(PROVIDER_REGISTRY.EXIMBAY).toMatchObject({
       enabled: false,
       allowedModes: [],
@@ -44,7 +45,7 @@ describe("Eximbay BF4 I1 dormancy invariants", () => {
     });
   });
 
-  it("has no BF4 SDK loader, request_pay, or route import reachability", () => {
+  it("adds no BF4 SDK loader or request_pay reachability", () => {
     const sourceFiles = BF4_SOURCE.map((path) => ts.createSourceFile(
       path,
       readFileSync(join(ROOT, path), "utf8"),
@@ -54,7 +55,7 @@ describe("Eximbay BF4 I1 dormancy invariants", () => {
     const moduleSpecifiers = sourceFiles.flatMap(staticModuleSpecifiers);
     const sourceText = sourceFiles.map((source) => source.text).join("\n");
 
-    expect(moduleSpecifiers.some((specifier) => /(?:sdk-loader|sdk-invocation|app\/api)/u.test(specifier)))
+    expect(moduleSpecifiers.some((specifier) => /(?:sdk-loader|sdk-invocation)/u.test(specifier)))
       .toBe(false);
     expect(sourceText).not.toMatch(/request_pay|EXIMBAY\.request_pay/u);
     expect(sourceText).not.toContain("globalThis.fetch");

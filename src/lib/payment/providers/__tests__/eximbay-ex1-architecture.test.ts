@@ -47,12 +47,13 @@ describe("Eximbay EX1 disabled architecture", () => {
     }
   });
 
-  it("keeps reviewed dormant S3 SDK authority path-exact without route, dependency, or activation", () => {
+  it("keeps reviewed dormant S3 SDK authority path-exact with only the default-off status route", () => {
     const routes = repositoryFiles(join(ROOT, "src/app/api/payments"));
     const packageJson = source("package.json");
     const production = productionSource();
 
     expect(routes).toEqual([
+      "src/app/api/payments/eximbay/status/route.ts",
       "src/app/api/payments/paypal/webhook/route.ts",
       "src/app/api/payments/status/[checkoutSessionId]/__tests__/route.integration.test.ts",
       "src/app/api/payments/status/[checkoutSessionId]/route.ts",
