@@ -5,12 +5,16 @@ diagnostic design authority, reviewed source status, and implementation
 boundaries. They do not by themselves activate customer, product, fitting,
 commerce, order, or manufacturing behavior.
 
-## Repository-wide standard
+## Repository-wide standards
 
-- [Feature Documentation Standard v0.1](./feature-documentation-standard-v0.1.md)
-  — defines the Medium/High-risk artifact lifecycle, change control,
-  source-status requirements, and activation separation used by the documents
-  below.
+- [Feature Documentation Standard v0.2](./feature-documentation-standard-v0.2.md)
+  — current prospective artifact-admission standard. Durable documents are
+  created only when they close a concrete failure, authority, operation,
+  activation, recovery, or evidence need; feature risk labels alone do not
+  mandate a full lifecycle.
+- [Feature Documentation Standard v0.1 (historical predecessor)](./feature-documentation-standard-v0.1.md)
+  — preserved historical artifact lifecycle. It is superseded prospectively
+  by v0.2 and is not applied retroactively to existing evidence or contracts.
 - [Mira AI Engineering Governance v0.1](./ai-engineering-governance-v0.1.md)
   — repository-wide model-agnostic governance for Mira software work, including
   authority/truth separation, safety supremacy, build-first defaults, minimum

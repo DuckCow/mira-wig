@@ -1,13 +1,12 @@
 # CLAUDE.md
 
-> 에이전트 규칙의 단일 출처는 repo 루트의 AGENTS.md다.
-> 작업 전 AGENTS.md를 읽고 그 지침을 따르라.
-
-## Claude/Fable review mode
-
-- Read `AGENTS.md` for general repo rules, but for Claude/Fable review tasks it is project context, not permission to implement.
-- The task-specific review packet and `docs/collaboration-protocol.md` define Claude's role as reviewer-only.
-- Claude must not edit files, produce code diffs, stage, commit, push, force-push, rewrite history, call providers, inspect or print secrets, wire live credentials, or make schema/migration changes.
-- If `AGENTS.md` appears to conflict with the review packet, report the conflict instead of resolving it silently.
-- Follow latest handoff precedence: v37 is the current Claude-review handoff; v36 is the whole-project restoration snapshot; v35 is the detailed payment-track snapshot.
-- Return findings, assumptions, risks, and Codex-ready recon prompts, not implementation patches.
+- Repository 운영 context는 `AGENTS.md`를 읽는다.
+- 이 파일은 구현 권한을 부여하지 않는다.
+- Task prompt가 `DESIGN` 또는 `REVIEW`를 지정하면 read-only로 작업하고 source,
+  schema, Git history, provider/runtime state를 변경하지 않는다.
+- 구현·Git·provider effect는 사람의 명시적 task authority가 있을 때만 가능하다.
+- Current handoff와 exact review packet은 task가 제공한다. 이 파일에 handoff version을
+  고정하지 않는다.
+- `AGENTS.md`, task authority, current source가 충돌하면 조용히 해결하지 말고
+  conflict를 보고한다.
+- Secret, credential, 고객 민감정보를 review evidence로 출력하지 않는다.
