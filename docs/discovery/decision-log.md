@@ -3476,3 +3476,80 @@ reviewed installation. E1B still requires a separate human invocation after
 installation. This entry creates no provider/API/SDK contact, credential or
 Payment-state use, `request_pay`, BF4/completion, routing, LIVE, customer, or
 activation authority and does not rewrite historical E1A evidence.
+
+## 2026-08-17 — Eximbay BF4 dedicated dormant status verification/completion architecture
+
+The reviewed human architecture adjudication for BF4 adopts a dedicated
+dormant `status_url` orchestrator and rejects generic-webhook generalization as
+its first owner. The detailed normative semantics belong to the reviewed
+[BF4 Design Contract](../engineering/eximbay-bf4-status-verification-completion-design-contract-v0.1.md)
+and companion
+[Threat / Failure Model](../engineering/eximbay-bf4-status-verification-completion-threat-model-v0.1.md),
+and become governing upon reviewed documentation installation; this entry is
+the durable decision-log summary.
+
+```text
+ADOPT:
+  dedicated dormant BF4 orchestrator
+
+REJECT:
+  generic webhook generalization as first BF4 owner
+  verify-only direct completion
+
+SCHEMA:
+  no schema change, conditional on the closed BF4 PaymentEvent envelope and
+  exact transition table
+
+COMPLETION:
+  existing completeFromCapture only
+
+VERIFY:
+  integrity only
+
+RETRIEVE:
+  authoritative SALE/money/identity required before completion
+
+AMBIGUITY:
+  Payment attempt OUTCOME_UNKNOWN + retained event claim
+  no automatic provider recontact
+
+E1B:
+  CLOSED / ADMITTED
+
+E1A:
+  DEFERRED / NOT SATISFIED
+
+E2:
+  still blocked
+```
+
+Correction: definitive `/verify` rejection does not simply erase the
+transaction claim. It atomically rotates the active transaction claim into an
+exact-raw rejection tombstone, releasing the transaction namespace while
+preventing repeated verification of identical rejected raw input. The
+reviewed Design Contract remains the detailed normative owner.
+
+Targeted closure correction: reject-tombstone lookup is required both before
+and after successful contact-claim acquisition, inside the claim-admission
+transaction. Provider contact begins only after that transaction commits. This
+closes the tombstone/claim TOCTOU without a schema change.
+
+The current official Eximbay documentation leaves callback HTTP method,
+query-string carrier location, callback content type, acknowledgement HTTP
+status/content type, merchant-selected failure code/message, `/verify` and
+`/retrieve` retry semantics, `transaction_date` timezone, and literal `+`
+behavior unresolved. These remain future transport/evidence gates, not
+provider facts.
+
+The accepted raw-retention policy keeps exact callback raw only while needed
+for verification, ambiguity adjudication, or local completion recovery; a
+terminal processed/rejected event replaces it with SHA-256 plus allowlisted
+facts/diagnostics. Unresolved ambiguous events may retain exact raw until human
+resolution. A time-based unresolved-event retention rule remains a future
+human privacy/operations gate.
+
+This reviewed decision grants documentation authority only. It creates no source,
+schema, provider/API/SDK contact, credential, `request_pay`, routing,
+sandbox/LIVE, customer, E2, or activation authority. Targeted correctness
+review is PASS. After documentation installation, the next gate is a separately
+authorized dormant BF4 source implementation task.

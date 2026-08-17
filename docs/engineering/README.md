@@ -122,6 +122,24 @@ commerce, order, or manufacturing behavior.
   — human-reviewed documentation-only Threat / Failure Model installed with
   the same design authority; it grants no provider contact, SDK load/execution,
   or activation authority.
+- [Eximbay BF4 `status_url` Verification / Retrieval / Completion Design Contract v0.1](./eximbay-bf4-status-verification-completion-design-contract-v0.1.md)
+  — reviewed normative design contract for a dedicated dormant BF4 orchestrator.
+  It records no schema change under the closed `PaymentEvent.raw` envelope and
+  exact transition table, keeps `completeFromCapture` as the only commerce
+  finalizer, and requires `/verify` integrity plus authoritative retrieval
+  `SALE` and exact persisted-fact matches. Callback transport and failure
+  acknowledgement remain evidence-gated. It grants no source, provider
+  contact, SDK/runtime, routing, or activation authority; E1B is closed/admitted,
+  E2 remains blocked, and the next gate is a separately authorized dormant BF4
+  source implementation task.
+- [Eximbay BF4 `status_url` Verification / Retrieval / Completion Threat / Failure Model v0.1](./eximbay-bf4-status-verification-completion-threat-model-v0.1.md)
+  — reviewed companion threat / failure model covering hostile raw input, claim
+  poisoning, duplicate/crash contact ceilings, verification/retrieval ambiguity,
+  identity and money authority, raw-data custody, generic-completion isolation,
+  acknowledgement loss, transport gaps, dormancy, and unsafe operator re-entry.
+  Targeted correctness review is PASS and documentation installation is ready;
+  no source/runtime, provider, schema, SDK, `request_pay`, E2, or activation
+  authority is granted.
 - [Eximbay EX2B2-S1 READY Kernel Source Status / As-Built v0.3](./eximbay-ex2b2-s1-ready-kernel-source-status-v0.3.md)
   — current reviewed reachability As-Built after the reviewed S3 merge. The
   same S1 kernel remains unchanged; S2 and the S3 server handoff are exact
