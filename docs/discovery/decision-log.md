@@ -3553,3 +3553,86 @@ schema, provider/API/SDK contact, credential, `request_pay`, routing,
 sandbox/LIVE, customer, E2, or activation authority. Targeted correctness
 review is PASS. After documentation installation, the next gate is a separately
 authorized dormant BF4 source implementation task.
+
+## 2026-08-17 — Eximbay BF4 authoritative SALE money-mismatch owner correction / closure
+
+BF4 I1 implementation discovery exposed a frozen v0.1 conflict between the
+pre-success use of `RECONCILIATION_REQUIRED` and the installed Payment database
+constraints. The source implementation is paused for design-authority
+correction. The detailed reviewed normative owner is the
+[BF4 Design Contract v0.2](../engineering/eximbay-bf4-status-verification-completion-design-contract-v0.2.md);
+this entry is decision evidence only.
+
+```text
+IMPLEMENTATION DISCOVERY:
+  BF4 I1 exposed a frozen v0.1 mismatch between pre-success
+  RECONCILIATION_REQUIRED and installed Payment constraints.
+
+DISPOSITION:
+  source implementation paused for design authority correction.
+
+ADOPT:
+  authoritative SALE money mismatch remains Payment OUTCOME_UNKNOWN with
+  remediationStatus NONE and no providerPaymentKey/financialSucceededAt;
+  PaymentEvent VERIFIED_SALE_MISMATCH_REQUIRES_RECONCILIATION owns the
+  provider-observed mismatch.
+
+REJECT:
+  promoting Payment to SUCCEEDED solely to satisfy remediation enum constraints
+  schema weakening
+  new reconciliation state/table
+  silently treating mismatch as exact SALE
+
+I1:
+  preserved uncommitted
+  not yet implementation-admitted
+```
+
+Targeted review accepted the D2 semantic direction but found one blocker and
+two important same-class authority-closure defects:
+
+```text
+F1:
+  Threat Model v0.1 T-BF4-17 retained the impossible pre-success
+  RECONCILIATION_REQUIRED claim.
+
+CORRECTION:
+  version Threat Model to v0.2 and supersede that phrase.
+
+F2:
+  money-mismatch scope requires transaction_type=PAYMENT.
+
+F3:
+  when Payment is transition-safe, its OUTCOME_UNKNOWN transition and the
+  VERIFIED_SALE_MISMATCH_REQUIRES_RECONCILIATION event evidence must commit
+  atomically in one local database transaction.
+
+HUMAN TARGETED CLOSURE:
+  PASS
+
+F1:
+  CLOSED
+
+F2:
+  CLOSED
+
+F3:
+  CLOSED
+
+ARCHITECTURE:
+  unchanged
+
+SCHEMA:
+  unchanged
+
+I1:
+  preserved / paused / not admitted
+```
+
+The Design Contract v0.2 and
+[Threat / Failure Model v0.2](../engineering/eximbay-bf4-status-verification-completion-threat-model-v0.2.md)
+form the v0.2 authority pair, governing upon reviewed installation. Both v0.1
+documents remain immutable historical predecessors. This bounded
+correction creates no source, schema, migration, provider/API/SDK contact,
+credential, `request_pay`, routing, E2, or activation authority. The next gate
+is `SEPARATELY AUTHORIZED BF4 I1 REBIND/CORRECTION + IMPLEMENTATION CORRECTNESS CLOSURE`.
