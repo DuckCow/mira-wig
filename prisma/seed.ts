@@ -1,9 +1,14 @@
-import "dotenv/config";
 import { PrismaClient, WigCategory } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+import { pathToFileURL } from "node:url";
+import {
+  assertDemoSeedReportedDatabaseIdentity,
+  authorizeDemoSeedEnvironment,
+  sanitizedDemoSeedError,
+  type DemoSeedPgConfig,
+  type DemoSeedPrismaPgOptions,
+  type ReportedDemoSeedDatabaseIdentity,
+} from "./demo-seed-guard";
 
 // ── 통화 최소단위 규칙 ────────────────────────────────────────
 //   KRW (zero-decimal): ₩30,000 → 30000
@@ -196,9 +201,72 @@ const styles: StyleDef[] = [
   },
 ];
 
-// ── 메인 ─────────────────────────────────────────────────────
+// ── 실행 경계 ─────────────────────────────────────────────────
 
-async function main() {
+type DemoSeedDatabase = Readonly<{
+  readCurrentIdentity: () => Promise<ReportedDemoSeedDatabaseIdentity>;
+  runDestructiveSeedBody: () => Promise<void>;
+  disconnect: () => Promise<void>;
+}>;
+
+export type DemoSeedRuntime = Readonly<{
+  connect: (
+    pgConfig: DemoSeedPgConfig,
+    prismaPgOptions: DemoSeedPrismaPgOptions,
+  ) => DemoSeedDatabase;
+}>;
+
+const defaultDemoSeedRuntime: DemoSeedRuntime = Object.freeze({
+  connect(pgConfig, prismaPgOptions) {
+    const prisma = new PrismaClient({
+      adapter: new PrismaPg(pgConfig, prismaPgOptions),
+    });
+    return Object.freeze({
+      async readCurrentIdentity() {
+        const rows = await prisma.$queryRaw<ReportedDemoSeedDatabaseIdentity[]>`
+          SELECT current_database() AS "databaseName",
+            current_user AS "currentUser",
+            current_schema() AS "currentSchema"
+        `;
+        if (rows.length !== 1 || typeof rows[0]?.databaseName !== "string"
+          || typeof rows[0].currentUser !== "string"
+          || typeof rows[0].currentSchema !== "string") {
+          throw new Error("DEMO_SEED_REPORTED_DATABASE_INVALID");
+        }
+        return Object.freeze(rows[0]);
+      },
+      runDestructiveSeedBody: () => seedDemoCatalog(prisma),
+      disconnect: () => prisma.$disconnect(),
+    });
+  },
+});
+
+export async function runDemoCatalogSeed(
+  env: Readonly<Record<string, string | undefined>>,
+  runtime: DemoSeedRuntime = defaultDemoSeedRuntime,
+): Promise<void> {
+  try {
+    const target = authorizeDemoSeedEnvironment(env);
+    const database = runtime.connect(
+      target.pgConfig,
+      target.prismaPgOptions,
+    );
+    try {
+      const reported = await database.readCurrentIdentity();
+      assertDemoSeedReportedDatabaseIdentity(target, reported);
+      await database.runDestructiveSeedBody();
+    } finally {
+      await database.disconnect();
+    }
+  } catch (error: unknown) {
+    throw sanitizedDemoSeedError(error);
+  }
+}
+
+// ── DEMO-ONLY 파괴적 본문 ─────────────────────────────────────
+
+async function seedDemoCatalog(prisma: PrismaClient): Promise<void> {
+  console.log("⚠️  DEMO-ONLY 카탈로그 시드 — 기존 상거래 데이터를 교체합니다.");
   console.log("🗑️  기존 데이터 초기화...");
   await prisma.manufacturingRequest.deleteMany();
   await prisma.orderItem.deleteMany();
@@ -263,9 +331,15 @@ async function main() {
   );
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
+async function runCli(): Promise<void> {
+  await import("dotenv/config");
+  await runDemoCatalogSeed(process.env);
+}
+
+const entrypoint = process.argv[1];
+if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
+  void runCli().catch((error: unknown) => {
+    console.error(sanitizedDemoSeedError(error).message);
     process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+  });
+}
