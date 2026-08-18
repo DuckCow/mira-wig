@@ -13,35 +13,45 @@ import { MockFittingProvider, MOCK_RESULT_KEY } from "@/lib/ai/mock";
 // ── 순수 함수: validateSourceKey ─────────────────────────────
 
 describe("validateSourceKey", () => {
-  it("유효한 user-upload key는 통과한다", () => {
-    expect(() => validateSourceKey(`user-upload/u1/${randomUUID()}.jpg`)).not.toThrow();
+  it("소유자가 정확히 일치하는 user-upload key는 통과한다", () => {
+    expect(() => validateSourceKey(`user-upload/u1/${randomUUID()}.jpg`, "u1")).not.toThrow();
   });
 
-  it("빈 문자열은 SOURCE_KEY_INVALID", () => {
-    expect(() => validateSourceKey("")).toThrow(FittingException);
+  it("다른 소유자는 SOURCE_KEY_INVALID", () => {
+    expectSourceKeyInvalid("user-upload/u2/photo.jpg", "u1");
   });
 
-  it("http URL은 SOURCE_KEY_INVALID", () => {
-    expect(() => validateSourceKey("http://example.com/img.jpg")).toThrow(FittingException);
+  it("소유자 prefix가 겹쳐도 SOURCE_KEY_INVALID", () => {
+    expectSourceKeyInvalid("user-upload/u1-other/photo.jpg", "u1");
   });
 
-  it("https URL은 SOURCE_KEY_INVALID", () => {
-    expect(() => validateSourceKey("https://s3.amazonaws.com/key")).toThrow(FittingException);
+  it("소유자 segment를 trim하거나 percent-decode하지 않는다", () => {
+    expectSourceKeyInvalid("user-upload/%75%31/photo.jpg", "u1");
+    expectSourceKeyInvalid("user-upload/ u1/photo.jpg", "u1");
   });
 
-  it("user-upload/ 아닌 경로는 SOURCE_KEY_INVALID", () => {
-    expect(() => validateSourceKey("wig-style/abc.jpg")).toThrow(FittingException);
+  it.each([
+    "",
+    "http://example.com/img.jpg",
+    "https://s3.amazonaws.com/key",
+    "wig-style/u1/abc.jpg",
+    "user-upload/u1",
+    "user-upload/u1/",
+    "user-upload//abc.jpg",
+    "user-upload/u1/nested/abc.jpg",
+  ])("잘못된 형식 %s → SOURCE_KEY_INVALID", (key) => {
+    expectSourceKeyInvalid(key, "u1");
   });
 
-  it("오류 code가 SOURCE_KEY_INVALID임을 확인한다", () => {
-    let caught: unknown;
-    try { validateSourceKey(""); } catch (e) { caught = e; }
-    if (caught instanceof FittingException) {
-      expect(caught.code).toBe("SOURCE_KEY_INVALID");
-    } else {
+  function expectSourceKeyInvalid(key: string, expectedOwnerId: string): void {
+    try {
+      validateSourceKey(key, expectedOwnerId);
       expect.unreachable("FittingException이어야 합니다");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FittingException);
+      if (error instanceof FittingException) expect(error.code).toBe("SOURCE_KEY_INVALID");
     }
-  });
+  }
 });
 
 // ── 순수 함수: assertKeyNotUrl ────────────────────────────────
@@ -126,7 +136,9 @@ interface Ctx {
 }
 
 function makeId(): string { return randomUUID().slice(0, 8); }
-const SOURCE_KEY = `user-upload/uid123/${randomUUID()}.jpg`;
+function sourceKeyFor(userId: string): string {
+  return `user-upload/${userId}/${randomUUID()}.jpg`;
+}
 
 async function setupCtx(): Promise<Ctx> {
   const id = makeId();
@@ -158,6 +170,46 @@ async function cleanupCtx(ctx: Ctx): Promise<void> {
   await db.user.deleteMany({ where: { id: ctx.userId } });
 }
 
+// ── 통합: sourceImageKey 소유권 preflight ──
+
+describe("startFitting — sourceImageKey 소유권", () => {
+  let ctx: Ctx;
+  beforeEach(async () => { ctx = await setupCtx(); });
+  afterEach(async () => { await cleanupCtx(ctx); });
+
+  it("다른 소유자 key는 variant 조회보다 먼저 SOURCE_KEY_INVALID이다", async () => {
+    await expectSourceKeyInvalid(
+      startFitting(ctx.userId, "user-upload/other-user/photo.jpg", "missing-variant", "KR"),
+    );
+  });
+
+  it("다른 소유자 key는 Fitting row/provider factory effect 전에 거부된다", async () => {
+    const fittingCountBefore = await db.fitting.count({ where: { userId: ctx.userId } });
+    const originalProvider = process.env.AI_PROVIDER;
+    process.env.AI_PROVIDER = "real";
+    try {
+      await expectSourceKeyInvalid(
+        startFitting(ctx.userId, "user-upload/other-user/photo.jpg", ctx.variantId, "KR"),
+      );
+    } finally {
+      if (originalProvider === undefined) delete process.env.AI_PROVIDER;
+      else process.env.AI_PROVIDER = originalProvider;
+    }
+    const fittingCountAfter = await db.fitting.count({ where: { userId: ctx.userId } });
+    expect(fittingCountAfter).toBe(fittingCountBefore);
+  });
+
+  async function expectSourceKeyInvalid(operation: Promise<unknown>): Promise<void> {
+    try {
+      await operation;
+      expect.unreachable("FittingException이어야 합니다");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FittingException);
+      if (error instanceof FittingException) expect(error.code).toBe("SOURCE_KEY_INVALID");
+    }
+  }
+});
+
 // ── 통합: PENDING → SUCCEEDED 전이 ───────────────────────────
 
 describe("startFitting + pollFitting — 성공 경로", () => {
@@ -166,26 +218,27 @@ describe("startFitting + pollFitting — 성공 경로", () => {
   afterEach(async () => { await cleanupCtx(ctx); });
 
   it("startFitting이 fittingId를 반환한다", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     expect(fittingId).toBeTruthy();
   });
 
   it("startFitting 직후 DB 상태가 PENDING이다", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     const row = await db.fitting.findUniqueOrThrow({ where: { id: fittingId } });
     expect(row.status).toBe("PENDING");
     expect(row.providerJobId).toMatch(/^mock-job-/);
   });
 
   it("DB sourceImageKey는 URL이 아닌 key이다 (규칙 4-4)", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const sourceImageKey = sourceKeyFor(ctx.userId);
+    const fittingId = await startFitting(ctx.userId, sourceImageKey, ctx.variantId, "KR");
     const row = await db.fitting.findUniqueOrThrow({ where: { id: fittingId } });
     expect(row.sourceImageKey).not.toMatch(/^https?:\/\//);
-    expect(row.sourceImageKey).toBe(SOURCE_KEY);
+    expect(row.sourceImageKey).toBe(sourceImageKey);
   });
 
   it("pollFitting이 SUCCEEDED로 전이하고 resultImageKey를 영속한다", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     const result = await pollFitting(fittingId, ctx.userId);
     expect(result.status).toBe("succeeded");
     if (result.status === "succeeded") {
@@ -196,7 +249,7 @@ describe("startFitting + pollFitting — 성공 경로", () => {
   });
 
   it("DB resultImageKey는 URL이 아닌 key이다 (규칙 4-4)", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     await pollFitting(fittingId, ctx.userId);
     const row = await db.fitting.findUniqueOrThrow({ where: { id: fittingId } });
     // 규칙 4-4: DB에 URL이 아닌 S3 key만 저장해야 한다
@@ -213,14 +266,14 @@ describe("pollFitting — 멱등성 (SUCCEEDED)", () => {
   afterEach(async () => { await cleanupCtx(ctx); });
 
   it("두 번째 폴링도 동일한 resultImageKey를 반환한다", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     const r1 = await pollFitting(fittingId, ctx.userId);
     const r2 = await pollFitting(fittingId, ctx.userId);
     expect(r1).toEqual(r2);
   });
 
   it("SUCCEEDED 후 AI_MOCK_FORCE_FAIL=true여도 재폴링은 SUCCEEDED를 반환한다", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     await pollFitting(fittingId, ctx.userId); // → SUCCEEDED
     const orig = process.env.AI_MOCK_FORCE_FAIL;
     process.env.AI_MOCK_FORCE_FAIL = "true";
@@ -244,7 +297,7 @@ describe("pollFitting — FAILED 경로", () => {
     const orig = process.env.AI_MOCK_FORCE_FAIL;
     process.env.AI_MOCK_FORCE_FAIL = "true";
     try {
-      const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+      const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
       const result = await pollFitting(fittingId, ctx.userId);
       expect(result.status).toBe("failed");
     } finally {
@@ -256,7 +309,7 @@ describe("pollFitting — FAILED 경로", () => {
     const orig = process.env.AI_MOCK_FORCE_FAIL;
     process.env.AI_MOCK_FORCE_FAIL = "true";
     try {
-      const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+      const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
       await pollFitting(fittingId, ctx.userId);
       const row = await db.fitting.findUniqueOrThrow({ where: { id: fittingId } });
       expect(row.status).toBe("FAILED");
@@ -276,7 +329,7 @@ describe("pollFitting — authz", () => {
   afterEach(async () => { await cleanupCtx(ctx); });
 
   it("다른 userId로 폴링하면 UNAUTHORIZED를 던진다", async () => {
-    const fittingId = await startFitting(ctx.userId, SOURCE_KEY, ctx.variantId, "KR");
+    const fittingId = await startFitting(ctx.userId, sourceKeyFor(ctx.userId), ctx.variantId, "KR");
     await expect(pollFitting(fittingId, "other-user-id")).rejects.toThrow(FittingException);
     let caught: unknown;
     try {

@@ -127,7 +127,7 @@ export async function startFitting(
   variantId: string,
   marketCode: string,
 ): Promise<string> {
-  validateSourceKey(sourceImageKey);
+  validateSourceKey(sourceImageKey, userId);
   const variantSku = await checkVariantForMarket(variantId, marketCode);
   const fittingId = await createPendingFitting(userId, variantId, sourceImageKey);
   await requestAndSaveJobId(fittingId, sourceImageKey, variantId, variantSku);
