@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getEnabledManualRelationPurposes,
+  getManualRelationCustomerGateStates,
   ManualItemRelationsActivationConfigError,
 } from "../activation";
 
@@ -37,10 +38,42 @@ describe("manual item relation activation", () => {
     },
   );
 
+  it("projects both KR customer gates without throwing on invalid configuration", () => {
+    expect(getManualRelationCustomerGateStates("KR", {
+      MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: " ENABLED ",
+      MANUAL_ITEM_RELATIONS_KR_COMPARE_WITH_ENABLED: "invalid",
+    })).toEqual({
+      SIMILAR_STYLE: "ON",
+      COMPARE_WITH: "INVALID CONFIGURATION",
+    });
+  });
+
+  it.each([
+    [undefined, "OFF"],
+    ["   ", "OFF"],
+    ["ENABLED", "ON"],
+    [" ENABLED ", "ON"],
+    ["enabled", "INVALID CONFIGURATION"],
+  ] as const)("projects %s as %s", (value, expected) => {
+    expect(getManualRelationCustomerGateStates("KR", {
+      MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: value,
+    }).SIMILAR_STYLE).toBe(expected);
+  });
+
   it("returns no enabled purpose outside KR without inspecting dormant KR values", () => {
     expect(getEnabledManualRelationPurposes("US", {
       MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "invalid",
       MANUAL_ITEM_RELATIONS_KR_COMPARE_WITH_ENABLED: "ENABLED",
     })).toEqual([]);
+  });
+
+  it("keeps non-KR diagnostic projections off without inspecting dormant KR values", () => {
+    expect(getManualRelationCustomerGateStates("US", {
+      MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "invalid",
+      MANUAL_ITEM_RELATIONS_KR_COMPARE_WITH_ENABLED: "ENABLED",
+    })).toEqual({
+      SIMILAR_STYLE: "OFF",
+      COMPARE_WITH: "OFF",
+    });
   });
 });

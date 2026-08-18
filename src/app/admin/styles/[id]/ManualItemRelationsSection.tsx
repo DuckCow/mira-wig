@@ -12,6 +12,10 @@ import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Toast";
 import { getAdminErrorMessage } from "@/lib/admin-messages";
+import type {
+  ManualRelationCustomerGateState,
+  ManualRelationCustomerGateStates,
+} from "@/lib/manual-item-relations/activation";
 import {
   ManualStyleRelationPurpose,
   type AdminManualStyleRelation,
@@ -24,6 +28,7 @@ interface Props {
   sourceStyleId: string;
   relations: AdminManualStyleRelation[];
   targetChoices: ManualRelationTargetChoice[];
+  customerGateStates: ManualRelationCustomerGateStates;
 }
 
 interface RelationDraft {
@@ -100,6 +105,29 @@ function diagnosticClass(diagnostic: ManualRelationDiagnostic): string {
 function activationButtonClass(isActive: boolean): string {
   if (isActive) return "bg-gray-200 text-gray-700 hover:bg-gray-300";
   return "bg-gray-900 text-white hover:bg-gray-700";
+}
+
+function customerGateBadgeVariant(
+  state: ManualRelationCustomerGateState,
+): "active" | "inactive" | "error" {
+  if (state === "ON") return "active";
+  if (state === "INVALID CONFIGURATION") return "error";
+  return "inactive";
+}
+
+function CustomerGateState({
+  purpose,
+  state,
+}: {
+  purpose: ManualStyleRelationPurposeValue;
+  state: ManualRelationCustomerGateState;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded border border-gray-200 bg-white px-3 py-2">
+      <code className="text-xs font-medium text-gray-700">{purpose}</code>
+      <Badge variant={customerGateBadgeVariant(state)}>{state}</Badge>
+    </div>
+  );
 }
 
 function RelationEditor({
@@ -199,6 +227,7 @@ export function ManualItemRelationsSection({
   sourceStyleId,
   relations,
   targetChoices,
+  customerGateStates,
 }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [targetStyleId, setTargetStyleId] = useState(targetChoices[0]?.id ?? "");
@@ -288,6 +317,31 @@ export function ManualItemRelationsSection({
 
   return (
     <Card title="수동 스타일 관계 (KR)">
+      <section
+        aria-labelledby="manual-relation-customer-gates"
+        className="mb-5 rounded-lg border border-gray-300 bg-gray-50 p-4"
+      >
+        <h3
+          id="manual-relation-customer-gates"
+          className="text-sm font-semibold text-gray-900"
+        >
+          고객 노출 게이트
+        </h3>
+        <p className="mt-1 text-xs text-gray-500">
+          고객 목적별 노출 설정입니다. 아래 관계 행의 활성·초안 상태와 별개이며 읽기 전용입니다.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <CustomerGateState
+            purpose={ManualStyleRelationPurpose.SIMILAR_STYLE}
+            state={customerGateStates.SIMILAR_STYLE}
+          />
+          <CustomerGateState
+            purpose={ManualStyleRelationPurpose.COMPARE_WITH}
+            state={customerGateStates.COMPARE_WITH}
+          />
+        </div>
+      </section>
+
       <div className="flex items-start justify-between gap-4 mb-5">
         <p className="text-xs text-gray-500">
           방향성 있는 편집 관계입니다. 자동 유사도나 상업적 대체 가능성을 의미하지 않습니다.

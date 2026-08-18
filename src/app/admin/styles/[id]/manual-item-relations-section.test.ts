@@ -57,6 +57,10 @@ describe("ManualItemRelationsSection", () => {
       sourceStyleId: "source-style",
       relations: [RELATION],
       targetChoices: [CHOICE],
+      customerGateStates: {
+        SIMILAR_STYLE: "OFF",
+        COMPARE_WITH: "ON",
+      },
     }));
     expect(html).toContain("수동 스타일 관계 (KR)");
     expect(html).toContain("target-");
@@ -65,7 +69,28 @@ describe("ManualItemRelationsSection", () => {
     expect(html).toContain("편집 저장");
     expect(html).toContain("활성화");
     expect(html).toContain("비활성 초안 만들기");
+    expect(html).toContain("고객 노출 게이트");
+    expect(html).toContain("SIMILAR_STYLE");
+    expect(html).toContain("COMPARE_WITH");
+    expect(html).toContain("OFF");
+    expect(html).toContain("ON");
     expect(html).not.toContain("삭제");
+  });
+
+  it("shows invalid customer gate configuration without exposing its raw value", () => {
+    const html = renderToStaticMarkup(React.createElement(ManualItemRelationsSection, {
+      sourceStyleId: "source-style",
+      relations: [],
+      targetChoices: [],
+      customerGateStates: {
+        SIMILAR_STYLE: "INVALID CONFIGURATION",
+        COMPARE_WITH: "OFF",
+      },
+    }));
+    expect(html).toContain("SIMILAR_STYLE");
+    expect(html).toContain("INVALID CONFIGURATION");
+    expect(html).toContain("COMPARE_WITH");
+    expect(html).not.toContain("MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED");
   });
 
   it("labels inactive and unpublished candidate targets for draft curation", () => {
@@ -73,6 +98,10 @@ describe("ManualItemRelationsSection", () => {
       sourceStyleId: "source-style",
       relations: [],
       targetChoices: [CHOICE],
+      customerGateStates: {
+        SIMILAR_STYLE: "OFF",
+        COMPARE_WITH: "OFF",
+      },
     }));
     expect(html).toContain("출시 준비 대상");
     expect(html).toContain("전역 비활성");
