@@ -10,12 +10,14 @@ import {
   getAdminManualStyleRelations,
   getManualRelationTargetChoices,
 } from "@/lib/manual-item-relations/admin";
+import { getManualRelationCustomerGateStates } from "@/lib/manual-item-relations/activation";
 import { ManualItemRelationsSection } from "./ManualItemRelationsSection";
 
 type Params = Promise<{ id: string }>;
 
 export default async function StyleDetailPage({ params }: { params: Params }) {
   const { id } = await params;
+  const customerGateStates = getManualRelationCustomerGateStates("KR");
   const [style, marketData, relations, targetChoices] = await Promise.all([
     getStyleDetail(id),
     getStyleMarketData(id),
@@ -41,6 +43,7 @@ export default async function StyleDetailPage({ params }: { params: Params }) {
         sourceStyleId={style.id}
         relations={relations}
         targetChoices={targetChoices}
+        customerGateStates={customerGateStates}
       />
     </div>
   );
