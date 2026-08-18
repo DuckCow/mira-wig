@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { FulfillmentType, ShippingCountry, WigCategory } from "@prisma/client";
+import { Client } from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CartException,
@@ -103,10 +104,159 @@ describe("cart pricing", () => {
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
   });
 
+  it("preserves malformed existing-parent precedence over request stock validation", async () => {
+    const persistedStyle = await createCatalogVariant(ctx);
+    const requestedVariant = await createCatalogVariant(ctx, { stock: 1 });
+    await db.cartItem.create({
+      data: {
+        userId: ctx.userId,
+        wigStyleId: persistedStyle.styleId,
+        variantId: requestedVariant.id,
+        quantity: 1,
+      },
+    });
+
+    await expectCartFailure("VARIANT_PARENT_MISMATCH", () => (
+      addToCart(ctx.userId, requestedVariant.id, requestedVariant.styleId, 2, MarketCode.KR)
+    ));
+    await expect(db.cartItem.findUnique({
+      where: { userId_variantId: { userId: ctx.userId, variantId: requestedVariant.id } },
+      select: { wigStyleId: true, quantity: true },
+    })).resolves.toEqual({ wigStyleId: persistedStyle.styleId, quantity: 1 });
+  });
+
+  it("atomically preserves concurrent increments for an existing cart identity", async () => {
+    const variant = await createCatalogVariant(ctx, { stock: 5 });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    const itemId = await firstCartItemId(ctx.userId);
+    const boundary = await holdCartItemRowWriteBoundary(itemId);
+    const contenders = [
+      settle(addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)),
+      settle(addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)),
+    ];
+
+    try {
+      const blocked = await waitForBlockedCartWrites(boundary, 1);
+      expect(blocked).toHaveLength(1);
+      await boundary.release();
+
+      const results = await Promise.all(contenders);
+      expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+      await expect(cartQuantity(itemId)).resolves.toBe(3);
+    } finally {
+      await boundary.close();
+      await Promise.all(contenders);
+    }
+  });
+
+  it("converges concurrent empty-row adds without exposing a create collision", async () => {
+    const variant = await createCatalogVariant(ctx, { stock: 5 });
+    const boundary = await holdCartItemTableWriteBoundary();
+    const contenders = [
+      settle(addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)),
+      settle(addToCart(ctx.userId, variant.id, variant.styleId, 2, MarketCode.KR)),
+    ];
+
+    try {
+      const blocked = await waitForBlockedCartWrites(boundary, 1);
+      expect(blocked).toHaveLength(1);
+      await boundary.release();
+
+      const results = await Promise.all(contenders);
+      expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+      await expect(db.cartItem.findMany({
+        where: { userId: ctx.userId, variantId: variant.id },
+        select: { quantity: true },
+      })).resolves.toEqual([{ quantity: 3 }]);
+    } finally {
+      await boundary.close();
+      await Promise.all(contenders);
+    }
+  });
+
+  it("rolls back the concurrent increment that would exceed stock", async () => {
+    const variant = await createCatalogVariant(ctx, { stock: 2 });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    const itemId = await firstCartItemId(ctx.userId);
+    const boundary = await holdCartItemRowWriteBoundary(itemId);
+    const contenders = [
+      settle(addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)),
+      settle(addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)),
+    ];
+
+    try {
+      const blocked = await waitForBlockedCartWrites(boundary, 1);
+      expect(blocked).toHaveLength(1);
+      await boundary.release();
+
+      const results = await Promise.all(contenders);
+      const fulfilled = results.filter((result) => result.status === "fulfilled");
+      const rejected = results.filter((result) => result.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]).toMatchObject({
+        reason: { name: "CartException", code: "STOCK_EXCEEDED" },
+      });
+      await expect(cartQuantity(itemId)).resolves.toBe(2);
+    } finally {
+      await boundary.close();
+      await Promise.all(contenders);
+    }
+  });
+
+  it("keeps a different cart identity writable while one identity is row-locked", async () => {
+    const blockedVariant = await createCatalogVariant(ctx, { stock: 3 });
+    const independentVariant = await createCatalogVariant(ctx, { stock: 3 });
+    await addToCart(ctx.userId, blockedVariant.id, blockedVariant.styleId, 1, MarketCode.KR);
+    await addToCart(ctx.userId, independentVariant.id, independentVariant.styleId, 1, MarketCode.KR);
+    const blockedItem = await cartItemForVariant(ctx.userId, blockedVariant.id);
+    const independentItem = await cartItemForVariant(ctx.userId, independentVariant.id);
+    const boundary = await holdCartItemRowWriteBoundary(blockedItem.id);
+    const blockedAdd = settle(addToCart(
+      ctx.userId,
+      blockedVariant.id,
+      blockedVariant.styleId,
+      1,
+      MarketCode.KR,
+    ));
+
+    try {
+      await waitForBlockedCartWrites(boundary, 1);
+      await expect(addToCart(
+        ctx.userId,
+        independentVariant.id,
+        independentVariant.styleId,
+        1,
+        MarketCode.KR,
+      )).resolves.toBeUndefined();
+      await expect(cartQuantity(independentItem.id)).resolves.toBe(2);
+
+      await boundary.release();
+      await expect(blockedAdd).resolves.toMatchObject({ status: "fulfilled" });
+      await expect(cartQuantity(blockedItem.id)).resolves.toBe(2);
+    } finally {
+      await boundary.close();
+      await blockedAdd;
+    }
+  });
+
   it("rejects addToCart when requested market price is missing", async () => {
     const variant = await createCatalogVariant(ctx, { marketPrices: {} });
 
     await expectCartFailure("VARIANT_PRICE_UNAVAILABLE", () => (
+      addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)
+    ));
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("rejects addToCart when the style is unpublished in the requested market", async () => {
+    const variant = await createCatalogVariant(ctx);
+    await db.wigStyleMarket.update({
+      where: { wigStyleId_marketCode: { wigStyleId: variant.styleId, marketCode: MarketCode.KR } },
+      data: { isActive: false },
+    });
+
+    await expectCartFailure("STYLE_UNPUBLISHED", () => (
       addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR)
     ));
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(0);
@@ -421,6 +571,110 @@ async function cartQuantity(cartItemId: string): Promise<number> {
   const item = await db.cartItem.findUnique({ where: { id: cartItemId }, select: { quantity: true } });
   if (!item) throw new Error("Expected cart item");
   return item.quantity;
+}
+
+async function cartItemForVariant(userId: string, variantId: string): Promise<{ id: string }> {
+  const item = await db.cartItem.findUnique({
+    where: { userId_variantId: { userId, variantId } },
+    select: { id: true },
+  });
+  if (!item) throw new Error("Expected cart item");
+  return item;
+}
+
+function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  return promise.then(
+    (value) => ({ status: "fulfilled", value }),
+    (reason: unknown) => ({ status: "rejected", reason }),
+  );
+}
+
+interface CartWriteBoundary {
+  client: Client;
+  blockerPid: number;
+  release(): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface CartWriteWaitEvidence {
+  pid: number;
+  blockingPids: number[];
+}
+
+async function holdCartItemRowWriteBoundary(cartItemId: string): Promise<CartWriteBoundary> {
+  return openCartWriteBoundary(async (client) => {
+    const locked = await client.query<{ id: string }>(
+      'SELECT "id" FROM "CartItem" WHERE "id" = $1 FOR UPDATE',
+      [cartItemId],
+    );
+    if (locked.rowCount !== 1) throw new Error(`Expected to lock CartItem ${cartItemId}`);
+  });
+}
+
+async function holdCartItemTableWriteBoundary(): Promise<CartWriteBoundary> {
+  return openCartWriteBoundary(async (client) => {
+    await client.query('LOCK TABLE "CartItem" IN ACCESS EXCLUSIVE MODE');
+  });
+}
+
+async function openCartWriteBoundary(acquire: (client: Client) => Promise<void>): Promise<CartWriteBoundary> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required for cart concurrency tests");
+  const client = new Client({
+    connectionString,
+    application_name: `wig_wrr_02_cart_boundary_${randomUUID()}`,
+  });
+  await client.connect();
+  let transactionOpen = false;
+  try {
+    await client.query("BEGIN");
+    transactionOpen = true;
+    await acquire(client);
+    const pidResult = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const blockerPid = pidResult.rows[0]?.pid;
+    if (blockerPid === undefined) throw new Error("Expected cart lock-holder pid");
+    return {
+      client,
+      blockerPid,
+      release: async () => {
+        if (!transactionOpen) return;
+        await client.query("COMMIT");
+        transactionOpen = false;
+      },
+      close: async () => {
+        if (transactionOpen) await client.query("ROLLBACK");
+        transactionOpen = false;
+        await client.end();
+      },
+    };
+  } catch (error) {
+    if (transactionOpen) await client.query("ROLLBACK");
+    await client.end();
+    throw error;
+  }
+}
+
+async function waitForBlockedCartWrites(
+  boundary: CartWriteBoundary,
+  expectedCount: number,
+): Promise<CartWriteWaitEvidence[]> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = await boundary.client.query<CartWriteWaitEvidence>(`
+      SELECT a.pid,
+             pg_blocking_pids(a.pid) AS "blockingPids"
+      FROM pg_stat_activity a
+      WHERE a.datname = current_database()
+        AND a.pid <> pg_backend_pid()
+        AND $1 = ANY(pg_blocking_pids(a.pid))
+      ORDER BY a.pid
+    `, [boundary.blockerPid]);
+    if (result.rows.length >= expectedCount) {
+      return result.rows.slice(0, expectedCount);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for ${expectedCount} blocked CartItem writes`);
 }
 
 async function deleteMarketPrice(variantId: string, marketCode: MarketCode): Promise<void> {

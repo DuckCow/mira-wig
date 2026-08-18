@@ -244,57 +244,71 @@ export async function addToCart(
 ): Promise<void> {
   if (quantity < 1) throw new CartException("INVALID_QUANTITY", "수량은 1 이상이어야 합니다.");
 
-  const variant = await db.wigVariant.findUnique({
-    where: { id: variantId },
-    select: {
-      wigStyleId: true,
-      isActive: true,
-      stock: true,
-      wigStyle: {
-        select: {
-          isActive: true,
-          availableMarkets: {
-            where: { marketCode, isActive: true, market: { isActive: true } },
-            select: { marketCode: true },
-            take: 1,
+  await db.$transaction(async (tx) => {
+    const variant = await tx.wigVariant.findUnique({
+      where: { id: variantId },
+      select: {
+        wigStyleId: true,
+        isActive: true,
+        stock: true,
+        wigStyle: {
+          select: {
+            isActive: true,
+            availableMarkets: {
+              where: { marketCode, isActive: true, market: { isActive: true } },
+              select: { marketCode: true },
+              take: 1,
+            },
           },
         },
+        marketPrices: {
+          where: { marketCode },
+          select: { amount: true },
+          take: 1,
+        },
       },
-      marketPrices: {
-        where: { marketCode },
-        select: { amount: true },
-        take: 1,
-      },
-    },
-  });
-  if (!variant) throw new CartException("VARIANT_NOT_FOUND", "옵션을 찾을 수 없습니다.");
+    });
+    if (!variant) throw new CartException("VARIANT_NOT_FOUND", "옵션을 찾을 수 없습니다.");
 
-  const existing = await db.cartItem.findUnique({
-    where: { userId_variantId: { userId, variantId } },
-    select: { id: true, quantity: true, wigStyleId: true },
-  });
+    const existing = await tx.cartItem.findUnique({
+      where: { userId_variantId: { userId, variantId } },
+      select: { wigStyleId: true },
+    });
+    if (existing && existing.wigStyleId !== wigStyleId) {
+      throwIntegrityFailure("VARIANT_PARENT_MISMATCH", variant.stock);
+    }
 
-  const newQty = (existing?.quantity ?? 0) + quantity;
-  if (existing && existing.wigStyleId !== wigStyleId) {
-    throwIntegrityFailure("VARIANT_PARENT_MISMATCH", variant.stock);
-  }
-  const failure = variantPurchasableInMarketFailure({
-    selectedStyleId: wigStyleId,
-    canonicalStyleId: variant.wigStyleId,
-    styleActive: variant.wigStyle.isActive,
-    stylePublishedInMarket: variant.wigStyle.availableMarkets.length === 1,
-    variantActive: variant.isActive,
-    hasMarketPrice: variant.marketPrices.length === 1,
-    stock: variant.stock,
-    quantity: newQty,
-  });
-  if (failure) throwIntegrityFailure(failure, variant.stock);
+    const requestedFailure = variantPurchasableInMarketFailure({
+      selectedStyleId: wigStyleId,
+      canonicalStyleId: variant.wigStyleId,
+      styleActive: variant.wigStyle.isActive,
+      stylePublishedInMarket: variant.wigStyle.availableMarkets.length === 1,
+      variantActive: variant.isActive,
+      hasMarketPrice: variant.marketPrices.length === 1,
+      stock: variant.stock,
+      quantity,
+    });
+    if (requestedFailure) throwIntegrityFailure(requestedFailure, variant.stock);
 
-  if (existing) {
-    await db.cartItem.update({ where: { id: existing.id }, data: { quantity: newQty } });
-  } else {
-    await db.cartItem.create({ data: { userId, variantId, wigStyleId, quantity } });
-  }
+    const item = await tx.cartItem.upsert({
+      where: { userId_variantId: { userId, variantId } },
+      create: { userId, variantId, wigStyleId, quantity },
+      update: { quantity: { increment: quantity } },
+      select: { wigStyleId: true, quantity: true },
+    });
+
+    const aggregateFailure = variantPurchasableInMarketFailure({
+      selectedStyleId: item.wigStyleId,
+      canonicalStyleId: variant.wigStyleId,
+      styleActive: variant.wigStyle.isActive,
+      stylePublishedInMarket: variant.wigStyle.availableMarkets.length === 1,
+      variantActive: variant.isActive,
+      hasMarketPrice: variant.marketPrices.length === 1,
+      stock: variant.stock,
+      quantity: item.quantity,
+    });
+    if (aggregateFailure) throwIntegrityFailure(aggregateFailure, variant.stock);
+  });
 }
 
 export async function updateQuantity(
