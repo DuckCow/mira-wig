@@ -44,3 +44,11 @@ describe("manual item relation administrator messages", () => {
     expect(getAdminErrorMessage(code)).not.toContain(`(${code})`);
   });
 });
+
+describe("catalog cover administrator messages", () => {
+  it("maps invalid or missing cover objects to generic safe copy", () => {
+    expect(getAdminErrorMessage("INVALID_COVER_IMAGE")).toBe(
+      "커버 이미지를 확인할 수 없습니다. 이미지를 다시 업로드해 주세요.",
+    );
+  });
+});

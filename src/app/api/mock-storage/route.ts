@@ -21,6 +21,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  readMockStorageObject,
+  recordMockStorageObject,
+} from "@/lib/storage/mock-store";
 
 // ── 프로덕션 가드 ────────────────────────────────────────────
 // 프로덕션에서만 이 라우트를 닫는다.
@@ -44,11 +48,6 @@ function corsHeaders(): Record<string, string> {
     "Access-Control-Allow-Headers": "Content-Type",
   };
 }
-
-// ── 인메모리 업로드 스토어 ────────────────────────────────────
-// 서버 재시작 시 초기화됨 (데모 전용)
-
-const uploadStore = new Map<string, { buffer: ArrayBuffer; contentType: string }>();
 
 // ── 데모 canned after 이미지 ──────────────────────────────────
 // 실 VTO provider 연동 시 제거(핸드오프 §8)
@@ -123,7 +122,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 
   const contentType = req.headers.get("Content-Type") ?? "application/octet-stream";
   const buffer = await req.arrayBuffer();
-  uploadStore.set(key, { buffer, contentType });
+  recordMockStorageObject(key, buffer, contentType);
   return new NextResponse(null, { status: 200, headers: corsHeaders() });
 }
 
@@ -135,7 +134,7 @@ export function GET(req: NextRequest): NextResponse {
   if (!key) return new NextResponse("missing key", { status: 400, headers: corsHeaders() });
 
   // 1. 업로드 스토어: 사용자가 올린 before 셀카
-  const stored = uploadStore.get(key);
+  const stored = readMockStorageObject(key);
   if (stored) {
     return imageResponse(stored.buffer, stored.contentType);
   }

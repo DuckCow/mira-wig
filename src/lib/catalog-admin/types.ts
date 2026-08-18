@@ -16,6 +16,7 @@ export type CatalogAdminErrorCode =
   | "SKU_DUPLICATE"
   | "INVALID_CATEGORY"
   | "INVALID_INPUT"
+  | "INVALID_COVER_IMAGE"
   | "MARKET_NOT_FOUND"
   | "INVALID_AMOUNT";
 

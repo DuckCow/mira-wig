@@ -85,7 +85,7 @@ export async function updateStyleAction(
   const guard = await requireAdmin();
   if (!guard.success) return guard;
   try {
-    await updateWigStyle(styleId, input);
+    await updateWigStyle(styleId, input, catalogStorage);
     revalidatePath(ADMIN_PATH);
     return { success: true };
   } catch (e) {

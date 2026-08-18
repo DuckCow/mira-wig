@@ -11,6 +11,7 @@
 
 import { randomUUID } from "crypto";
 import type { PresignedUploadResult, StorageProvider, UploadPurpose } from "./types";
+import { deleteMockStorageObject, hasMockStorageObject } from "./mock-store";
 
 function extFromContentType(contentType: string): string {
   const map: Record<string, string> = {
@@ -60,11 +61,12 @@ export class MockStorageProvider implements StorageProvider {
     );
   }
 
-  delete(_key: string): Promise<void> {
+  delete(key: string): Promise<void> {
+    deleteMockStorageObject(key);
     return Promise.resolve();
   }
 
-  exists(_key: string): Promise<boolean> {
-    return Promise.resolve(true);
+  exists(key: string): Promise<boolean> {
+    return Promise.resolve(hasMockStorageObject(key));
   }
 }
