@@ -496,6 +496,9 @@ model CheckoutSessionLine {
   id              String          @id @default(cuid())
   sessionId       String
   session         CheckoutSession @relation(fields: [sessionId], references: [id])
+  /// Exact mutable CartItem identity from which a cart-checkout line was frozen.
+  /// Used only to bound successful-completion cart cleanup; not commercial/order authority.
+  sourceCartItemId String?
   variantId       String
   variant         WigVariant      @relation(fields: [variantId], references: [id])
   /// Cart-selected parent identity. This is not inferred from variantId at completion.
@@ -507,6 +510,7 @@ model CheckoutSessionLine {
   createdAt       DateTime        @default(now())
 
   @@unique([sessionId, variantId])
+  @@index([sourceCartItemId])
 }
 
 model CheckoutSessionShipping {

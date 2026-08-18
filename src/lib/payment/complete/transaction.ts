@@ -60,7 +60,7 @@ async function completeInTransaction(
   guardCompletion(session, payment, facts);
   const order = await createOrder(tx, session, payment, effectiveCapturedAt(facts));
   await decrementStockedLines(tx, session.lines, payment, facts);
-  await deletePurchasedCartLines(tx, session);
+  await consumePurchasedCartProvenance(tx, session);
   await completeSession(tx, session, facts);
   await finalizePayment(tx, payment, facts);
   return { kind: "completed", checkoutSessionId: session.id, paymentId: payment.id, orderId: order.id };
@@ -312,13 +312,94 @@ async function decrementStockedLine(
   if (result.count !== 1) fail("STOCK_INSUFFICIENT", "Stock is insufficient at completion", facts, payment);
 }
 
-async function deletePurchasedCartLines(
+type ProvenanceLine = CompletionLine & { sourceCartItemId: string };
+type LockedCartSource = { id: string; quantity: number };
+
+async function consumePurchasedCartProvenance(
   tx: CompletionTx,
   session: CompletionSession,
 ): Promise<void> {
-  await tx.cartItem.deleteMany({
-    where: { userId: session.userId, variantId: { in: session.lines.map((line) => line.variantId) } },
+  const lines = session.lines
+    .filter(hasSourceCartItemId)
+    .sort(compareSourceCartItemId);
+  for (const line of lines) await consumeSourceLine(tx, session, line);
+}
+
+function hasSourceCartItemId(line: CompletionLine): line is ProvenanceLine {
+  return line.sourceCartItemId !== null;
+}
+
+function compareSourceCartItemId(left: ProvenanceLine, right: ProvenanceLine): number {
+  if (left.sourceCartItemId < right.sourceCartItemId) return -1;
+  if (left.sourceCartItemId > right.sourceCartItemId) return 1;
+  return 0;
+}
+
+async function consumeSourceLine(
+  tx: CompletionTx,
+  session: CompletionSession,
+  line: ProvenanceLine,
+): Promise<void> {
+  const source = await lockExactCartSource(tx, session.userId, line);
+  if (!source) return;
+
+  // This committed-Order watermark must be read only after the exact CartItem row lock.
+  // Under READ COMMITTED the lock serializes sibling completions, then this statement
+  // observes the maximum frozen quantity whose cleanup transaction committed.
+  const priorWatermark = await tx.checkoutSessionLine.aggregate({
+    where: {
+      sourceCartItemId: line.sourceCartItemId,
+      sessionId: { not: session.id },
+      variantId: line.variantId,
+      wigStyleId: line.wigStyleId,
+      session: {
+        userId: session.userId,
+        order: { isNot: null },
+      },
+    },
+    _max: { quantity: true },
   });
+  const cleanupDelta = Math.max(0, line.quantity - (priorWatermark._max.quantity ?? 0));
+  if (cleanupDelta === 0) return;
+
+  const exactSource = exactCartSourcePredicate(session.userId, line);
+  if (source.quantity <= cleanupDelta) {
+    await tx.cartItem.deleteMany({ where: exactSource });
+    return;
+  }
+  await tx.cartItem.updateMany({
+    where: exactSource,
+    data: { quantity: { decrement: cleanupDelta } },
+  });
+}
+
+async function lockExactCartSource(
+  tx: CompletionTx,
+  userId: string,
+  line: ProvenanceLine,
+): Promise<LockedCartSource | null> {
+  const rows = await tx.$queryRaw<LockedCartSource[]>(Prisma.sql`
+    SELECT "id", "quantity"
+    FROM "CartItem"
+    WHERE "id" = ${line.sourceCartItemId}
+      AND "userId" = ${userId}
+      AND "variantId" = ${line.variantId}
+      AND "wigStyleId" = ${line.wigStyleId}
+    FOR UPDATE
+  `);
+  return rows[0] ?? null;
+}
+
+function exactCartSourcePredicate(
+  userId: string,
+  line: ProvenanceLine,
+): Prisma.CartItemWhereInput {
+  return {
+    id: line.sourceCartItemId,
+    userId,
+    variantId: line.variantId,
+    wigStyleId: line.wigStyleId,
+  };
 }
 
 async function completeSession(
