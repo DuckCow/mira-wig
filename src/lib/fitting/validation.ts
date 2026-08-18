@@ -5,12 +5,20 @@
 
 import { FittingException } from "./types";
 
+function sourceOwner(key: string): string | null {
+  const segments = key.split("/");
+  if (segments.length !== 3) return null;
+  const [purpose, ownerId, filename] = segments;
+  if (purpose !== "user-upload" || !ownerId || !filename) return null;
+  return ownerId;
+}
+
 /**
  * sourceImageKey가 S3 key 형식인지 검증한다.
  * 규칙 4-4: DB/인터페이스에 URL을 두지 않는다.
  * 유효한 형식: "user-upload/{ownerId}/{filename}"
  */
-export function validateSourceKey(key: string): void {
+export function validateSourceKey(key: string, expectedOwnerId: string): void {
   if (!key || key.trim().length === 0) {
     throw new FittingException("SOURCE_KEY_INVALID", "소스 이미지 키가 비어 있습니다.");
   }
@@ -20,10 +28,10 @@ export function validateSourceKey(key: string): void {
       "URL이 아닌 S3 key를 사용해야 합니다 (규칙 4-4).",
     );
   }
-  if (!key.startsWith("user-upload/")) {
+  if (sourceOwner(key) !== expectedOwnerId) {
     throw new FittingException(
       "SOURCE_KEY_INVALID",
-      "소스 이미지는 user-upload/ 경로여야 합니다.",
+      "소스 이미지 키가 유효한 소유자 경로가 아닙니다.",
     );
   }
 }
