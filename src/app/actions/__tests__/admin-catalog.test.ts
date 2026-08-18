@@ -15,6 +15,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 vi.mock("@/lib/storage", () => ({
   catalogStorage: {
+    exists: vi.fn(),
     getUploadUrl: vi.fn().mockResolvedValue({
       uploadUrl: "https://mock-s3/wig-style/abc.jpg?presign",
       key: "wig-style/abc.jpg",
@@ -44,6 +45,7 @@ vi.mock("@/lib/catalog-admin", () => ({
 }));
 
 import { getSession } from "@/lib/session";
+import { catalogStorage } from "@/lib/storage";
 import {
   createStyleAction,
   updateStyleAction,
@@ -199,6 +201,7 @@ describe("updateStyleAction — ADMIN 성공", () => {
     expect(mockUpdateWigStyle).toHaveBeenCalledWith(
       "style-1",
       expect.objectContaining({ coverImageKey: "wig-style/abc.jpg" }),
+      catalogStorage,
     );
   });
 
@@ -209,6 +212,7 @@ describe("updateStyleAction — ADMIN 성공", () => {
     expect(mockUpdateWigStyle).toHaveBeenCalledWith(
       "style-1",
       expect.objectContaining({ coverImageKey: null }),
+      catalogStorage,
     );
   });
 });

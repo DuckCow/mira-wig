@@ -11,6 +11,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   SKU_DUPLICATE: "이미 존재하는 SKU입니다.",
   INVALID_CATEGORY: "유효하지 않은 카테고리입니다.",
   INVALID_INPUT: "입력값이 올바르지 않습니다.",
+  INVALID_COVER_IMAGE: "커버 이미지를 확인할 수 없습니다. 이미지를 다시 업로드해 주세요.",
   INVALID_TRANSITION: "현재 상태에서는 이 전이를 할 수 없습니다.",
   MARKET_NOT_FOUND: "유효하지 않은 마켓 코드입니다.",
   INVALID_ACTOR: "인증된 관리자 정보를 확인할 수 없습니다.",

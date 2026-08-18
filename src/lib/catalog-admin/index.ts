@@ -11,6 +11,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { WIG_CATEGORIES } from "@/lib/catalog.types";
+import type { StorageProvider } from "@/lib/storage/types";
 import {
   CatalogAdminException,
   type CreateStyleInput,
@@ -24,6 +25,9 @@ export * from "./types";
 // ── 내부 헬퍼 ────────────────────────────────────────────────
 
 const VALID_CATEGORIES: ReadonlySet<string> = new Set(WIG_CATEGORIES);
+const CATALOG_COVER_KEY_RE = /^wig-style\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.(?:jpg|png|webp)$/;
+
+type CatalogCoverStorage = Pick<StorageProvider, "exists">;
 
 function assertNonEmpty(value: string | undefined, field: string): void {
   if (!value || !value.trim()) {
@@ -64,7 +68,10 @@ export async function createWigStyle(input: CreateStyleInput): Promise<{ id: str
   });
 }
 
-function buildStyleUpdateData(input: UpdateStyleInput) {
+function buildStyleUpdateData(
+  input: UpdateStyleInput,
+  admittedCoverImageKey: string | null | undefined,
+) {
   return {
     ...(input.name !== undefined && { name: input.name.trim() }),
     ...(input.description !== undefined && { description: input.description }),
@@ -72,17 +79,55 @@ function buildStyleUpdateData(input: UpdateStyleInput) {
     ...(input.tags !== undefined && { tags: input.tags }),
     ...(input.sortOrder !== undefined && { sortOrder: input.sortOrder }),
     ...(input.isActive !== undefined && { isActive: input.isActive }),
-    ...(input.coverImageKey !== undefined && { coverImageKey: input.coverImageKey }),
+    ...(admittedCoverImageKey !== undefined && { coverImageKey: admittedCoverImageKey }),
   };
 }
 
-/** WigStyle 텍스트 메타를 수정한다. 이미지 필드는 제외. */
-export async function updateWigStyle(styleId: string, input: UpdateStyleInput): Promise<void> {
+function invalidCoverImage(): never {
+  throw new CatalogAdminException(
+    "INVALID_COVER_IMAGE",
+    "커버 이미지 키 또는 업로드 객체를 확인할 수 없습니다.",
+  );
+}
+
+async function admitCoverImageMutation(
+  submitted: unknown,
+  existing: string | null,
+  storage: CatalogCoverStorage,
+): Promise<string | null | undefined> {
+  if (submitted === undefined) return undefined;
+  if (submitted === null) return null;
+  if (typeof submitted !== "string") invalidCoverImage();
+
+  // 기존 demo/legacy 키의 정확한 재전송은 새 공개 객체 identity 입장이 아니다.
+  if (submitted === existing) return undefined;
+  if (!CATALOG_COVER_KEY_RE.test(submitted)) invalidCoverImage();
+  if (!await storage.exists(submitted)) invalidCoverImage();
+  return submitted;
+}
+
+/** WigStyle 메타와 커버 이미지 identity를 권위 있게 수정한다. */
+export async function updateWigStyle(
+  styleId: string,
+  input: UpdateStyleInput,
+  storage: CatalogCoverStorage,
+): Promise<void> {
   if (input.name !== undefined) assertNonEmpty(input.name, "이름");
   if (input.category !== undefined) assertValidCategory(input.category);
-  const existing = await db.wigStyle.findUnique({ where: { id: styleId }, select: { id: true } });
+  const existing = await db.wigStyle.findUnique({
+    where: { id: styleId },
+    select: { id: true, coverImageKey: true },
+  });
   if (!existing) throw new CatalogAdminException("STYLE_NOT_FOUND", "스타일을 찾을 수 없습니다.");
-  await db.wigStyle.update({ where: { id: styleId }, data: buildStyleUpdateData(input) });
+  const admittedCoverImageKey = await admitCoverImageMutation(
+    input.coverImageKey,
+    existing.coverImageKey,
+    storage,
+  );
+  await db.wigStyle.update({
+    where: { id: styleId },
+    data: buildStyleUpdateData(input, admittedCoverImageKey),
+  });
 }
 
 /**
