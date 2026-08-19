@@ -31,6 +31,7 @@ import type { ProviderEnv } from "@/lib/payment/providers/credentials";
 import type { PaymentMethod, PaymentMode } from "@/lib/payment/providers/routing";
 
 export type { EximbayReadyFetch } from "./ready-http";
+export { EXIMBAY_READY_TOTAL_DEADLINE_MS } from "./ready-http";
 
 const preparedContactBrand: unique symbol = Symbol("PreparedEximbayReadyContact");
 const freshAuthorityBrand: unique symbol = Symbol("FreshEximbayReadyAuthority");
