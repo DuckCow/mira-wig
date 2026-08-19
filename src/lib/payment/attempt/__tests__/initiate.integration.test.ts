@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { readFileSync } from "node:fs";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
@@ -16,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { completeFromCapture, recordCapture, type CaptureFacts } from "@/lib/payment/complete";
+import { EXIMBAY_READY_TOTAL_DEADLINE_MS } from "@/lib/payment/eximbay/ready-contact";
 import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import { PaymentMethod, PaymentMode } from "@/lib/payment/providers/routing";
@@ -970,7 +972,27 @@ describe("payment initiate providerRef persistence", () => {
     await expectNoRejectedPaymentSideEffects(session.sessionId);
   });
 
-  it("C2I exact expiresAt boundary rejects with the freshly captured contact time", async () => {
+  it("captures contact time after claim revalidation and before the final usability decision and write", () => {
+    const source = readFileSync(new URL("../initiate.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function markContactStarted(");
+    const end = source.indexOf("\nfunction contactClaimWhere(", start);
+    const claimSource = source.slice(start, end);
+
+    expect(claimSource.indexOf("await validateCommerceAtContactBoundary(tx, session)")).toBeLessThan(
+      claimSource.indexOf("const contactBoundaryNow = await captureContactBoundaryTime"),
+    );
+    expect(claimSource.indexOf("await assertEximbayPreparedFactsStillCurrent")).toBeLessThan(
+      claimSource.indexOf("const contactBoundaryNow = await captureContactBoundaryTime"),
+    );
+    expect(claimSource.indexOf("const contactBoundaryNow = await captureContactBoundaryTime")).toBeLessThan(
+      claimSource.indexOf("if (!isUsable(session, contactBoundaryNow))"),
+    );
+    expect(claimSource.indexOf("if (!isUsable(session, contactBoundaryNow))")).toBeLessThan(
+      claimSource.indexOf("attemptLifecycle: PaymentAttemptLifecycle.CONTACTED"),
+    );
+  });
+
+  it("C2I exact expiresAt boundary rejects with the late freshly captured contact time", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const authorizationNow = new Date(session.expiresAt.getTime() - 1);
     const contactBoundaryClock = vi.fn(() => new Date(session.expiresAt));
@@ -1656,7 +1678,136 @@ describe("payment initiate providerRef persistence", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("returns durable-only inProgress while a contacted Eximbay attempt has no output", async () => {
+  it("fails closed when compatible Eximbay reuse retains READY under OUTCOME_UNKNOWN", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const routingRuleId = "test.eximbay.transient.ready-outcome-unknown-reentry";
+    const contactStartedAt = new Date();
+    const existing = await createEximbayContactedPayment(session, routingRuleId, contactStartedAt);
+    await db.payment.update({
+      where: { id: existing.id },
+      data: {
+        attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+        initiationOutputKind: PaymentInitiationOutputKind.READY,
+        initiationCompletedAt: contactStartedAt,
+      },
+    });
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl, routingRuleId);
+
+    await expect(initiatePaymentAttemptExecutionForTest(db, input))
+      .rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(db.payment.findUniqueOrThrow({ where: { id: existing.id } })).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      initiationOutputKind: PaymentInitiationOutputKind.READY,
+      initiationCompletedAt: contactStartedAt,
+    });
+  });
+
+  it("fails a bounded observer closed when OUTCOME_UNKNOWN retains durable READY", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const routingRuleId = "test.eximbay.transient.ready-outcome-unknown-observer";
+    const contactStartedAt = new Date();
+    const existing = await createEximbayContactedPayment(session, routingRuleId, contactStartedAt);
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl, routingRuleId);
+    const observerReads = vi.spyOn(db.payment, "findUnique");
+    try {
+      const contenderPending = initiatePaymentAttemptExecutionForTest(db, input);
+      await vi.waitFor(() => expect(observerReads).toHaveBeenCalled());
+      await db.payment.update({
+        where: { id: existing.id },
+        data: {
+          attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+          initiationOutputKind: PaymentInitiationOutputKind.READY,
+          initiationCompletedAt: contactStartedAt,
+        },
+      });
+
+      await expect(contenderPending).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      await expect(db.payment.findUniqueOrThrow({ where: { id: existing.id } })).resolves.toMatchObject({
+        attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+        initiationOutputKind: PaymentInitiationOutputKind.READY,
+      });
+    } finally {
+      observerReads.mockRestore();
+    }
+  });
+
+  it("gives an active near-stale Eximbay contender a full observer-entry window", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchBarrier = coordinationBarrier();
+    const fetchImpl = vi.fn(async () => {
+      await fetchBarrier.wait();
+      return syntheticReadyResponse();
+    });
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.active-near-stale");
+    const oldRemainingContactBudgetMs = 2_000;
+    input.contactBoundaryNow = new Date(
+      Date.now() - EXIMBAY_READY_TOTAL_DEADLINE_MS + oldRemainingContactBudgetMs,
+    );
+    const ownerPending = initiatePaymentAttemptExecutionForTest(db, input);
+    await fetchBarrier.reached;
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      contactStartedAt: input.contactBoundaryNow,
+      initiationOutputKind: null,
+    });
+
+    const findUnique = db.payment.findUnique.bind(db.payment);
+    let observerReadCount = 0;
+    let markThirdObserverRead: () => void = () => { throw new Error("Observer read signal was not initialized"); };
+    const thirdObserverRead = new Promise<void>((resolve) => { markThirdObserverRead = resolve; });
+    const observerReads = vi.spyOn(db.payment, "findUnique");
+    observerReads.mockImplementation((args) => {
+      const result = findUnique(args);
+      void result.then(() => {
+        observerReadCount += 1;
+        if (observerReadCount === 3) markThirdObserverRead();
+      });
+      return result;
+    });
+    let monotonicReadCount = 0;
+    const monotonicClock = vi.spyOn(performance, "now").mockImplementation(() => {
+      monotonicReadCount += 1;
+      return monotonicReadCount === 1 ? 0 : oldRemainingContactBudgetMs + 500;
+    });
+    let fetchReleased = false;
+    try {
+      const contenderPending = initiatePaymentAttemptExecutionForTest(db, input);
+      await Promise.race([
+        thirdObserverRead,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Observer did not continue beyond the old remaining-age budget")), 2_000);
+        }),
+      ]);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      fetchBarrier.release();
+      fetchReleased = true;
+
+      const [owner, contender] = await Promise.all([ownerPending, contenderPending]);
+
+      expect(owner.channel).toBe("FRESH_EXIMBAY_READY");
+      expect(contender).toMatchObject({
+        channel: "DURABLE_ONLY",
+        durable: {
+          paymentId: owner.durable.paymentId,
+          initiateResult: { kind: "ready" },
+        },
+      });
+      expect("freshAuthority" in contender).toBe(false);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      if (!fetchReleased) fetchBarrier.release();
+      monotonicClock.mockRestore();
+      observerReads.mockRestore();
+    }
+  });
+
+  it("converges a contacted Eximbay contender to durable-only READY while preserving fresh owner authority", async () => {
     const session = await submitUsSessionWithOneLine(ctx);
     const fetchBarrier = coordinationBarrier();
     const fetchImpl = vi.fn(async () => {
@@ -1665,18 +1816,93 @@ describe("payment initiate providerRef persistence", () => {
     });
     const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
       "test.eximbay.transient.contacted-no-output");
-    const pending = initiatePaymentAttemptExecutionForTest(db, input);
+    const ownerPending = initiatePaymentAttemptExecutionForTest(db, input);
     await fetchBarrier.reached;
+    const observerReads = vi.spyOn(db.payment, "findUnique");
+    let fetchReleased = false;
+    try {
+      const contenderPending = initiatePaymentAttemptExecutionForTest(db, input);
+      await vi.waitFor(() => expect(observerReads).toHaveBeenCalled());
+      fetchBarrier.release();
+      fetchReleased = true;
 
-    const reentry = await initiatePaymentAttemptExecutionForTest(db, input);
+      const [owner, contender] = await Promise.all([ownerPending, contenderPending]);
 
-    expect(reentry).toMatchObject({
-      channel: "DURABLE_ONLY",
-      durable: { initiateResult: { kind: "inProgress" } },
+      expect(owner.channel).toBe("FRESH_EXIMBAY_READY");
+      if (owner.channel !== "FRESH_EXIMBAY_READY") throw new Error("Expected fresh owner authority");
+      expect(owner.freshAuthority).toBeDefined();
+      expect(owner.durable.initiateResult.kind).toBe("ready");
+      expect(contender).toMatchObject({
+        channel: "DURABLE_ONLY",
+        durable: {
+          paymentId: owner.durable.paymentId,
+          initiateResult: { kind: "ready" },
+        },
+      });
+      expect("freshAuthority" in contender).toBe(false);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      if (!fetchReleased) fetchBarrier.release();
+      observerReads.mockRestore();
+    }
+  });
+
+  it("converges an observing Eximbay contender to OUTCOME_UNKNOWN without retry", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const fetchBarrier = coordinationBarrier();
+    const fetchImpl = vi.fn(async () => {
+      await fetchBarrier.wait();
+      return new Response(JSON.stringify({
+        rescode: "9999",
+        resmsg: "synthetic rejection",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    fetchBarrier.release();
-    await expect(pending).resolves.toMatchObject({ channel: "FRESH_EXIMBAY_READY" });
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl,
+      "test.eximbay.transient.observed-outcome-unknown");
+    const ownerPending = initiatePaymentAttemptExecutionForTest(db, input);
+    await fetchBarrier.reached;
+    const observerReads = vi.spyOn(db.payment, "findUnique");
+    let fetchReleased = false;
+    try {
+      const contenderPending = initiatePaymentAttemptExecutionForTest(db, input);
+      await vi.waitFor(() => expect(observerReads).toHaveBeenCalled());
+      fetchBarrier.release();
+      fetchReleased = true;
+
+      await expect(ownerPending).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+      await expect(contenderPending).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+        attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+        initiationOutputKind: null,
+      });
+    } finally {
+      if (!fetchReleased) fetchBarrier.release();
+      observerReads.mockRestore();
+    }
+  });
+
+  it("returns stale Eximbay CONTACTED as inProgress promptly without a fresh observation budget", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const routingRuleId = "test.eximbay.transient.stale-contacted";
+    const existing = await createEximbayContactedPayment(
+      session,
+      routingRuleId,
+      new Date(Date.now() - EXIMBAY_READY_TOTAL_DEADLINE_MS - 1_000),
+    );
+    const fetchImpl = vi.fn(() => Promise.resolve(syntheticReadyResponse()));
+    const input = transientEximbayInput(session.sessionId, ctx.userId, fetchImpl, routingRuleId);
+    const startedAt = performance.now();
+
+    const execution = await initiatePaymentAttemptExecutionForTest(db, input);
+
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(execution).toMatchObject({
+      channel: "DURABLE_ONLY",
+      durable: { paymentId: existing.id, initiateResult: { kind: "inProgress" } },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(1);
   });
 
   it("returns no authority after OUTCOME_UNKNOWN and never fetches again", async () => {
@@ -2264,6 +2490,29 @@ async function createUncontactedAuthorizedPayment(
     select: { id: true, idempotencyKey: true },
   });
   return { paymentId: payment.id, idempotencyKey: payment.idempotencyKey };
+}
+
+async function createEximbayContactedPayment(
+  session: { sessionId: string; totalAmount: number; currency: string },
+  routingRuleId: string,
+  contactStartedAt: Date,
+) {
+  return db.payment.create({
+    data: {
+      checkoutSessionId: session.sessionId,
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+      amount: session.totalAmount,
+      currency: session.currency,
+      providerOrderId: `c${randomUUID().replaceAll("-", "").slice(0, 24)}`,
+      idempotencyKey: `eximbay-contacted:${session.sessionId}:${randomUUID()}`,
+      contactIntentAt: contactStartedAt,
+      contactStartedAt,
+    },
+  });
 }
 
 async function createOrdinarySupersededPayment(
