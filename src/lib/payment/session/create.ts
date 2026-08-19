@@ -99,6 +99,7 @@ async function loadCartItems(tx: SessionTx, userId: string, marketCode: string) 
     where: { userId },
     orderBy: { createdAt: "asc" },
     select: {
+      id: true,
       variantId: true,
       wigStyleId: true,
       quantity: true,
@@ -164,6 +165,7 @@ function buildLine(
   validateAmount(price.amount);
   return {
     variant: { connect: { id: item.variantId } },
+    sourceCartItemId: item.id,
     wigStyleId: item.wigStyleId,
     quantity: item.quantity,
     unitAmount: price.amount,

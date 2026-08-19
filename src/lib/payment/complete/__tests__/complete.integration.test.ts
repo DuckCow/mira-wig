@@ -12,6 +12,7 @@ import {
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
+import { Client } from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
@@ -23,6 +24,7 @@ import {
   completeFromCapture,
   EximbayWebhookFirstCaptureError,
   recordCapture,
+  runCompletionTransaction,
   type CaptureFacts,
 } from "@/lib/payment/complete";
 
@@ -230,6 +232,43 @@ describe("payment completion core", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(0);
     await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.FAILED);
     await expect(outboxCount(facts)).resolves.toBe(1);
+    await expect(db.cartItem.count({ where: { userId: ctx.userId } })).resolves.toBe(1);
+  });
+
+  it("a completion rollback leaves neither cart mutation nor sibling-Order cleanup witness", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const facts = captureFacts(ctx, session);
+    const captured = await recordCapture(db, facts);
+    await db.payment.update({
+      where: { id: captured.id },
+      data: {
+        attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+        blockingEndedAt: facts.receivedAt,
+      },
+    });
+
+    const rolledBack = await runCompletionTransaction(db, facts, captured);
+
+    expect(rolledBack.kind).toBe("retryableFailure");
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 2 });
+
+    await db.payment.update({
+      where: { id: captured.id },
+      data: {
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        blockingEndedAt: null,
+      },
+    });
+    const retried = await runCompletionTransaction(db, facts, captured);
+
+    expect(retried.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
   });
 
   it("같은 캡처 2회는 주문 1개와 효과 1회로 수렴한다", async () => {
@@ -246,6 +285,337 @@ describe("payment completion core", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
     await expect(mrCount(ctx.userId)).resolves.toBe(1);
     await expect(outboxCount(facts)).resolves.toBe(0);
+  });
+
+  it("post-submit same-row additions preserve the exact CartItem id and positive residual", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+
+    await completeFromCapture(db, captureFacts(ctx, session));
+
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+  });
+
+  it("larger post-submit excess is decremented only by the frozen quantity", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await incrementCart(source.id, 2);
+
+    await completeFromCapture(db, captureFacts(ctx, session));
+
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 2 });
+  });
+
+  it("a current source quantity below the frozen quantity deletes only that source row", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 2);
+    const session = await submitSession(ctx);
+    await db.cartItem.update({ where: { id: source.id }, data: { quantity: 1 } });
+
+    await completeFromCapture(db, captureFacts(ctx, session));
+
+    await expect(cartRow(source.id)).resolves.toBeNull();
+  });
+
+  it("delete and re-add creates a new CartItem generation that old completion cannot consume", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const firstSource = await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await db.cartItem.delete({ where: { id: firstSource.id } });
+    const secondSource = await addCart(ctx, variant, 2);
+
+    await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(secondSource.id).not.toBe(firstSource.id);
+    await expect(cartRow(secondSource.id)).resolves.toEqual({ id: secondSource.id, quantity: 2 });
+  });
+
+  it("legacy null provenance completes the order and conservatively leaves the live cart untouched", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: session.sessionId },
+      data: { sourceCartItemId: null },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(result.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+  });
+
+  it("corrupted provenance cannot consume another user's CartItem", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    const otherUserId = `b2_other_${randomUUID()}`;
+    await db.user.create({ data: { id: otherUserId, email: `${otherUserId}@example.test` } });
+    const foreign = await db.cartItem.create({
+      data: { userId: otherUserId, wigStyleId: variant.styleId, variantId: variant.id, quantity: 3 },
+      select: { id: true },
+    });
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: session.sessionId },
+      data: { sourceCartItemId: foreign.id },
+    });
+
+    try {
+      const result = await completeFromCapture(db, captureFacts(ctx, session));
+      expect(result.kind).toBe("completed");
+      await expect(cartRow(foreign.id)).resolves.toEqual({ id: foreign.id, quantity: 3 });
+    } finally {
+      await db.cartItem.deleteMany({ where: { userId: otherUserId } });
+      await db.user.deleteMany({ where: { id: otherUserId } });
+    }
+  });
+
+  it("corrupted provenance cannot consume another variant's CartItem", async () => {
+    const purchased = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, purchased, 1);
+    const session = await submitSession(ctx);
+    const unrelated = await createCatalogVariant(ctx, { amount: 8_000, stock: 5 });
+    const foreign = await addCart(ctx, unrelated, 3);
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: session.sessionId },
+      data: { sourceCartItemId: foreign.id },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(result.kind).toBe("completed");
+    await expect(cartRow(foreign.id)).resolves.toEqual({ id: foreign.id, quantity: 3 });
+  });
+
+  it("corrupted provenance cannot consume a CartItem with another style identity", async () => {
+    const purchased = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const original = await addCart(ctx, purchased, 1);
+    const session = await submitSession(ctx);
+    await db.cartItem.delete({ where: { id: original.id } });
+    const wrongStyle = await createCatalogVariant(ctx, { amount: 8_000, stock: 5 });
+    const foreign = await db.cartItem.create({
+      data: { userId: ctx.userId, wigStyleId: wrongStyle.styleId, variantId: purchased.id, quantity: 3 },
+      select: { id: true },
+    });
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: session.sessionId },
+      data: { sourceCartItemId: foreign.id },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+
+    expect(result.kind).toBe("completed");
+    await expect(cartRow(foreign.id)).resolves.toEqual({ id: foreign.id, quantity: 3 });
+  });
+
+  it("same frozen quantities preserve post-submit intent when the first-created session completes first", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const firstCreated = await submitSession(ctx);
+    const secondCreated = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+
+    const first = await completeFromCapture(db, captureFacts(ctx, firstCreated));
+    const second = await completeFromCapture(db, captureFacts(ctx, secondCreated));
+
+    expect(first.kind).toBe("completed");
+    expect(second.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(2);
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+  });
+
+  it("same frozen quantities preserve post-submit intent when the later-created session completes first", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const firstCreated = await submitSession(ctx);
+    const secondCreated = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+
+    const second = await completeFromCapture(db, captureFacts(ctx, secondCreated));
+    const first = await completeFromCapture(db, captureFacts(ctx, firstCreated));
+
+    expect(second.kind).toBe("completed");
+    expect(first.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(2);
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+  });
+
+  it("a larger frozen quantity advances the cleanup watermark after a smaller completion", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const smaller = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const larger = await submitSession(ctx);
+
+    const smallerResult = await completeFromCapture(db, captureFacts(ctx, smaller));
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+    const largerResult = await completeFromCapture(db, captureFacts(ctx, larger));
+
+    expect(smallerResult.kind).toBe("completed");
+    expect(largerResult.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(2);
+    await expect(cartRow(source.id)).resolves.toBeNull();
+  });
+
+  it("a smaller frozen quantity cannot consume again after a larger completion", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const smaller = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const larger = await submitSession(ctx);
+
+    const largerResult = await completeFromCapture(db, captureFacts(ctx, larger));
+    const smallerResult = await completeFromCapture(db, captureFacts(ctx, smaller));
+
+    expect(largerResult.kind).toBe("completed");
+    expect(smallerResult.kind).toBe("completed");
+    await expect(orderCount(ctx.userId)).resolves.toBe(2);
+    await expect(cartRow(source.id)).resolves.toBeNull();
+  });
+
+  it("future intent after the larger snapshot survives smaller-then-larger completion", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const smaller = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const larger = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+
+    await completeFromCapture(db, captureFacts(ctx, smaller));
+    await completeFromCapture(db, captureFacts(ctx, larger));
+
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+  });
+
+  it("future intent after the larger snapshot survives larger-then-smaller completion", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const smaller = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const larger = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+
+    await completeFromCapture(db, captureFacts(ctx, larger));
+    await completeFromCapture(db, captureFacts(ctx, smaller));
+
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+  });
+
+  it("a committed sibling from another user does not contribute to the cleanup watermark", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const corruptedSibling = await submitSession(ctx);
+    const current = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    await completeFromCapture(db, captureFacts(ctx, corruptedSibling));
+    const otherUserId = `b2_watermark_other_${randomUUID()}`;
+    await db.user.create({ data: { id: otherUserId, email: `${otherUserId}@example.test` } });
+    await db.checkoutSession.update({
+      where: { id: corruptedSibling.sessionId },
+      data: { userId: otherUserId },
+    });
+
+    try {
+      await completeFromCapture(db, captureFacts(ctx, current));
+      await expect(cartRow(source.id)).resolves.toBeNull();
+    } finally {
+      await db.checkoutSession.update({
+        where: { id: corruptedSibling.sessionId },
+        data: { userId: ctx.userId },
+      });
+      await db.user.delete({ where: { id: otherUserId } });
+    }
+  });
+
+  it("a committed sibling with another variant does not contribute to the cleanup watermark", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const corruptedSibling = await submitSession(ctx);
+    const current = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    await completeFromCapture(db, captureFacts(ctx, corruptedSibling));
+    const unrelated = await createCatalogVariant(ctx, { amount: 8_000, stock: 5 });
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: corruptedSibling.sessionId },
+      data: { variantId: unrelated.id },
+    });
+
+    await completeFromCapture(db, captureFacts(ctx, current));
+
+    await expect(cartRow(source.id)).resolves.toBeNull();
+  });
+
+  it("a committed sibling with another style does not contribute to the cleanup watermark", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const corruptedSibling = await submitSession(ctx);
+    const current = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    await completeFromCapture(db, captureFacts(ctx, corruptedSibling));
+    const unrelated = await createCatalogVariant(ctx, { amount: 8_000, stock: 5 });
+    await db.checkoutSessionLine.updateMany({
+      where: { sessionId: corruptedSibling.sessionId },
+      data: { wigStyleId: unrelated.styleId },
+    });
+
+    await completeFromCapture(db, captureFacts(ctx, current));
+
+    await expect(cartRow(source.id)).resolves.toBeNull();
+  });
+
+  it("different frozen quantities causally serialize at the exact CartItem row and consume only the maximum", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const smaller = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const larger = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const frozenQuantities = await db.checkoutSessionLine.findMany({
+      where: { sessionId: { in: [smaller.sessionId, larger.sessionId] } },
+      select: { quantity: true },
+    });
+    expect(frozenQuantities.map((line) => line.quantity).sort()).toEqual([1, 2]);
+    const boundary = await holdCartItemCleanupBoundary(source.id);
+
+    try {
+      const completions = Promise.all([
+        completeFromCapture(db, captureFacts(ctx, smaller)),
+        completeFromCapture(db, captureFacts(ctx, larger)),
+      ]);
+      const evidence = await waitForBlockedCartCleanup(boundary, 2);
+      expect(evidence).toHaveLength(2);
+      expect(evidence.every((row) => row.query.includes('FROM "CartItem"') && row.query.includes("FOR UPDATE"))).toBe(true);
+      expect(evidence.some((row) => row.blockingPids.includes(boundary.blockerPid))).toBe(true);
+      const contenderPids = evidence.map((row) => row.pid);
+      expect(evidence.some((row) => row.blockingPids.some((pid) => contenderPids.includes(pid)))).toBe(true);
+      await boundary.release();
+
+      const results = await completions;
+      expect(results.map((result) => result.kind)).toEqual(["completed", "completed"]);
+      await expect(orderCount(ctx.userId)).resolves.toBe(2);
+      await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
+    } finally {
+      await boundary.close();
+    }
+  }, 10_000);
+
+  it("capture replay after a post-submit add does not consume the residual twice", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await incrementCart(source.id, 1);
+    const facts = captureFacts(ctx, session);
+
+    const first = await completeFromCapture(db, facts);
+    const replay = await completeFromCapture(db, facts);
+
+    expect(first.kind).toBe("completed");
+    expect(replay.kind).toBe("alreadyCompleted");
+    await expect(cartRow(source.id)).resolves.toEqual({ id: source.id, quantity: 1 });
   });
 
   it("completed same-key duplicate under flipped mode remains benign and void-less", async () => {
@@ -814,9 +1184,10 @@ async function addCart(
   context: TestContext,
   variant: { id: string; styleId: string },
   quantity: number,
-): Promise<void> {
-  await db.cartItem.create({
+): Promise<{ id: string }> {
+  return db.cartItem.create({
     data: { userId: context.userId, wigStyleId: variant.styleId, variantId: variant.id, quantity },
+    select: { id: true },
   });
 }
 
@@ -956,4 +1327,106 @@ async function stockOf(variantId: string): Promise<number> {
   const variant = await db.wigVariant.findUnique({ where: { id: variantId }, select: { stock: true } });
   if (!variant) throw new Error(`Missing variant ${variantId}`);
   return variant.stock;
+}
+
+async function incrementCart(cartItemId: string, quantity: number): Promise<void> {
+  await db.cartItem.update({ where: { id: cartItemId }, data: { quantity: { increment: quantity } } });
+}
+
+async function cartRow(cartItemId: string): Promise<{ id: string; quantity: number } | null> {
+  return db.cartItem.findUnique({ where: { id: cartItemId }, select: { id: true, quantity: true } });
+}
+
+interface CartCleanupBoundary {
+  client: Client;
+  observer: Client;
+  blockerPid: number;
+  release(): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface CartCleanupWaitEvidence {
+  pid: number;
+  blockingPids: number[];
+  query: string;
+  state: string;
+  waitEventType: string | null;
+}
+
+async function holdCartItemCleanupBoundary(cartItemId: string): Promise<CartCleanupBoundary> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required for completion lock verification");
+  const client = new Client({
+    connectionString,
+    application_name: `wig_cart_provenance_boundary_${randomUUID()}`,
+  });
+  await client.connect();
+  const observer = new Client({
+    connectionString,
+    application_name: `wig_cart_provenance_observer_${randomUUID()}`,
+  });
+  await observer.connect();
+  let transactionOpen = false;
+  try {
+    await client.query("BEGIN");
+    transactionOpen = true;
+    const locked = await client.query<{ id: string }>(
+      'SELECT "id" FROM "CartItem" WHERE "id" = $1 FOR UPDATE',
+      [cartItemId],
+    );
+    if (locked.rowCount !== 1) throw new Error(`Expected to lock CartItem ${cartItemId}`);
+    const pidResult = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const blockerPid = pidResult.rows[0]?.pid;
+    if (blockerPid === undefined) throw new Error("Expected CartItem cleanup blocker pid");
+    return {
+      client,
+      observer,
+      blockerPid,
+      release: async () => {
+        if (!transactionOpen) return;
+        await client.query("COMMIT");
+        transactionOpen = false;
+      },
+      close: async () => {
+        if (transactionOpen) await client.query("ROLLBACK");
+        transactionOpen = false;
+        await observer.end();
+        await client.end();
+      },
+    };
+  } catch (error) {
+    if (transactionOpen) await client.query("ROLLBACK");
+    await observer.end();
+    await client.end();
+    throw error;
+  }
+}
+
+async function waitForBlockedCartCleanup(
+  boundary: CartCleanupBoundary,
+  expectedCount: number,
+): Promise<CartCleanupWaitEvidence[]> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = await boundary.observer.query<CartCleanupWaitEvidence>(`
+      SELECT a.pid,
+             pg_blocking_pids(a.pid) AS "blockingPids",
+             a.query,
+             a.state,
+             a.wait_event_type AS "waitEventType"
+      FROM pg_stat_activity a
+      WHERE a.datname = current_database()
+        AND a.pid <> pg_backend_pid()
+      ORDER BY a.pid
+    `);
+    const blocked = result.rows.filter((row) => (
+      row.waitEventType === "Lock"
+      && row.blockingPids.length > 0
+      && row.query.includes('FROM "CartItem"')
+      && row.query.includes("FOR UPDATE")
+    ));
+    if (blocked.length >= expectedCount) return blocked.slice(0, expectedCount);
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for ${expectedCount} blocked CartItem cleanup transactions`);
 }

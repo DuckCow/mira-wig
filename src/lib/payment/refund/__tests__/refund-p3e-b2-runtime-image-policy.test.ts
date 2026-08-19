@@ -1323,10 +1323,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
 
   it("keeps schema, migrations, and the R2A subinventory byte-authoritative", () => {
     expect(sha256(readFileSync(join(ROOT, "prisma/schema.prisma")))).toBe(
-      "05393bc34466a42bef8d03e5cc5d83081954b24ec1f554c10f515c2ae6f9e450",
+      "852ce8c0fd9ce714e515c9f520e0fb568a363021455444ff33cae2e7375968fa",
     );
     expect(migrationRuntimeDigest()).toBe(
-      "a2329aacde7eb91c8b6c905a66f97e3bcb923162d4c2e1de35a165e8b0ced88d",
+      "081e575f9e54d22336b85384b2a9d1e4fd8222a5c811b70b31cfe43e844522a5",
     );
     const terraform = repositoryRelativeFiles(INFRA)
       .filter((path) => !path.startsWith(

@@ -158,6 +158,31 @@ describe("checkout session lifecycle", () => {
     expect(line.fulfillmentType).toBe(FulfillmentType.STOCKED);
   });
 
+  it("cart-backed checkout freezes the exact source CartItem identity and quantity", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    const source = await addCart(ctx, variant, 2);
+
+    const result = await createCheckoutSession(db, baseInput(ctx));
+    const line = firstLine(await findSession(result.sessionId));
+
+    expect(line.sourceCartItemId).toBe(source.id);
+    expect(line.quantity).toBe(2);
+  });
+
+  it("multiple checkout lines preserve distinct exact source CartItem identities", async () => {
+    const first = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    const second = await createCartVariant(ctx, { amount: 7_500, stock: 5 });
+    const firstSource = await addCart(ctx, first, 1);
+    const secondSource = await addCart(ctx, second, 2);
+
+    const result = await createCheckoutSession(db, baseInput(ctx));
+    const session = await findSession(result.sessionId);
+
+    expect(lineForVariant(session, first.id).sourceCartItemId).toBe(firstSource.id);
+    expect(lineForVariant(session, second.id).sourceCartItemId).toBe(secondSource.id);
+    expect(firstSource.id).not.toBe(secondSource.id);
+  });
+
   it("정상 생성 라인의 snapshotData는 표시 필드를 담는다", async () => {
     const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
     await addCart(ctx, variant, 1);
@@ -289,6 +314,7 @@ describe("checkout session lifecycle", () => {
     expect(hasJsonKey(snapshot, "phone")).toBe(false);
     expect(hasJsonKey(snapshot, "addressLine1")).toBe(false);
     expect(hasJsonKey(snapshot, "memo")).toBe(false);
+    expect(hasJsonKey(snapshot, "sourceCartItemId")).toBe(false);
   });
 
   it("shipping PII는 shipping 위성에만 저장된다", async () => {
@@ -645,9 +671,10 @@ async function addCart(
   context: TestContext,
   variant: { id: string; styleId: string },
   quantity: number,
-): Promise<void> {
-  await db.cartItem.create({
+): Promise<{ id: string }> {
+  return db.cartItem.create({
     data: { userId: context.userId, wigStyleId: variant.styleId, variantId: variant.id, quantity },
+    select: { id: true },
   });
 }
 
