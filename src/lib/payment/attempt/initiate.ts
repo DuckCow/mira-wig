@@ -19,6 +19,7 @@ import {
 import { generateEximbayProviderOrderId } from "@/lib/payment/attempt/provider-order-id";
 import {
   assertPreparedEximbayReadyContact,
+  EXIMBAY_READY_TOTAL_DEADLINE_MS,
   EximbayReadyContactError,
   executePreparedEximbayReadyContact,
   prepareEximbayReadyContact,
@@ -77,6 +78,11 @@ type ContactClaim =
   | { kind: "sessionNotUsable" };
 
 type ContactBoundaryClock = () => Date | Promise<Date>;
+type DatabaseClockClient = Pick<PrismaClient, "$queryRaw">;
+
+const EXIMBAY_READY_OBSERVATION_POLL_MS = 50;
+const EXIMBAY_READY_OBSERVATION_MAX_READS =
+  Math.ceil(EXIMBAY_READY_TOTAL_DEADLINE_MS / EXIMBAY_READY_OBSERVATION_POLL_MS) + 2;
 
 export type PaymentInitiateErrorCode =
   | "SESSION_UNAVAILABLE"
@@ -193,7 +199,7 @@ async function contactProviderForAttempt(
   const authorizationNow = input.now ?? new Date();
   const decision = await client.$transaction((tx) => authorizeContact(tx, input, authorizationNow));
   if (decision.kind === "reuse") {
-    return durableOnly(toResult(decision.payment, decision.initiateResult));
+    return resolveDurableReuse(client, decision.payment, decision.initiateResult);
   }
   if (decision.payment.provider === PaymentProvider.EXIMBAY) {
     return contactEximbayForAttempt(client, decision.payment, input);
@@ -241,9 +247,105 @@ async function contactEximbayForAttempt(
   const claim = await claimPreparedEximbayContact(client, payment, input, prepared);
   if (claim.kind === "sessionNotUsable") throw sessionNotUsable();
   if (claim.kind === "lost") {
-    return durableOnly(toResult(claim.payment, claim.initiateResult));
+    return resolveDurableReuse(client, claim.payment, claim.initiateResult);
   }
   return contactEximbay(client, claim.payment, prepared);
+}
+
+async function resolveDurableReuse(
+  client: PrismaClient,
+  payment: InitiatedPayment,
+  initiateResult: PaymentInitiateResult,
+): Promise<InitiatePaymentAttemptExecution> {
+  if (payment.provider === PaymentProvider.EXIMBAY
+    && initiateResult.kind === "inProgress") {
+    return observeEximbayReadyFlight(client, payment);
+  }
+  return durableOnly(toResult(payment, initiateResult));
+}
+
+async function observeEximbayReadyFlight(
+  client: PrismaClient,
+  payment: InitiatedPayment,
+): Promise<InitiatePaymentAttemptExecution> {
+  const initialObservation = await requirePayment(client, payment.id);
+  const initialSettled = classifyObservedEximbayReadyFlight(initialObservation);
+  if (initialSettled) return initialSettled;
+
+  const contactStartedAt = requireObservableEximbayReadyFlight(initialObservation);
+  const databaseNow = await captureDatabaseTime(client);
+  const contactAgeMs = Math.max(0, databaseNow.getTime() - contactStartedAt.getTime());
+  if (contactAgeMs >= EXIMBAY_READY_TOTAL_DEADLINE_MS) {
+    return durableOnly(toResult(initialObservation, { kind: "inProgress" }));
+  }
+  const monotonicDeadline = performance.now() + EXIMBAY_READY_TOTAL_DEADLINE_MS;
+
+  for (let readCount = 0; readCount < EXIMBAY_READY_OBSERVATION_MAX_READS; readCount += 1) {
+    const observed = await requirePayment(client, payment.id);
+    const settled = classifyObservedEximbayReadyFlight(observed, contactStartedAt);
+    if (settled) return settled;
+
+    const remainingMs = monotonicDeadline - performance.now();
+    if (remainingMs <= 0) {
+      return durableOnly(toResult(observed, { kind: "inProgress" }));
+    }
+    if (readCount === EXIMBAY_READY_OBSERVATION_MAX_READS - 1) {
+      await delay(remainingMs);
+      break;
+    }
+    await delay(Math.min(EXIMBAY_READY_OBSERVATION_POLL_MS, remainingMs));
+  }
+
+  const finalObservation = await requirePayment(client, payment.id);
+  return classifyObservedEximbayReadyFlight(finalObservation, contactStartedAt)
+    ?? durableOnly(toResult(finalObservation, { kind: "inProgress" }));
+}
+
+function classifyObservedEximbayReadyFlight(
+  payment: InitiatedPayment,
+  contactStartedAt?: Date,
+): InitiatePaymentAttemptExecution | null {
+  if (payment.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN) {
+    throw blockedAttemptError(payment);
+  }
+  const persisted = persistedInitiationResult(payment);
+  if (persisted) return durableOnly(toResult(payment, persisted));
+  if (isObservableEximbayReadyFlight(payment)
+    && payment.contactStartedAt
+    && (contactStartedAt === undefined
+      || payment.contactStartedAt.getTime() === contactStartedAt.getTime())) {
+    return null;
+  }
+  throw blockedAttemptError(payment);
+}
+
+function requireObservableEximbayReadyFlight(payment: InitiatedPayment): Date {
+  if (!isObservableEximbayReadyFlight(payment) || !payment.contactStartedAt) {
+    throw blockedAttemptError(payment);
+  }
+  return payment.contactStartedAt;
+}
+
+function isObservableEximbayReadyFlight(payment: InitiatedPayment): boolean {
+  const invalid = [
+    payment.provider !== PaymentProvider.EXIMBAY,
+    payment.status !== PaymentAttemptStatus.INITIATED,
+    payment.attemptLifecycle !== PaymentAttemptLifecycle.CONTACTED,
+    payment.remediationStatus !== PaymentRemediationStatus.NONE,
+    payment.providerRef !== null,
+    payment.providerPaymentKey !== null,
+    payment.initiationOutputKind !== null,
+    payment.initiationApproveUrl !== null,
+    payment.initiationCompletedAt !== null,
+    payment.financialSucceededAt !== null,
+    payment.blockingEndedAt !== null,
+    payment.suspendedByPaymentId !== null,
+  ].some(Boolean);
+  return !invalid;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function claimPreparedEximbayContact(
@@ -320,6 +422,7 @@ async function decideCompatible(
   current: InitiatedPayment,
   session: InitiateSession,
 ): Promise<InitiateDecision> {
+  throwIfEximbayOutcomeUnknown(current);
   const persisted = persistedInitiationResult(current);
   if (persisted) return { kind: "reuse", payment: current, initiateResult: persisted };
   if (isUncontactedAuthorized(current)) {
@@ -557,15 +660,9 @@ async function markContactStarted(
 ): Promise<ContactClaim> {
   return client.$transaction(async (tx) => {
     await lockCheckoutSession(tx, payment.checkoutSessionId);
-    const contactBoundaryNow = await captureContactBoundaryTime(tx, input.contactBoundaryClock);
     const session = await loadCommerceSession(tx, payment.checkoutSessionId);
     if (!session || session.userId !== input.userId) {
       throw new PaymentInitiateException("SESSION_UNAVAILABLE", "Checkout session is unavailable.");
-    }
-    if (!isUsable(session, contactBoundaryNow)) {
-      const closed = await closeUncontactedPaymentForUnusableSession(tx, payment, contactBoundaryNow);
-      if (closed) return { kind: "sessionNotUsable" };
-      return lostContactClaim(await requirePayment(tx, payment.id));
     }
     if (await hasUnresolvedSessionExposure(tx, payment.checkoutSessionId)
       || await hasSessionSuspensionCycle(tx, payment.checkoutSessionId)) {
@@ -573,6 +670,12 @@ async function markContactStarted(
     }
     await validateCommerceAtContactBoundary(tx, session);
     await assertEximbayPreparedFactsStillCurrent(tx, payment.id, session, input, prepared);
+    const contactBoundaryNow = await captureContactBoundaryTime(tx, input.contactBoundaryClock);
+    if (!isUsable(session, contactBoundaryNow)) {
+      const closed = await closeUncontactedPaymentForUnusableSession(tx, payment, contactBoundaryNow);
+      if (closed) return { kind: "sessionNotUsable" };
+      return lostContactClaim(await requirePayment(tx, payment.id));
+    }
     const result = await tx.payment.updateMany({
       where: contactClaimWhere(payment, prepared),
       data: {
@@ -631,7 +734,11 @@ async function captureContactBoundaryTime(
   clock: ContactBoundaryClock | undefined,
 ): Promise<Date> {
   if (clock) return requireValidContactBoundaryTime(await clock());
-  const rows = await tx.$queryRaw<{ capturedAtMs: bigint }[]>(Prisma.sql`
+  return captureDatabaseTime(tx);
+}
+
+async function captureDatabaseTime(client: DatabaseClockClient): Promise<Date> {
+  const rows = await client.$queryRaw<{ capturedAtMs: bigint }[]>(Prisma.sql`
     SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "capturedAtMs"
   `);
   const capturedAtMs = rows[0]?.capturedAtMs;
@@ -698,12 +805,20 @@ function strictEximbayUncontactedPaymentClaimWhere(
 }
 
 function lostContactClaim(payment: InitiatedPayment): ContactClaim {
+  throwIfEximbayOutcomeUnknown(payment);
   const persisted = persistedInitiationResult(payment);
   if (persisted) return { kind: "lost", payment, initiateResult: persisted };
   if (payment.attemptLifecycle === PaymentAttemptLifecycle.CONTACTED) {
     return { kind: "lost", payment, initiateResult: { kind: "inProgress" } };
   }
   throw blockedAttemptError(payment);
+}
+
+function throwIfEximbayOutcomeUnknown(payment: InitiatedPayment): void {
+  if (payment.provider === PaymentProvider.EXIMBAY
+    && payment.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN) {
+    throw blockedAttemptError(payment);
+  }
 }
 
 async function markOutcomeUnknown(client: PrismaClient, paymentId: string): Promise<void> {

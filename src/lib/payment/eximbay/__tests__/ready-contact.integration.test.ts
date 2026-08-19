@@ -17,7 +17,7 @@ import { PaymentMethod } from "@/lib/payment/providers/routing";
 import type { PaymentInitiationProvider } from "@/lib/payment/providers/types";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
-import type { EximbayReadyFetch } from "../ready-http";
+import { EXIMBAY_READY_TOTAL_DEADLINE_MS, type EximbayReadyFetch } from "../ready-http";
 
 const provider = vi.hoisted<PaymentInitiationProvider>(() => ({
   code: "EXIMBAY",
@@ -286,7 +286,9 @@ describe("EX2B2-S2 READY contact lifecycle integration", () => {
       where: { id: existing.id },
       data: {
         attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
-        contactStartedAt: new Date(),
+        contactStartedAt: output
+          ? new Date()
+          : new Date(Date.now() - EXIMBAY_READY_TOTAL_DEADLINE_MS - 1_000),
         initiationOutputKind: output,
         initiationCompletedAt: output ? new Date() : null,
       },
@@ -302,10 +304,11 @@ describe("EX2B2-S2 READY contact lifecycle integration", () => {
   it("concurrent same-checkout callers commit at most one fetch and reuse durable READY", async () => {
     const session = await createUsSession(ctx);
     const fetchImpl = vi.fn<EximbayReadyFetch>(() => Promise.resolve(successResponse()));
+    const bothPrepared = rendezvous(2);
 
     const results = await Promise.all([
-      initiate(session.sessionId, PaymentMode.SANDBOX, fetchImpl),
-      initiate(session.sessionId, PaymentMode.SANDBOX, fetchImpl),
+      initiate(session.sessionId, PaymentMode.SANDBOX, fetchImpl, bothPrepared),
+      initiate(session.sessionId, PaymentMode.SANDBOX, fetchImpl, bothPrepared),
     ]);
 
     expect(results[0]?.paymentId).toBe(results[1]?.paymentId);
@@ -332,6 +335,17 @@ describe("EX2B2-S2 READY contact lifecycle integration", () => {
     });
   }
 });
+
+function rendezvous(expected: number): () => Promise<void> {
+  let arrived = 0;
+  let release: () => void = () => { throw new Error("Rendezvous was not initialized"); };
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  return async () => {
+    arrived += 1;
+    if (arrived === expected) release();
+    await released;
+  };
+}
 
 function adapterContext(mode: PaymentMode): ProviderFactoryContext {
   return {
