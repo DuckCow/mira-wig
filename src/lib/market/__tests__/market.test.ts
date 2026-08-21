@@ -130,22 +130,22 @@ describe("resolveMarketCode — 폴백 보장", () => {
   });
 });
 
-// ── MARKET_CONFIGS 메타데이터 검증 ────────────────────────────
+// ── MARKET_CONFIGS presentation 메타데이터 검증 ───────────────
 
-describe("MARKET_CONFIGS 통화 메타데이터", () => {
-  it("KR 마켓은 KRW zero-decimal이다", () => {
-    expect(MARKET_CONFIGS.KR.currency.code).toBe("KRW");
-    expect(MARKET_CONFIGS.KR.currency.decimals).toBe(0);
+describe("MARKET_CONFIGS presentation metadata", () => {
+  it("keeps labels currency-neutral and retains locale defaults", () => {
+    expect(MARKET_CONFIGS).toEqual({
+      KR: { code: "KR", label: "한국", defaultLocale: "ko" },
+      US: { code: "US", label: "United States", defaultLocale: "en" },
+      JP: { code: "JP", label: "日本", defaultLocale: "ja" },
+    });
   });
 
-  it("US 마켓은 USD 2-decimal이다", () => {
-    expect(MARKET_CONFIGS.US.currency.code).toBe("USD");
-    expect(MARKET_CONFIGS.US.currency.decimals).toBe(2);
-  });
-
-  it("JP 마켓은 JPY zero-decimal이다", () => {
-    expect(MARKET_CONFIGS.JP.currency.code).toBe("JPY");
-    expect(MARKET_CONFIGS.JP.currency.decimals).toBe(0);
+  it("does not expose mutable commercial facts", () => {
+    for (const config of Object.values(MARKET_CONFIGS)) {
+      expect(config).not.toHaveProperty("currency");
+      expect(config).not.toHaveProperty("shippableCountries");
+    }
   });
 });
 

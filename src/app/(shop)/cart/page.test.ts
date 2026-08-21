@@ -3,11 +3,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CartItemView } from "@/lib/cart";
 import type { StorefrontContext } from "@/lib/market/resolve";
+import { CURRENCY_META, type MarketCode } from "@/lib/market/types";
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getStorefrontContext: vi.fn(),
   getCart: vi.fn(),
+  getActiveMarketCommercialFacts: vi.fn(),
   redirect: vi.fn((path: string): never => { throw new Error(`REDIRECT:${path}`); }),
 }));
 
@@ -17,6 +19,9 @@ vi.mock("next/image", () => ({ default: (props: Record<string, unknown>) => crea
 vi.mock("@/lib/session", () => ({ getSession: mocks.getSession }));
 vi.mock("@/lib/market", () => ({ getStorefrontContext: mocks.getStorefrontContext }));
 vi.mock("@/lib/cart", () => ({ getCart: mocks.getCart }));
+vi.mock("@/lib/market/active-market", () => ({
+  getActiveMarketCommercialFacts: mocks.getActiveMarketCommercialFacts,
+}));
 vi.mock("@/lib/storage", () => ({ catalogStorage: { getViewUrl: vi.fn() } }));
 vi.mock("./CartItemActions", () => ({
   RemoveButton: ({ cartItemId }: { cartItemId: string }) => createElement("button", { "data-remove": cartItemId }),
@@ -38,6 +43,12 @@ describe("cart page current-versus-target presentation seam", () => {
     vi.clearAllMocks();
     mocks.getSession.mockResolvedValue({ user: { id: "cart-user" }, expires: "2099-01-01" });
     mocks.getCart.mockResolvedValue([cartLine()]);
+    mocks.getActiveMarketCommercialFacts.mockImplementation((marketCode: MarketCode) => Promise.resolve({
+      code: marketCode,
+      isActive: true,
+      currency: marketCode === "KR" ? CURRENCY_META.KRW : marketCode === "US" ? CURRENCY_META.USD : CURRENCY_META.JPY,
+      shippableCountries: [marketCode],
+    }));
   });
 
   it("keeps confirmed JP as displayed commerce authority when transient target is US", async () => {
@@ -77,6 +88,26 @@ describe("cart page current-versus-target presentation seam", () => {
     expect(html).toContain("these amounts are proposals");
     expect(html).toContain("Confirm the delivery region to continue");
     expect(html).not.toContain('href="/checkout');
+  });
+
+  it("formats current cart amounts from resolved DB Market currency", async () => {
+    mocks.getStorefrontContext.mockResolvedValue(context({
+      marketCode: "US",
+      confirmedMarketCode: "US",
+      locale: "en",
+    }));
+    mocks.getCart.mockResolvedValue([cartLine({ price: 7_799 })]);
+    mocks.getActiveMarketCommercialFacts.mockResolvedValue({
+      code: "US",
+      isActive: true,
+      currency: CURRENCY_META.JPY,
+      shippableCountries: ["US"],
+    });
+
+    const html = renderToStaticMarkup(await CartPage());
+
+    expect(html).toContain("¥7,799");
+    expect(html).not.toContain("$77.99");
   });
 
   it("treats an inactive remembered Market as no current authority", async () => {

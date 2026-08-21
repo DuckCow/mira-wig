@@ -3,7 +3,7 @@
 //
 // 사용 패턴:
 //   서버 컴포넌트/액션: import { getCurrentMarket } from "@/lib/market"
-//   클라이언트 컴포넌트: import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types"
+//   클라이언트 컴포넌트: 서버가 전달한 CurrencyMeta와 formatPrice를 사용
 //
 // index.ts는 resolve.ts(server-only)를 포함하므로 서버 전용.
 // 클라이언트에서 types.ts의 순수 유틸만 필요하면 직접 import.
@@ -13,16 +13,21 @@ export { getAuthenticationLocale, getCurrentMarket, getCurrentMarketCode, getSto
 
 export {
   MarketCode,
+  CurrencyCode,
   MARKET_CODES,
   MARKET_CONFIGS,
   CURRENCY_META,
+  CURRENCY_CODES,
   MARKET_COOKIE,
   DEFAULT_MARKET_CODE,
   formatPrice,
+  currencyMetaForCode,
+  isCurrencyCode,
   isMarketCode,
   resolveMarketCode,
   type MarketConfig,
   type CurrencyMeta,
+  type CurrencyCode as CurrencyCodeValue,
 } from "./types";
 
 export { Locale, LOCALES, LOCALE_COOKIE, isLocale, preferredEnabledLocale, type Locale as LocaleCode } from "./locale";
@@ -37,4 +42,16 @@ export {
   type SiteVariant,
 } from "./site-variant";
 export { resolveRootLocale, resolveRootMarket, type RootLocaleResolution, type RootMarketResolution } from "./resolution";
-export { NoActiveMarketException, getActiveMarketCodes, getActiveSiteVariants, isActiveMarket } from "./active-market";
+export {
+  MarketCommercialFactsUnavailableException,
+  NoActiveMarketException,
+  UnsupportedMarketCurrencyException,
+  getActiveMarketCodes,
+  getActiveMarketCommercialFacts,
+  getActiveMarketCommercialFactsForCodes,
+  getActiveSiteVariants,
+  getMarketCommercialFacts,
+  getMarketCommercialFactsForCodes,
+  isActiveMarket,
+  type MarketCommercialFacts,
+} from "./active-market";

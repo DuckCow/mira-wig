@@ -2,6 +2,7 @@ import { CheckoutSessionStatus } from "@prisma/client";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { snapshotToJson } from "@/lib/order/snapshot";
 import { normalizeShippingAddress } from "@/lib/order/validation";
+import { isCurrencyCode } from "@/lib/market/types";
 import {
   variantPurchasableInMarketFailure,
   commerceIntegrityMessage,
@@ -91,6 +92,9 @@ async function loadMarket(tx: SessionTx, marketCode: string) {
   });
   if (!market) throw new SessionException("MARKET_UNAVAILABLE", "마켓을 찾을 수 없습니다.");
   if (!market.isActive) throw new SessionException("MARKET_UNAVAILABLE", "마켓을 찾을 수 없습니다.");
+  if (!isCurrencyCode(market.currency)) {
+    throw new SessionException("MARKET_UNAVAILABLE", "지원하지 않는 마켓 통화입니다.");
+  }
   return market;
 }
 

@@ -1,5 +1,5 @@
 import { StyleCard } from "@/components/features/StyleCard";
-import type { MarketCode } from "@/lib/market/types";
+import type { CurrencyMeta, MarketCode } from "@/lib/market/types";
 import type { Locale } from "@/lib/market/locale";
 import { messagesFor } from "@/lib/market/messages";
 import {
@@ -73,10 +73,12 @@ async function resolveViewGroups(groups: ManualRelatedStyleGroups): Promise<Rela
 export function RelatedStylesSectionView({
   groups,
   marketCode,
+  currency,
   locale,
 }: {
   groups: RelatedStyleViewGroups;
   marketCode: MarketCode;
+  currency: CurrencyMeta;
   locale: Locale;
 }) {
   const hasItems = MANUAL_RELATED_STYLE_GROUP_ORDER.some(
@@ -102,6 +104,7 @@ export function RelatedStylesSectionView({
                   imageUrl={style.imageUrl}
                   basePrice={style.basePrice}
                   marketCode={marketCode}
+                  currency={currency}
                   locale={locale}
                 />
               ))}
@@ -116,13 +119,15 @@ export function RelatedStylesSectionView({
 export async function RelatedStylesSection({
   sourceStyleId,
   marketCode,
+  currency,
   locale,
 }: {
   sourceStyleId: string;
   marketCode: MarketCode;
+  currency: CurrencyMeta;
   locale: Locale;
 }) {
   const groups = await loadRelatedStylesForPdp(sourceStyleId, marketCode);
   const viewGroups = await resolveViewGroups(groups);
-  return <RelatedStylesSectionView groups={viewGroups} marketCode={marketCode} locale={locale} />;
+  return <RelatedStylesSectionView groups={viewGroups} marketCode={marketCode} currency={currency} locale={locale} />;
 }

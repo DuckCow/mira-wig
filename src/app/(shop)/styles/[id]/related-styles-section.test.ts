@@ -1,6 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { CURRENCY_META } from "@/lib/market/types";
 
 vi.mock("@/lib/storage", () => ({
   catalogStorage: { getViewUrl: vi.fn() },
@@ -21,6 +22,7 @@ describe("related styles PDP section", () => {
     expect(renderToStaticMarkup(React.createElement(RelatedStylesSectionView, {
       groups: EMPTY,
       marketCode: "KR",
+      currency: CURRENCY_META.KRW,
       locale: "ko",
     }))).toBe("");
   });
@@ -40,6 +42,7 @@ describe("related styles PDP section", () => {
     const html = renderToStaticMarkup(React.createElement(RelatedStylesSectionView, {
       groups,
       marketCode: "KR",
+      currency: CURRENCY_META.KRW,
       locale: "ko",
     }));
     expect(html).toContain("비슷한 스타일");

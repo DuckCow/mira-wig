@@ -10,7 +10,14 @@ import {
 } from "@/app/actions/market";
 import { messagesFor } from "@/lib/market/messages";
 import { enabledLocalesForMarket } from "@/lib/market/site-variant";
-import { MARKET_CODES, MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import {
+  MARKET_CODES,
+  MARKET_CONFIGS,
+  currencyMetaForCode,
+  formatPrice,
+  type CurrencyCode,
+  type MarketCode,
+} from "@/lib/market/types";
 import { isLocale, type Locale } from "@/lib/market/locale";
 import { siteVariantNavigationTarget } from "@/lib/market/request-context";
 
@@ -87,9 +94,9 @@ export function MarketSelector({ currentMarket, currentLocale, activeMarketCodes
                 <p className="font-medium text-gray-800">{line.styleName} × {line.quantity}</p>
                 <p className={line.targetAvailable ? "text-gray-600" : "text-red-600"}>
                   {preview.impact.currentMarket
-                    ? `${impactAmount(line.currentUnitAmount, preview.impact.currentMarket, currentLocale)} → `
+                    ? `${impactAmount(line.currentUnitAmount, preview.impact.currentCurrency, currentLocale)} → `
                     : ""}
-                  {line.targetAvailable ? impactAmount(line.targetUnitAmount, preview.impact.targetMarket, currentLocale) : messages.selector.unavailable}
+                  {line.targetAvailable ? impactAmount(line.targetUnitAmount, preview.impact.targetCurrency, currentLocale) : messages.selector.unavailable}
                 </p>
               </li>
             ))}
@@ -104,7 +111,7 @@ export function MarketSelector({ currentMarket, currentLocale, activeMarketCodes
   );
 }
 
-function impactAmount(amount: number | null, marketCode: MarketCode, locale: Locale): string {
-  if (amount === null) return "—";
-  return formatPrice(amount, MARKET_CONFIGS[marketCode].currency, locale);
+function impactAmount(amount: number | null, currencyCode: CurrencyCode | null, locale: Locale): string {
+  if (amount === null || currencyCode === null) return "—";
+  return formatPrice(amount, currencyMetaForCode(currencyCode), locale);
 }

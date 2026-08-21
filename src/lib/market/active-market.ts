@@ -1,7 +1,14 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { MARKET_CODES, isMarketCode, type MarketCode } from "./types";
+import {
+  CURRENCY_META,
+  MARKET_CODES,
+  isCurrencyCode,
+  isMarketCode,
+  type CurrencyMeta,
+  type MarketCode,
+} from "./types";
 import { ENABLED_SITE_VARIANTS, type SiteVariant } from "./site-variant";
 
 export class NoActiveMarketException extends Error {
@@ -9,6 +16,83 @@ export class NoActiveMarketException extends Error {
     super("No configured storefront market is active.");
     this.name = "NoActiveMarketException";
   }
+}
+
+export class MarketCommercialFactsUnavailableException extends Error {
+  constructor(marketCode: MarketCode) {
+    super(`Current commercial facts are unavailable for Market ${marketCode}.`);
+    this.name = "MarketCommercialFactsUnavailableException";
+  }
+}
+
+export class UnsupportedMarketCurrencyException extends Error {
+  constructor(marketCode: MarketCode, currencyCode: string) {
+    super(`Market ${marketCode} has unsupported currency ${currencyCode}.`);
+    this.name = "UnsupportedMarketCurrencyException";
+  }
+}
+
+export interface MarketCommercialFacts {
+  code: MarketCode;
+  isActive: boolean;
+  currency: CurrencyMeta;
+  shippableCountries: readonly string[];
+}
+
+export async function getMarketCommercialFacts(
+  marketCode: MarketCode,
+): Promise<MarketCommercialFacts> {
+  const [facts] = await getMarketCommercialFactsForCodes([marketCode]);
+  if (!facts) throw new MarketCommercialFactsUnavailableException(marketCode);
+  return facts;
+}
+
+export async function getActiveMarketCommercialFacts(
+  marketCode: MarketCode,
+): Promise<MarketCommercialFacts> {
+  const [facts] = await getActiveMarketCommercialFactsForCodes([marketCode]);
+  if (!facts) throw new MarketCommercialFactsUnavailableException(marketCode);
+  return facts;
+}
+
+export async function getActiveMarketCommercialFactsForCodes(
+  marketCodes: readonly MarketCode[],
+): Promise<readonly MarketCommercialFacts[]> {
+  const facts = await getMarketCommercialFactsForCodes(marketCodes);
+  for (const market of facts) {
+    if (!market.isActive) throw new MarketCommercialFactsUnavailableException(market.code);
+  }
+  return facts;
+}
+
+export async function getMarketCommercialFactsForCodes(
+  marketCodes: readonly MarketCode[],
+): Promise<readonly MarketCommercialFacts[]> {
+  const requested = MARKET_CODES.filter((code) => marketCodes.includes(code));
+  if (requested.length === 0) return [];
+  const rows = await db.market.findMany({
+    where: { code: { in: [...requested] } },
+    select: {
+      code: true,
+      currency: true,
+      shippableCountries: true,
+      isActive: true,
+    },
+  });
+  const byCode = new Map(rows.map((row) => [row.code, row]));
+  return requested.map((marketCode) => {
+    const row = byCode.get(marketCode);
+    if (!row) throw new MarketCommercialFactsUnavailableException(marketCode);
+    if (!isCurrencyCode(row.currency)) {
+      throw new UnsupportedMarketCurrencyException(marketCode, row.currency);
+    }
+    return {
+      code: marketCode,
+      isActive: row.isActive,
+      currency: CURRENCY_META[row.currency],
+      shippableCountries: row.shippableCountries,
+    };
+  });
 }
 
 export async function getActiveMarketCodes(): Promise<readonly MarketCode[]> {

@@ -14,6 +14,7 @@ const mockPriceUpsert = vi.fn();
 const mockStyleFindUnique = vi.fn();
 const mockStyleMarketUpsert = vi.fn();
 const mockStyleMarketFindMany = vi.fn();
+const mockMarketFindMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -31,6 +32,9 @@ vi.mock("@/lib/db", () => ({
       upsert: (...a: unknown[]): unknown => mockStyleMarketUpsert(...a),
       findMany: (...a: unknown[]): unknown => mockStyleMarketFindMany(...a),
     },
+    market: {
+      findMany: (...a: unknown[]): unknown => mockMarketFindMany(...a),
+    },
   },
 }));
 
@@ -40,7 +44,14 @@ import {
   findMarketPriceGaps,
 } from "../market-price";
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockMarketFindMany.mockResolvedValue([
+    { code: "KR", currency: "KRW", shippableCountries: ["KR"], isActive: true },
+    { code: "US", currency: "USD", shippableCountries: ["US"], isActive: true },
+    { code: "JP", currency: "JPY", shippableCountries: ["JP"], isActive: true },
+  ]);
+});
 
 // ── setVariantPrices: variant 검증 ───────────────────────────
 
@@ -117,6 +128,26 @@ describe("setVariantPrices — 금액 검증 (zero-decimal 규칙)", () => {
     await expect(
       setVariantPrices("v-1", [{ marketCode: "KR", amount: 0 }]),
     ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+  });
+
+  it("uses current DB Market currency when validating operator input", async () => {
+    mockMarketFindMany.mockResolvedValue([
+      { code: "US", currency: "JPY", shippableCountries: ["US"], isActive: true },
+    ]);
+
+    await expect(setVariantPrices("v-1", [{ marketCode: "US", amount: -1 }]))
+      .rejects.toThrow("JPY 금액");
+    expect(mockPriceUpsert).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before price writes when current DB Market currency is unsupported", async () => {
+    mockMarketFindMany.mockResolvedValue([
+      { code: "US", currency: "EUR", shippableCountries: ["US"], isActive: true },
+    ]);
+
+    await expect(setVariantPrices("v-1", [{ marketCode: "US", amount: 7_799 }]))
+      .rejects.toMatchObject({ name: "UnsupportedMarketCurrencyException" });
+    expect(mockPriceUpsert).not.toHaveBeenCalled();
   });
 
   it("일괄 저장에 0 금액이 섞이면 쓰기 전에 INVALID_AMOUNT를 던진다", async () => {
