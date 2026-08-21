@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import {
   isRefundExecutionWorkerEnabled,
+  isRefundExecutionEximbayRoutingEnabled,
   RefundExecutionActivationConfigError,
 } from "./execution-activation";
 import {
@@ -39,7 +40,10 @@ type MutableCounters = { -readonly [Key in keyof RefundExecutionWorkerCycleCount
 type PreparedCycle = Readonly<{
   ok: true;
   queues: RefundExecutionWorkerCandidateQueues;
-  readiness: Readonly<Record<RefundExecutionWorkerCandidateClass, boolean>>;
+  readiness: Readonly<Record<
+    RefundExecutionWorkerCandidateClass,
+    Readonly<Record<"TOSS" | "EXIMBAY", boolean>>
+  >>;
 }> | RefundExecutionWorkerCycleFailure;
 type CandidateProcessingResult = Readonly<{ ok: true; stopped: boolean }>
   | RefundExecutionWorkerCycleFailure;
@@ -59,7 +63,7 @@ export async function runRefundExecutionWorkerCycle(
 ): Promise<RefundExecutionWorkerCycleResult> {
   const normalized = normalizeRefundExecutionWorkerCycleInput(input);
   if (!normalized.ok) return normalized;
-  const prepared = await prepareControlledCycle(client, env, control);
+  const prepared = await prepareControlledCycle(client, env, control, dependencies);
   if (!prepared.ok) return prepared;
   if ("stopped" in prepared) {
     return workerCycleStopped(EMPTY_REFUND_EXECUTION_WORKER_CYCLE_COUNTERS);
@@ -78,6 +82,7 @@ async function prepareControlledCycle(
   client: PrismaClient,
   env: ActivationEnv,
   control: RefundExecutionWorkerCycleControl,
+  dependencies: RefundExecutionWorkerDependencies,
 ): Promise<ControlledPreparation> {
   const gate = workerGateResult(env);
   if (gate !== true) return gate;
@@ -85,20 +90,27 @@ async function prepareControlledCycle(
   if (!initialStop.ok) return initialStop;
   return initialStop.shouldStop
     ? Object.freeze({ ok: true, stopped: true })
-    : prepareWorkerCycle(client, env);
+    : prepareWorkerCycle(client, env, dependencies);
 }
 
 async function prepareWorkerCycle(
   client: PrismaClient,
   env: ActivationEnv,
+  dependencies: RefundExecutionWorkerDependencies,
 ): Promise<PreparedCycle> {
   try {
-    const queues = await selectRefundExecutionWorkerCandidates(client);
-    const preflight = preflightRefundExecutionWorkerRoutes(queues, env);
+    const eximbayEnabled = isRefundExecutionEximbayRoutingEnabled(env);
+    const queues = await selectRefundExecutionWorkerCandidates(client, { eximbayEnabled });
+    const preflight = preflightRefundExecutionWorkerRoutes(queues, env, {
+      eximbay: dependencies.eximbay !== undefined,
+    });
     return preflight.ok
       ? Object.freeze({ ok: true, queues, readiness: preflight.readiness })
       : preflight;
-  } catch {
+  } catch (error) {
+    if (error instanceof RefundExecutionActivationConfigError) {
+      return workerFailure("CONFIG_INVALID");
+    }
     return workerFailure("SYSTEMIC_FAILURE");
   }
 }
@@ -175,7 +187,7 @@ async function processCandidate(
   if (!stopBeforeRoute.ok) return stopBeforeRoute;
   if (stopBeforeRoute.shouldStop) return stoppedCandidateStep(false);
   markSelected(counters, candidateClass);
-  if (!prepared.readiness[candidateClass]) {
+  if (!prepared.readiness[candidateClass][candidate.provider]) {
     counters.skippedCount += 1;
     return completedCandidateStep(true);
   }
@@ -267,6 +279,7 @@ function observeProviderInvocations(
   dependencies: RefundExecutionWorkerDependencies,
   counters: MutableCounters,
 ): RefundExecutionWorkerDependencies {
+  const eximbay = dependencies.eximbay;
   return Object.freeze({
     lookup: (...args: Parameters<RefundExecutionWorkerDependencies["lookup"]>) => {
       counters.providerLookupCount += 1;
@@ -276,6 +289,21 @@ function observeProviderInvocations(
       counters.providerCancellationCount += 1;
       return dependencies.cancellation(...args);
     },
+    ...(eximbay ? { eximbay: Object.freeze({
+      config: eximbay.config,
+      retrieve: (...args: Parameters<typeof eximbay.retrieve>) => {
+        counters.providerLookupCount += 1;
+        return eximbay.retrieve(...args);
+      },
+      cancellation: (...args: Parameters<typeof eximbay.cancellation>) => {
+        counters.providerCancellationCount += 1;
+        return eximbay.cancellation(...args);
+      },
+      lookup: (...args: Parameters<typeof eximbay.lookup>) => {
+        counters.providerLookupCount += 1;
+        return eximbay.lookup(...args);
+      },
+    }) } : {}),
   });
 }
 

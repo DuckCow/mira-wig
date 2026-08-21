@@ -72,7 +72,8 @@ async function reclaimInTransaction(
   const locked = await lockAndLoad(tx, input.commandId);
   if (!locked) return reclaimFailure("COMMAND_NOT_FOUND_OR_INELIGIBLE");
   const classification = classifyUncontactedRefundExecutionState(locked);
-  if (classification.kind !== "EXPIRED_U1") {
+  if (classification.kind !== "EXPIRED_U1"
+    && classification.kind !== "EXPIRED_AUTHORIZED_EXIMBAY_R1") {
     return resultForClassification(classification, "LEASE_CONFLICT");
   }
   const gateFailure = validateRecoveryGate(env);
@@ -123,13 +124,28 @@ async function loadRecoveryArtifacts(
   });
   const binding = await tx.refundExecutionProviderOperationBinding.findUnique({
     where: { refundAttemptId: ownership.refundAttemptId },
-    include: { eligibilityProof: true },
+    include: {
+      eligibilityProof: true,
+      eximbayPreflightObservations: {
+        orderBy: [{ observingLeaseGeneration: "asc" }, { id: "asc" }],
+      },
+    },
   });
   const contactProofCount = await tx.refundExecutionProviderContactEligibilityProof.count({
     where: { dispatchAttempt: { commandId } },
   });
-  const evidenceCount = await tx.refundExecutionEvidence.count({ where: { commandId } });
-  return { events, dispatches, binding, contactProofCount, evidenceCount };
+  const evidence = await tx.refundExecutionEvidence.findMany({
+    where: { commandId },
+    orderBy: [{ observedAt: "asc" }, { id: "asc" }],
+  });
+  return {
+    events,
+    dispatches,
+    binding,
+    contactProofCount,
+    evidence,
+    evidenceCount: evidence.length,
+  };
 }
 
 async function discoverOwnership(
@@ -187,7 +203,7 @@ async function persistTakeover(
   const updated = await updateCommandByFullCas(tx, locked, input, candidate);
   if (updated !== 1) throw new UncontactedRecoveryCasConflictError();
   await appendTakeoverEvent(tx, locked, candidate.generation);
-  return leaseSuccess(
+  const leased = leaseSuccess(
     locked.command.id,
     locked.target.id,
     locked.aggregate.id,
@@ -195,6 +211,12 @@ async function persistTakeover(
     candidate.rawToken,
     candidate.leaseUntil,
   );
+  return Object.freeze({
+    ...leased,
+    recoveredState: locked.command.dispatchAttempt === 1
+      ? "AUTHORIZED_EXIMBAY_R1"
+      : "ORDINAL_ZERO",
+  });
 }
 
 function buildTakeoverCandidate(
@@ -220,7 +242,7 @@ async function updateCommandByFullCas(
       id: locked.command.id,
       refundAttemptId: locked.target.id,
       status: RefundExecutionCommandStatus.LEASED,
-      dispatchAttempt: 0,
+      dispatchAttempt: locked.command.dispatchAttempt,
       leaseGeneration: locked.command.leaseGeneration,
       leaseOwner: locked.command.leaseOwner,
       leaseTokenHash: locked.command.leaseTokenHash,
@@ -249,7 +271,7 @@ async function appendTakeoverEvent(
       commandId: locked.command.id,
       eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
       leaseGeneration: generation,
-      dispatchAttempt: 0,
+      dispatchAttempt: locked.command.dispatchAttempt,
       occurredAt: locked.capturedAt,
     },
   });
@@ -275,6 +297,9 @@ function resultForClassification(
   expiredFallback: "LEASE_CONFLICT" | "PERSISTENCE_CONFLICT",
 ): ReclaimUncontactedRefundExecutionResult {
   if (classification.kind === "EXPIRED_U1") return reclaimFailure(expiredFallback);
+  if (classification.kind === "EXPIRED_AUTHORIZED_EXIMBAY_R1") {
+    return reclaimFailure(expiredFallback);
+  }
   if (classification.kind === "ACTIVE_U1") return reclaimFailure("LEASE_NOT_EXPIRED");
   if (classification.kind === "AUTHORIZED_U2") {
     return reclaimFailure("AUTHORIZED_RECOVERY_UNSUPPORTED");

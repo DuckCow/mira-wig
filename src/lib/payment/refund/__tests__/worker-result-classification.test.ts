@@ -3,6 +3,9 @@ import {
   classifyAcquireWorkerFailure,
   classifyAuthorizationWorkerFailure,
   classifyContactWorkerFailure,
+  classifyEximbayAuthorizationWorkerFailure,
+  classifyEximbayContactWorkerResult,
+  classifyEximbayReconciliationWorkerResult,
   classifyRecoveryWorkerFailure,
   classifyReclaimWorkerFailure,
   classifyWorkerSuccess,
@@ -47,5 +50,21 @@ describe("refund execution worker result classification", () => {
       classifyAuthorizationWorkerFailure("INVALID_LEASE_TOKEN"),
     )).toBe(true);
     expect(Object.isFrozen(classifyWorkerSuccess(false))).toBe(true);
+  });
+
+  it("maps Eximbay financial uncertainty and manual finality conservatively", () => {
+    expect(classifyEximbayContactWorkerResult({
+      ok: true, state: "WAITING_EVIDENCE", replayed: false,
+    }).kind).toBe("TEMPORARY");
+    expect(classifyEximbayReconciliationWorkerResult({
+      ok: true, state: "PARKED", replayed: false,
+    }).kind).toBe("MANUAL");
+    expect(classifyEximbayReconciliationWorkerResult({
+      ok: false, code: "LOOKUP_NOT_YET_DUE",
+    }).kind).toBe("TEMPORARY");
+    expect(classifyEximbayAuthorizationWorkerFailure("PREFLIGHT_CONFLICT").kind)
+      .toBe("CONFLICT");
+    expect(classifyEximbayAuthorizationWorkerFailure("REFUND_LEDGER_INCONSISTENT").kind)
+      .toBe("INCONSISTENT");
   });
 });

@@ -613,6 +613,40 @@ describe("runRefundExecutionWorkerCycle integration", () => {
     expect(selected.READY).toHaveLength(6);
   });
 
+  it("excludes Eximbay before the batch bound when its provider route is off", async () => {
+    const eximbay = await createDispatchFixture();
+    fixtures.push(eximbay);
+    await Promise.all([
+      db.refundAttempt.update({
+        where: { id: eximbay.refundAttemptId },
+        data: { provider: PaymentProvider.EXIMBAY, mode: PaymentMode.SANDBOX },
+      }),
+      db.refundExecutionCommand.update({
+        where: { id: eximbay.commandId },
+        data: { availableAt: new Date("2019-01-01T00:00:00.000Z") },
+      }),
+    ]);
+    const toss: DispatchFixture[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      toss.push(await tossFixture(fixtures, new Date(Date.UTC(2020, 4, index + 1))));
+    }
+
+    const dormant = await selectRefundExecutionWorkerCandidates(db);
+    expect(dormant.READY).toHaveLength(6);
+    expect(dormant.READY.map((candidate) => candidate.commandId))
+      .toEqual(toss.map((fixture) => fixture.commandId));
+    expect(dormant.READY.every((candidate) => candidate.provider === "TOSS")).toBe(true);
+
+    const enabled = await selectRefundExecutionWorkerCandidates(db, { eximbayEnabled: true });
+    expect(enabled.READY).toHaveLength(6);
+    expect(enabled.READY[0]).toEqual({
+      commandId: eximbay.commandId,
+      candidateClass: "READY",
+      provider: "EXIMBAY",
+    });
+    expect(enabled.READY.slice(1).every((candidate) => candidate.provider === "TOSS")).toBe(true);
+  });
+
   it("excludes unsupported Q0 READY work before allocation and routing", async () => {
     const fixture = await tossFixture(fixtures);
     await setUnsupportedDomain(fixture, "mode");

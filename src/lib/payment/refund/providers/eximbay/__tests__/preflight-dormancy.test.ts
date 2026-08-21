@@ -21,16 +21,32 @@ const RECONCILE = join(
 );
 
 describe("Eximbay refund preflight dormancy", () => {
-  it("has zero production callers outside its dormant owner", () => {
+  it("is reachable only through the approved dormant production worker path", () => {
     const files = productionSourceFiles();
     expect(reverseReachableFiles(AUTHORIZE, files).map(repositoryPath)).toEqual([
       "src/lib/payment/refund/providers/eximbay/authorize-first-dispatch.ts",
+      "src/lib/payment/refund/worker-result-classification.ts",
+      "src/lib/payment/refund/worker-router.ts",
+      "src/lib/payment/refund/run-refund-execution-worker-cycle.ts",
+      "src/lib/payment/refund/run-refund-execution-worker-host.ts",
+      "scripts/refund-execution-worker.ts",
+      "src/lib/payment/refund/worker-host-process.ts",
     ]);
     expect(reverseReachableFiles(CONTACT, files).map(repositoryPath)).toEqual([
       "src/lib/payment/refund/providers/eximbay/execute-contact.ts",
+      "src/lib/payment/refund/worker-router.ts",
+      "src/lib/payment/refund/run-refund-execution-worker-cycle.ts",
+      "src/lib/payment/refund/run-refund-execution-worker-host.ts",
+      "scripts/refund-execution-worker.ts",
+      "src/lib/payment/refund/worker-host-process.ts",
     ]);
     expect(reverseReachableFiles(RECONCILE, files).map(repositoryPath)).toEqual([
       "src/lib/payment/refund/providers/eximbay/reconcile-refund.ts",
+      "src/lib/payment/refund/worker-router.ts",
+      "src/lib/payment/refund/run-refund-execution-worker-cycle.ts",
+      "src/lib/payment/refund/run-refund-execution-worker-host.ts",
+      "scripts/refund-execution-worker.ts",
+      "src/lib/payment/refund/worker-host-process.ts",
     ]);
   });
 

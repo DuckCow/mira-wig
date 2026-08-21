@@ -4,6 +4,7 @@ import {
   PaymentProvider,
   Prisma,
   RefundAttemptStatus,
+  RefundExecutionCommandEventType,
   RefundExecutionCommandStatus,
   RefundExecutionDispatchAttemptState,
   type RefundExecutionCommandEvent,
@@ -20,6 +21,9 @@ import {
   matchesCompleteTossAuthorization,
 } from "./providers/toss/refund-authorization-identity";
 import type { LockedTossAuthorizationState } from "./providers/toss/refund-authorization-state";
+import { isEximbayRefundContext } from "./providers/eximbay/preflight-state";
+import { deriveEximbayDispatchAuthority } from "./providers/eximbay/lifecycle-authority";
+import { createEximbayRefundPreflightConfig } from "./providers/eximbay/preflight-contract";
 import { validateInitialRefundExecutionSuitability } from "./execution-suitability";
 import { hasCoherentUncontactedLeaseEventHistory } from "./uncontacted-recovery-event-history";
 
@@ -43,7 +47,10 @@ export type UncontactedRecoveryTarget = UncontactedRecoveryAggregate["refundAtte
 export type UncontactedRecoveryCommand = NonNullable<UncontactedRecoveryTarget["executionCommand"]>;
 export type UncontactedRecoveryBinding =
   Prisma.RefundExecutionProviderOperationBindingGetPayload<{
-    include: { eligibilityProof: true };
+    include: {
+      eligibilityProof: true;
+      eximbayPreflightObservations: true;
+    };
   }>;
 
 export type LockedUncontactedRecoveryState = Readonly<{
@@ -55,6 +62,7 @@ export type LockedUncontactedRecoveryState = Readonly<{
   binding: UncontactedRecoveryBinding | null;
   contactProofCount: number;
   evidenceCount: number;
+  evidence: readonly Prisma.RefundExecutionEvidenceGetPayload<Record<string, never>>[];
   capturedAt: Date;
 }>;
 
@@ -62,6 +70,7 @@ export type UncontactedRecoveryClassification =
   | Readonly<{ kind: "EXPIRED_U1" }>
   | Readonly<{ kind: "ACTIVE_U1" }>
   | Readonly<{ kind: "AUTHORIZED_U2" }>
+  | Readonly<{ kind: "EXPIRED_AUTHORIZED_EXIMBAY_R1" }>
   | Readonly<{ kind: "CONTACTED" }>
   | Readonly<{ kind: "INELIGIBLE" }>
   | Readonly<{ kind: "INCONSISTENT" }>;
@@ -84,13 +93,15 @@ function classifyLeased(
   if (!hasCoherentInitialAggregate(locked) || !hasCoherentLease(locked.command)) {
     return classification("INCONSISTENT");
   }
-  if (!hasCoherentUncontactedLeaseEventHistory(
-    locked.command.id,
-    locked.command.leaseGeneration,
-    locked.events,
-    false,
-  )) return classification("INCONSISTENT");
-  if (locked.command.dispatchAttempt === 0) return classifyOrdinalZeroLease(locked);
+  if (locked.command.dispatchAttempt === 0) {
+    if (!hasCoherentUncontactedLeaseEventHistory(
+      locked.command.id,
+      locked.command.leaseGeneration,
+      locked.events,
+      false,
+    )) return classification("INCONSISTENT");
+    return classifyOrdinalZeroLease(locked);
+  }
   if (locked.command.dispatchAttempt === 1) return classifyAuthorizedLease(locked);
   return classification("INCONSISTENT");
 }
@@ -132,7 +143,7 @@ function classifyOrdinalZeroLease(
     locked.command.lastSafeErrorMessage === null,
   ].every(Boolean);
   if (!exactUncontactedShape) return classification("INCONSISTENT");
-  if (!isSupportedTossSandboxContext(locked)) return classification("INELIGIBLE");
+  if (!isSupportedInitialSandboxContext(locked)) return classification("INELIGIBLE");
   return isExpired(locked)
     ? classification("EXPIRED_U1")
     : classification("ACTIVE_U1");
@@ -144,6 +155,15 @@ function classifyAuthorizedLease(
   if (locked.contactProofCount !== 0 || locked.evidenceCount !== 0) {
     return classification("INCONSISTENT");
   }
+  if (isEximbayRefundContext(authorizationContext(locked))) {
+    return classifyEximbayAuthorizedR1Lease(locked);
+  }
+  if (!hasCoherentUncontactedLeaseEventHistory(
+    locked.command.id,
+    locked.command.leaseGeneration,
+    locked.events,
+    false,
+  )) return classification("INCONSISTENT");
   const context = authorizationContext(locked);
   const history: DispatchAuthorizationHistory = {
     events: locked.events,
@@ -174,6 +194,97 @@ function classifyAuthorizedLease(
   return isExpired(locked)
     ? classification("AUTHORIZED_U2")
     : classification("INELIGIBLE");
+}
+
+function classifyEximbayAuthorizedR1Lease(
+  locked: LockedUncontactedRecoveryState,
+): UncontactedRecoveryClassification {
+  const structure = identifyDispatchAuthorizationStructure(
+    locked.command.dispatchAttempt,
+    locked.dispatches,
+  );
+  if (structure.kind !== "replay"
+    || !hasCoherentEximbayAuthorizedLeaseEvents(locked, structure.attempt.leaseGeneration)
+    || !hasExactEximbayR1Authority(locked, structure.attempt.id)) {
+    return classification("INCONSISTENT");
+  }
+  return isExpired(locked)
+    ? classification("EXPIRED_AUTHORIZED_EXIMBAY_R1")
+    : classification("INELIGIBLE");
+}
+
+function hasExactEximbayR1Authority(
+  locked: LockedUncontactedRecoveryState,
+  dispatchId: string,
+): boolean {
+  const authority = deriveAuthorizedEximbayR1Authority(locked);
+  return [
+    authority !== null,
+    authority?.dispatch.id === dispatchId,
+    authority?.dispatch.state === RefundExecutionDispatchAttemptState.AUTHORIZED,
+    authority?.dispatch.contactMarkedAt === null,
+  ].every(Boolean);
+}
+
+function deriveAuthorizedEximbayR1Authority(
+  locked: LockedUncontactedRecoveryState,
+): ReturnType<typeof deriveEximbayDispatchAuthority> {
+  const binding = locked.binding;
+  const observations = binding?.eximbayPreflightObservations ?? [];
+  if (!binding || observations.length !== 1) return null;
+  try {
+    const config = createEximbayRefundPreflightConfig({
+      mode: PaymentMode.SANDBOX,
+      mid: observations[0].mid,
+      merchantAccountBindingId: binding.merchantAccountBindingId,
+      credentialGenerationBindingId: binding.credentialGenerationBindingId,
+    });
+    return deriveEximbayDispatchAuthority({
+      context: authorizationContext(locked),
+      history: {
+        events: locked.events,
+        dispatchAttempts: locked.dispatches,
+        evidenceCount: locked.evidenceCount,
+      },
+      binding,
+      observations,
+      evidence: [...locked.evidence],
+      capturedAt: locked.capturedAt,
+    }, config, 1);
+  } catch {
+    return null;
+  }
+}
+
+function hasCoherentEximbayAuthorizedLeaseEvents(
+  locked: LockedUncontactedRecoveryState,
+  authorizationGeneration: number,
+): boolean {
+  if (authorizationGeneration > locked.command.leaseGeneration) return false;
+  const initial = locked.events.filter((event) => (
+    event.leaseGeneration <= authorizationGeneration
+  ));
+  if (!hasCoherentUncontactedLeaseEventHistory(
+    locked.command.id,
+    authorizationGeneration,
+    initial,
+    false,
+  )) return false;
+  const recovered = locked.events.filter((event) => (
+    event.leaseGeneration > authorizationGeneration
+  ));
+  if (recovered.length !== locked.command.leaseGeneration - authorizationGeneration) return false;
+  let prior = initial.at(-1)?.occurredAt;
+  return recovered.every((event, index) => {
+    const coherent = event.commandId === locked.command.id
+      && event.eventType === RefundExecutionCommandEventType.LEASE_ACQUIRED
+      && event.leaseGeneration === authorizationGeneration + index + 1
+      && event.dispatchAttempt === 1
+      && event.occurredAt instanceof Date
+      && (prior === undefined || prior.getTime() <= event.occurredAt.getTime());
+    prior = event.occurredAt;
+    return coherent;
+  });
 }
 
 function classifyContactTruth(
@@ -207,6 +318,11 @@ function isSupportedTossSandboxContext(locked: LockedUncontactedRecoveryState): 
     && locked.target.provider === PaymentProvider.TOSS
     && locked.target.mode === PaymentMode.SANDBOX
     && isTossFullRefundContext(authorizationContext(locked));
+}
+
+function isSupportedInitialSandboxContext(locked: LockedUncontactedRecoveryState): boolean {
+  return isSupportedTossSandboxContext(locked)
+    || isEximbayRefundContext(authorizationContext(locked));
 }
 
 function hasCoherentLease(command: UncontactedRecoveryCommand): boolean {

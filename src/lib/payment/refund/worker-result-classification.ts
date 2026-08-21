@@ -3,6 +3,7 @@ import type { ReclaimUncontactedRefundExecutionFailureCode } from "./uncontacted
 import type { TossRefundAuthorizationFailureCode } from "./providers/toss/refund-authorization-contract";
 import type { TossRefundContactFailureCode } from "./providers/toss/refund-contact-contract";
 import type { TossRefundRecoveryFailureCode } from "./providers/toss/refund-recovery-contract";
+import type { EximbayFirstRefundAuthorizationFailureCode } from "./providers/eximbay/authorize-first-dispatch";
 
 export type RefundExecutionWorkerOutcomeKind =
   | "SUCCEEDED"
@@ -158,6 +159,85 @@ export function classifyRecoveryWorkerFailure(
 
 export function classifyWorkerSuccess(replayed: boolean): RefundExecutionWorkerRouteOutcome {
   return replayed ? REPLAYED : SUCCEEDED;
+}
+
+export function classifyEximbayAuthorizationWorkerFailure(
+  code: EximbayFirstRefundAuthorizationFailureCode,
+): RefundExecutionWorkerRouteOutcome {
+  const outcomes = {
+    INVALID_INPUT: FAILED,
+    COMMAND_NOT_FOUND_OR_INELIGIBLE: RACE_SKIPPED,
+    LEASE_FENCE_MISMATCH: RACE_CONFLICT,
+    LEASE_EXPIRED: RACE_CONFLICT,
+    CONTACT_RECOVERY_REQUIRED: TEMPORARY,
+    BINDING_MISMATCH: CONFLICT,
+    REFUND_LEDGER_INCONSISTENT: INCONSISTENT,
+    PREFLIGHT_NOT_ADMITTED: TEMPORARY,
+    PREFLIGHT_CONFLICT: CONFLICT,
+    REFUND_NOT_LAWFUL: MANUAL,
+    PERSISTENCE_CONFLICT: RACE_CONFLICT,
+  } satisfies Readonly<Record<
+    EximbayFirstRefundAuthorizationFailureCode,
+    RefundExecutionWorkerRouteOutcome
+  >>;
+  return outcomes[code];
+}
+
+export function classifyEximbayContactWorkerResult(
+  result: Readonly<{
+    ok: true;
+    state: "SUCCEEDED" | "WAITING_EVIDENCE";
+    replayed: boolean;
+  }> | Readonly<{ ok: false; code: string }>,
+): RefundExecutionWorkerRouteOutcome {
+  if (result.ok) {
+    return result.state === "SUCCEEDED" ? classifyWorkerSuccess(result.replayed) : TEMPORARY;
+  }
+  if (result.code === "COMMAND_NOT_FOUND_OR_INELIGIBLE") return RACE_SKIPPED;
+  if (result.code === "CONTACT_RECOVERY_REQUIRED") return TEMPORARY;
+  if (result.code === "REFUND_LEDGER_INCONSISTENT") return INCONSISTENT;
+  if (result.code === "PERSISTENCE_CONFLICT") return RACE_CONFLICT;
+  return FAILED;
+}
+
+export function classifyEximbayReconciliationWorkerResult(
+  result: Readonly<{
+    ok: true;
+    state: "SUCCEEDED" | "WAITING_EVIDENCE" | "PARKED" | "R2_AUTHORIZED";
+    replayed: boolean;
+  }> | Readonly<{ ok: false; code: string }>,
+): RefundExecutionWorkerRouteOutcome {
+  return result.ok
+    ? classifyEximbayReconciliationSuccess(result.state, result.replayed)
+    : classifyEximbayReconciliationFailure(result.code);
+}
+
+function classifyEximbayReconciliationSuccess(
+  state: "SUCCEEDED" | "WAITING_EVIDENCE" | "PARKED" | "R2_AUTHORIZED",
+  replayed: boolean,
+): RefundExecutionWorkerRouteOutcome {
+  if (state === "SUCCEEDED") return classifyWorkerSuccess(replayed);
+  if (state === "PARKED") return MANUAL;
+  return state === "WAITING_EVIDENCE" ? TEMPORARY : INCONSISTENT;
+}
+
+function classifyEximbayReconciliationFailure(
+  code: string,
+): RefundExecutionWorkerRouteOutcome {
+  if (code === "COMMAND_NOT_FOUND_OR_INELIGIBLE") return RACE_SKIPPED;
+  if (code === "LOOKUP_NOT_YET_DUE") return TEMPORARY;
+  if (code === "RECOVERY_LEASE_CONFLICT" || code === "PERSISTENCE_CONFLICT") {
+    return RACE_CONFLICT;
+  }
+  return code === "REFUND_LEDGER_INCONSISTENT" ? INCONSISTENT : FAILED;
+}
+
+export function classifyUnsupportedWorkerProvider(): RefundExecutionWorkerRouteOutcome {
+  return INCONSISTENT;
+}
+
+export function classifyUnavailableWorkerRoute(): RefundExecutionWorkerRouteOutcome {
+  return SKIPPED;
 }
 
 export function isSelectorRaceLoss(outcomeValue: RefundExecutionWorkerRouteOutcome): boolean {

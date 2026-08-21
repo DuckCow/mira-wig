@@ -61,18 +61,20 @@ describe("refund worker route readiness", () => {
     ["CONTACTED", "CONTACTED_LOOKUP"],
   ] as const)("keeps %s preflight readiness equal to health %s readiness", (candidateClass, route) => {
     const queues = {
-      READY: candidateClass === "READY" ? [{ commandId: "ready", candidateClass }] : [],
+      READY: candidateClass === "READY"
+        ? [{ commandId: "ready", candidateClass, provider: "TOSS" as const }]
+        : [],
       UNCONTACTED: candidateClass === "UNCONTACTED"
-        ? [{ commandId: "uncontacted", candidateClass }]
+        ? [{ commandId: "uncontacted", candidateClass, provider: "TOSS" as const }]
         : [],
       CONTACTED: candidateClass === "CONTACTED"
-        ? [{ commandId: "contacted", candidateClass }]
+        ? [{ commandId: "contacted", candidateClass, provider: "TOSS" as const }]
         : [],
     };
     const preflight = preflightRefundExecutionWorkerRoutes(queues, ROUTE_ENV);
     expect(preflight.ok).toBe(true);
     if (!preflight.ok) throw new Error("Expected route preflight readiness.");
-    expect(preflight.readiness[candidateClass]).toBe(
+    expect(preflight.readiness[candidateClass].TOSS).toBe(
       refundExecutionWorkerRouteReadiness(ROUTE_ENV, "CONFIGURED")[route],
     );
   });
