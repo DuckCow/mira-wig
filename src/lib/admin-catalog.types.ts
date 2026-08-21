@@ -4,6 +4,7 @@
 // ============================================================
 
 import type { WigCategory } from "@/lib/catalog.types";
+import type { CurrencyMeta, MarketCode } from "@/lib/market/types";
 
 export interface StyleRow {
   id: string;
@@ -54,7 +55,14 @@ export interface VariantPriceRow {
   prices: VariantMarketPriceRow[];
 }
 
+export interface MarketPriceContextRow {
+  marketCode: MarketCode;
+  isActive: boolean;
+  currency: CurrencyMeta;
+}
+
 export interface StyleMarketData {
   markets: MarketAvailabilityRow[];
+  marketPriceContexts: MarketPriceContextRow[];
   variantPrices: VariantPriceRow[];
 }

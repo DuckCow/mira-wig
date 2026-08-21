@@ -4,6 +4,8 @@ import { catalogStorage } from "@/lib/storage";
 import { StyleCard } from "@/components/features/StyleCard";
 import { MarketConfirmation } from "@/components/features/MarketConfirmation";
 import { getStorefrontContext } from "@/lib/market";
+import { getActiveMarketCommercialFacts } from "@/lib/market/active-market";
+import type { CurrencyMeta } from "@/lib/market/types";
 import { localizedCategoryLabel } from "@/lib/market/catalog-presentation";
 import { messagesFor } from "@/lib/market/messages";
 import { publicPageMetadata } from "@/lib/market/seo";
@@ -27,25 +29,30 @@ export default async function PublicStylesPage({ params, searchParams }: Props) 
     ? raw.category
     : undefined;
   const query = typeof raw.q === "string" && raw.q.trim() ? raw.q.trim() : undefined;
-  const styles = await getWigStyles({ category, query }, variant.marketCode);
+  const [styles, market] = await Promise.all([
+    getWigStyles({ category, query }, variant.marketCode),
+    getActiveMarketCommercialFacts(variant.marketCode),
+  ]);
   const withImages = await Promise.all(styles.map(async (style) => ({
     ...style,
     imageUrl: style.coverImageKey
       ? await catalogStorage.getViewUrl(style.coverImageKey).catch(() => null)
       : null,
   })));
-  return <StylesView variant={variant} styles={withImages} category={category} query={query} currentMarketCode={context.confirmedMarketCode} />;
+  return <StylesView variant={variant} styles={withImages} currency={market.currency} category={category} query={query} currentMarketCode={context.confirmedMarketCode} />;
 }
 
 function StylesView({
   variant,
   styles,
+  currency,
   category,
   query,
   currentMarketCode,
 }: {
   variant: SiteVariant;
   styles: (WigStyleSummary & { imageUrl: string | null })[];
+  currency: CurrencyMeta;
   category?: string;
   query?: string;
   currentMarketCode: Parameters<typeof MarketConfirmation>[0]["currentMarketCode"];
@@ -84,7 +91,7 @@ function StylesView({
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {styles.map((style) => (
             <li key={style.id}>
-              <StyleCard {...style} marketCode={variant.marketCode} locale={variant.locale} />
+              <StyleCard {...style} marketCode={variant.marketCode} currency={currency} locale={variant.locale} />
             </li>
           ))}
         </ul>

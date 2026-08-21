@@ -6,6 +6,7 @@ import type { CheckoutCartItem } from "./checkout-summary";
 import { getSession } from "@/lib/session";
 import { getCart } from "@/lib/cart";
 import { getStorefrontContext } from "@/lib/market";
+import { getActiveMarketCommercialFacts } from "@/lib/market/active-market";
 import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types";
 import { configuredPaymentMode } from "@/lib/payment/mode";
 import { PaymentMode } from "@/lib/payment/providers/routing";
@@ -40,8 +41,14 @@ function checkoutItems(items: CartItemView[], locale: Parameters<typeof localize
   });
 }
 
-function checkoutCountry(marketCode: MarketCode): ShippingCountry {
-  const [country] = MARKET_CONFIGS[marketCode].shippableCountries;
+export function checkoutCountry(
+  marketCode: MarketCode,
+  shippableCountries: readonly string[],
+): ShippingCountry {
+  if (shippableCountries.length !== 1) {
+    throw new Error(`Checkout requires exactly one shipping country for ${marketCode}.`);
+  }
+  const [country] = shippableCountries;
   if (country === ShippingCountry.KR) return ShippingCountry.KR;
   if (country === ShippingCountry.US) return ShippingCountry.US;
   if (country === ShippingCountry.JP) return ShippingCountry.JP;
@@ -63,11 +70,14 @@ export default async function CheckoutPage() {
   if (!context.confirmedMarketCode) redirect(withStorefrontHandoff("/cart", presentationVariant));
   const marketCode = context.confirmedMarketCode;
   const variant = { marketCode, locale: context.locale };
-  const items = await getCart(session.user.id, marketCode);
+  const [items, market] = await Promise.all([
+    getCart(session.user.id, marketCode),
+    getActiveMarketCommercialFacts(marketCode),
+  ]);
   if (items.length === 0) redirect(withStorefrontHandoff("/cart", variant));
   if (pricedItems(items).length !== items.length) redirect(withStorefrontHandoff("/cart", variant));
 
-  const market = MARKET_CONFIGS[marketCode];
+  const presentation = MARKET_CONFIGS[marketCode];
   const messages = messagesFor(context.locale).checkout;
   const subtotal = productSubtotal(items);
   const cartLines = checkoutItems(items, context.locale);
@@ -90,9 +100,9 @@ export default async function CheckoutPage() {
       <CheckoutForm
         key={marketCode}
         marketCode={marketCode}
-        marketLabel={market.label}
+        marketLabel={presentation.label}
         currency={market.currency}
-        shippingCountry={checkoutCountry(marketCode)}
+        shippingCountry={checkoutCountry(marketCode, market.shippableCountries)}
         cartItems={cartLines}
         productSubtotal={subtotal}
         mockPaymentEnabled={mockPaymentEnabled()}

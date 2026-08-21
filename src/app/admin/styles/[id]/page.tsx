@@ -38,7 +38,10 @@ export default async function StyleDetailPage({ params }: { params: Params }) {
       <StyleEditForm style={style} initialCoverUrl={initialCoverUrl} />
       <VariantSection variants={style.variants} wigStyleId={style.id} />
       <MarketAvailabilitySection wigStyleId={style.id} markets={marketData.markets} />
-      <MarketPriceSection variantPrices={marketData.variantPrices} />
+      <MarketPriceSection
+        variantPrices={marketData.variantPrices}
+        marketPriceContexts={marketData.marketPriceContexts}
+      />
       <ManualItemRelationsSection
         sourceStyleId={style.id}
         relations={relations}

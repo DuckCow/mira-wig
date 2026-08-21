@@ -10,7 +10,8 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { isMarketCode, MARKET_CONFIGS } from "@/lib/market/types";
+import { getMarketCommercialFactsForCodes } from "@/lib/market/active-market";
+import { isMarketCode, type MarketCode } from "@/lib/market/types";
 import {
   CatalogAdminException,
   type SetVariantPriceEntry,
@@ -29,7 +30,7 @@ function assertValidAmount(amount: number, currencyCode: string): void {
   }
 }
 
-function assertValidMarketCode(code: string): asserts code is keyof typeof MARKET_CONFIGS {
+function assertValidMarketCode(code: string): asserts code is MarketCode {
   if (!isMarketCode(code)) {
     throw new CatalogAdminException("MARKET_NOT_FOUND", `유효하지 않은 마켓 코드: ${code}`);
   }
@@ -49,9 +50,17 @@ export async function setVariantPrices(
   const variant = await db.wigVariant.findUnique({ where: { id: variantId }, select: { id: true } });
   if (!variant) throw new CatalogAdminException("VARIANT_NOT_FOUND", "변형을 찾을 수 없습니다.");
 
+  const marketCodes: MarketCode[] = [];
   for (const entry of entries) {
     assertValidMarketCode(entry.marketCode);
-    const currencyCode = MARKET_CONFIGS[entry.marketCode].currency.code;
+    if (!marketCodes.includes(entry.marketCode)) marketCodes.push(entry.marketCode);
+  }
+  const marketFacts = await getMarketCommercialFactsForCodes(marketCodes);
+  const factsByCode = new Map(marketFacts.map((market) => [market.code, market]));
+  for (const entry of entries) {
+    assertValidMarketCode(entry.marketCode);
+    const currencyCode = factsByCode.get(entry.marketCode)?.currency.code;
+    if (!currencyCode) throw new CatalogAdminException("MARKET_NOT_FOUND", `마켓을 찾을 수 없습니다: ${entry.marketCode}`);
     assertValidAmount(entry.amount, currencyCode);
   }
 

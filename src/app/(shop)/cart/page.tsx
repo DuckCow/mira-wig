@@ -4,7 +4,8 @@ import Image from "next/image";
 import { getSession } from "@/lib/session";
 import { getCart } from "@/lib/cart";
 import { getStorefrontContext } from "@/lib/market";
-import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types";
+import { getActiveMarketCommercialFacts } from "@/lib/market/active-market";
+import { formatPrice, type CurrencyMeta } from "@/lib/market/types";
 import { catalogStorage } from "@/lib/storage";
 import { localizedVariantOptionLabel } from "@/lib/market/catalog-presentation";
 import { RemoveButton, QuantityControl } from "./CartItemActions";
@@ -54,6 +55,7 @@ function CartRow({
   imageUrl,
   displayedMarketCode,
   presentationMarketCode,
+  currency,
   priceAuthority,
   locale,
 }: {
@@ -61,10 +63,10 @@ function CartRow({
   imageUrl: string | null;
   displayedMarketCode: MarketCode;
   presentationMarketCode: MarketCode;
+  currency: CurrencyMeta;
   priceAuthority: "CURRENT" | "TARGET_PROJECTION";
   locale: Locale;
 }) {
-  const { currency } = MARKET_CONFIGS[displayedMarketCode];
   const messages = messagesFor(locale).cart;
   const optionLabel = localizedVariantOptionLabel(item.color, item.length, item.curl, locale);
   const lineTotal = item.price === null ? null : item.price * item.quantity;
@@ -117,17 +119,16 @@ function CartRow({
 function CartSummary({
   subtotal,
   hasUnavailableItem,
-  displayedMarketCode,
+  currency,
   priceAuthority,
   locale,
 }: {
   subtotal: number;
   hasUnavailableItem: boolean;
-  displayedMarketCode: MarketCode;
+  currency: CurrencyMeta;
   priceAuthority: "CURRENT" | "TARGET_PROJECTION";
   locale: Locale;
 }) {
-  const { currency } = MARKET_CONFIGS[displayedMarketCode];
   const messages = messagesFor(locale).cart;
   return (
     <div className="space-y-2 pt-4 border-t border-gray-200">
@@ -164,7 +165,10 @@ export default async function CartPage() {
   const priceAuthority = currentMarketCode === null ? "TARGET_PROJECTION" : "CURRENT";
   const commerceVariant = { marketCode: displayedMarketCode, locale: context.locale };
   const messages = messagesFor(context.locale).cart;
-  const items = await getCart(session.user.id, displayedMarketCode);
+  const [items, displayedMarket] = await Promise.all([
+    getCart(session.user.id, displayedMarketCode),
+    getActiveMarketCommercialFacts(displayedMarketCode),
+  ]);
   const imageUrls = await resolveImageUrls(items);
   const hasUnavailableItem = items.some((item) => item.unavailableCode !== null);
   const productSubtotal = items.reduce((sum, item) => {
@@ -195,6 +199,7 @@ export default async function CartPage() {
                 imageUrl={imageUrls[i] ?? null}
                 displayedMarketCode={displayedMarketCode}
                 presentationMarketCode={targetMarketCode}
+                currency={displayedMarket.currency}
                 priceAuthority={priceAuthority}
                 locale={context.locale}
               />
@@ -205,7 +210,7 @@ export default async function CartPage() {
             <CartSummary
               subtotal={productSubtotal}
               hasUnavailableItem={hasUnavailableItem}
-              displayedMarketCode={displayedMarketCode}
+              currency={displayedMarket.currency}
               priceAuthority={priceAuthority}
               locale={context.locale}
             />

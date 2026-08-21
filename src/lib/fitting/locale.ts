@@ -1,8 +1,8 @@
 // ============================================================
-// lib/fitting/locale.ts — 피팅 UI 텍스트 (마켓 로케일 기반)
+// lib/fitting/locale.ts — 피팅 UI 텍스트 (독립 presentation locale 기반)
 // ------------------------------------------------------------
 // i18n 라이브러리 없이 단순 맵으로 관리.
-// MARKET_CONFIGS[marketCode].defaultLocale → getFittingLocale()로 텍스트 선택.
+// route/cookie에서 해결된 locale → getFittingLocale()로 텍스트 선택.
 // 에러는 코드를 키로 하여 이 맵에서 문구로 변환한다.
 // ============================================================
 

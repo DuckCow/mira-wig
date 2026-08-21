@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { type WigCategory } from "@/lib/catalog.types";
-import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import { formatPrice, type CurrencyMeta, type MarketCode } from "@/lib/market/types";
 import type { Locale } from "@/lib/market/locale";
 import { localizedCategoryLabel } from "@/lib/market/catalog-presentation";
 import { messagesFor } from "@/lib/market/messages";
@@ -19,6 +19,7 @@ export interface StyleCardProps {
   /** 현재 마켓 최소단위 정수 금액. null이면 해당 마켓 가격 미제공. */
   basePrice: number | null;
   marketCode: MarketCode;
+  currency: CurrencyMeta;
   locale: Locale;
 }
 
@@ -58,9 +59,9 @@ export function StyleCard({
   imageUrl,
   basePrice,
   marketCode,
+  currency,
   locale,
 }: StyleCardProps) {
-  const { currency } = MARKET_CONFIGS[marketCode];
   const messages = messagesFor(locale);
 
   return (

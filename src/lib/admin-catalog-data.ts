@@ -4,6 +4,8 @@
 import "server-only";
 
 import { db } from "@/lib/db";
+import { getMarketCommercialFactsForCodes } from "@/lib/market/active-market";
+import { MARKET_CODES } from "@/lib/market/types";
 import type { StyleRow, StyleDetail, StyleMarketData } from "./admin-catalog.types";
 
 const VARIANT_SELECT = {
@@ -57,7 +59,7 @@ export async function getStyleDetail(id: string): Promise<StyleDetail | null> {
 }
 
 export async function getStyleMarketData(wigStyleId: string): Promise<StyleMarketData> {
-  const [markets, variantRows] = await Promise.all([
+  const [markets, variantRows, marketFacts] = await Promise.all([
     db.wigStyleMarket.findMany({
       where: { wigStyleId },
       select: { marketCode: true, isActive: true },
@@ -71,9 +73,15 @@ export async function getStyleMarketData(wigStyleId: string): Promise<StyleMarke
       },
       orderBy: { sku: "asc" },
     }),
+    getMarketCommercialFactsForCodes(MARKET_CODES),
   ]);
   return {
     markets,
+    marketPriceContexts: marketFacts.map((market) => ({
+      marketCode: market.code,
+      isActive: market.isActive,
+      currency: market.currency,
+    })),
     variantPrices: variantRows.map((v) => ({
       id: v.id,
       sku: v.sku,

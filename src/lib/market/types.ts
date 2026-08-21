@@ -26,9 +26,19 @@ export const MARKET_COOKIE = "mira-market";
 //   USD = 2 (2-decimal):    2999  → $29.99    (÷100)
 //   JPY = 0 (zero-decimal): 1500  → ¥1,500   (÷1)
 
+export const CurrencyCode = {
+  KRW: "KRW",
+  USD: "USD",
+  JPY: "JPY",
+} as const;
+
+export type CurrencyCode = (typeof CurrencyCode)[keyof typeof CurrencyCode];
+
+export const CURRENCY_CODES: readonly CurrencyCode[] = ["KRW", "USD", "JPY"];
+
 export interface CurrencyMeta {
   /** ISO 4217 통화 코드 */
-  code: string;
+  code: CurrencyCode;
   /** 표시 기호 */
   symbol: string;
   /** 소수 자릿수 (0=zero-decimal, 2=센트 기반) */
@@ -37,7 +47,7 @@ export interface CurrencyMeta {
   locale: string;
 }
 
-export const CURRENCY_META: Record<string, CurrencyMeta> = {
+export const CURRENCY_META: Readonly<Record<string, CurrencyMeta>> = {
   KRW: { code: "KRW", symbol: "₩", decimals: 0, locale: "ko-KR" },
   USD: { code: "USD", symbol: "$", decimals: 2, locale: "en-US" },
   JPY: { code: "JPY", symbol: "¥", decimals: 0, locale: "ja-JP" },
@@ -47,33 +57,26 @@ export const CURRENCY_META: Record<string, CurrencyMeta> = {
 
 export interface MarketConfig {
   code: MarketCode;
-  /** UI 선택자에 표시할 레이블 */
+  /** UI 선택자에 표시할 통화 중립 레이블 */
   label: string;
-  currency: CurrencyMeta;
-  shippableCountries: string[];
+  /** locale은 commerce authority와 독립인 presentation 기본값이다. */
   defaultLocale: Locale;
 }
 
 export const MARKET_CONFIGS: Record<MarketCode, MarketConfig> = {
   KR: {
     code: "KR",
-    label: "한국 (₩)",
-    currency: CURRENCY_META.KRW,
-    shippableCountries: ["KR"],
+    label: "한국",
     defaultLocale: "ko",
   },
   US: {
     code: "US",
-    label: "United States ($)",
-    currency: CURRENCY_META.USD,
-    shippableCountries: ["US"],
+    label: "United States",
     defaultLocale: "en",
   },
   JP: {
     code: "JP",
-    label: "日本 (¥)",
-    currency: CURRENCY_META.JPY,
-    shippableCountries: ["JP"],
+    label: "日本",
     defaultLocale: "ja",
   },
 };
@@ -82,6 +85,15 @@ export const MARKET_CONFIGS: Record<MarketCode, MarketConfig> = {
 
 export function isMarketCode(value: string): value is MarketCode {
   return MARKET_CODES.some((c) => c === value);
+}
+
+export function isCurrencyCode(value: string): value is CurrencyCode {
+  return CURRENCY_CODES.some((code) => code === value);
+}
+
+export function currencyMetaForCode(value: string): CurrencyMeta {
+  if (!isCurrencyCode(value)) throw new Error(`Unsupported currency code: ${value}`);
+  return CURRENCY_META[value];
 }
 
 // ── 금액 포맷팅 ───────────────────────────────────────────────

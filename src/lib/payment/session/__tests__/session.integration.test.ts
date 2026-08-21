@@ -276,6 +276,25 @@ describe("checkout session lifecycle", () => {
     await expectNoSessionResidue(ctx.userId);
   });
 
+  it("uses current DB shippableCountries and rejects the former static-only country without residue", async () => {
+    const variant = await createCartVariant(ctx, { stock: 5 });
+    await addCart(ctx, variant, 1);
+    await db.market.update({
+      where: { code: MarketCode.KR },
+      data: { shippableCountries: [ShippingCountry.US] },
+    });
+
+    await expectFailure("SHIPPING_COUNTRY_INVALID", () => {
+      return createCheckoutSession(db, baseInput(ctx));
+    });
+    await expectNoSessionResidue(ctx.userId);
+
+    const created = await createCheckoutSession(db, baseInput(ctx, {
+      shipping: validShipping(ShippingCountry.US),
+    }));
+    expect((await findSession(created.sessionId)).shipping?.country).toBe(ShippingCountry.US);
+  });
+
   it("비활성 시장은 기존 MARKET_UNAVAILABLE로 거부한다", async () => {
     const marketCode = makeSyntheticMarketCode();
     await createInactiveMarket(marketCode);
@@ -290,6 +309,15 @@ describe("checkout session lifecycle", () => {
     }
   });
 
+  it("unsupported current DB Market currency fails closed without session residue", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    await db.market.update({ where: { code: MarketCode.KR }, data: { currency: "EUR" } });
+
+    await expectFailure("MARKET_UNAVAILABLE", () => createCheckoutSession(db, baseInput(ctx)));
+    await expectNoSessionResidue(ctx.userId);
+  });
+
   it("생성 후 시장 가격이 바뀌어도 unitAmount는 불변이다", async () => {
     const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
     await addCart(ctx, variant, 1);
@@ -301,6 +329,32 @@ describe("checkout session lifecycle", () => {
     });
 
     expect(firstLine(await findSession(result.sessionId)).unitAmount).toBe(12_000);
+  });
+
+  it("keeps frozen session commerce facts invariant after current Market and catalog drift", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 2);
+    const result = await createCheckoutSession(db, baseInput(ctx));
+    const before = await findSession(result.sessionId);
+
+    await Promise.all([
+      db.market.update({
+        where: { code: MarketCode.KR },
+        data: { currency: "JPY", shippableCountries: [ShippingCountry.US], defaultLocale: "en" },
+      }),
+      db.variantMarketPrice.update({
+        where: { variantId_marketCode: { variantId: variant.id, marketCode: MarketCode.KR } },
+        data: { amount: 99_000 },
+      }),
+    ]);
+    const after = await findSession(result.sessionId);
+
+    expect(after.currency).toBe(before.currency);
+    expect(after.subtotalAmount).toBe(before.subtotalAmount);
+    expect(after.shippingAmount).toBe(before.shippingAmount);
+    expect(after.totalAmount).toBe(before.totalAmount);
+    expect(after.shipping).toEqual(before.shipping);
+    expect(after.lines).toEqual(before.lines);
   });
 
   it("snapshotData에는 배송 PII 필드가 없다", async () => {

@@ -11,8 +11,11 @@ import {
   commerceIntegrityMessage,
   type CommerceIntegrityFailureCode,
 } from "./commerce-integrity";
-import type { MarketCode } from "./market/types";
-import { MARKET_CONFIGS } from "./market/types";
+import {
+  getActiveMarketCommercialFacts,
+  getActiveMarketCommercialFactsForCodes,
+} from "./market/active-market";
+import type { CurrencyCode, MarketCode } from "./market/types";
 
 // ── 에러 타입 ─────────────────────────────────────────────────
 
@@ -71,8 +74,8 @@ export interface MarketSwitchLineImpact {
 export interface MarketSwitchImpact {
   currentMarket: MarketCode | null;
   targetMarket: MarketCode;
-  currentCurrency: string | null;
-  targetCurrency: string;
+  currentCurrency: CurrencyCode | null;
+  targetCurrency: CurrencyCode;
   lines: MarketSwitchLineImpact[];
   fingerprint: string;
 }
@@ -164,10 +167,14 @@ export async function getMarketSwitchImpact(
   currentMarket: MarketCode,
   targetMarket: MarketCode,
 ): Promise<MarketSwitchImpact> {
-  const [currentItems, targetItems] = await Promise.all([
+  const [currentItems, targetItems, marketFacts] = await Promise.all([
     getCart(userId, currentMarket),
     getCart(userId, targetMarket),
+    getActiveMarketCommercialFactsForCodes([currentMarket, targetMarket]),
   ]);
+  const currentFacts = marketFacts.find((market) => market.code === currentMarket);
+  const targetFacts = marketFacts.find((market) => market.code === targetMarket);
+  if (!currentFacts || !targetFacts) throw new Error("Market switch facts are incomplete.");
   const targetById = new Map(targetItems.map((item) => [item.id, item]));
   const lines = currentItems.map((current): MarketSwitchLineImpact => {
     const target = targetById.get(current.id);
@@ -193,8 +200,8 @@ export async function getMarketSwitchImpact(
   const impactWithoutFingerprint = {
     currentMarket,
     targetMarket,
-    currentCurrency: MARKET_CONFIGS[currentMarket].currency.code,
-    targetCurrency: MARKET_CONFIGS[targetMarket].currency.code,
+    currentCurrency: currentFacts.currency.code,
+    targetCurrency: targetFacts.currency.code,
     lines,
   };
   return {
@@ -207,7 +214,10 @@ export async function getMarketAdmissionImpact(
   userId: string,
   targetMarket: MarketCode,
 ): Promise<MarketSwitchImpact> {
-  const targetItems = await getCart(userId, targetMarket);
+  const [targetItems, targetFacts] = await Promise.all([
+    getCart(userId, targetMarket),
+    getActiveMarketCommercialFacts(targetMarket),
+  ]);
   const lines = targetItems.map((target): MarketSwitchLineImpact => {
     const targetAvailable = target.price !== null && target.unavailableCode === null;
     return {
@@ -226,7 +236,7 @@ export async function getMarketAdmissionImpact(
     currentMarket: null,
     targetMarket,
     currentCurrency: null,
-    targetCurrency: MARKET_CONFIGS[targetMarket].currency.code,
+    targetCurrency: targetFacts.currency.code,
     lines,
   };
   return {

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { WigVariantDetail } from "@/lib/catalog.types";
 import { addToCart } from "@/app/actions/cart";
-import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import { formatPrice, type CurrencyMeta, type MarketCode } from "@/lib/market/types";
 import type { Locale } from "@/lib/market/locale";
 import { localizedCurlLabel, localizedLengthLabel } from "@/lib/market/catalog-presentation";
 import { messagesFor } from "@/lib/market/messages";
@@ -182,6 +182,7 @@ function AddToCartPanel({
   isPending,
   feedback,
   marketCode,
+  currency,
   onQuantityChange,
   onAddToCart,
   locale,
@@ -192,6 +193,7 @@ function AddToCartPanel({
   isPending: boolean;
   feedback: { ok: boolean; msg: string } | null;
   marketCode: MarketCode;
+  currency: CurrencyMeta;
   onQuantityChange: (n: number) => void;
   onAddToCart: () => void;
   locale: Locale;
@@ -203,7 +205,7 @@ function AddToCartPanel({
     <div className="space-y-4">
       {variant && (
         <p className="text-lg font-semibold text-gray-900">
-          {displayVariantPrice(variant, marketCode, locale)}
+          {displayVariantPrice(variant, currency, locale)}
           {variant.stock === 0 ? <span className="ml-2 text-sm font-normal text-red-500">{messages.product.soldOut}</span> : null}
         </p>
       )}
@@ -226,9 +228,9 @@ function purchasableVariant(variant: WigVariantDetail | null): variant is WigVar
   return variant !== null && variant.stock > 0 && variant.price !== null;
 }
 
-function displayVariantPrice(variant: WigVariantDetail, marketCode: MarketCode, locale: Locale): string {
+function displayVariantPrice(variant: WigVariantDetail, currency: CurrencyMeta, locale: Locale): string {
   if (variant.price === null) return messagesFor(locale).styles.priceUnavailable;
-  return formatPrice(variant.price, MARKET_CONFIGS[marketCode].currency, locale);
+  return formatPrice(variant.price, currency, locale);
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────
@@ -237,12 +239,14 @@ export function VariantSelector({
   variants,
   wigStyleId,
   marketCode,
+  currency,
   locale,
   currentMarketCode,
 }: {
   variants: WigVariantDetail[];
   wigStyleId: string;
   marketCode: MarketCode;
+  currency: CurrencyMeta;
   locale: Locale;
   currentMarketCode: MarketCode | null;
 }) {
@@ -299,6 +303,7 @@ export function VariantSelector({
         isPending={isPending}
         feedback={feedback}
         marketCode={marketCode}
+        currency={currency}
         onQuantityChange={setQuantity}
         onAddToCart={() => { void handleAddToCart(); }}
         locale={locale}

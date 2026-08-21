@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MarketSwitchResult } from "@/app/actions/market";
-import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import { CURRENCY_META, formatPrice, type CurrencyCode, type MarketCode } from "@/lib/market/types";
 import { messagesFor } from "@/lib/market/messages";
 import type { Locale } from "@/lib/market/locale";
 
@@ -23,12 +23,12 @@ describe("truthful cart Market impact presentation", () => {
     const messages = messagesFor(locale).marketConfirmation;
 
     expect(text).toContain(`${messages.currentCartMarketLabel}:`);
-    expect(text).toContain("日本 (¥) · JPY");
+    expect(text).toContain("日本");
     expect(text).toContain(`${messages.proposedTargetMarketLabel}:`);
-    expect(text).toContain("United States ($) · USD");
+    expect(text).toContain("United States");
     expect(text).toMatch(/JPY.*→.*USD/u);
-    expect(text).toContain(formatPrice(9_800, MARKET_CONFIGS.JP.currency, locale));
-    expect(text).toContain(formatPrice(7_799, MARKET_CONFIGS.US.currency, locale));
+    expect(text).toContain(formatPrice(9_800, CURRENCY_META.JPY, locale));
+    expect(text).toContain(formatPrice(7_799, CURRENCY_META.USD, locale));
     expect(text).not.toContain("Delivery region for displayed prices: United States");
     expect(html).toContain(`aria-label="${messages.previewRegionLabel}"`);
   });
@@ -37,8 +37,8 @@ describe("truthful cart Market impact presentation", () => {
     const html = renderView("US", "JP", "en", preview("US", "JP", 7_799, 9_800));
     const text = visibleText(html);
 
-    expect(text).toContain("United States ($) · USD");
-    expect(text).toContain("日本 (¥) · JPY");
+    expect(text).toContain("United States");
+    expect(text).toContain("日本");
     expect(text).toMatch(/USD.*→.*JPY/u);
     expect(text).toContain("$77.99");
     expect(text).toContain("¥9,800");
@@ -59,7 +59,7 @@ describe("truthful cart Market impact presentation", () => {
     const messages = messagesFor("en").marketConfirmation;
 
     expect(text).toContain(messages.noConfirmedMarketPremise);
-    expect(text).toContain(`${messages.proposedTargetMarketLabel}: United States ($) · USD`);
+    expect(text).toContain(`${messages.proposedTargetMarketLabel}: United States`);
     expect(text).toMatch(new RegExp(`${messages.proposedCurrencyLabel}.*USD`, "u"));
     expect(text).toContain(`${messages.targetAmountLabel}: $77.99`);
     expect(text).not.toContain(messages.currentCartMarketLabel);
@@ -72,7 +72,7 @@ describe("truthful cart Market impact presentation", () => {
     const messages = messagesFor("ja").marketConfirmation;
 
     expect(text).toContain(messages.noConfirmedMarketPremise);
-    expect(text).toContain(`${messages.proposedTargetMarketLabel}: 日本 (¥) · JPY`);
+    expect(text).toContain(`${messages.proposedTargetMarketLabel}: 日本`);
     expect(text).not.toContain(messages.currentCartMarketLabel);
     expect(text).not.toContain("KRW");
   });
@@ -92,7 +92,7 @@ describe("truthful cart Market impact presentation", () => {
     const html = renderView("JP", "US", "en", preview("JP", "US", 9_800, 8_899, "IMPACT_CHANGED"));
     const text = visibleText(html);
 
-    expect(text).toContain("Current cart price authority: 日本 (¥) · JPY");
+    expect(text).toContain("Current cart price authority: 日本");
     expect(text).toContain("Your cart changed. Review the refreshed impact before confirming.");
     expect(text).toContain("Proposed: $88.99");
     expect(html).toContain('role="alert"');
@@ -103,9 +103,19 @@ describe("truthful cart Market impact presentation", () => {
     const html = renderView("JP", "JP", "ja", null);
     const text = visibleText(html);
 
-    expect(text).toContain("現在のカート価格基準: 日本 (¥) · JPY");
+    expect(text).toContain("現在のカート価格基準: 日本");
     expect(text).not.toContain("→");
     expect(text).not.toContain(messagesFor("ja").marketConfirmation.proposedTargetMarketLabel);
+  });
+
+  it("formats switch amounts from the DB-backed impact currency instead of marketCode", () => {
+    const impact = preview("JP", "US", 9_800, 7_799, "PREVIEW", true, 1, "USD", "JPY");
+    const text = visibleText(renderView("JP", "US", "en", impact));
+
+    expect(text).toMatch(/USD.*→.*JPY/u);
+    expect(text).toContain("Current: $98.00");
+    expect(text).toContain("Proposed: ¥7,799");
+    expect(text).not.toContain("$77.99");
   });
 });
 
@@ -135,6 +145,8 @@ function preview(
   kind: Preview["kind"] = "PREVIEW",
   targetAvailable = true,
   quantity = 1,
+  currentCurrency: CurrencyCode | null = currentMarket ? fixtureCurrency(currentMarket) : null,
+  targetCurrency: CurrencyCode = fixtureCurrency(targetMarket),
 ): Preview {
   return {
     kind,
@@ -142,8 +154,8 @@ function preview(
     impact: {
       currentMarket,
       targetMarket,
-      currentCurrency: currentMarket ? MARKET_CONFIGS[currentMarket].currency.code : null,
-      targetCurrency: MARKET_CONFIGS[targetMarket].currency.code,
+      currentCurrency,
+      targetCurrency,
       lines: [{
         cartItemId: "cart-item",
         variantId: "variant",
@@ -158,6 +170,12 @@ function preview(
       fingerprint: "server-fingerprint",
     },
   };
+}
+
+function fixtureCurrency(marketCode: MarketCode): CurrencyCode {
+  if (marketCode === "KR") return "KRW";
+  if (marketCode === "US") return "USD";
+  return "JPY";
 }
 
 function visibleText(html: string): string {

@@ -424,6 +424,25 @@ describe("cart pricing", () => {
     await expect(getCartItemCount(ctx.userId)).resolves.toBe(1);
   });
 
+  it("binds DB-backed currencies into switch impact and its confirmation fingerprint", async () => {
+    const variant = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000, US: 2_999 } });
+    await addToCart(ctx.userId, variant.id, variant.styleId, 1, MarketCode.KR);
+    const before = await getMarketSwitchImpact(ctx.userId, MarketCode.KR, MarketCode.US);
+
+    await db.market.update({ where: { code: MarketCode.US }, data: { currency: "JPY" } });
+    const afterCurrencyChange = await getMarketSwitchImpact(ctx.userId, MarketCode.KR, MarketCode.US);
+
+    expect(afterCurrencyChange.targetCurrency).toBe("JPY");
+    expect(afterCurrencyChange.lines[0]?.targetUnitAmount).toBe(2_999);
+    expect(afterCurrencyChange.fingerprint).not.toBe(before.fingerprint);
+
+    await db.market.update({ where: { code: MarketCode.US }, data: { defaultLocale: "ko" } });
+    const afterLocaleOnlyChange = await getMarketSwitchImpact(ctx.userId, MarketCode.KR, MarketCode.US);
+
+    expect(afterLocaleOnlyChange).toEqual(afterCurrencyChange);
+    await expect(getCartItemCount(ctx.userId)).resolves.toBe(1);
+  });
+
   it("projects target facts for an unconfirmed cart without inventing current price authority", async () => {
     const available = await createCatalogVariant(ctx, { marketPrices: { US: 2_999 } });
     const unavailable = await createCatalogVariant(ctx, { marketPrices: { KR: 12_000 } });

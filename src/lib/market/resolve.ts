@@ -10,10 +10,8 @@ import "server-only";
 
 import { cookies, headers } from "next/headers";
 import {
-  MARKET_CONFIGS,
   MARKET_COOKIE,
   type MarketCode,
-  type MarketConfig,
 } from "./types";
 import {
   LOCALES,
@@ -23,7 +21,12 @@ import {
   type Locale,
 } from "./locale";
 import { resolveRootLocale, resolveRootMarket } from "./resolution";
-import { getActiveMarketCodes, NoActiveMarketException } from "./active-market";
+import {
+  getActiveMarketCodes,
+  getActiveMarketCommercialFacts,
+  NoActiveMarketException,
+  type MarketCommercialFacts,
+} from "./active-market";
 import {
   MIRA_CONTEXT_ATTESTATION_HEADER,
   MIRA_CONTEXT_ATTESTATION_VALUE,
@@ -164,9 +167,9 @@ function localeFromSafeApplicationPath(callbackUrl: string): Locale | null {
   return resolution.kind === "INVALID" ? null : resolution.variant.locale;
 }
 
-export async function getCurrentMarket(): Promise<MarketConfig> {
+export async function getCurrentMarket(): Promise<MarketCommercialFacts> {
   const code = await getCurrentMarketCode();
-  return MARKET_CONFIGS[code];
+  return getActiveMarketCommercialFacts(code);
 }
 
 function isAttested(headerStore: Awaited<ReturnType<typeof headers>>): boolean {

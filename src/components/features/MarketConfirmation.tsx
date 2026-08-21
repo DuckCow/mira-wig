@@ -7,7 +7,13 @@ import {
   previewMarketSwitch,
   type MarketSwitchResult,
 } from "@/app/actions/market";
-import { MARKET_CONFIGS, formatPrice, type MarketCode } from "@/lib/market/types";
+import {
+  MARKET_CONFIGS,
+  currencyMetaForCode,
+  formatPrice,
+  type CurrencyCode,
+  type MarketCode,
+} from "@/lib/market/types";
 import { messagesFor } from "@/lib/market/messages";
 import type { Locale } from "@/lib/market/locale";
 
@@ -208,8 +214,8 @@ function MarketImpactPreviewPanel({
           <ImpactLine
             key={line.cartItemId}
             line={line}
-            currentMarketCode={impact.currentMarket}
-            targetMarketCode={impact.targetMarket}
+            currentCurrency={impact.currentCurrency}
+            targetCurrency={impact.targetCurrency}
             locale={locale}
           />
         ))}
@@ -232,24 +238,24 @@ function MarketImpactPreviewPanel({
 
 function ImpactLine({
   line,
-  currentMarketCode,
-  targetMarketCode,
+  currentCurrency,
+  targetCurrency,
   locale,
 }: {
   line: MarketImpactPreview["impact"]["lines"][number];
-  currentMarketCode: MarketCode | null;
-  targetMarketCode: MarketCode;
+  currentCurrency: CurrencyCode | null;
+  targetCurrency: CurrencyCode;
   locale: Locale;
 }) {
   const messages = messagesFor(locale).marketConfirmation;
-  const targetAmount = availableImpactAmount(line.targetAvailable, line.targetUnitAmount, targetMarketCode, locale);
-  const currentSubtotal = currentMarketCode && line.currentUnitAmount !== null
-    ? impactAmount(line.currentUnitAmount * line.quantity, currentMarketCode, locale)
+  const targetAmount = availableImpactAmount(line.targetAvailable, line.targetUnitAmount, targetCurrency, locale);
+  const currentSubtotal = currentCurrency && line.currentUnitAmount !== null
+    ? impactAmount(line.currentUnitAmount * line.quantity, currentCurrency, locale)
     : null;
   const targetSubtotal = availableImpactAmount(
     line.targetAvailable,
     line.targetUnitAmount,
-    targetMarketCode,
+    targetCurrency,
     locale,
     line.quantity,
   );
@@ -258,11 +264,11 @@ function ImpactLine({
       <p className="font-medium text-gray-800">{line.styleName} × {line.quantity}</p>
       <p className="mt-1 text-gray-500">{messages.unitPriceTransitionLabel}</p>
       <div className="mt-0.5 flex flex-wrap items-center gap-2">
-        {currentMarketCode ? (
+        {currentCurrency ? (
           <>
             <span>
               <span className="font-medium">{messages.currentAmountLabel}:</span>{" "}
-              {impactAmount(line.currentUnitAmount, currentMarketCode, locale)}
+              {impactAmount(line.currentUnitAmount, currentCurrency, locale)}
             </span>
             <span aria-hidden="true">→</span>
           </>
@@ -296,22 +302,21 @@ function ImpactLine({
 }
 
 function marketIdentity(marketCode: MarketCode): string {
-  const market = MARKET_CONFIGS[marketCode];
-  return `${market.label} · ${market.currency.code}`;
+  return MARKET_CONFIGS[marketCode].label;
 }
 
-function impactAmount(amount: number | null, marketCode: MarketCode, locale: Locale): string {
+function impactAmount(amount: number | null, currencyCode: CurrencyCode, locale: Locale): string {
   if (amount === null) return "—";
-  return formatPrice(amount, MARKET_CONFIGS[marketCode].currency, locale);
+  return formatPrice(amount, currencyMetaForCode(currencyCode), locale);
 }
 
 function availableImpactAmount(
   available: boolean,
   unitAmount: number | null,
-  marketCode: MarketCode,
+  currencyCode: CurrencyCode,
   locale: Locale,
   quantity = 1,
 ): string | null {
   if (!available || unitAmount === null) return null;
-  return impactAmount(unitAmount * quantity, marketCode, locale);
+  return impactAmount(unitAmount * quantity, currencyCode, locale);
 }

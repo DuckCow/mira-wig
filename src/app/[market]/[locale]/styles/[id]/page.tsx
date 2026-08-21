@@ -10,11 +10,12 @@ import { localizedCategoryLabel } from "@/lib/market/catalog-presentation";
 import { messagesFor } from "@/lib/market/messages";
 import { requirePublicSiteVariant } from "@/lib/market/route";
 import { storefrontMetadata } from "@/lib/market/seo";
-import { getPublishedSiteVariants } from "@/lib/market/active-market";
+import { getActiveMarketCommercialFacts, getPublishedSiteVariants } from "@/lib/market/active-market";
 import { siteVariantPath, type SiteVariant } from "@/lib/market/site-variant";
 import { VariantSelector } from "@/app/(shop)/styles/[id]/VariantSelector";
 import { RelatedStylesSection } from "@/app/(shop)/styles/[id]/RelatedStylesSection";
 import type { WigStyleDetail } from "@/lib/catalog.types";
+import type { CurrencyMeta } from "@/lib/market/types";
 
 type PageParams = Promise<{ market: string; locale: string; id: string }>;
 const getStyleForRoute = cache(getWigStyleById);
@@ -46,18 +47,19 @@ export default async function PublicStyleDetailPage({ params }: { params: PagePa
     Promise.resolve({ market: raw.market, locale: raw.locale }),
     `/styles/${encodeURIComponent(raw.id)}`,
   );
-  const [style, context] = await Promise.all([
+  const [style, context, market] = await Promise.all([
     getStyleForRoute(raw.id, variant.marketCode),
     getStorefrontContext(),
+    getActiveMarketCommercialFacts(variant.marketCode),
   ]);
   if (!style) notFound();
   const coverUrl = style.coverImageKey
     ? await catalogStorage.getViewUrl(style.coverImageKey).catch(() => null)
     : null;
-  return <StyleDetailView variant={variant} style={style} coverUrl={coverUrl} currentMarketCode={context.confirmedMarketCode} />;
+  return <StyleDetailView variant={variant} style={style} coverUrl={coverUrl} currency={market.currency} currentMarketCode={context.confirmedMarketCode} />;
 }
 
-function StyleDetailView({ variant, style, coverUrl, currentMarketCode }: { variant: SiteVariant; style: WigStyleDetail; coverUrl: string | null; currentMarketCode: Parameters<typeof VariantSelector>[0]["currentMarketCode"] }) {
+function StyleDetailView({ variant, style, coverUrl, currency, currentMarketCode }: { variant: SiteVariant; style: WigStyleDetail; coverUrl: string | null; currency: CurrencyMeta; currentMarketCode: Parameters<typeof VariantSelector>[0]["currentMarketCode"] }) {
   const messages = messagesFor(variant.locale);
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
@@ -73,10 +75,10 @@ function StyleDetailView({ variant, style, coverUrl, currentMarketCode }: { vari
           </div>
           <p className="text-xs text-gray-500">{messages.detail.productLanguageNotice}</p>
           {style.description ? <p className="text-sm leading-relaxed text-gray-600">{style.description}</p> : null}
-          <VariantSelector variants={style.variants} wigStyleId={style.id} marketCode={variant.marketCode} locale={variant.locale} currentMarketCode={currentMarketCode} />
+          <VariantSelector variants={style.variants} wigStyleId={style.id} marketCode={variant.marketCode} currency={currency} locale={variant.locale} currentMarketCode={currentMarketCode} />
         </div>
       </div>
-      <RelatedStylesSection sourceStyleId={style.id} marketCode={variant.marketCode} locale={variant.locale} />
+      <RelatedStylesSection sourceStyleId={style.id} marketCode={variant.marketCode} currency={currency} locale={variant.locale} />
     </main>
   );
 }

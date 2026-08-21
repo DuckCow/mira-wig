@@ -13,11 +13,12 @@ import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
 import { setVariantPricesAction } from "@/app/actions/admin/market-price";
 import { getAdminErrorMessage } from "@/lib/admin-messages";
-import { MARKET_CODES, MARKET_CONFIGS } from "@/lib/market/types";
-import type { VariantPriceRow } from "@/lib/admin-catalog.types";
+import { MARKET_CODES } from "@/lib/market/types";
+import type { MarketPriceContextRow, VariantPriceRow } from "@/lib/admin-catalog.types";
 
 interface Props {
   variantPrices: VariantPriceRow[];
+  marketPriceContexts: MarketPriceContextRow[];
 }
 
 type InputMap = Record<string, Record<string, string>>;
@@ -34,7 +35,7 @@ function buildInitialInputs(variantPrices: VariantPriceRow[]): InputMap {
   return result;
 }
 
-export function MarketPriceSection({ variantPrices }: Props) {
+export function MarketPriceSection({ variantPrices, marketPriceContexts }: Props) {
   const [inputs, setInputs] = useState<InputMap>(() => buildInitialInputs(variantPrices));
   const [isPending, startTransition] = useTransition();
   const { showToast } = useToast();
@@ -111,7 +112,8 @@ export function MarketPriceSection({ variantPrices }: Props) {
             </div>
             <div className="grid grid-cols-3 gap-3">
               {MARKET_CODES.map((code) => {
-                const config = MARKET_CONFIGS[code];
+                const market = marketPriceContexts.find((entry) => entry.marketCode === code);
+                if (!market) throw new Error(`Missing current Market facts for ${code}.`);
                 const noPriceSet = !hasPriceSet(v.id, code);
                 return (
                   <div key={code} className="flex flex-col gap-1">
@@ -119,7 +121,7 @@ export function MarketPriceSection({ variantPrices }: Props) {
                       htmlFor={`price-${v.id}-${code}`}
                       className="flex items-center gap-1.5 text-xs font-medium text-gray-500"
                     >
-                      {config.currency.symbol} {config.currency.code}
+                      {market.currency.symbol} {market.currency.code}
                       {noPriceSet && <Badge variant="warning">가격없음</Badge>}
                     </label>
                     <input
@@ -131,7 +133,7 @@ export function MarketPriceSection({ variantPrices }: Props) {
                       onChange={(e) => handleInput(v.id, code, e.target.value)}
                       placeholder={code === "US" ? "예: 7799" : "예: 85000"}
                       className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400"
-                      aria-label={`${v.sku} ${config.currency.code} 가격`}
+                      aria-label={`${v.sku} ${market.currency.code} 가격`}
                     />
                   </div>
                 );
