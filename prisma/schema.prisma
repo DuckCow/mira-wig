@@ -774,23 +774,50 @@ model RefundExecutionProviderContactEligibilityProof {
   dispatchAttempt RefundExecutionDispatchAttempt @relation(fields: [dispatchAttemptId], references: [id], onDelete: Restrict, map: "RefundContactProof_dispatch_fkey")
 }
 
-/// Immutable Toss provider-operation identity. E3B1A deliberately has no
-/// production writer; migration-owned CHECK constraints are verified against PostgreSQL.
+/// Immutable attempt-stable provider operation-family authority. Physical
+/// merchant wire keys remain owned by RefundExecutionDispatchAttempt.
 model RefundExecutionProviderOperationBinding {
-  id                            String          @id(map: "RefundProviderBinding_pkey") @default(cuid())
-  refundAttemptId               String          @unique(map: "RefundProviderBinding_refundAttempt_key")
-  provider                      PaymentProvider
-  mode                          PaymentMode
-  providerOperationKey          String          @unique(map: "RefundProviderBinding_operationKey_key") @db.VarChar(300)
-  operationKeyAlgorithmVersion  String          @db.VarChar(64)
-  wireContractVersion           String          @db.VarChar(64)
-  wireRequestFingerprint        String          @db.VarChar(64)
-  merchantAccountBindingId      String          @db.VarChar(64)
-  credentialGenerationBindingId String          @db.VarChar(64)
-  createdAt                     DateTime        @default(now()) @db.Timestamp(3)
+  id                                 String          @id(map: "RefundProviderBinding_pkey") @default(cuid())
+  refundAttemptId                    String          @unique(map: "RefundProviderBinding_refundAttempt_key")
+  provider                           PaymentProvider
+  mode                               PaymentMode
+  providerOperationFamilyKey         String          @unique(map: "RefundProviderBinding_operationKey_key") @map("providerOperationKey") @db.VarChar(300)
+  operationFamilyKeyAlgorithmVersion String          @map("operationKeyAlgorithmVersion") @db.VarChar(64)
+  wireContractVersion                String          @db.VarChar(64)
+  operationFamilyFingerprint         String          @map("wireRequestFingerprint") @db.VarChar(64)
+  merchantAccountBindingId           String          @db.VarChar(64)
+  credentialGenerationBindingId      String          @db.VarChar(64)
+  createdAt                          DateTime        @default(now()) @db.Timestamp(3)
 
   refundAttempt    RefundAttempt                            @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict, map: "RefundProviderBinding_refundAttempt_fkey")
   eligibilityProof RefundExecutionProviderEligibilityProof?
+  eximbayPreflightObservations RefundExecutionEximbayPreflightObservation[]
+}
+
+/// Immutable Eximbay payment state admitted before the first physical cancel
+/// dispatch is authorized. Provider/account provenance is inherited from binding.
+model RefundExecutionEximbayPreflightObservation {
+  id                       String @id @default(cuid())
+  bindingId                String
+  observingLeaseGeneration Int
+
+  mid                   String @db.VarChar(512)
+  providerOrderId       String @db.VarChar(512)
+  providerTransactionId String @db.VarChar(512)
+  providerStatus        String @db.VarChar(32)
+  currency              String @db.VarChar(3)
+  originalAmount        Int
+  refundableBalance     Int
+
+  observedAt             DateTime @db.Timestamp(3)
+  inquiryContractVersion String   @db.VarChar(64)
+  parserVersion          String   @db.VarChar(64)
+  observationFingerprint String   @unique(map: "RefundExecutionEximbayPreflightObservation_observationFingerpri") @db.VarChar(64)
+  createdAt              DateTime @default(now()) @db.Timestamp(3)
+
+  binding RefundExecutionProviderOperationBinding @relation(fields: [bindingId], references: [id], onDelete: Restrict)
+
+  @@unique([bindingId, observingLeaseGeneration], map: "EximbayPreflight_binding_generation_key")
 }
 
 /// Immutable normalized pre-first-contact Toss eligibility facts. Raw Toss

@@ -30,7 +30,8 @@ token generator.
 
 Evidence `dispatchAttemptId` identifies the physical contacted ordinal concerned by an
 observation. `authorizingLeaseGeneration` identifies the lease generation that authorized
-application. Neither enters provider operation identity, wire identity, or terminal dedup.
+application. Neither enters provider operation-family identity, physical wire identity, or
+terminal dedup.
 
 Initial POST success links ordinal 1 to its `LEASE_ACQUIRED` generation. Recovery GET
 success links the latest contacted ordinal to a `RECOVERY_LEASE_ACQUIRED` generation.
@@ -42,6 +43,11 @@ identity is `refund-provider-lookup:{commandId}:{recoveryGeneration}`. GET attri
 always selects the greatest coherent contacted ordinal and creates no dispatch.
 
 ## 4. Fixed recovery policy
+
+Toss recovery is the installed `STABLE_PER_LOGICAL_REFUND` regime: every recovery ordinal copies
+the immutable binding `providerOperationFamilyKey` into its dispatch `providerOperationKey` and
+retains the existing fingerprint bytes. This same-key rule is Toss-specific and does not constrain
+a provider governed by `UNIQUE_PER_PHYSICAL_DISPATCH`.
 
 The strict recontact deadline is 13 days after the earliest `contactMarkedAt`; equality is
 expired and later ordinals never reset it. At most two total

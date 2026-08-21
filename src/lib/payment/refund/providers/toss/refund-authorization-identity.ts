@@ -6,10 +6,12 @@ import {
 } from "@prisma/client";
 import type { DispatchAuthorizationContext } from "../../dispatch-authorization-contract";
 import {
-  fingerprintRefundRequest,
-  normalizeRefundRequestFingerprintInput,
   RefundRequestFingerprintInputError,
 } from "../../refund-request-fingerprint";
+import {
+  isPhysicalDispatchIdentityCoherent,
+  resolveRefundOperationIdentityRegime,
+} from "../../refund-operation-identity-policy";
 import type { ConfiguredTossRefundCredential } from "./refund-credential-config";
 import {
   fingerprintTossRefundEligibility,
@@ -18,19 +20,16 @@ import {
   type NormalizedTossRefundEligibility,
 } from "./refund-eligibility";
 import {
-  deriveTossRefundOperationKey,
   TOSS_REFUND_OPERATION_KEY_VERSION,
   TossRefundOperationKeyInputError,
 } from "./refund-operation-key";
+import { tossRefundOperationIdentityPolicy } from "./refund-operation-identity-policy";
 import type {
   BindingWithProof,
   FreshTossLookupAuthority,
   LockedTossAuthorizationState,
 } from "./refund-authorization-state";
-import {
-  fingerprintTossRefundWireRequest,
-  TOSS_REFUND_WIRE_VERSION,
-} from "./refund-wire-fingerprint";
+import { TOSS_REFUND_WIRE_VERSION } from "./refund-wire-fingerprint";
 
 export type DurableTossRefundRequest = Readonly<{
   providerOperationKey: string;
@@ -67,23 +66,23 @@ export function deriveDurableTossRefundRequest(
   const paymentKey = exactTossPaymentKey(context.aggregate.payment.providerPaymentKey);
   if (!paymentKey) return null;
   try {
-    const providerOperationKey = deriveTossRefundOperationKey(context.target.idempotencyKey);
-    const neutral = normalizeRefundRequestFingerprintInput({
-      provider: PaymentProvider.TOSS,
-      mode: PaymentMode.SANDBOX,
+    const family = tossRefundOperationIdentityPolicy.allocateOperationFamily({
+      refundAttemptIdempotencyKey: context.target.idempotencyKey,
       providerPaymentReference: paymentKey,
       amountMinor: context.target.amount,
       currency: context.target.currency,
-      providerOperationKey,
+    });
+    const dispatch = tossRefundOperationIdentityPolicy.allocatePhysicalDispatch({
+      family,
+      ordinal: 1,
+      providerPaymentReference: paymentKey,
+      amountMinor: context.target.amount,
+      currency: context.target.currency,
     });
     return Object.freeze({
-      providerOperationKey,
-      neutralFingerprint: fingerprintRefundRequest(neutral),
-      wireFingerprint: fingerprintTossRefundWireRequest({
-        paymentKey,
-        providerOperationKey,
-        cancelAmount: context.target.amount,
-      }),
+      providerOperationKey: dispatch.providerOperationKey,
+      neutralFingerprint: dispatch.requestFingerprint,
+      wireFingerprint: family.operationFamilyFingerprint,
     });
   } catch (error) {
     if (error instanceof TossRefundOperationKeyInputError
@@ -130,7 +129,7 @@ export function matchesCompleteTossAuthorization(
   if (!normalized.ok) return false;
   return bindingMatches(locked, binding, request)
     && proofMatches(locked, proof, normalized.facts)
-    && dispatchMatches(locked, dispatch, binding.providerOperationKey, request);
+    && dispatchMatches(locked, dispatch, binding.providerOperationFamilyKey, request);
 }
 
 function completeAuthorizationParts(locked: LockedTossAuthorizationState): Readonly<{
@@ -148,12 +147,19 @@ function bindingMatches(
   binding: BindingWithProof,
   request: DurableTossRefundRequest,
 ): boolean {
-  return binding.provider === PaymentProvider.TOSS
+  const regime = resolveRefundOperationIdentityRegime({
+    provider: binding.provider,
+    mode: binding.mode,
+    wireContractVersion: binding.wireContractVersion,
+    operationFamilyKeyAlgorithmVersion: binding.operationFamilyKeyAlgorithmVersion,
+  });
+  return regime === tossRefundOperationIdentityPolicy.regime
+    && binding.provider === PaymentProvider.TOSS
     && binding.mode === PaymentMode.SANDBOX
-    && binding.providerOperationKey === request.providerOperationKey
-    && binding.operationKeyAlgorithmVersion === TOSS_REFUND_OPERATION_KEY_VERSION
+    && binding.providerOperationFamilyKey === request.providerOperationKey
+    && binding.operationFamilyKeyAlgorithmVersion === TOSS_REFUND_OPERATION_KEY_VERSION
     && binding.wireContractVersion === TOSS_REFUND_WIRE_VERSION
-    && binding.wireRequestFingerprint === request.wireFingerprint
+    && binding.operationFamilyFingerprint === request.wireFingerprint
     && binding.refundAttemptId === locked.context.target.id;
 }
 
@@ -187,7 +193,12 @@ function dispatchMatches(
     dispatch.leaseGeneration === locked.context.command.leaseGeneration,
     dispatch.provider === PaymentProvider.TOSS,
     dispatch.mode === PaymentMode.SANDBOX,
-    dispatch.providerOperationKey === providerOperationKey,
+    isPhysicalDispatchIdentityCoherent(
+      tossRefundOperationIdentityPolicy.regime,
+      providerOperationKey,
+      dispatch.providerOperationKey,
+      [],
+    ),
     dispatch.requestFingerprint === request.neutralFingerprint,
     dispatch.state === RefundExecutionDispatchAttemptState.AUTHORIZED,
     dispatch.contactMarkedAt === null,

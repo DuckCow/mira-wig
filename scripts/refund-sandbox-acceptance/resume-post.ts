@@ -47,17 +47,17 @@ async function assertLocalResumeIdentity(
 ): Promise<void> {
   const binding = await input.prisma.refundExecutionProviderOperationBinding.findUnique({
     where: { refundAttemptId },
-    select: { providerOperationKey: true, wireRequestFingerprint: true },
+    select: { providerOperationFamilyKey: true, operationFamilyFingerprint: true },
   });
   if (!binding) throw new Error("RESUME_POST_IDENTITY_MISMATCH");
   const wireInput = {
     paymentKey: input.fixture.paymentKey,
-    providerOperationKey: binding.providerOperationKey,
+    providerOperationKey: binding.providerOperationFamilyKey,
     cancelAmount: input.fixture.amount,
   };
   const wire = deriveTossRefundCancellationWireRequest(wireInput);
   const fingerprint = fingerprintTossRefundWireRequest(wireInput);
-  if (binding.wireRequestFingerprint !== fingerprint
+  if (binding.operationFamilyFingerprint !== fingerprint
     || !matchesLastPost(input.ledger, protectedPostRequest(wire, JSON.stringify(wire.body)))) {
     throw new Error("RESUME_POST_IDENTITY_MISMATCH");
   }

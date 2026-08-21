@@ -110,14 +110,14 @@ describe("recoverTossRefundExecution ordinal-2 recontact", () => {
       await db.refundExecutionProviderOperationBinding.update({
         where: { refundAttemptId: entry.fixture.refundAttemptId },
         data: {
-          providerOperationKey: deriveTossRefundOperationKey(`${entry.fixture.operationKey}:drift`),
+          providerOperationFamilyKey: deriveTossRefundOperationKey(`${entry.fixture.operationKey}:drift`),
         },
       });
     }],
     ["wire fingerprint", "COMMAND_NOT_FOUND_OR_INELIGIBLE", async (entry: ContactedRecoveryFixture) => {
       await db.refundExecutionProviderOperationBinding.update({
         where: { refundAttemptId: entry.fixture.refundAttemptId },
-        data: { wireRequestFingerprint: "f".repeat(64) },
+        data: { operationFamilyFingerprint: "f".repeat(64) },
       });
     }],
     ["credential generation", "RECOVERY_CREDENTIAL_UNAVAILABLE", async (
@@ -1159,10 +1159,10 @@ async function loadRecoveryPreservationSnapshot(contacted: ContactedRecoveryFixt
         refundAttemptId: true,
         provider: true,
         mode: true,
-        providerOperationKey: true,
-        operationKeyAlgorithmVersion: true,
+        providerOperationFamilyKey: true,
+        operationFamilyKeyAlgorithmVersion: true,
         wireContractVersion: true,
-        wireRequestFingerprint: true,
+        operationFamilyFingerprint: true,
         merchantAccountBindingId: true,
         credentialGenerationBindingId: true,
         createdAt: true,
@@ -1281,12 +1281,12 @@ function expectIntentionalRecoveryDrift(
     return;
   }
   if (label === "operation key") {
-    expect(snapshot.binding.providerOperationKey)
+    expect(snapshot.binding.providerOperationFamilyKey)
       .toBe(deriveTossRefundOperationKey(`${contacted.fixture.operationKey}:drift`));
     return;
   }
   if (label === "wire fingerprint") {
-    expect(snapshot.binding.wireRequestFingerprint).toBe("f".repeat(64));
+    expect(snapshot.binding.operationFamilyFingerprint).toBe("f".repeat(64));
     return;
   }
   if (label === "credential generation") {

@@ -165,7 +165,11 @@ async function resolveFreshInTransaction(
   );
   if ("ok" in plan) return plan;
   if (!validatePlanTransition(plan)) return ledgerFailure();
-  return persistResolution(tx, context, operation.input, plan, context.capturedAt);
+  if (!context.dispatch) return ledgerFailure();
+  return persistResolution(tx, context, operation.input, plan, context.capturedAt, {
+    dispatchAttemptId: context.dispatch.id,
+    authorizingLeaseGeneration: context.dispatch.leaseGeneration,
+  });
 }
 
 function validateFreshCoherence(

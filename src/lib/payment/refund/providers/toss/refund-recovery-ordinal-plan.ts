@@ -45,7 +45,7 @@ export type TossRefundRecoveryOrdinalSnapshot = Readonly<{
     refundAttemptId: string;
     provider: PaymentProvider;
     mode: PaymentMode;
-    providerOperationKey: string;
+    providerOperationFamilyKey: string;
     requestFingerprint: string;
     merchantAccountBindingId: string;
     credentialGenerationBindingId: string;
@@ -106,7 +106,7 @@ export function planTossRefundRecoveryOrdinal(
       authorizingLeaseGeneration: snapshot.command.leaseGeneration,
       contactMarkedAt: snapshot.phaseDCapturedAt,
       eligibility: Object.freeze({ ...eligibility }),
-      providerOperationKey: snapshot.binding.providerOperationKey,
+      providerOperationKey: snapshot.binding.providerOperationFamilyKey,
       requestFingerprint: snapshot.binding.requestFingerprint,
     }),
   });
@@ -153,7 +153,7 @@ function dispatchCoherent(
     dispatch.hasContactProof,
     dispatch.provider === PaymentProvider.TOSS,
     dispatch.mode === PaymentMode.SANDBOX,
-    dispatch.providerOperationKey === snapshot.binding.providerOperationKey,
+    dispatch.providerOperationKey === snapshot.binding.providerOperationFamilyKey,
     dispatch.requestFingerprint === snapshot.binding.requestFingerprint,
   ].every(Boolean);
 }
@@ -167,9 +167,9 @@ function bindingCoherent(snapshot: TossRefundRecoveryOrdinalSnapshot): boolean {
       === snapshot.expectedCredential.merchantAccountBindingId,
     snapshot.binding.credentialGenerationBindingId
       === snapshot.expectedCredential.credentialGenerationBindingId,
-    snapshot.binding.providerOperationKey === snapshot.expectedRequest.providerOperationKey,
+    snapshot.binding.providerOperationFamilyKey === snapshot.expectedRequest.providerOperationKey,
     snapshot.binding.requestFingerprint === snapshot.expectedRequest.requestFingerprint,
-    snapshot.binding.providerOperationKey.trim().length > 0,
+    snapshot.binding.providerOperationFamilyKey.trim().length > 0,
     /^[0-9a-f]{64}$/.test(snapshot.binding.requestFingerprint),
   ].every(Boolean);
 }

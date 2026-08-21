@@ -83,7 +83,7 @@ function snapshot(): TossRefundRecoveryOrdinalSnapshot {
       refundAttemptId: "attempt-1",
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
-      providerOperationKey: "operation-1",
+      providerOperationFamilyKey: "operation-1",
       requestFingerprint: "a".repeat(64),
       merchantAccountBindingId: "merchant-1",
       credentialGenerationBindingId: "generation-1",

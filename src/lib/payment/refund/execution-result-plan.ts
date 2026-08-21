@@ -80,7 +80,7 @@ export function matchesAuthorizedResultRequest(
     target.currency === aggregate.currency,
     dispatch.provider === target.provider,
     dispatch.mode === target.mode,
-    dispatch.providerOperationKey === target.idempotencyKey,
+    dispatch.providerOperationKey.trim().length > 0,
   ].every(Boolean);
   if (!coherentIdentity) return false;
   try {
@@ -90,7 +90,7 @@ export function matchesAuthorizedResultRequest(
       providerPaymentReference,
       amountMinor: target.amount,
       currency: target.currency,
-      providerOperationKey: target.idempotencyKey,
+      providerOperationKey: dispatch.providerOperationKey,
     });
   } catch (error) {
     if (error instanceof RefundRequestFingerprintInputError) return false;

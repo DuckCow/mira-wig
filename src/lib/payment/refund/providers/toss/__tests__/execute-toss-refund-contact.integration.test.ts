@@ -123,8 +123,8 @@ describe("executeTossRefundContact integration", () => {
       CREDENTIALS.TOSS_SANDBOX_SECRET_KEY,
     ));
     expect(contacts[0]?.wire).toEqual(expectedWire);
-    expect(binding.providerOperationKey).toBe(operationKey);
-    expect(binding.wireRequestFingerprint).toBe(fingerprintTossRefundWireRequest({
+    expect(binding.providerOperationFamilyKey).toBe(operationKey);
+    expect(binding.operationFamilyFingerprint).toBe(fingerprintTossRefundWireRequest({
       paymentKey: authorized.fixture.providerPaymentKey,
       providerOperationKey: operationKey,
       cancelAmount: authorized.fixture.targetAmount,
@@ -161,13 +161,15 @@ describe("executeTossRefundContact integration", () => {
     ["operation key", async (fixture: DispatchFixture) => {
       await db.refundExecutionProviderOperationBinding.update({
         where: { refundAttemptId: fixture.refundAttemptId },
-        data: { providerOperationKey: deriveTossRefundOperationKey(`${fixture.operationKey}:drift`) },
+        data: {
+          providerOperationFamilyKey: deriveTossRefundOperationKey(`${fixture.operationKey}:drift`),
+        },
       });
     }],
     ["wire fingerprint", async (fixture: DispatchFixture) => {
       await db.refundExecutionProviderOperationBinding.update({
         where: { refundAttemptId: fixture.refundAttemptId },
-        data: { wireRequestFingerprint: "f".repeat(64) },
+        data: { operationFamilyFingerprint: "f".repeat(64) },
       });
     }],
   ] as const)("rejects persisted %s drift before GET or POST", async (_label, drift) => {

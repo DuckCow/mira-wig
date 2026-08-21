@@ -121,7 +121,7 @@ function bindingSnapshot(locked: LockedTossContactState, requestFingerprint: str
     refundAttemptId: binding.refundAttemptId,
     provider: binding.provider,
     mode: binding.mode,
-    providerOperationKey: binding.providerOperationKey,
+    providerOperationFamilyKey: binding.providerOperationFamilyKey,
     requestFingerprint,
     merchantAccountBindingId: binding.merchantAccountBindingId,
     credentialGenerationBindingId: binding.credentialGenerationBindingId,

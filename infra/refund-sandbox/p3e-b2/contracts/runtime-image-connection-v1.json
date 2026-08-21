@@ -170,9 +170,9 @@
     "modePolicy": "REGULAR_0644_DIRECTORY_0755",
     "timestampEpochSeconds": 1784764800,
     "manifestAlgorithm": "SORTED_PATH_SIZE_MODE_SHA256_JSON",
-    "expectedFileCount": 150,
-    "expectedManifestSha256": "7dcb8f93a7b79d089b4664e6c5329f634a5f23062d328a95df447ac6c14c5037",
-    "repositoryGraphInputCount": 108,
+    "expectedFileCount": 154,
+    "expectedManifestSha256": "428242f39290d2561333cd90e89422c34bfc00c3ced3b3890c9e3ca9dab1b4a4",
+    "repositoryGraphInputCount": 110,
     "packagedGraphInputCount": 45,
     "entrypointCount": 3,
     "temporaryArtifactPolicy": "DELETE_IN_FINALLY"
@@ -211,8 +211,8 @@
     "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
     "changedEntryCount": 3,
     "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
-    "addedEntryCount": 159,
-    "addedMetadataContentManifestSha256": "f6a701f3dd140701d920243ab90990e3966ffd1ed13e10767991abcc68f384bc",
+    "addedEntryCount": 173,
+    "addedMetadataContentManifestSha256": "d5330eba9313f008ee9ca5273a5056a607f11ce7252501625c430db42684a6ab",
     "removalCategories": [
       {
         "code": "APT_DPKG_EXECUTABLE_METADATA_AND_SCHEDULER_SURFACE",
@@ -254,7 +254,7 @@
     "additionCategories": [
       {
         "code": "EXACT_APPLICATION_CLOSURE",
-        "entryCount": 156
+        "entryCount": 170
       },
       {
         "code": "RUNTIME_USER_WRITABLE_DIRECTORIES",
@@ -268,9 +268,9 @@
   },
   "applicationClosure": {
     "authority": "EXACT_IMAGE_NATIVE_METADATA_AND_CONTENT_MANIFEST",
-    "entryCount": 156,
-    "metadataManifestSha256": "615d451c325b18d9f02ee95bc07c913b1a8229fe481cab71a867d203279515fb",
-    "contentManifestSha256": "b41fe8913eda7eb3c38646c13f808f2fff26aaaea52ad742f6960f8443b02a63"
+    "entryCount": 170,
+    "metadataManifestSha256": "c32e4ddf79e1644328003d1d9155007d32044ca03272028ab07930f0ee44a14a",
+    "contentManifestSha256": "badfc782598a7661134051e4c0e79b69077c4d5582e7d3bac885bc495e165a17"
   },
   "forbiddenRuntimeExecutables": [
     "apt",
