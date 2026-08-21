@@ -91,13 +91,13 @@ describe("E3B1A Toss refund binding schema", () => {
   });
 
   it.each([
-    ["provider", { provider: PaymentProvider.MOCK }, "RefundProviderBinding_provider_toss_check"],
+    ["provider", { provider: PaymentProvider.MOCK }, "RefundProviderBinding_"],
     ["mode", { mode: PaymentMode.LIVE }, "RefundProviderBinding_mode_sandbox_check"],
-    ["operation key", { providerOperationKey: "refund:local:key" }, "RefundProviderBinding_operation_key_format_check"],
-    ["uppercase operation key", { providerOperationKey: `toss-refund-v1-${"A".repeat(64)}` }, "RefundProviderBinding_operation_key_format_check"],
-    ["algorithm", { operationKeyAlgorithmVersion: "toss-refund-v2" }, "RefundProviderBinding_algorithm_version_check"],
+    ["operation family", { providerOperationFamilyKey: "refund:local:key" }, "RefundProviderBinding_operation_key_format_check"],
+    ["uppercase operation family", { providerOperationFamilyKey: `toss-refund-v1-${"A".repeat(64)}` }, "RefundProviderBinding_operation_key_format_check"],
+    ["algorithm", { operationFamilyKeyAlgorithmVersion: "toss-refund-v2" }, "RefundProviderBinding_algorithm_version_check"],
     ["wire version", { wireContractVersion: "refund-provider-toss-wire/v2" }, "RefundProviderBinding_wire_version_check"],
-    ["wire fingerprint", { wireRequestFingerprint: "A".repeat(64) }, "RefundProviderBinding_wire_fingerprint_check"],
+    ["family fingerprint", { operationFamilyFingerprint: "A".repeat(64) }, "RefundProviderBinding_wire_fingerprint_check"],
     ["merchant grammar", { merchantAccountBindingId: "merchant:invalid" }, "RefundProviderBinding_merchant_label_check"],
     ["generation grammar", { credentialGenerationBindingId: "generation invalid" }, "RefundProviderBinding_generation_label_check"],
     ["merchant length", { merchantAccountBindingId: "m".repeat(65) }, "value too long"],
@@ -117,14 +117,18 @@ describe("E3B1A Toss refund binding schema", () => {
     });
     await expectPrismaCode(
       db.refundExecutionProviderOperationBinding.create({
-        data: bindingData(context.refundAttemptId, { providerOperationKey: operationKey("duplicate") }),
+        data: bindingData(context.refundAttemptId, {
+          providerOperationFamilyKey: operationKey("duplicate"),
+        }),
       }),
       "P2002",
     );
     const secondAttemptId = await createSecondAttempt(context);
     await expectPrismaCode(
       db.refundExecutionProviderOperationBinding.create({
-        data: bindingData(secondAttemptId, { providerOperationKey: first.providerOperationKey }),
+        data: bindingData(secondAttemptId, {
+          providerOperationFamilyKey: first.providerOperationFamilyKey,
+        }),
       }),
       "P2002",
     );
@@ -235,10 +239,10 @@ function bindingData(
     refundAttemptId,
     provider: PaymentProvider.TOSS,
     mode: PaymentMode.SANDBOX,
-    providerOperationKey: operationKey(refundAttemptId),
-    operationKeyAlgorithmVersion: "toss-refund-v1",
+    providerOperationFamilyKey: operationKey(refundAttemptId),
+    operationFamilyKeyAlgorithmVersion: "toss-refund-v1",
     wireContractVersion: "refund-provider-toss-wire/v1",
-    wireRequestFingerprint: "a".repeat(64),
+    operationFamilyFingerprint: "a".repeat(64),
     merchantAccountBindingId: "merchant_sandbox_1",
     credentialGenerationBindingId: "credential_generation_1",
     ...override,

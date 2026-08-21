@@ -67,10 +67,10 @@ export type TossRefundResultIdentitySnapshot = Readonly<{
     refundAttemptId: string;
     provider: PaymentProvider;
     mode: PaymentMode;
-    providerOperationKey: string;
-    operationKeyAlgorithmVersion: string;
+    providerOperationFamilyKey: string;
+    operationFamilyKeyAlgorithmVersion: string;
     wireContractVersion: string;
-    wireRequestFingerprint: string;
+    operationFamilyFingerprint: string;
     merchantAccountBindingId: string;
     credentialGenerationBindingId: string;
   }>;

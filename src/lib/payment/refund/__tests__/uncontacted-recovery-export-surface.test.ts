@@ -43,6 +43,7 @@ describe("uncontacted recovery export and reachability boundary", () => {
     ]);
     expect(ownerBasenames("randomBytes(32)")).toEqual([
       "acquire-lease.ts",
+      "reconcile-refund.ts",
       "refund-recovery-fence.ts",
       "uncontacted-recovery-persistence.ts",
     ]);

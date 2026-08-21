@@ -61,16 +61,16 @@ describe("pure Toss binding-aware result identity plan", () => {
       payment: { ...value.payment, mode: PaymentMode.LIVE },
     })],
     ["operation-key version", (value: TossRefundResultIdentitySnapshot) => ({
-      ...value, binding: { ...value.binding, operationKeyAlgorithmVersion: "other-version" },
+      ...value, binding: { ...value.binding, operationFamilyKeyAlgorithmVersion: "other-version" },
     })],
     ["operation-key value", (value: TossRefundResultIdentitySnapshot) => ({
-      ...value, binding: { ...value.binding, providerOperationKey: "other-key" },
+      ...value, binding: { ...value.binding, providerOperationFamilyKey: "other-key" },
     })],
     ["wire version", (value: TossRefundResultIdentitySnapshot) => ({
       ...value, binding: { ...value.binding, wireContractVersion: "other-version" },
     })],
     ["wire fingerprint", (value: TossRefundResultIdentitySnapshot) => ({
-      ...value, binding: { ...value.binding, wireRequestFingerprint: "0".repeat(64) },
+      ...value, binding: { ...value.binding, operationFamilyFingerprint: "0".repeat(64) },
     })],
     ["merchant credential label", (value: TossRefundResultIdentitySnapshot) => ({
       ...value,
@@ -292,10 +292,10 @@ function coherentSnapshot(): TossRefundResultIdentitySnapshot {
       refundAttemptId: "refund-attempt-1",
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
-      providerOperationKey,
-      operationKeyAlgorithmVersion: "toss-refund-v1",
+      providerOperationFamilyKey: providerOperationKey,
+      operationFamilyKeyAlgorithmVersion: "toss-refund-v1",
       wireContractVersion: "refund-provider-toss-wire/v1",
-      wireRequestFingerprint: fingerprintTossRefundWireRequest({
+      operationFamilyFingerprint: fingerprintTossRefundWireRequest({
         paymentKey,
         providerOperationKey,
         cancelAmount: amount,

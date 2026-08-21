@@ -1103,11 +1103,11 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     );
     expect(contract.applicationClosure).toEqual({
       authority: "EXACT_IMAGE_NATIVE_METADATA_AND_CONTENT_MANIFEST",
-      entryCount: 156,
+      entryCount: 170,
       metadataManifestSha256:
-        "615d451c325b18d9f02ee95bc07c913b1a8229fe481cab71a867d203279515fb",
+        "c32e4ddf79e1644328003d1d9155007d32044ca03272028ab07930f0ee44a14a",
       contentManifestSha256:
-        "b41fe8913eda7eb3c38646c13f808f2fff26aaaea52ad742f6960f8443b02a63",
+        "badfc782598a7661134051e4c0e79b69077c4d5582e7d3bac885bc495e165a17",
     });
     expect(contract.systemClosure).toMatchObject({
       classificationVersion: "PINNED_NODE_BASE_DELTA_V1",
@@ -1117,9 +1117,9 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       changedEntryCount: 3,
       changedMetadataContentManifestSha256:
         "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
-      addedEntryCount: 159,
+      addedEntryCount: 173,
       addedMetadataContentManifestSha256:
-        "f6a701f3dd140701d920243ab90990e3966ffd1ed13e10767991abcc68f384bc",
+        "d5330eba9313f008ee9ca5273a5056a607f11ce7252501625c430db42684a6ab",
     });
     expect(contract.systemClosure.removalCategories).toEqual([
       {
@@ -1134,7 +1134,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       { code: "PACKAGE_SIGNATURE_VERIFIER_SURFACE", entryCount: 1 },
     ]);
     expect(contract.systemClosure.additionCategories).toEqual([
-      { code: "EXACT_APPLICATION_CLOSURE", entryCount: 156 },
+      { code: "EXACT_APPLICATION_CLOSURE", entryCount: 170 },
       { code: "RUNTIME_USER_WRITABLE_DIRECTORIES", entryCount: 2 },
       { code: "VERIFIED_CLOUD_SQL_PROXY_EXECUTABLE", entryCount: 1 },
     ]);
@@ -1323,10 +1323,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
 
   it("keeps schema, migrations, and the R2A subinventory byte-authoritative", () => {
     expect(sha256(readFileSync(join(ROOT, "prisma/schema.prisma")))).toBe(
-      "852ce8c0fd9ce714e515c9f520e0fb568a363021455444ff33cae2e7375968fa",
+      "daa0666c37eccdebf0177d42dc629139b870b66cbbd02d9b17be93691dddc334",
     );
     expect(migrationRuntimeDigest()).toBe(
-      "081e575f9e54d22336b85384b2a9d1e4fd8222a5c811b70b31cfe43e844522a5",
+      "63fbfa6e53a7835acd538cf1114a4dcd729070ce72b98353a230fc552c81f38a",
     );
     const terraform = repositoryRelativeFiles(INFRA)
       .filter((path) => !path.startsWith(

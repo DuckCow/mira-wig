@@ -138,7 +138,7 @@ describe("S5 provider-free production recovery", () => {
     expect(afterOrdinalOne.dispatches[0]).toMatchObject({
       ordinal: 1,
       state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
-      providerOperationKey: binding.providerOperationKey,
+      providerOperationKey: binding.providerOperationFamilyKey,
     });
     expect(afterOrdinalOne.evidence).toHaveLength(0);
     expect(afterOrdinalOne.contactProofs).toHaveLength(1);
@@ -172,19 +172,19 @@ describe("S5 provider-free production recovery", () => {
     }
     const expectedWire = deriveTossRefundCancellationWireRequest({
       paymentKey: fixture.providerPaymentKey,
-      providerOperationKey: binding.providerOperationKey,
+      providerOperationKey: binding.providerOperationFamilyKey,
       cancelAmount: fixture.targetAmount,
     });
     expect(ordinalTwoWire.method).toBe("POST");
     expect(ordinalTwoWire.path).toBe(expectedWire.path);
-    expect(ordinalTwoWire.idempotencyKey).toBe(binding.providerOperationKey);
+    expect(ordinalTwoWire.idempotencyKey).toBe(binding.providerOperationFamilyKey);
     expect(ordinalTwoWire.body.cancelAmount).toBe(fixture.targetAmount);
     expect(ordinalTwoWire.body.cancelReason).toBe("Mira merchant refund");
     expect(JSON.stringify(ordinalTwoWire.body)).toBe(JSON.stringify(ordinalOneWire.body));
     expect(JSON.stringify(ordinalTwoWire.body)).toBe(JSON.stringify(expectedWire.body));
-    expect(binding.wireRequestFingerprint).toBe(fingerprintTossRefundWireRequest({
+    expect(binding.operationFamilyFingerprint).toBe(fingerprintTossRefundWireRequest({
       paymentKey: fixture.providerPaymentKey,
-      providerOperationKey: binding.providerOperationKey,
+      providerOperationKey: binding.providerOperationFamilyKey,
       cancelAmount: fixture.targetAmount,
     }));
     expect(binding).toMatchObject({
@@ -235,13 +235,13 @@ describe("S5 provider-free production recovery", () => {
       {
         ordinal: 1,
         state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
-        providerOperationKey: binding.providerOperationKey,
+        providerOperationKey: binding.providerOperationFamilyKey,
         requestFingerprint: authorizedOrdinalOne.requestFingerprint,
       },
       {
         ordinal: 2,
         state: RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED,
-        providerOperationKey: binding.providerOperationKey,
+        providerOperationKey: binding.providerOperationFamilyKey,
         requestFingerprint: authorizedOrdinalOne.requestFingerprint,
       },
     ]);
@@ -270,8 +270,8 @@ describe("S5 provider-free production recovery", () => {
       refundAttemptId: fixture.refundAttemptId,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
-      providerOperationKey: binding.providerOperationKey,
-      wireRequestFingerprint: binding.wireRequestFingerprint,
+      providerOperationFamilyKey: binding.providerOperationFamilyKey,
+      operationFamilyFingerprint: binding.operationFamilyFingerprint,
       merchantAccountBindingId: "merchant-provider-free",
       credentialGenerationBindingId: "generation-provider-free-1",
     });
@@ -586,10 +586,10 @@ async function loadRecoveryImmutabilitySnapshot(fixture: DispatchFixture) {
         refundAttemptId: true,
         provider: true,
         mode: true,
-        providerOperationKey: true,
-        operationKeyAlgorithmVersion: true,
+        providerOperationFamilyKey: true,
+        operationFamilyKeyAlgorithmVersion: true,
         wireContractVersion: true,
-        wireRequestFingerprint: true,
+        operationFamilyFingerprint: true,
         merchantAccountBindingId: true,
         credentialGenerationBindingId: true,
         createdAt: true,

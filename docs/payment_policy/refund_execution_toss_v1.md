@@ -12,9 +12,10 @@ Governing neutral policy: `docs/payment_policy/refund_execution_v3.md`
 
 This provider-specific policy is subordinate to `refund_execution_v3.md`, is narrower than that
 policy, and MUST NOT weaken it. V3 continues to own the provider-neutral lease, physical dispatch,
-contact-boundary, evidence, fencing, replay, and projection invariants. If this document and V3
-appear to conflict, V3 controls and Toss contact MUST remain unreachable until the conflict is
-resolved by a policy amendment.
+contact-boundary, evidence, fencing, replay, and projection invariants. V3 also owns the generic
+separation between operation-family and physical dispatch identity. This document freezes Toss as
+`STABLE_PER_LOGICAL_REFUND`; same-key reuse is provider-specific Toss correctness, not a universal
+generic invariant.
 
 This document governs only Toss-specific:
 
@@ -123,7 +124,7 @@ The v1 endpoint is exactly:
 ```text
 POST /v1/payments/{paymentKey}/cancel
 Content-Type: application/json
-Idempotency-Key: <persisted providerOperationKey>
+Idempotency-Key: <persisted dispatch.providerOperationKey>
 ```
 
 The JSON body is exactly these two members:
@@ -164,12 +165,12 @@ or provider error messages.
 Changing this text or introducing categorical reasons requires a new Toss wire-contract version
 and a policy amendment. Configuration or runtime input MUST NOT alter it.
 
-## 6. Toss provider operation key
+## 6. Toss operation-family and physical wire key
 
 The provider-visible idempotency key is derived exactly once as:
 
 ```text
-providerOperationKey =
+providerOperationFamilyKey =
   "toss-refund-v1-" +
   lowercaseHex(SHA-256(UTF-8(RefundAttempt.idempotencyKey)))
 ```
@@ -177,8 +178,8 @@ providerOperationKey =
 `RefundAttempt.idempotencyKey` is the canonical provider-neutral logical identity input; it is not
 the provider-visible key. The following invariants SHALL hold:
 
-- one `RefundAttempt` maps to one Toss operation key;
-- every physical dispatch ordinal for that attempt reuses exactly that key;
+- one `RefundAttempt` maps to one Toss operation-family key;
+- the Toss stable identity policy maps every physical dispatch ordinal to exactly that family key;
 - different refund attempts map to different keys, subject to the cryptographic hash assumption;
 - the operation-key generation version is `toss-refund-v1`;
 - the generated value is persisted verbatim before contact;
@@ -222,10 +223,10 @@ entity. Conceptually it owns:
 ```text
 provider
 mode
-providerOperationKey
-operation-key algorithm version
+providerOperationFamilyKey
+operation-family-key algorithm version
 wire-contract version
-wire-request fingerprint
+operation-family fingerprint
 merchant/account binding
 credential-generation binding
 createdAt
@@ -234,8 +235,9 @@ createdAt
 The exact Prisma model, constraints, migration, and relation names are not created or finalized by
 this policy act. E3B1 MUST reconstruct and audit the schema separately. Logical binding facts MUST
 NOT be duplicated per physical dispatch, placed as Toss wire material directly on
-`RefundAttempt`, or treated as safely recoverable from re-derivation alone. Physical dispatch
-attempts MUST reference or resolve the same logical binding.
+`RefundAttempt`, or treated as safely recoverable from re-derivation alone. Every physical
+dispatch persists the exact same Toss key in `RefundExecutionDispatchAttempt.providerOperationKey`.
+This equality is required by the Toss stable regime and MUST NOT be generalized to every provider.
 
 ## 9. Toss wire fingerprint
 
@@ -357,7 +359,7 @@ outside this ordinary domestic-card contract.
 
 ## 13. Same-key recovery authority
 
-Same-key recovery is the primary exact response-loss mechanism. Each recovery contact MUST:
+Same-key recovery is the Toss-specific exact response-loss mechanism. Each recovery contact MUST:
 
 - allocate a new positive physical dispatch ordinal;
 - reuse the identical persisted `providerOperationKey`;
@@ -485,7 +487,8 @@ required before contact activation.
 | Secret key | Secret | Never persist or log |
 | Authorization header | Secret credential material | Never persist or log |
 | `paymentKey` | Sensitive provider identifier | Persist only where already authorized; redact in logs/UI/tests |
-| `providerOperationKey` | Sensitive operation identifier | Persist in immutable binding; redact/hash outside restricted audit paths |
+| `providerOperationFamilyKey` | Sensitive attempt-stable operation-family identifier | Persist in immutable binding; redact/hash outside restricted audit paths |
+| dispatch `providerOperationKey` | Sensitive exact physical wire identifier | Persist per ordinal; for Toss it equals the family key |
 | cancel `transactionKey` | Sensitive provider cancellation identifier | Persist only as authorized provider refund identity; redact elsewhere |
 | `cancelRequestId` | Sensitive unsupported identifier | Do not use as identity; retain only minimal normalized conflict fact if required |
 | `cancelReason` | Fixed non-sensitive protocol text | May persist as fingerprint input; no user text |

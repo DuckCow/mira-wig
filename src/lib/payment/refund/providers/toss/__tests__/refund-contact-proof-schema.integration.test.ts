@@ -298,10 +298,10 @@ function bindingData(
     refundAttemptId: fixture.refundAttemptId,
     provider: PaymentProvider.TOSS,
     mode: PaymentMode.SANDBOX,
-    providerOperationKey: deriveTossRefundOperationKey(fixture.operationKey),
-    operationKeyAlgorithmVersion: "toss-refund-v1",
+    providerOperationFamilyKey: deriveTossRefundOperationKey(fixture.operationKey),
+    operationFamilyKeyAlgorithmVersion: "toss-refund-v1",
     wireContractVersion: "refund-provider-toss-wire/v1",
-    wireRequestFingerprint: "a".repeat(64),
+    operationFamilyFingerprint: "a".repeat(64),
     merchantAccountBindingId: "merchant_sandbox_1",
     credentialGenerationBindingId: "credential_generation_1",
   };

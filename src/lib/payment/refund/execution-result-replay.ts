@@ -93,7 +93,7 @@ function matchesDispatch(context: ReplayContext, dispatch: RefundExecutionDispat
     && dispatch.leaseGeneration === context.command.leaseGeneration
     && dispatch.provider === context.target.provider
     && dispatch.mode === context.target.mode
-    && dispatch.providerOperationKey === context.target.idempotencyKey
+    && dispatch.providerOperationKey.trim().length > 0
     && dispatch.state === RefundExecutionDispatchAttemptState.CONTACT_MAY_HAVE_OCCURRED
     && dispatch.contactMarkedAt !== null;
 }
@@ -104,12 +104,22 @@ function matchesCommand(
   evidence: RefundExecutionEvidence,
 ): boolean {
   return context.command.refundAttemptId === context.target.id
-    && evidence.commandId === context.command.id
+    && matchesEvidenceProvenance(context, dispatch, evidence)
     && context.command.dispatchAttempt === dispatch.ordinal
     && context.command.leaseGeneration === dispatch.leaseGeneration
     && context.command.leaseOwner === null
     && context.command.leaseUntil === null
     && context.command.leaseTokenHash === null;
+}
+
+function matchesEvidenceProvenance(
+  context: ReplayContext,
+  dispatch: RefundExecutionDispatchAttempt,
+  evidence: RefundExecutionEvidence,
+): boolean {
+  return evidence.commandId === context.command.id
+    && evidence.dispatchAttemptId === dispatch.id
+    && evidence.authorizingLeaseGeneration === dispatch.leaseGeneration;
 }
 
 function matchesRequestFingerprint(context: ReplayContext, dispatch: RefundExecutionDispatchAttempt): boolean {
@@ -134,7 +144,7 @@ function matchesRequestFingerprint(context: ReplayContext, dispatch: RefundExecu
       providerPaymentReference,
       amountMinor: context.target.amount,
       currency: context.target.currency,
-      providerOperationKey: context.target.idempotencyKey,
+      providerOperationKey: dispatch.providerOperationKey,
     });
   } catch {
     return false;

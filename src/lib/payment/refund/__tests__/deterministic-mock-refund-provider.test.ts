@@ -21,7 +21,7 @@ describe("deterministic MOCK refund provider planning", () => {
       RefundExecutionEvidenceOutcome.UNKNOWN,
     ];
     const plans = outcomes.map((outcome, index) => plan({
-      operationKey: `refund:payment_${index}:attempt_${index}`,
+      providerOperationKey: `refund:payment_${index}:attempt_${index}`,
       outcome,
       reportedAmount: index === 1 ? null : 500 + index,
       reportedCurrency: index === 1 ? null : index === 2 ? "USD" : "KRW",
@@ -46,7 +46,7 @@ describe("deterministic MOCK refund provider planning", () => {
       .toThrowError(InvalidMockRefundPlanError);
     expect(() => new DeterministicMockRefundProvider([{
       ...configured,
-      operationKey: "refund:other:attempt",
+      providerOperationKey: "refund:other:attempt",
     }])).toThrowError(InvalidMockRefundPlanError);
   });
 
@@ -162,14 +162,17 @@ describe("deterministic MOCK refund provider execution", () => {
 });
 
 type PlanOverrides = Partial<RefundProviderObservation> & {
-  operationKey?: string;
+  providerOperationKey?: string;
 };
 
 function plan(overrides: PlanOverrides = {}): DeterministicMockRefundPlan {
-  const { operationKey = "refund:payment_1:attempt_1", ...observationOverrides } = overrides;
+  const {
+    providerOperationKey = "refund:payment_1:attempt_1",
+    ...observationOverrides
+  } = overrides;
   return {
-    operationKey,
-    expectedRequest: request({ operationKey }),
+    providerOperationKey,
+    expectedRequest: request({ providerOperationKey }),
     observation: observation(observationOverrides),
   };
 }
@@ -179,7 +182,7 @@ function request(overrides: Partial<RefundProviderRequest> = {}): RefundProvider
     providerPaymentReference: "provider_payment_1",
     amount: 500,
     currency: "KRW",
-    operationKey: "refund:payment_1:attempt_1",
+    providerOperationKey: "refund:payment_1:attempt_1",
     ...overrides,
   };
 }

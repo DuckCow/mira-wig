@@ -15,14 +15,14 @@ describe("refund provider request contract", () => {
     const result = normalizeRefundProviderRequest(request({
       providerPaymentReference: "  provider_payment_1  ",
       currency: " krw ",
-      operationKey: "  refund:payment_1:attempt_1  ",
+      providerOperationKey: "  refund:payment_1:attempt_1  ",
     }));
 
     expect(result).toEqual({
       providerPaymentReference: "provider_payment_1",
       amount: 500,
       currency: "KRW",
-      operationKey: "refund:payment_1:attempt_1",
+      providerOperationKey: "refund:payment_1:attempt_1",
     });
     expect(Object.isFrozen(result)).toBe(true);
   });
@@ -34,7 +34,7 @@ describe("refund provider request contract", () => {
 
   it.each([
     request({ providerPaymentReference: "  " }),
-    request({ operationKey: "\t" }),
+    request({ providerOperationKey: "\t" }),
     request({ currency: "KR" }),
     request({ currency: "KRW1" }),
   ])("rejects malformed request fields", (candidate) => expectRequestFailure(candidate));
@@ -133,7 +133,7 @@ function request(overrides: Partial<RefundProviderRequest> = {}): RefundProvider
     providerPaymentReference: "provider_payment_1",
     amount: 500,
     currency: "KRW",
-    operationKey: "refund:payment_1:attempt_1",
+    providerOperationKey: "refund:payment_1:attempt_1",
     ...overrides,
   };
 }

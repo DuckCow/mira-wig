@@ -4,13 +4,18 @@ import {
   normalizeRefundEvidenceCurrency,
 } from "./refund-observation-contract";
 
-const REQUEST_FIELDS = ["providerPaymentReference", "amount", "currency", "operationKey"] as const;
+const REQUEST_FIELDS = [
+  "providerPaymentReference",
+  "amount",
+  "currency",
+  "providerOperationKey",
+] as const;
 
 export type RefundProviderRequest = Readonly<{
   providerPaymentReference: string;
   amount: number;
   currency: string;
-  operationKey: string;
+  providerOperationKey: string;
 }>;
 
 export type RefundProviderObservation = NormalizedRefundObservation;
@@ -36,12 +41,18 @@ export class RefundProviderContractError extends Error {
 export function normalizeRefundProviderRequest(input: RefundProviderRequest): RefundProviderRequest {
   if (!hasExactFields(input, REQUEST_FIELDS)) throw invalidRequest();
   const providerPaymentReference = normalizeRequiredText(input.providerPaymentReference);
-  const operationKey = normalizeRequiredText(input.operationKey);
+  const providerOperationKey = normalizeRequiredText(input.providerOperationKey);
   const currency = normalizeCurrency(input.currency);
-  if (!providerPaymentReference || !operationKey || !currency || !isPositiveSafeInteger(input.amount)) {
+  if (!providerPaymentReference || !providerOperationKey
+    || !currency || !isPositiveSafeInteger(input.amount)) {
     throw invalidRequest();
   }
-  return Object.freeze({ providerPaymentReference, amount: input.amount, currency, operationKey });
+  return Object.freeze({
+    providerPaymentReference,
+    amount: input.amount,
+    currency,
+    providerOperationKey,
+  });
 }
 
 export function normalizeRefundProviderObservation(

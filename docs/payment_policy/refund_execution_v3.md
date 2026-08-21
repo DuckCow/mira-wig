@@ -1,7 +1,7 @@
 # Refund Execution Provider Dispatch and Fenced Result - Policy Amendment v3
 
 - **Date:** 2026-07-16
-- **Status:** PROPOSED DESIGN LOCK - documentation only; normative only after review and commit.
+- **Status:** INSTALLED — provider-specific identity-regime amendment applied.
 - **Amends:** `refund_execution_v1.md` and `refund_execution_v2.md`
 - **Act boundary:** ACT E3P1 - provider-neutral dispatch, contact, unknown-outcome, and fenced-result policy
 - **Base commit context:** `04657a4 feat(refund): add lease event ledger and release`
@@ -90,14 +90,20 @@ For this policy:
   with possession of the raw token whose digest equals `leaseTokenHash`.
 - **Request fingerprint** means a SHA-256 integrity digest over the versioned canonical immutable
   authorized request facts.
-- **Provider operation key** means the stable usable provider wire idempotency/operation identity
-  allocated or mapped once for one `RefundAttempt`.
+- **Provider operation-family identity** means the immutable attempt-level provider binding root
+  for one `RefundAttempt`. It is versioned and need not itself be sent to the provider.
+- **Physical merchant wire key** means the exact provider request key durably owned by one
+  `RefundExecutionDispatchAttempt`.
+- **Identity regime** means either `STABLE_PER_LOGICAL_REFUND`, where physical ordinals reuse one
+  wire key, or `UNIQUE_PER_PHYSICAL_DISPATCH`, where each lawful physical ordinal owns a distinct
+  wire key.
 
 ## 4. Compact authority table
 
 | Authority | Durable or secret proof | Owns | MUST NOT substitute for |
 |---|---|---|---|
 | Logical refund operation | `RefundAttempt.idempotencyKey` | One refund-money-operation identity | Dispatch ordinal, lease token, evidence identity |
+| Provider operation family | `RefundExecutionProviderOperationBinding` | Attempt-stable provider/account/credential/wire-contract authority | Physical dispatch key or provider result identity |
 | Current lease incarnation | `leaseGeneration` + raw token verified against `leaseTokenHash` | Current command possession | Provider operation or observation identity |
 | Current ordinal projection | `RefundExecutionCommand.dispatchAttempt` | Latest authorized physical invocation ordinal | Historical authorization ledger |
 | Dispatch history | `RefundExecutionDispatchAttempt` | Immutable authorization and contact history per ordinal | Provider observation evidence |
@@ -106,31 +112,42 @@ For this policy:
 
 These authorities MUST remain distinct in schema, contracts, logs, tests, and recovery logic.
 
-## 5. Stable provider operation identity
+## 5. Provider-specific operation identity regimes
 
-One `RefundAttempt` MUST map to exactly one stable logical provider operation identity.
+One `RefundAttempt` MUST map to exactly one stable logical refund identity and one immutable,
+versioned provider operation-family binding. That does not universally require one physical wire
+key.
 
 - `RefundAttempt.idempotencyKey` remains the provider-neutral logical identity.
-- The usable provider wire key MUST be allocated or mapped once and durably recoverable after a
-  crash.
-- Every later physical dispatch ordinal for the same attempt MUST reuse that wire key verbatim.
-- A new dispatch ordinal MUST NOT create a new refund identity.
-- Re-derived request facts that differ under the same operation key MUST fail closed locally
-  before contact.
+- The provider operation-family key, merchant/account binding, credential-generation binding,
+  wire-contract version, family-key algorithm version, and family fingerprint MUST be allocated
+  once and persisted before first contact.
+- Every physical dispatch ordinal MUST persist its exact merchant wire key and physical request
+  fingerprint before contact.
+- Recovery of an existing dispatch MUST read its persisted key; it MUST NOT re-derive that key
+  under current code.
+- A new dispatch ordinal remains part of the same logical refund intent and operation family.
 - A different actual refund MUST use a new `RefundAttempt` through the existing request policy.
 
-A provider-specific policy MUST decide whether `RefundAttempt.idempotencyKey` is usable directly
-on the wire or maps once to a stored provider-specific value. That mapping MUST preserve one
-logical operation and MUST NOT be recomputed under an algorithm that can drift.
+A narrow provider-specific identity policy selected from the persisted
+`provider + wireContractVersion + operationFamilyKeyAlgorithmVersion` tuple MUST choose exactly
+one regime:
 
-The provider wire key MUST NOT be derived from:
+```text
+STABLE_PER_LOGICAL_REFUND
+UNIQUE_PER_PHYSICAL_DISPATCH
+```
 
-- command ID plus ordinal;
-- dispatch-attempt row ID;
-- a new random value per retry;
-- worker identity;
-- lease owner; or
-- lease generation/token.
+The stable regime requires every physical ordinal to reuse the bound family key verbatim. The
+unique regime requires every lawful physical ordinal to own a different merchant wire key while
+the operation family remains unchanged. Unknown tuples MUST fail closed. Toss SANDBOX v1 is the
+installed stable regime. A dormant Eximbay family tuple may identify the unique regime, but this
+contract does not define or activate its merchant `refund_id` serializer.
+
+The operation-family key and physical wire key MUST NOT depend on worker identity, lease owner,
+lease generation, or lease token. A provider-specific physical key MAY depend on a stable family
+identity and positive ordinal only when its frozen regime requires per-dispatch uniqueness. Once
+persisted, that dispatch row is authoritative and recomputation is only an integrity check.
 
 The usable wire key is operationally sensitive. It MUST NOT enter UI, public or ordinary results,
 logs, metrics labels, analytics, browser state, screenshots, or test assertion failure output.
@@ -146,8 +163,8 @@ represent one positive physical invocation authorization and contain at least:
 - positive authorizing lease generation;
 - immutable provider snapshot;
 - immutable mode snapshot;
-- stable usable provider operation key;
-- canonical request fingerprint;
+- exact merchant wire key for that ordinal;
+- exact physical request fingerprint;
 - authoritative authorization timestamp;
 - contact state;
 - nullable authoritative contact-mark timestamp; and
@@ -244,10 +261,10 @@ One authorization transaction MUST:
 9. require coherent Payment, provider, mode, amount, currency, provider payment reference,
    attempt identity, command ownership, transitions, evidence, and sibling reservation state;
 10. require no unresolved dispatch authorization that forbids another invocation;
-11. validate or establish the attempt-stable provider operation-key binding;
+11. validate or establish the attempt-stable provider operation-family binding;
 12. allocate exactly the next positive ordinal without wrap, reset, or caller influence;
-13. derive the immutable provider-neutral request facts under lock;
-14. compute the versioned canonical request fingerprint;
+13. allocate or validate the physical wire key through the persisted identity policy;
+14. derive the immutable request facts and physical request fingerprint under lock;
 15. insert one `AUTHORIZED` dispatch-attempt row;
 16. advance `RefundExecutionCommand.dispatchAttempt` to the same ordinal with a guarded CAS; and
 17. commit before returning the trusted internal dispatch handle.
@@ -258,8 +275,8 @@ reset, or be reused.
 
 The success handle MAY carry only the minimum internal facts needed to reconstitute the authorized
 request and later prove the current fence, including command/attempt identity, ordinal,
-generation, raw token, provider/mode, provider payment reference, amount, currency, and stable
-provider operation key. It MUST be immutable, trusted-internal, non-loggable, and unavailable to
+generation, raw token, provider/mode, provider payment reference, amount, currency, and exact
+physical provider operation key. It MUST be immutable, trusted-internal, non-loggable, and unavailable to
 ordinary application boundaries.
 
 ## 9. Authorization replay
@@ -308,16 +325,21 @@ serialization version and facts are:
   providerPaymentReference,
   positiveMinimumUnitAmount,
   uppercaseCurrency,
-  stableProviderOperationKey
+  physicalProviderOperationKey
 ]
 ```
 
 The canonical array order, version tag, string normalization, escaping, separators, and base-10
 integer representation MUST be frozen by E3A as one exact byte serialization and behavior-tested
 with stable test vectors. Incidental runtime object-key order MUST NOT define the serialization.
-Dispatch ordinal, lease generation, worker identity, clock, and random values MUST NOT enter the
-fingerprint because they do not change the logical provider request. Every dispatch ordinal for
-the same immutable request MUST therefore bind to the same fingerprint.
+Dispatch ordinal, lease generation, worker identity, clock, and random values MUST NOT enter as
+incidental fingerprint facts. The exact physical wire key does enter the fingerprint. Therefore a
+stable-regime provider retains equal fingerprints for byte-identical retries, while a
+unique-per-dispatch provider has different physical fingerprints when its wire keys differ.
+
+`RefundExecutionProviderOperationBinding.operationFamilyFingerprint` separately covers immutable
+attempt-level/provider-binding facts and remains stable across physical ordinals. It MUST NOT be
+used as the exact physical request fingerprint for a unique-per-dispatch provider.
 
 The stored fingerprint MUST be the lowercase hexadecimal SHA-256 digest of that canonical byte
 sequence. It is an integrity check, not a secret or proof of authority. It MUST NOT be used as
@@ -438,7 +460,8 @@ Under the authoritative E4 transaction, fresh insertion MUST validate:
 - that row is `CONTACT_MAY_HAVE_OCCURRED`;
 - the input generation equals the current lease generation and the row's authorizing generation;
 - the raw-token digest equals the command's current `leaseTokenHash`;
-- provider, mode, amount, currency, operation identity, and request fingerprint remain coherent;
+- provider, mode, amount, currency, operation-family identity, exact dispatch wire key, and
+  physical request fingerprint remain coherent under the persisted identity policy;
 - the normalized observation is coherent with the authorized request;
 - aggregate ownership, lineage, transitions, sibling reservations, and provider-refund identity
   remain coherent; and
@@ -532,8 +555,8 @@ Recovery MUST distinguish:
 - `CONTACT_MAY_HAVE_OCCURRED` and possibly contacted.
 
 Future authorized-but-uncontacted recovery MAY transfer, abandon, or reconstitute the same
-authorization. It MUST preserve the same logical provider operation identity and MUST NOT infer a
-new physical invocation authorization without a separately proven transition.
+authorization. It MUST preserve the same operation family and already-persisted physical key. It
+MUST NOT infer a new physical invocation authorization without a separately proven transition.
 
 If such recovery changes the current lease generation, its later policy MUST introduce a durable
 fence-binding fact without rewriting the immutable original authorization. Until that authority
@@ -633,7 +656,8 @@ Provider-neutral policy owns:
 Provider-specific policy owns:
 
 - endpoint and wire request/response shape;
-- usable operation-key mapping and official idempotency guarantees;
+- operation-family allocation, persisted identity-regime selection, physical wire-key allocation,
+  and official idempotency/uniqueness guarantees;
 - amount/currency wire conversion;
 - provider-required fixed reason or metadata;
 - client timeout and cancellation behavior;
@@ -690,7 +714,8 @@ E3A verification MUST prove at least:
 - wrong or stale generation/token produces zero writes;
 - two authorizers allocate exactly one ordinal;
 - exact authorization replay returns the same immutable request identity without allocation;
-- the stable provider operation key and fingerprint cannot drift across ordinals;
+- stable-policy Toss keys/fingerprints cannot drift, while a synthetic unique policy proves
+  distinct immutable physical keys/fingerprints across ordinals;
 - positive ordinal prevents E2B1 release;
 - authorization creates no evidence, result application, contact, or provider call; and
 - migration preflight and privacy constraints are behaviorally enforced.

@@ -131,10 +131,10 @@ function bindingMatches(
     binding.refundAttemptId === snapshot.refundAttempt.id,
     binding.provider === PaymentProvider.TOSS,
     binding.mode === PaymentMode.SANDBOX,
-    binding.providerOperationKey === providerOperationKey,
-    binding.operationKeyAlgorithmVersion === TOSS_REFUND_OPERATION_KEY_VERSION,
+    binding.providerOperationFamilyKey === providerOperationKey,
+    binding.operationFamilyKeyAlgorithmVersion === TOSS_REFUND_OPERATION_KEY_VERSION,
     binding.wireContractVersion === TOSS_REFUND_WIRE_VERSION,
-    binding.wireRequestFingerprint === wireFingerprint,
+    binding.operationFamilyFingerprint === wireFingerprint,
     binding.merchantAccountBindingId === snapshot.expectedCredential.merchantAccountBindingId,
     binding.credentialGenerationBindingId
       === snapshot.expectedCredential.credentialGenerationBindingId,

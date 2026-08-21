@@ -187,9 +187,12 @@ async function expireForRecovery(
 async function loadWireIdentity(client: PrismaClient, refundAttemptId: string) {
   const binding = await client.refundExecutionProviderOperationBinding.findUniqueOrThrow({
     where: { refundAttemptId },
-    select: { providerOperationKey: true, wireRequestFingerprint: true },
+    select: { providerOperationFamilyKey: true, operationFamilyFingerprint: true },
   });
-  return Object.freeze({ operationKey: binding.providerOperationKey, wireFingerprint: binding.wireRequestFingerprint });
+  return Object.freeze({
+    operationKey: binding.providerOperationFamilyKey,
+    wireFingerprint: binding.operationFamilyFingerprint,
+  });
 }
 
 function scenarioResult(

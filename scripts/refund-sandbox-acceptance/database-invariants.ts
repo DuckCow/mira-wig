@@ -7,7 +7,7 @@ export const DATABASE_CHECK_INVARIANTS_INVALID = "DATABASE_CHECK_INVARIANTS_INVA
 export const DATABASE_PARTIAL_INDEX_INVARIANT_INVALID = "DATABASE_PARTIAL_INDEX_INVARIANT_INVALID";
 export const DATABASE_INVARIANT_MANIFEST_INVALID = "DATABASE_INVARIANT_MANIFEST_INVALID";
 export const EXPECTED_CHECK_INVARIANT_COUNT = 65;
-export const EXPECTED_CHECK_MANIFEST_SHA256 = "4bee2cdcfa34213cdd5c3d319da6273aa59361454174bf07cd8a0c9ce5cd97d3";
+export const EXPECTED_CHECK_MANIFEST_SHA256 = "210433cac8820bfbccb57ec21c4cab8f5bb1d4ef628226d20e48c95b9d989f17";
 
 const PINNED_CHECK_TABLES = Object.freeze([
   "CustomerRefundIntake", "RefundAttemptTransition", "RefundExecutionCommand",
@@ -119,14 +119,14 @@ export const EXPECTED_CHECK_INVARIANTS: readonly CheckInvariant[] = Object.freez
   check("RefundExecutionProviderEligibilityProof", "RefundEligibilityProof_tax_exempt_zero_check", `CHECK ("taxExemptionAmount" = 0)`),
   check("RefundExecutionProviderEligibilityProof", "RefundEligibilityProof_tax_free_zero_check", `CHECK ("taxFreeAmount" = 0)`),
   check("RefundExecutionProviderEligibilityProof", "RefundEligibilityProof_total_positive_check", `CHECK ("totalAmount" >= 1)`),
-  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_algorithm_version_check", `CHECK ("operationKeyAlgorithmVersion"::text = 'toss-refund-v1'::text)`),
+  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_algorithm_version_check", `CHECK (provider = 'TOSS'::"PaymentProvider" AND "operationKeyAlgorithmVersion"::text = 'toss-refund-v1'::text OR provider = 'EXIMBAY'::"PaymentProvider" AND "operationKeyAlgorithmVersion"::text = 'eximbay-refund-family-v1'::text)`),
   check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_generation_label_check", `CHECK ("credentialGenerationBindingId"::text ~ '^[A-Za-z0-9._-]{1,64}$'::text)`),
   check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_merchant_label_check", `CHECK ("merchantAccountBindingId"::text ~ '^[A-Za-z0-9._-]{1,64}$'::text)`),
   check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_mode_sandbox_check", `CHECK (mode = 'SANDBOX'::"PaymentMode")`),
-  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_operation_key_format_check", `CHECK ("providerOperationKey"::text ~ '^toss-refund-v1-[0-9a-f]{64}$'::text)`),
-  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_provider_toss_check", `CHECK (provider = 'TOSS'::"PaymentProvider")`),
+  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_operation_key_format_check", `CHECK (provider = 'TOSS'::"PaymentProvider" AND "providerOperationKey"::text ~ '^toss-refund-v1-[0-9a-f]{64}$'::text OR provider = 'EXIMBAY'::"PaymentProvider" AND "providerOperationKey"::text ~ '^eximbay-refund-family-v1-[0-9a-f]{64}$'::text)`),
+  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_provider_toss_check", `CHECK (provider = ANY (ARRAY['TOSS'::"PaymentProvider", 'EXIMBAY'::"PaymentProvider"]))`),
   check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_wire_fingerprint_check", `CHECK ("wireRequestFingerprint"::text ~ '^[0-9a-f]{64}$'::text)`),
-  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_wire_version_check", `CHECK ("wireContractVersion"::text = 'refund-provider-toss-wire/v1'::text)`),
+  check("RefundExecutionProviderOperationBinding", "RefundProviderBinding_wire_version_check", `CHECK (provider = 'TOSS'::"PaymentProvider" AND "wireContractVersion"::text = 'refund-provider-toss-wire/v1'::text OR provider = 'EXIMBAY'::"PaymentProvider" AND "wireContractVersion"::text = 'refund-provider-eximbay-cancel-wire/v1'::text)`),
 ]);
 
 export const EXPECTED_PARTIAL_INDEX: PartialIndexInvariant = Object.freeze({

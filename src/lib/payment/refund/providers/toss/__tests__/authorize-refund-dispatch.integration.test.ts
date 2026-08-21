@@ -311,10 +311,10 @@ describe("authorizeTossRefundExecutionDispatch integration", () => {
         refundAttemptId: blocker.fixture.refundAttemptId,
         provider: PaymentProvider.TOSS,
         mode: PaymentMode.SANDBOX,
-        providerOperationKey: deriveTossRefundOperationKey(target.fixture.operationKey),
-        operationKeyAlgorithmVersion: TOSS_REFUND_OPERATION_KEY_VERSION,
+        providerOperationFamilyKey: deriveTossRefundOperationKey(target.fixture.operationKey),
+        operationFamilyKeyAlgorithmVersion: TOSS_REFUND_OPERATION_KEY_VERSION,
         wireContractVersion: TOSS_REFUND_WIRE_VERSION,
-        wireRequestFingerprint: "d".repeat(64),
+        operationFamilyFingerprint: "d".repeat(64),
         merchantAccountBindingId: "merchant-test",
         credentialGenerationBindingId: "generation-1",
       },
@@ -360,15 +360,23 @@ describe("authorizeTossRefundExecutionDispatch integration", () => {
     const firstSession = createNamedDbSession("e3b1lb_different_first");
     const secondSession = createNamedDbSession("e3b1lb_different_second");
     let calls = 0;
+    let markBothLookupsEntered: (() => void) | undefined;
+    const bothLookupsEntered = new Promise<void>((resolve) => {
+      markBothLookupsEntered = resolve;
+    });
     let releaseSecond: (() => void) | undefined;
     const secondMayReturn = new Promise<void>((resolve) => {
       releaseSecond = resolve;
     });
     const lookup: TossRefundLookupPort = async () => {
+      const index = calls;
       calls += 1;
-      if (calls === 1) {
+      if (calls === 2) markBothLookupsEntered?.();
+      await bothLookupsEntered;
+      if (index === 0) {
         return { kind: "response", body: JSON.stringify(eligibleBody(leased.fixture)) };
       }
+      if (index !== 1) throw new Error("Unexpected extra Toss lookup invocation.");
       await secondMayReturn;
       return {
         kind: "response",
@@ -384,14 +392,24 @@ describe("authorizeTossRefundExecutionDispatch integration", () => {
         secondSession,
         () => authorize(secondSession.client, authorizationInput(leased), ENABLED_ENV),
       );
+      await bothLookupsEntered;
+      expect(calls).toBe(2);
       const first = await queued.first;
       expect(first.ok && !first.replayed).toBe(true);
       releaseSecond?.();
       const second = await queued.second;
       expect(second.ok && second.replayed).toBe(true);
       expect(calls).toBe(2);
-      expect(await authorizationWriteCounts(leased.fixture)).toEqual([1, 1, 1, 1]);
+      const state = await durableState(leased.fixture);
+      expect([
+        state.bindings.length,
+        state.proofs.length,
+        state.dispatches.length,
+        state.command.dispatchAttempt,
+      ]).toEqual([1, 1, 1, 1]);
+      expect(state.proofs[0].totalAmount).toBe(leased.fixture.totalAmount);
     } finally {
+      markBothLookupsEntered?.();
       releaseSecond?.();
       await disconnectSessions(firstSession, secondSession);
     }
@@ -620,10 +638,10 @@ function createPartialBinding(fixture: DispatchFixture) {
       refundAttemptId: fixture.refundAttemptId,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
-      providerOperationKey: deriveTossRefundOperationKey(fixture.operationKey),
-      operationKeyAlgorithmVersion: TOSS_REFUND_OPERATION_KEY_VERSION,
+      providerOperationFamilyKey: deriveTossRefundOperationKey(fixture.operationKey),
+      operationFamilyKeyAlgorithmVersion: TOSS_REFUND_OPERATION_KEY_VERSION,
       wireContractVersion: TOSS_REFUND_WIRE_VERSION,
-      wireRequestFingerprint: "a".repeat(64),
+      operationFamilyFingerprint: "a".repeat(64),
       merchantAccountBindingId: "merchant-test",
       credentialGenerationBindingId: "generation-1",
     },

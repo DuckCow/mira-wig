@@ -27,6 +27,7 @@ import {
   REFUND_EXECUTION_TOSS_ELIGIBILITY_LOOKUP_ENABLED,
 } from "../execution-activation";
 import { authorizeRefundExecutionDispatch } from "../dispatch-authorization";
+import { fingerprintRefundRequest } from "../refund-request-fingerprint";
 import {
   persistFreshRefundExecutionObservation,
   replayRefundExecutionResult,
@@ -123,6 +124,39 @@ describe("fenced refund execution observation persistence", () => {
       {},
     );
     expectSuccess(freshShapedReplay, true, RefundExecutionEvidenceApplication.APPLIED);
+  });
+
+  it("uses the persisted physical dispatch key instead of RefundAttempt idempotency", async () => {
+    const prepared = await prepareContacted(fixtures);
+    const providerOperationKey = `physical-wire-${crypto.randomUUID()}`;
+    const requestFingerprint = fingerprintRefundRequest({
+      provider: PaymentProvider.MOCK,
+      mode: PaymentMode.SANDBOX,
+      providerPaymentReference: prepared.fixture.providerPaymentKey,
+      amountMinor: prepared.fixture.targetAmount,
+      currency: "KRW",
+      providerOperationKey,
+    });
+    await db.refundExecutionDispatchAttempt.update({
+      where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+      data: { providerOperationKey, requestFingerprint },
+    });
+
+    const result = await persistFreshRefundExecutionObservation(
+      db,
+      freshInput(prepared),
+      RESULT_ENV,
+    );
+
+    expectSuccess(result, false, RefundExecutionEvidenceApplication.APPLIED);
+    const evidence = await db.refundExecutionEvidence.findUniqueOrThrow({
+      where: { sourceDedupKey: `refund-result:${prepared.fixture.commandId}:1` },
+    });
+    const dispatch = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+      where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
+    });
+    expect(evidence.dispatchAttemptId).toBe(dispatch.id);
+    expect(evidence.authorizingLeaseGeneration).toBe(dispatch.leaseGeneration);
   });
 
   it("gates only absent-evidence fresh writes and fails invalid configuration closed", async () => {
