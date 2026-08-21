@@ -22,6 +22,8 @@ import {
   type DispatchFixture,
 } from "./refund-dispatch-fixture";
 
+const PRE_BOUNDARY_GUARD_SECONDS = 60;
+
 describe("refund operations read-only snapshots", () => {
   const fixtures: DispatchFixture[] = [];
 
@@ -255,9 +257,15 @@ describe("refund operations read-only snapshots", () => {
     await addContact(possible, secondsBefore(now, 30), false, 2);
     const overlap = await contactedFixture(fixtures, secondsBefore(now, 11 * 24 * 60 * 60));
     await makeManual(overlap, secondsBefore(now, 30));
-    const beforeWarning = await contactedFixture(fixtures, secondsBefore(now, 10 * 24 * 60 * 60 - 1));
+    const beforeWarning = await contactedFixture(
+      fixtures,
+      secondsBefore(now, 10 * 24 * 60 * 60 - PRE_BOUNDARY_GUARD_SECONDS),
+    );
     const warning = await contactedFixture(fixtures, secondsBefore(now, 10 * 24 * 60 * 60));
-    const beforeCritical = await contactedFixture(fixtures, secondsBefore(now, 12 * 24 * 60 * 60 - 1));
+    const beforeCritical = await contactedFixture(
+      fixtures,
+      secondsBefore(now, 12 * 24 * 60 * 60 - PRE_BOUNDARY_GUARD_SECONDS),
+    );
     const critical = await contactedFixture(fixtures, secondsBefore(now, 12 * 24 * 60 * 60));
     const beforeHard = await contactedFixture(fixtures, secondsBefore(now, 13 * 24 * 60 * 60 - 1));
     const hard = await contactedFixture(fixtures, secondsBefore(now, 13 * 24 * 60 * 60));
@@ -282,6 +290,8 @@ describe("refund operations read-only snapshots", () => {
     expect(byRef.get(beforeWarning.refundAttemptId)?.classifications).toEqual(["POSSIBLE_CONTACT"]);
     expect(byRef.get(warning.refundAttemptId)?.classifications).toContain("CONTACTED_DEADLINE_WARNING");
     expect(byRef.get(beforeCritical.refundAttemptId)?.classifications).toContain("CONTACTED_DEADLINE_WARNING");
+    expect(byRef.get(beforeCritical.refundAttemptId)?.classifications)
+      .not.toContain("CONTACTED_DEADLINE_CRITICAL");
     expect(byRef.get(critical.refundAttemptId)?.classifications).toContain("CONTACTED_DEADLINE_CRITICAL");
     expect(byRef.get(beforeHard.refundAttemptId)?.classifications).toContain("CONTACTED_DEADLINE_CRITICAL");
     expect(byRef.get(hard.refundAttemptId)?.classifications).toContain("CONTACTED_DEADLINE_CRITICAL");

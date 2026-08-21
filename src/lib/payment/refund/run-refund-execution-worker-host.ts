@@ -2,10 +2,14 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import {
   inspectRefundExecutionActivationInventory,
+  isRefundExecutionEximbayRoutingEnabled,
   isRefundExecutionWorkerEnabled,
   RefundExecutionActivationConfigError,
   type RefundExecutionActivationInventory,
 } from "./execution-activation";
+import {
+  parseEximbayRefundWorkerConfig,
+} from "./providers/eximbay/refund-worker-config";
 import {
   parseTossRefundCredentialConfig,
   TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
@@ -70,7 +74,7 @@ export type RefundExecutionWorkerHostDependencies<Database> = Readonly<{
   disconnectDatabase: (database: Database) => Promise<void>;
   createLifecycle?: () => RefundExecutionWorkerHostLifecycle;
   readHealthBacklog?: (database: Database) => Promise<unknown>;
-  createWorkerDependencies: () => RefundExecutionWorkerDependencies;
+  createWorkerDependencies: (env: HostEnv) => RefundExecutionWorkerDependencies;
   runProviderContactAdmission: <Result>(
     env: HostEnv,
     operation: () => Promise<Result>,
@@ -97,10 +101,7 @@ export const defaultRefundExecutionWorkerHostDependencies: RefundExecutionWorker
     disconnectDatabase: (database) => database.$disconnect(),
     readHealthBacklog: readRefundExecutionWorkerHealthBacklog,
     runProviderContactAdmission: runWithRefundProviderContactAdmission,
-    createWorkerDependencies: () => Object.freeze({
-      lookup: createTossRefundLookupPort({ fetchFn: globalThis.fetch }),
-      cancellation: createTossRefundCancellationPort({ fetchFn: globalThis.fetch }),
-    }),
+    createWorkerDependencies: createDefaultWorkerDependencies,
     runWorkerCycle: (database, workerOwner, dependencies, env, control) => (
       runRefundExecutionWorkerCycle(database, { workerOwner }, dependencies, env, control)
     ),
@@ -184,6 +185,8 @@ type HostConfiguration = Readonly<{
   ok: true;
   activation: RefundExecutionActivationInventory;
   credentialStatus: "ABSENT" | "CONFIGURED";
+  eximbayRoutingEnabled: boolean;
+  eximbayConfigStatus: "ABSENT" | "CONFIGURED";
 }> | Readonly<{
   ok: false;
   result: Extract<RefundExecutionWorkerHostResult, { ok: false }>;
@@ -209,15 +212,49 @@ function inspectHostConfiguration<Database>(
 ): HostConfiguration {
   try {
     const activation = dependencies.inspectActivation(env);
-    const credentialStatus = dependencies.inspectCredential(env);
-    if (credentialStatus === "CONFIG_INVALID"
-      || command.kind === "RUN_ONCE" && credentialStatus !== "CONFIGURED") {
+    const inspectedCredentialStatus = dependencies.inspectCredential(env);
+    const eximbayRoutingEnabled = isRefundExecutionEximbayRoutingEnabled(env);
+    const inspectedEximbayConfig = eximbayRoutingEnabled
+      ? parseEximbayRefundWorkerConfig(env)
+      : Object.freeze({ status: "ABSENT" } as const);
+    const credentialStatus = admittedStatus(inspectedCredentialStatus);
+    const eximbayConfigStatus = admittedStatus(inspectedEximbayConfig.status);
+    if (!credentialStatus || !eximbayConfigStatus) return configurationFailure();
+    if (hostConfigurationInvalid(
+      command, credentialStatus, eximbayRoutingEnabled, eximbayConfigStatus,
+    )) {
       return configurationFailure();
     }
-    return Object.freeze({ ok: true, activation, credentialStatus });
+    return Object.freeze({
+      ok: true,
+      activation,
+      credentialStatus,
+      eximbayRoutingEnabled,
+      eximbayConfigStatus,
+    });
   } catch {
     return configurationFailure();
   }
+}
+
+function hostConfigurationInvalid(
+  command: RefundExecutionWorkerHostCommand,
+  credentialStatus: AdmittedConfigStatus,
+  eximbayRoutingEnabled: boolean,
+  eximbayConfigStatus: AdmittedConfigStatus,
+): boolean {
+  if (eximbayRoutingEnabled && eximbayConfigStatus !== "CONFIGURED") return true;
+  return command.kind === "RUN_ONCE"
+    && credentialStatus !== "CONFIGURED"
+    && eximbayConfigStatus !== "CONFIGURED";
+}
+
+type AdmittedConfigStatus = "ABSENT" | "CONFIGURED";
+
+function admittedStatus(
+  status: TossRefundCredentialConfigState["status"],
+): AdmittedConfigStatus | null {
+  return status === "CONFIG_INVALID" ? null : status;
 }
 
 async function runWithOwnedDatabase<Database>(
@@ -388,7 +425,7 @@ async function runOneCycle<Database>(
   if (beforeAdapters.kind !== "CONTINUE") return admissionResult(beforeAdapters);
   let workerDependencies: RefundExecutionWorkerDependencies;
   try {
-    workerDependencies = dependencies.createWorkerDependencies();
+    workerDependencies = dependencies.createWorkerDependencies(env);
   } catch {
     return hostFailure("SYSTEMIC_FAILURE");
   }
@@ -472,6 +509,25 @@ function credentialStatus(env: HostEnv): TossRefundCredentialConfigState["status
     merchantAccountBinding: env[TOSS_REFUND_SANDBOX_MERCHANT_BINDING],
     credentialGenerationBinding: env[TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING],
   }).status;
+}
+
+function createDefaultWorkerDependencies(env: HostEnv): RefundExecutionWorkerDependencies {
+  const dependencies: RefundExecutionWorkerDependencies = {
+    lookup: createTossRefundLookupPort({ fetchFn: globalThis.fetch }),
+    cancellation: createTossRefundCancellationPort({ fetchFn: globalThis.fetch }),
+  };
+  if (!isRefundExecutionEximbayRoutingEnabled(env)) return Object.freeze(dependencies);
+  const eximbay = parseEximbayRefundWorkerConfig(env);
+  if (eximbay.status !== "CONFIGURED") throw new Error("EXIMBAY_REFUND_WORKER_CONFIG_REQUIRED");
+  return Object.freeze({
+    ...dependencies,
+    eximbay: Object.freeze({
+      config: eximbay.config,
+      retrieve: globalThis.fetch,
+      cancellation: globalThis.fetch,
+      lookup: globalThis.fetch,
+    }),
+  });
 }
 
 function createOwnedDatabase(env: HostEnv): PrismaClient {

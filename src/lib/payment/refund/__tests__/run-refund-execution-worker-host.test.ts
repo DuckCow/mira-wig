@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   isRefundExecutionWorkerEnabled,
+  REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED,
   REFUND_EXECUTION_WORKER_ENABLED,
   RefundExecutionActivationConfigError,
 } from "../execution-activation";
+import { EXIMBAY_SANDBOX_MID } from "@/lib/payment/providers/credentials";
+import {
+  EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
+  EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING,
+} from "../providers/eximbay/refund-worker-config";
 import {
   defaultRefundExecutionWorkerHostDependencies,
   runRefundExecutionWorkerHost,
@@ -20,6 +26,13 @@ import { ConfiguredTossRefundCredential } from "../providers/toss/refund-credent
 const CHECK = Object.freeze({ kind: "CHECK" as const });
 const RUN_ONCE = Object.freeze({ kind: "RUN_ONCE" as const, workerOwner: "refund-sbx:svc:rev:slot" });
 const CONFIGURED_ENV = Object.freeze({ REFUND_EXECUTION_WORKER_ENABLED: "ENABLED" });
+const EXIMBAY_CONFIGURED_ENV = Object.freeze({
+  ...CONFIGURED_ENV,
+  [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED]: "ENABLED",
+  [EXIMBAY_SANDBOX_MID]: "synthetic-mid",
+  [EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING]: "merchant-test-1",
+  [EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING]: "generation-test-1",
+});
 
 describe("runRefundExecutionWorkerHost early master boundary", () => {
   it("returns healthy disabled before every database, credential, adapter, and cycle boundary", async () => {
@@ -152,6 +165,41 @@ describe("runRefundExecutionWorkerHost check", () => {
 });
 
 describe("runRefundExecutionWorkerHost run-once", () => {
+  it("requires Eximbay configuration only when its separate route is enabled", async () => {
+    const absent = hostFixture({ credential: "ABSENT", poisonDatabase: true });
+    expect(await runRefundExecutionWorkerHost(RUN_ONCE, {
+      ...CONFIGURED_ENV,
+      [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED]: "ENABLED",
+    }, absent.dependencies)).toEqual({ ok: false, code: "CONFIG_INVALID" });
+    expect(absent.calls.createDatabase).toBe(0);
+
+    const configured = hostFixture({ credential: "ABSENT" });
+    expect(await runRefundExecutionWorkerHost(
+      RUN_ONCE,
+      EXIMBAY_CONFIGURED_ENV,
+      configured.dependencies,
+    )).toMatchObject({ ok: true, code: "CYCLE_COMPLETE" });
+    expect(configured.calls.adapters).toBe(1);
+    expect(configured.calls.cycle).toBe(1);
+  });
+
+  it("keeps default Eximbay transports absent and unreachable while its gate is off", () => {
+    const dormant = defaultRefundExecutionWorkerHostDependencies.createWorkerDependencies({});
+    expect(dormant.eximbay).toBeUndefined();
+
+    const configured = defaultRefundExecutionWorkerHostDependencies
+      .createWorkerDependencies(EXIMBAY_CONFIGURED_ENV);
+    expect(configured.eximbay).toMatchObject({
+      config: {
+        mode: "SANDBOX",
+        mid: "synthetic-mid",
+        merchantAccountBindingId: "merchant-test-1",
+        credentialGenerationBindingId: "generation-test-1",
+      },
+    });
+    expect(JSON.stringify({ dormant: dormant.eximbay })).not.toContain("synthetic-mid");
+  });
+
   it("maps a busy distributed admission to a zero-work overlap skip", async () => {
     const fixture = hostFixture({ admissionOutcome: "BUSY" });
 

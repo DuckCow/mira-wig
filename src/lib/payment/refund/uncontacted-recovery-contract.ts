@@ -32,7 +32,11 @@ export type ReclaimUncontactedRefundExecutionFailure = Readonly<{
 }>;
 
 export type ReclaimUncontactedRefundExecutionResult =
-  | Readonly<{ ok: true; lease: RefundExecutionLeaseHandle }>
+  | Readonly<{
+      ok: true;
+      lease: RefundExecutionLeaseHandle;
+      recoveredState: "ORDINAL_ZERO" | "AUTHORIZED_EXIMBAY_R1";
+    }>
   | ReclaimUncontactedRefundExecutionFailure;
 
 export type NormalizeReclaimUncontactedRefundExecutionInputResult =

@@ -42,6 +42,18 @@ describe("refund execution worker allocation", () => {
     expect(REFUND_EXECUTION_WORKER_BATCH_SIZE).toBe(6);
     expect(REFUND_EXECUTION_WORKER_ROUTE_ATTEMPT_BOUND).toBe(18);
   });
+
+  it("preserves durable provider identity and rejects conflicting duplicate identity", () => {
+    const eximbay = { commandId: "eximbay", candidateClass: "READY" as const, provider: "EXIMBAY" as const };
+    expect(mergeRefundExecutionWorkerCandidates({
+      CONTACTED: [], UNCONTACTED: [], READY: [eximbay],
+    }).READY).toEqual([eximbay]);
+    expect(() => mergeRefundExecutionWorkerCandidates({
+      CONTACTED: [{ ...eximbay, candidateClass: "CONTACTED", provider: "TOSS" }],
+      UNCONTACTED: [],
+      READY: [eximbay],
+    })).toThrow("REFUND_EXECUTION_WORKER_PROVIDER_CONFLICT");
+  });
 });
 
 function makeQueues(
@@ -61,5 +73,5 @@ function makeCandidates(length: number, candidateClass: RefundExecutionWorkerCan
 }
 
 function candidate(commandId: string, candidateClass: RefundExecutionWorkerCandidateClass) {
-  return { commandId, candidateClass } as const;
+  return { commandId, candidateClass, provider: "TOSS" } as const;
 }

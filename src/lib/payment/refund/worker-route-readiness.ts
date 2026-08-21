@@ -1,5 +1,6 @@
 import {
   isRefundExecutionDispatchAuthorizationEnabled,
+  isRefundExecutionEximbayRoutingEnabled,
   isRefundExecutionLeaseEnabled,
   isRefundExecutionObservationApplicationEnabled,
   isRefundExecutionTossAuthorizationEnabled,
@@ -8,9 +9,11 @@ import {
   isRefundExecutionTossRecoveryLookupEnabled,
   isRefundExecutionTossRecoveryRecontactEnabled,
   isRefundExecutionUncontactedRecoveryEnabled,
+  isRefundExecutionWorkerEnabled,
 } from "./execution-activation";
 type ActivationEnv = Readonly<Record<string, string | undefined>>;
 type CredentialStatus = "ABSENT" | "CONFIGURED";
+type EximbayConfigStatus = "ABSENT" | "CONFIGURED";
 
 export type RefundExecutionWorkerRouteReadiness = Readonly<{
   READY: boolean;
@@ -73,5 +76,51 @@ export function contactedRefundExecutionWorkerLookupRouteIsReady(
     isRefundExecutionTossRecoveryLookupEnabled(env),
     isRefundExecutionObservationApplicationEnabled(env),
     credentialStatus === "CONFIGURED",
+  ].every(Boolean);
+}
+
+export function readyEximbayRefundExecutionWorkerRouteIsReady(
+  env: ActivationEnv,
+  configStatus: EximbayConfigStatus,
+  dependenciesAvailable: boolean,
+): boolean {
+  return [
+    isRefundExecutionWorkerEnabled(env),
+    isRefundExecutionEximbayRoutingEnabled(env),
+    isRefundExecutionLeaseEnabled(env),
+    isRefundExecutionDispatchAuthorizationEnabled(env),
+    isRefundExecutionObservationApplicationEnabled(env),
+    configStatus === "CONFIGURED",
+    dependenciesAvailable,
+  ].every(Boolean);
+}
+
+export function uncontactedEximbayRefundExecutionWorkerRouteIsReady(
+  env: ActivationEnv,
+  configStatus: EximbayConfigStatus,
+  dependenciesAvailable: boolean,
+): boolean {
+  return [
+    isRefundExecutionWorkerEnabled(env),
+    isRefundExecutionEximbayRoutingEnabled(env),
+    isRefundExecutionUncontactedRecoveryEnabled(env),
+    isRefundExecutionDispatchAuthorizationEnabled(env),
+    isRefundExecutionObservationApplicationEnabled(env),
+    configStatus === "CONFIGURED",
+    dependenciesAvailable,
+  ].every(Boolean);
+}
+
+export function contactedEximbayRefundExecutionWorkerRouteIsReady(
+  env: ActivationEnv,
+  configStatus: EximbayConfigStatus,
+  dependenciesAvailable: boolean,
+): boolean {
+  return [
+    isRefundExecutionWorkerEnabled(env),
+    isRefundExecutionEximbayRoutingEnabled(env),
+    isRefundExecutionObservationApplicationEnabled(env),
+    configStatus === "CONFIGURED",
+    dependenciesAvailable,
   ].every(Boolean);
 }

@@ -7,6 +7,7 @@ import {
   isRefundExecutionLeaseReleaseEnabled,
   isRefundExecutionUncontactedRecoveryEnabled,
   isRefundExecutionWorkerEnabled,
+  isRefundExecutionEximbayRoutingEnabled,
   isRefundExecutionDispatchAuthorizationEnabled,
   isRefundExecutionObservationApplicationEnabled,
   isRefundExecutionTossAuthorizationEnabled,
@@ -19,6 +20,7 @@ import {
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
   REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
   REFUND_EXECUTION_WORKER_ENABLED,
+  REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED,
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
   REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
   REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
@@ -47,6 +49,7 @@ describe("refund execution activation inventory", () => {
     REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
     REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
     REFUND_EXECUTION_WORKER_ENABLED,
+    REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED,
     REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
     REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
     REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED,
@@ -97,6 +100,7 @@ describe("refund execution activation inventory", () => {
 
 describe.each([
   [REFUND_EXECUTION_WORKER_ENABLED, isRefundExecutionWorkerEnabled],
+  [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED, isRefundExecutionEximbayRoutingEnabled],
   [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED, isRefundExecutionUncontactedRecoveryEnabled],
   [REFUND_EXECUTION_TOSS_AUTHORIZATION_ENABLED, isRefundExecutionTossAuthorizationEnabled],
   [REFUND_EXECUTION_TOSS_CONTACT_ENABLED, isRefundExecutionTossContactEnabled],
@@ -127,6 +131,14 @@ describe(REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED, () => {
   it("is independent of ordinary lease activation", () => {
     expect(isRefundExecutionUncontactedRecoveryEnabled({
       [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED",
+    })).toBe(false);
+  });
+});
+
+describe(REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED, () => {
+  it("is independent of the generic worker master", () => {
+    expect(isRefundExecutionEximbayRoutingEnabled({
+      [REFUND_EXECUTION_WORKER_ENABLED]: "ENABLED",
     })).toBe(false);
   });
 });

@@ -136,13 +136,16 @@ describe("Eximbay EX1 disabled architecture", () => {
       .toThrowError(expect.objectContaining({ code: "PROVIDER_NOT_ENABLED" }));
   });
 
-  it("preserves exact Toss-only refund runtime authority", () => {
+  it("preserves Toss-only runtime activation while the Eximbay worker route remains separately gated", () => {
     const authority = source("infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json");
     const eligibility = source("src/lib/payment/refund/worker-eligibility.ts");
+    const activation = source("src/lib/payment/refund/execution-activation.ts");
 
     expect(authority).toContain('"classification": "TOSS_ONLY_EXPLICIT"');
-    expect(eligibility.match(/provider: PaymentProvider\.TOSS/gu)).toHaveLength(4);
-    expect(eligibility).not.toContain("PaymentProvider.EXIMBAY");
+    expect(eligibility).toContain("const TOSS_ONLY");
+    expect(eligibility).toContain("PaymentProvider.EXIMBAY");
+    expect(eligibility).toContain("provider: PaymentProvider.TOSS");
+    expect(activation).toContain('REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED');
   });
 });
 

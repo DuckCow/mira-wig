@@ -4,10 +4,14 @@ export const REFUND_EXECUTION_WORKER_ROUTE_ATTEMPT_BOUND =
   REFUND_EXECUTION_WORKER_BATCH_SIZE * REFUND_EXECUTION_WORKER_CLASS_COUNT;
 
 export type RefundExecutionWorkerCandidateClass = "CONTACTED" | "UNCONTACTED" | "READY";
+export type RefundExecutionWorkerProvider =
+  | "TOSS"
+  | "EXIMBAY";
 
 export type RefundExecutionWorkerCandidate = Readonly<{
   commandId: string;
   candidateClass: RefundExecutionWorkerCandidateClass;
+  provider: RefundExecutionWorkerProvider;
 }>;
 
 export type RefundExecutionWorkerCandidateQueues = Readonly<{
@@ -50,7 +54,7 @@ export function reserveRefundExecutionWorkerCapacity(
 export function mergeRefundExecutionWorkerCandidates(
   candidates: RefundExecutionWorkerCandidateQueues,
 ): RefundExecutionWorkerCandidateQueues {
-  const seen = new Set<string>();
+  const seen = new Map<string, RefundExecutionWorkerProvider>();
   return Object.freeze({
     CONTACTED: uniqueCandidates(candidates.CONTACTED, "CONTACTED", seen),
     UNCONTACTED: uniqueCandidates(candidates.UNCONTACTED, "UNCONTACTED", seen),
@@ -65,13 +69,23 @@ export function workerCandidateClassOrder(): readonly RefundExecutionWorkerCandi
 function uniqueCandidates(
   candidates: readonly RefundExecutionWorkerCandidate[],
   candidateClass: RefundExecutionWorkerCandidateClass,
-  seen: Set<string>,
+  seen: Map<string, RefundExecutionWorkerProvider>,
 ): readonly RefundExecutionWorkerCandidate[] {
   const unique: RefundExecutionWorkerCandidate[] = [];
   for (const candidate of candidates) {
-    if (seen.has(candidate.commandId)) continue;
-    seen.add(candidate.commandId);
-    unique.push(Object.freeze({ commandId: candidate.commandId, candidateClass }));
+    const seenProvider = seen.get(candidate.commandId);
+    if (seenProvider !== undefined) {
+      if (seenProvider !== candidate.provider) {
+        throw new Error("REFUND_EXECUTION_WORKER_PROVIDER_CONFLICT");
+      }
+      continue;
+    }
+    seen.set(candidate.commandId, candidate.provider);
+    unique.push(Object.freeze({
+      commandId: candidate.commandId,
+      candidateClass,
+      provider: candidate.provider,
+    }));
   }
   return Object.freeze(unique);
 }

@@ -7,10 +7,24 @@ import {
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
+import { EXIMBAY_SANDBOX_MID } from "@/lib/payment/providers/credentials";
 import { encodeEximbayAmount } from "@/lib/payment/providers/eximbay/amount";
 import { isRecord } from "@/lib/payment/providers/eximbay/validation";
 import { acquireRefundExecutionLease, type RefundExecutionLeaseHandle } from "../../../acquire-lease";
-import { REFUND_EXECUTION_LEASE_ENABLED } from "../../../execution-activation";
+import { reclaimUncontactedRefundExecution } from "../../../reclaim-uncontacted-execution";
+import {
+  REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
+  REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED,
+  REFUND_EXECUTION_LEASE_ENABLED,
+  REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED,
+  REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
+  REFUND_EXECUTION_WORKER_ENABLED,
+} from "../../../execution-activation";
+import {
+  runRefundExecutionWorkerCycle,
+  type RefundExecutionWorkerDependencies,
+} from "../../../run-refund-execution-worker-cycle";
+import { selectRefundExecutionWorkerCandidates } from "../../../worker-selector";
 import {
   cleanupDispatchFixtures,
   createDispatchFixture,
@@ -19,6 +33,10 @@ import {
 import { createEximbayFirstRefundDispatchAuthorizer } from "../authorize-first-dispatch";
 import { createEximbayRefundContactExecutor } from "../execute-contact";
 import { createEximbayRefundReconciler } from "../reconcile-refund";
+import {
+  EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
+  EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING,
+} from "../refund-worker-config";
 
 const LEASE_ENV = Object.freeze({ [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" });
 const CONFIG = Object.freeze({
@@ -27,13 +45,29 @@ const CONFIG = Object.freeze({
   merchantAccountBindingId: "merchant-test-1",
   credentialGenerationBindingId: "generation-test-1",
 });
+const WORKER_EXIMBAY_ENV = Object.freeze({
+  [REFUND_EXECUTION_WORKER_ENABLED]: "ENABLED",
+  [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED]: "ENABLED",
+  [REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED]: "ENABLED",
+  [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "ENABLED",
+  [EXIMBAY_SANDBOX_MID]: CONFIG.mid,
+  [EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING]: CONFIG.merchantAccountBindingId,
+  [EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING]:
+    CONFIG.credentialGenerationBindingId,
+});
 
 type LeasedFixture = Readonly<{
   fixture: DispatchFixture;
   lease: RefundExecutionLeaseHandle;
   providerOrderId: string;
   r1RefundId: string;
+  initialRetrieveCount: number;
 }>;
+type ReadyWorkerCandidate = Readonly<{
+  fixture: DispatchFixture;
+  providerOrderId: string;
+}>;
+type WorkerCallCounts = { toss: number; retrieve: number; cancel: number; lookup: number };
 
 describe("dormant Eximbay cancel and refund-id recovery", () => {
   const fixtures: DispatchFixture[] = [];
@@ -52,6 +86,326 @@ describe("dormant Eximbay cancel and refund-id recovery", () => {
     await cleanupObservations(fixtures);
     await cleanupDispatchFixtures(...fixtures);
     fixtures.length = 0;
+  });
+
+  it("routes a synthetic READY candidate through generic lease, preflight, R1, and contact", async () => {
+    const candidate = await readyEximbayCandidate(fixtures, 1_234, 1_234);
+    const calls = { toss: 0, retrieve: 0, cancel: 0, lookup: 0 };
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-ready-worker" },
+      workerDependencies(candidate, calls, {
+        cancel: async () => {
+          calls.cancel += 1;
+          const dispatch = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+            where: { commandId_ordinal: { commandId: candidate.fixture.commandId, ordinal: 1 } },
+          });
+          expect(dispatch.state).toBe("CONTACT_MAY_HAVE_OCCURRED");
+          return cancelSuccessForCandidate(candidate, dispatch.providerOperationKey, "worker-r1", 0);
+        },
+      }),
+      { ...WORKER_EXIMBAY_ENV, [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      cycle: {
+        readySelected: 1,
+        succeededCount: 1,
+        providerLookupCount: 1,
+        providerCancellationCount: 1,
+      },
+    });
+    expect(calls).toEqual({ toss: 0, retrieve: 1, cancel: 1, lookup: 0 });
+    expect((await db.refundExecutionCommand.findUniqueOrThrow({
+      where: { id: candidate.fixture.commandId },
+    })).status).toBe("DONE");
+  });
+
+  it("classifies uncertain R1 contact as temporary and cannot blindly contact it again", async () => {
+    const candidate = await readyEximbayCandidate(fixtures, 1_234, 1_234);
+    const calls = { toss: 0, retrieve: 0, cancel: 0, lookup: 0 };
+    const dependencies = workerDependencies(candidate, calls, {
+      cancel: () => {
+        calls.cancel += 1;
+        return Promise.reject(new Error("synthetic response loss"));
+      },
+    });
+    const env = { ...WORKER_EXIMBAY_ENV, [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" };
+
+    const first = await runRefundExecutionWorkerCycle(
+      db, { workerOwner: "eximbay-uncertain-worker" }, dependencies, env,
+    );
+    const immediateReplay = await runRefundExecutionWorkerCycle(
+      db, { workerOwner: "eximbay-immediate-replay" }, dependencies, env,
+    );
+
+    expect(first).toMatchObject({
+      ok: true,
+      cycle: { readySelected: 1, temporaryCount: 1, providerCancellationCount: 1 },
+    });
+    expect(immediateReplay).toMatchObject({
+      ok: true,
+      cycle: { selectedCount: 0, providerCancellationCount: 0 },
+    });
+    expect(calls.cancel).toBe(1);
+    expect((await db.refundExecutionCommand.findUniqueOrThrow({
+      where: { id: candidate.fixture.commandId },
+    })).status).toBe("WAITING_EVIDENCE");
+  });
+
+  it("reclaims Eximbay ordinal-zero UNCONTACTED work without changing its logical identity", async () => {
+    const candidate = await readyEximbayCandidate(fixtures, 1_234, 1_234);
+    const abandoned = await acquireRefundExecutionLease(db, {
+      commandId: candidate.fixture.commandId,
+      leaseOwner: "eximbay-abandoned-worker",
+    }, LEASE_ENV);
+    if (!abandoned.ok) throw new Error(abandoned.code);
+    await db.refundExecutionCommand.update({
+      where: { id: candidate.fixture.commandId },
+      data: { leaseUntil: new Date("2000-01-01T00:00:00.000Z") },
+    });
+    const calls = { toss: 0, retrieve: 0, cancel: 0, lookup: 0 };
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-uncontacted-worker" },
+      workerDependencies(candidate, calls, {
+        cancel: async () => {
+          calls.cancel += 1;
+          const dispatch = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+            where: { commandId_ordinal: { commandId: candidate.fixture.commandId, ordinal: 1 } },
+          });
+          return cancelSuccessForCandidate(candidate, dispatch.providerOperationKey, "worker-u1", 0);
+        },
+      }),
+      { ...WORKER_EXIMBAY_ENV, [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED]: "ENABLED" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      cycle: { uncontactedSelected: 1, succeededCount: 1 },
+    });
+    const dispatches = await db.refundExecutionDispatchAttempt.findMany({
+      where: { commandId: candidate.fixture.commandId },
+    });
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0].leaseGeneration).toBe(abandoned.lease.leaseGeneration + 1);
+    expect(calls).toEqual({ toss: 0, retrieve: 1, cancel: 1, lookup: 0 });
+  });
+
+  it("re-enters an expired authorized Eximbay R1 after process loss without new preflight or dispatch", async () => {
+    const leased = await readyR1(fixtures, 1_234, 1_234);
+    const before = await db.refundExecutionDispatchAttempt.findMany({
+      where: { commandId: leased.fixture.commandId },
+    });
+    expect(leased.initialRetrieveCount).toBe(1);
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({
+      ordinal: 1,
+      provider: "EXIMBAY",
+      mode: "SANDBOX",
+      state: "AUTHORIZED",
+      contactMarkedAt: null,
+    });
+    expect((await selectRefundExecutionWorkerCandidates(
+      db,
+      { eximbayEnabled: true },
+    )).UNCONTACTED).toEqual([]);
+
+    await expireCommandLease(leased.fixture.commandId);
+    expect(Object.values(await selectRefundExecutionWorkerCandidates(db)).flat()
+      .some((candidate) => candidate.commandId === leased.fixture.commandId)).toBe(false);
+    expect((await selectRefundExecutionWorkerCandidates(
+      db,
+      { eximbayEnabled: true },
+    )).UNCONTACTED).toContainEqual({
+      commandId: leased.fixture.commandId,
+      candidateClass: "UNCONTACTED",
+      provider: "EXIMBAY",
+    });
+
+    const candidate = { fixture: leased.fixture, providerOrderId: leased.providerOrderId };
+    const calls = { toss: 0, retrieve: 0, cancel: 0, lookup: 0 };
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-authorized-r1-reentry" },
+      workerDependencies(candidate, calls, {
+        cancel: async () => {
+          calls.cancel += 1;
+          const [command, dispatch] = await Promise.all([
+            db.refundExecutionCommand.findUniqueOrThrow({
+              where: { id: leased.fixture.commandId },
+            }),
+            db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+              where: { commandId_ordinal: { commandId: leased.fixture.commandId, ordinal: 1 } },
+            }),
+          ]);
+          expect(command.leaseGeneration).toBe(leased.lease.leaseGeneration + 1);
+          expect(dispatch).toMatchObject({
+            id: before[0].id,
+            providerOperationKey: before[0].providerOperationKey,
+            requestFingerprint: before[0].requestFingerprint,
+            state: "CONTACT_MAY_HAVE_OCCURRED",
+          });
+          return cancelSuccessForCandidate(candidate, dispatch.providerOperationKey, "recovered-r1", 0);
+        },
+      }),
+      { ...WORKER_EXIMBAY_ENV, [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED]: "ENABLED" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      cycle: {
+        uncontactedSelected: 1,
+        succeededCount: 1,
+        providerLookupCount: 0,
+        providerCancellationCount: 1,
+      },
+    });
+    expect(calls).toEqual({ toss: 0, retrieve: 0, cancel: 1, lookup: 0 });
+    const after = await db.refundExecutionDispatchAttempt.findMany({
+      where: { commandId: leased.fixture.commandId },
+    });
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({
+      id: before[0].id,
+      ordinal: 1,
+      providerOperationKey: before[0].providerOperationKey,
+      requestFingerprint: before[0].requestFingerprint,
+    });
+  });
+
+  it("blocks the stale R1 lease token after authorized re-entry and accepts only the fresh fence", async () => {
+    const leased = await readyR1(fixtures, 1_234, 1_234);
+    await expireCommandLease(leased.fixture.commandId);
+    const recovered = await reclaimUncontactedRefundExecution(db, {
+      commandId: leased.fixture.commandId,
+      recoveryOwner: "eximbay-authorized-r1-fence",
+    }, { [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED]: "ENABLED" });
+    if (!recovered.ok) throw new Error(recovered.code);
+    expect(recovered.recoveredState).toBe("AUTHORIZED_EXIMBAY_R1");
+    expect(recovered.lease.leaseGeneration).toBe(leased.lease.leaseGeneration + 1);
+
+    const candidate = { fixture: leased.fixture, providerOrderId: leased.providerOrderId };
+    let cancelCalls = 0;
+    const contact = createEximbayRefundContactExecutor({
+      config: CONFIG,
+      cancel: () => {
+        cancelCalls += 1;
+        return Promise.resolve(cancelSuccessForCandidate(
+          candidate,
+          leased.r1RefundId,
+          "fresh-fence-r1",
+          0,
+        ));
+      },
+    });
+    expect(await contact(db, contactInput(leased.lease, 1))).toMatchObject({
+      ok: false,
+      code: "REFUND_LEDGER_INCONSISTENT",
+    });
+    expect(cancelCalls).toBe(0);
+    expect(await contact(db, contactInput(recovered.lease, 1))).toMatchObject({
+      ok: true,
+      state: "SUCCEEDED",
+    });
+    expect(cancelCalls).toBe(1);
+  });
+
+  it("keeps an uncertain recovered R1 in CONTACTED ownership with no same-cycle recancel", async () => {
+    const leased = await readyR1(fixtures, 1_234, 1_234);
+    await expireCommandLease(leased.fixture.commandId);
+    const candidate = { fixture: leased.fixture, providerOrderId: leased.providerOrderId };
+    const calls = { toss: 0, retrieve: 0, cancel: 0, lookup: 0 };
+    const dependencies = workerDependencies(candidate, calls, {
+      cancel: () => {
+        calls.cancel += 1;
+        return Promise.reject(new Error("synthetic recovered R1 response loss"));
+      },
+    });
+    const env = {
+      ...WORKER_EXIMBAY_ENV,
+      [REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED]: "ENABLED",
+    };
+    const first = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-recovered-r1-uncertain" },
+      dependencies,
+      env,
+    );
+    const immediate = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-recovered-r1-immediate" },
+      dependencies,
+      env,
+    );
+    expect(first).toMatchObject({
+      ok: true,
+      cycle: { uncontactedSelected: 1, temporaryCount: 1, providerCancellationCount: 1 },
+    });
+    expect(immediate).toMatchObject({
+      ok: true,
+      cycle: { selectedCount: 0, providerCancellationCount: 0 },
+    });
+    expect(calls).toEqual({ toss: 0, retrieve: 0, cancel: 1, lookup: 0 });
+    await makeLookupDue(leased.fixture, 1);
+    const due = await selectRefundExecutionWorkerCandidates(db, { eximbayEnabled: true });
+    expect(due.UNCONTACTED.some((row) => row.commandId === leased.fixture.commandId)).toBe(false);
+    expect(due.CONTACTED).toContainEqual({
+      commandId: leased.fixture.commandId,
+      candidateClass: "CONTACTED",
+      provider: "EXIMBAY",
+    });
+  });
+
+  it("continues only exact reconciler-issued R2 authority and never creates R3", async () => {
+    const leased = await readyR1(fixtures, 1_234, 1_234);
+    await createEximbayRefundContactExecutor({
+      config: CONFIG,
+      cancel: () => Promise.reject(new Error("synthetic R1 response loss")),
+    })(db, contactInput(leased.lease, 1));
+    await makeLookupDue(leased.fixture, 1);
+    const candidate = {
+      fixture: leased.fixture,
+      providerOrderId: leased.providerOrderId,
+    };
+    const calls = { toss: 0, retrieve: 0, cancel: 0, lookup: 0 };
+    const result = await runRefundExecutionWorkerCycle(
+      db,
+      { workerOwner: "eximbay-r2-worker" },
+      workerDependencies(candidate, calls, {
+        lookup: () => {
+          calls.lookup += 1;
+          return Promise.resolve(refundLookupNone(leased));
+        },
+        cancel: async () => {
+          calls.cancel += 1;
+          const dispatch = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+            where: { commandId_ordinal: { commandId: leased.fixture.commandId, ordinal: 2 } },
+          });
+          expect(dispatch.state).toBe("CONTACT_MAY_HAVE_OCCURRED");
+          return cancelSuccessForCandidate(candidate, dispatch.providerOperationKey, "worker-r2", 0);
+        },
+      }),
+      WORKER_EXIMBAY_ENV,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      cycle: {
+        contactedSelected: 1,
+        succeededCount: 1,
+        providerLookupCount: 1,
+        providerCancellationCount: 1,
+      },
+    });
+    const dispatches = await db.refundExecutionDispatchAttempt.findMany({
+      where: { commandId: leased.fixture.commandId },
+      orderBy: { ordinal: "asc" },
+    });
+    expect(dispatches).toHaveLength(2);
+    expect(dispatches[1].providerOperationKey).not.toBe(dispatches[0].providerOperationKey);
+    expect(calls).toEqual({ toss: 0, retrieve: 0, cancel: 1, lookup: 1 });
   });
 
   it("commits one contact marker before transport and applies exact cancel success", async () => {
@@ -705,6 +1059,44 @@ async function readyR1(
   totalAmount: number,
   targetAmount: number,
 ): Promise<LeasedFixture> {
+  const candidate = await readyEximbayCandidate(fixtures, totalAmount, targetAmount);
+  const { fixture, providerOrderId } = candidate;
+  const leased = await acquireRefundExecutionLease(db, {
+    commandId: fixture.commandId,
+    leaseOwner: "eximbay-cancel-test",
+  }, LEASE_ENV);
+  if (!leased.ok) throw new Error(leased.code);
+  let initialRetrieveCount = 0;
+  const authorizer = createEximbayFirstRefundDispatchAuthorizer({
+    config: CONFIG,
+    retrieve: () => {
+      initialRetrieveCount += 1;
+      return Promise.resolve(preflightResponse(fixture, providerOrderId, totalAmount));
+    },
+  });
+  const authorized = await authorizer(db, {
+    commandId: leased.lease.commandId,
+    leaseGeneration: leased.lease.leaseGeneration,
+    leaseToken: leased.lease.leaseToken,
+  });
+  if (!authorized.ok) throw new Error(authorized.code);
+  const r1 = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
+    where: { commandId_ordinal: { commandId: fixture.commandId, ordinal: 1 } },
+  });
+  return {
+    fixture,
+    lease: leased.lease,
+    providerOrderId,
+    r1RefundId: r1.providerOperationKey,
+    initialRetrieveCount,
+  };
+}
+
+async function readyEximbayCandidate(
+  fixtures: DispatchFixture[],
+  totalAmount: number,
+  targetAmount: number,
+): Promise<ReadyWorkerCandidate> {
   const fixture = await createDispatchFixture({ totalAmount, targetAmount });
   fixtures.push(fixture);
   await seedEximbayPayment(fixture);
@@ -717,30 +1109,46 @@ async function readyR1(
   ]);
   const payment = await db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } });
   if (!payment.providerOrderId) throw new Error("Missing provider order id.");
-  const providerOrderId = payment.providerOrderId;
-  const leased = await acquireRefundExecutionLease(db, {
-    commandId: fixture.commandId,
-    leaseOwner: "eximbay-cancel-test",
-  }, LEASE_ENV);
-  if (!leased.ok) throw new Error(leased.code);
-  const authorizer = createEximbayFirstRefundDispatchAuthorizer({
-    config: CONFIG,
-    retrieve: () => Promise.resolve(preflightResponse(
-      fixture,
-      providerOrderId,
-      totalAmount,
-    )),
+  return Object.freeze({ fixture, providerOrderId: payment.providerOrderId });
+}
+
+function workerDependencies(
+  candidate: ReadyWorkerCandidate,
+  calls: WorkerCallCounts,
+  overrides: Readonly<{
+    cancel?: NonNullable<RefundExecutionWorkerDependencies["eximbay"]>["cancellation"];
+    lookup?: NonNullable<RefundExecutionWorkerDependencies["eximbay"]>["lookup"];
+  }> = Object.freeze({}),
+): RefundExecutionWorkerDependencies {
+  return Object.freeze({
+    lookup: () => {
+      calls.toss += 1;
+      return Promise.reject(new Error("Toss lookup must remain unreachable"));
+    },
+    cancellation: () => {
+      calls.toss += 1;
+      return Promise.reject(new Error("Toss cancellation must remain unreachable"));
+    },
+    eximbay: Object.freeze({
+      config: CONFIG,
+      retrieve: () => {
+        calls.retrieve += 1;
+        return Promise.resolve(preflightResponse(
+          candidate.fixture,
+          candidate.providerOrderId,
+          candidate.fixture.totalAmount,
+        ));
+      },
+      cancellation: overrides.cancel ?? (() => {
+        calls.cancel += 1;
+        return Promise.reject(new Error("Unexpected Eximbay cancellation"));
+      }),
+      lookup: overrides.lookup ?? (() => {
+        calls.lookup += 1;
+        return Promise.reject(new Error("Unexpected Eximbay lookup"));
+      }),
+    }),
   });
-  const authorized = await authorizer(db, {
-    commandId: leased.lease.commandId,
-    leaseGeneration: leased.lease.leaseGeneration,
-    leaseToken: leased.lease.leaseToken,
-  });
-  if (!authorized.ok) throw new Error(authorized.code);
-  const r1 = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
-    where: { commandId_ordinal: { commandId: fixture.commandId, ordinal: 1 } },
-  });
-  return { fixture, lease: leased.lease, providerOrderId, r1RefundId: r1.providerOperationKey };
 }
 
 async function authorizeR2AfterNone(leased: LeasedFixture) {
@@ -840,6 +1248,34 @@ function cancelSuccess(
   });
 }
 
+function cancelSuccessForCandidate(
+  candidate: ReadyWorkerCandidate,
+  refundId: string,
+  providerRefundId: string,
+  resultingBalance: number,
+): Response {
+  return jsonResponse({
+    rescode: "0000",
+    resmsg: "Success.",
+    mid: CONFIG.mid,
+    refund: {
+      refund_amount: encodeEximbayAmount("USD", candidate.fixture.targetAmount),
+      refund_id: refundId,
+      refund_date: "20260821112233",
+      refund_transaction_id: providerRefundId,
+    },
+    payment: {
+      order_id: candidate.providerOrderId,
+      currency: "USD",
+      amount: encodeEximbayAmount("USD", candidate.fixture.totalAmount),
+      transaction_id: candidate.fixture.providerPaymentKey,
+      balance: resultingBalance === 0
+        ? "0.00"
+        : encodeEximbayAmount("USD", resultingBalance),
+    },
+  });
+}
+
 function refundLookupNone(leased: LeasedFixture, balance?: string): Response {
   return jsonResponse({
     rescode: "0000",
@@ -896,6 +1332,13 @@ function contactInput(lease: RefundExecutionLeaseHandle, dispatchAttempt: 1 | 2)
     leaseGeneration: lease.leaseGeneration,
     leaseToken: lease.leaseToken,
   };
+}
+
+async function expireCommandLease(commandId: string): Promise<void> {
+  await db.refundExecutionCommand.update({
+    where: { id: commandId },
+    data: { leaseUntil: new Date("2000-01-01T00:00:00.000Z") },
+  });
 }
 
 async function makeLookupDue(fixture: DispatchFixture, ordinal: 1 | 2): Promise<void> {
