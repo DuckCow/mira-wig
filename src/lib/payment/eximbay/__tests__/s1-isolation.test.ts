@@ -123,7 +123,7 @@ describe("EX2B2-S1 source isolation", () => {
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-invocation.ts"),
-      [],
+      ["src/app/(shop)/checkout/eximbay-browser-consumer.ts"],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-handoff-contract.ts"),
@@ -132,6 +132,7 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/eximbay/sdk-handoff.ts",
         "src/lib/payment/eximbay/sdk-invocation.ts",
         "src/lib/payment/eximbay/sdk-loader.ts",
+        "src/lib/payment/eximbay/sdk-origins.ts",
       ],
     );
   }, 30_000);
@@ -181,7 +182,11 @@ function productionImportersOf(targetRelativePath: string): string[] {
   return ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined)
     .flatMap((absolutePath) => {
       const importer = repositoryRelativePath(absolutePath);
-      if (importer.includes("/__tests__/") || importer === targetRelativePath) return [];
+      if (
+        importer.includes("/__tests__/")
+        || /\.test\.tsx?$/u.test(importer)
+        || importer === targetRelativePath
+      ) return [];
       const source = readFileSync(absolutePath, "utf8");
       return sourceImportsTarget(importer, source, targetRelativePath) ? [importer] : [];
     })

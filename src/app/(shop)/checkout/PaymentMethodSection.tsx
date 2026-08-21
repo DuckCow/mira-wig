@@ -12,6 +12,7 @@ import type { Locale } from "@/lib/market/locale";
 import type { MarketCode } from "@/lib/market/types";
 import { messagesFor, type StorefrontMessages } from "@/lib/market/messages";
 import { withStorefrontHandoff } from "@/lib/market/request-context";
+import { createCheckoutEximbayBrowserConsumer } from "./eximbay-browser-consumer";
 
 interface PaymentMethodSectionProps {
   checkoutSessionId: string;
@@ -158,22 +159,39 @@ export async function runMockPayment(
 ) {
   const messages = messagesFor(locale).checkout.payment;
   const initiated = await initiatePayment(checkoutSessionId, { method: MOCK_METHOD });
-  if (!handleInitiationExecution(initiated, setState, messages)) return;
+  if (!await handleInitiationExecution(initiated, setState, messages)) return;
 
   const confirmed = await confirmPayment(checkoutSessionId, { method: MOCK_METHOD });
   handleConfirmationResult(confirmed, setState, messages);
 }
 
-function handleInitiationExecution(
+async function handleInitiationExecution(
   execution: InitiatePaymentActionResult,
   setState: (state: PaymentState) => void,
   messages: StorefrontMessages["checkout"]["payment"],
-): boolean {
-  if (execution.channel !== "DURABLE_ONLY") {
-    setState({ kind: "failed", message: messages.unavailableMock });
+): Promise<boolean> {
+  if (execution.channel === "FRESH_EXIMBAY_READY") {
+    await delegateFreshEximbayHandoff(execution, setState, messages);
     return false;
   }
   return handleInitiationResult(execution.durable, setState, messages);
+}
+
+async function delegateFreshEximbayHandoff(
+  execution: Extract<InitiatePaymentActionResult, { channel: "FRESH_EXIMBAY_READY" }>,
+  setState: (state: PaymentState) => void,
+  messages: StorefrontMessages["checkout"]["payment"],
+): Promise<void> {
+  const created = createCheckoutEximbayBrowserConsumer(execution);
+  if (!created.ok) {
+    setState({ kind: "failed", message: messages.unavailableMock });
+    return;
+  }
+  const result = await created.consumer.invokeFromUserAction();
+  created.consumer.dispose();
+  if (result.kind === "BROWSER_HANDOFF_FAILED") {
+    setState({ kind: "failed", message: messages.unavailableMock });
+  }
 }
 
 function handleInitiationResult(

@@ -1,4 +1,12 @@
 import type { NextConfig } from "next";
+import { EXIMBAY_SDK_ORIGINS } from "./src/lib/payment/eximbay/sdk-origins";
+
+const NO_ACTIVE_EXIMBAY_SDK_MODES: readonly [] = Object.freeze([]);
+
+export const EXIMBAY_SDK_CSP_BOUNDARY = Object.freeze({
+  origins: EXIMBAY_SDK_ORIGINS,
+  activeModes: NO_ACTIVE_EXIMBAY_SDK_MODES,
+});
 
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: {

@@ -1,6 +1,7 @@
 "use client";
 
 import type { EximbaySdkModeV1, EximbaySdkWireV1 } from "./sdk-handoff-contract";
+import { EXIMBAY_SDK_ORIGINS, EXIMBAY_SDK_SOURCES } from "./sdk-origins";
 
 export type EximbayRequestPayV2 = (payload: EximbaySdkWireV1) => unknown;
 
@@ -50,11 +51,8 @@ const STATE_BRAND_VALUE = "MIRA_EXIMBAY_SDK_LOADER_V2_V1_STATE";
 const BLOCK_BRAND_VALUE = "MIRA_EXIMBAY_SDK_LOADER_V2_V1_BLOCKED";
 const SCRIPT_MARKER = "data-mira-eximbay-sdk-loader-v2-v1";
 const SDK_LOAD_TIMEOUT_MS = 15_000;
-const SDK_SOURCES = Object.freeze({
-  SANDBOX: "https://api-test.eximbay.com/v2/javascriptSDK.js",
-  LIVE: "https://api.eximbay.com/v2/javascriptSDK.js",
-});
-const SDK_ORIGINS = new Set(["https://api-test.eximbay.com", "https://api.eximbay.com"]);
+const SDK_SOURCES = EXIMBAY_SDK_SOURCES;
+const SDK_ORIGINS = new Set(Object.values(EXIMBAY_SDK_ORIGINS));
 
 class EximbaySdkLoaderError extends Error {
   constructor(readonly code: LoaderErrorCode) {

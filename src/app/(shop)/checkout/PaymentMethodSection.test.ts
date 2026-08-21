@@ -2,10 +2,13 @@ import { randomUUID } from "crypto";
 import { PaymentProvider } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const loadSdk = vi.hoisted(() => vi.fn());
+
 vi.mock("@/app/actions/payment", () => ({
   initiatePayment: vi.fn(),
   confirmPayment: vi.fn(),
 }));
+vi.mock("@/lib/payment/eximbay/sdk-loader", () => ({ loadEximbaySdkV2: loadSdk }));
 
 import { confirmPayment, initiatePayment } from "@/app/actions/payment";
 import type {
@@ -20,6 +23,7 @@ const mockConfirmPayment = vi.mocked(confirmPayment);
 describe("checkout payment result handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadSdk.mockReset();
   });
 
   it.each([
@@ -68,6 +72,7 @@ describe("checkout payment result handling", () => {
 
     expect(mockConfirmPayment).toHaveBeenCalledTimes(1);
     expect(mockConfirmPayment).toHaveBeenCalledWith("checkout-session", { method: "MOCK" });
+    expect(loadSdk).not.toHaveBeenCalled();
     expect(states.at(-1)).toEqual({
       kind: "success",
       orderId: "order-ready",
@@ -75,45 +80,32 @@ describe("checkout payment result handling", () => {
     });
   });
 
-  it("fails closed on an unexpected fresh Eximbay channel and never confirms", async () => {
-    const unexpectedFresh: InitiatePaymentActionResult = {
-      channel: "FRESH_EXIMBAY_READY",
-      durable: {
-        kind: "READY",
-        success: true,
-        paymentId: "unexpected-fresh-payment",
-        provider: PaymentProvider.EXIMBAY,
-      },
-      transientHandoff: {
-        kind: "EXIMBAY_READY_HANDOFF_V1",
-        paymentId: "unexpected-fresh-payment",
-        mode: "SANDBOX",
-        sdkGeneration: "v2",
-        payload: {
-          fgkey: "SYNTHETIC_UI_FGKEY_NEVER_RENDER",
-          payment: {
-            transaction_type: "PAYMENT",
-            order_id: "synthetic-ui-order",
-            currency: "USD",
-            amount: "1.00",
-            lang: "EN",
-            payment_method: "P000",
-          },
-          merchant: { mid: "SYNTHETIC_UI_MID_NEVER_RENDER" },
-          buyer: { name: "Synthetic Buyer", email: "synthetic-ui@example.test" },
-          url: {
-            return_url: "https://payments.example.test/return",
-            status_url: "https://payments.example.test/status",
-          },
-        },
-      },
-    };
-    mockInitiatePayment.mockResolvedValue(unexpectedFresh);
+  it("delegates an admitted fresh Eximbay handoff through the checkout-owned consumer", async () => {
+    const requestPay = vi.fn();
+    loadSdk.mockResolvedValue(requestPay);
+    const fresh = freshEximbayExecution();
+    mockInitiatePayment.mockResolvedValue(fresh);
     const states: PaymentState[] = [];
 
     await runMockPayment("checkout-session", (state) => states.push(state));
 
     expect(mockConfirmPayment).not.toHaveBeenCalled();
+    expect(loadSdk).toHaveBeenCalledTimes(1);
+    expect(loadSdk).toHaveBeenCalledWith("SANDBOX");
+    expect(requestPay).toHaveBeenCalledTimes(1);
+    expect(requestPay).toHaveBeenCalledWith(fresh.transientHandoff.payload);
+    expect(states).toEqual([]);
+  });
+
+  it("rejects a fresh Eximbay handoff whose Payment identity does not match", async () => {
+    const mismatched = freshEximbayExecution("other-payment-id");
+    mockInitiatePayment.mockResolvedValue(mismatched);
+    const states: PaymentState[] = [];
+
+    await runMockPayment("checkout-session", (state) => states.push(state));
+
+    expect(mockConfirmPayment).not.toHaveBeenCalled();
+    expect(loadSdk).not.toHaveBeenCalled();
     expect(states.at(-1)).toEqual({
       kind: "failed",
       message: "사용 가능한 테스트 결제 수단이 없습니다.",
@@ -199,6 +191,43 @@ describe("checkout payment result handling", () => {
 
 function durableInitiation(durable: PaymentActionResult): InitiatePaymentActionResult {
   return { channel: "DURABLE_ONLY", durable };
+}
+
+function freshEximbayExecution(
+  handoffPaymentId = "fresh-payment-id",
+): Extract<InitiatePaymentActionResult, { channel: "FRESH_EXIMBAY_READY" }> {
+  return {
+    channel: "FRESH_EXIMBAY_READY",
+    durable: {
+      kind: "READY",
+      success: true,
+      paymentId: "fresh-payment-id",
+      provider: PaymentProvider.EXIMBAY,
+    },
+    transientHandoff: {
+      kind: "EXIMBAY_READY_HANDOFF_V1",
+      paymentId: handoffPaymentId,
+      mode: "SANDBOX",
+      sdkGeneration: "v2",
+      payload: {
+        fgkey: "SYNTHETIC_UI_FGKEY_NEVER_RENDER",
+        payment: {
+          transaction_type: "PAYMENT",
+          order_id: "synthetic-ui-order",
+          currency: "USD",
+          amount: "1.00",
+          lang: "EN",
+          payment_method: "P000",
+        },
+        merchant: { mid: "SYNTHETIC_UI_MID_NEVER_RENDER" },
+        buyer: { name: "Synthetic Buyer", email: "synthetic-ui@example.test" },
+        url: {
+          return_url: "https://payments.example.test/return",
+          status_url: "https://payments.example.test/status",
+        },
+      },
+    },
+  };
 }
 
 function expectProviderNamesAbsent(states: PaymentState[]): void {

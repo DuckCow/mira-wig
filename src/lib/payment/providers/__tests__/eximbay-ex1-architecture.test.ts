@@ -7,15 +7,16 @@ import { credentialChecksForProvider } from "../credentials";
 import { createInitiationProvider } from "../factory";
 import { PaymentMethod, PaymentMode } from "../routing";
 import { normalizeRefundRequestFingerprintInput } from "../../refund/refund-request-fingerprint";
+import { EXIMBAY_SDK_ORIGINS, EXIMBAY_SDK_SOURCES } from "../../eximbay/sdk-origins";
+import nextConfig, { EXIMBAY_SDK_CSP_BOUNDARY } from "../../../../../next.config";
 
 const ROOT = process.cwd();
 const MIGRATION = "prisma/migrations/20260803100000_eximbay_ex1_provider_identity/migration.sql";
 const S3_LOADER = "src/lib/payment/eximbay/sdk-loader.ts";
 const S3_INVOCATION = "src/lib/payment/eximbay/sdk-invocation.ts";
-const S3_SDK_SOURCES = [
-  "https://api-test.eximbay.com/v2/javascriptSDK.js",
-  "https://api.eximbay.com/v2/javascriptSDK.js",
-] as const;
+const S3_ORIGIN_OWNER = "src/lib/payment/eximbay/sdk-origins.ts";
+const CHECKOUT_PAYMENT_OWNER = "src/app/(shop)/checkout/PaymentMethodSection.tsx";
+const CHECKOUT_BROWSER_CONSUMER = "src/app/(shop)/checkout/eximbay-browser-consumer.ts";
 
 describe("Eximbay EX1 disabled architecture", () => {
   it("adds only the fourth provider enum identity through one canonical migration", () => {
@@ -64,25 +65,47 @@ describe("Eximbay EX1 disabled architecture", () => {
     expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(true);
     expect(packageJson.toLowerCase()).not.toContain("eximbay");
     expect(production).not.toMatch(/EXIMBAY_(?:EXTERNAL_)?ENABLED/u);
-    for (const sdkSource of S3_SDK_SOURCES) {
-      expect(productionPathsContaining(sdkSource)).toEqual([S3_LOADER]);
+    expect(EXIMBAY_SDK_ORIGINS).toEqual({
+      SANDBOX: "https://api-test.eximbay.com",
+      LIVE: "https://api.eximbay.com",
+    });
+    expect(EXIMBAY_SDK_SOURCES).toEqual({
+      SANDBOX: "https://api-test.eximbay.com/v2/javascriptSDK.js",
+      LIVE: "https://api.eximbay.com/v2/javascriptSDK.js",
+    });
+    for (const origin of Object.values(EXIMBAY_SDK_ORIGINS)) {
+      expect(productionPathsContaining(origin).filter((path) => (
+        path.startsWith("src/lib/payment/eximbay/sdk-")
+      ))).toEqual([S3_ORIGIN_OWNER]);
     }
+    expect(productionPathsContaining("/v2/javascriptSDK.js")).toEqual([S3_ORIGIN_OWNER]);
+    expect(source(S3_LOADER)).toContain('from "./sdk-origins"');
     expect(productionPathsMatching(/(?:EXIMBAY\.request_pay|request_pay|requestPay)/u)).toEqual([
       S3_INVOCATION,
       S3_LOADER,
     ]);
   });
 
-  it("keeps dormant S3 browser modules unreachable from checkout and customer clients", () => {
-    const paymentMethod = source("src/app/(shop)/checkout/PaymentMethodSection.tsx");
-    const customerClientConsumers = productionPathsMatching(/sdk-(?:loader|invocation)/u)
-      .filter((path) => path.endsWith(".tsx"))
-      .filter((path) => path.startsWith("src/app/(shop)/") || path.startsWith("src/components/"));
-    const securityConfiguration = [source("next.config.ts"), source("src/proxy.ts")].join("\n");
+  it("keeps checkout ownership dormant behind the canonical activation fence", () => {
+    const paymentMethod = source(CHECKOUT_PAYMENT_OWNER);
+    const consumer = source(CHECKOUT_BROWSER_CONSUMER);
 
-    expect(paymentMethod).not.toMatch(/sdk-(?:loader|invocation)|request_pay/u);
-    expect(customerClientConsumers).toEqual([]);
-    expect(securityConfiguration).not.toMatch(/(?:api-test\.)?eximbay\.com|EXIMBAY/iu);
+    expect(paymentMethod).toContain('from "./eximbay-browser-consumer"');
+    expect(paymentMethod).toContain('execution.channel === "FRESH_EXIMBAY_READY"');
+    expect(consumer).toContain('@/lib/payment/eximbay/sdk-invocation');
+    expect(source(S3_INVOCATION)).toContain('from "./sdk-loader"');
+    expect(paymentMethod).not.toMatch(/(?:EXIMBAY_METHOD|method:\s*["']EXIMBAY["']|<EximbayPaymentMethod)/u);
+    expect(source("src/proxy.ts")).not.toMatch(/(?:api-test\.)?eximbay\.com|EXIMBAY/iu);
+
+    expect(EXIMBAY_SDK_CSP_BOUNDARY).toEqual({
+      origins: EXIMBAY_SDK_ORIGINS,
+      activeModes: [],
+    });
+    expect(nextConfig.headers).toBeUndefined();
+    const dormantPolicy = JSON.stringify(EXIMBAY_SDK_CSP_BOUNDARY);
+    expect(dormantPolicy).not.toContain("*");
+    expect(dormantPolicy).not.toContain("unsafe-inline");
+    expect(dormantPolicy).not.toContain("unsafe-eval");
   });
 
   it("keeps routing and factory reachability disabled even when every dormant S2 config name is present", () => {
