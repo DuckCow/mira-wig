@@ -35,7 +35,9 @@ describe("customer refund intake queue view model", () => {
       items: [{ ...item, currency: "ABC", ownershipConsistent: false }],
     }, false);
 
-    expect(view.rows[0].orderTotal).toBe("10,000 ABC");
+    expect(view.rows[0].orderTotal).toBe(
+      "ABC · 저장된 최소 단위 10000 · 소수 자릿수 확인 불가",
+    );
     expect(view.rows[0].ownershipWarning).toContain("소유자 확인 필요");
     expect(view.rows[0].ownershipWarning).toContain("거절로 종결");
     expect(view.rows[0].ownershipWarning).not.toContain("customer");

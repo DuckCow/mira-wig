@@ -3,7 +3,7 @@ import {
   RefundAttemptStatus,
   RefundExecutionCommandStatus,
 } from "@prisma/client";
-import { CURRENCY_META, formatPrice } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import {
   REFUND_EXECUTION_WORKLIST_DEFAULT_PAGE_SIZE,
   type RefundExecutionLeaseState,
@@ -64,7 +64,7 @@ export function buildRefundExecutionWorklistViewModel(
       renderKey: `${row.orderId}:${row.createdAt.toISOString()}:${index}`,
       orderId: row.orderId,
       orderHref: `/admin/orders/${encodeURIComponent(row.orderId)}`,
-      refundAmount: formatMoney(row.refundAmount, row.currency),
+      refundAmount: formatPersistedMoney(row.refundAmount, row.currency),
       commandStatus: commandStatusLabel(row.commandStatus),
       attemptStatus: attemptStatusLabel(row.attemptStatus),
       orderStatus: orderStatusLabel(row.orderStatus),
@@ -148,9 +148,4 @@ function buildNextHref(result: RefundExecutionWorklistResult, cursor: string): s
 
 function formatDateTime(date: Date): string {
   return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
-function formatMoney(amount: number, currency: string): string {
-  const meta = CURRENCY_META[currency];
-  return meta ? formatPrice(amount, meta) : `${amount.toLocaleString("ko-KR")} ${currency}`;
 }

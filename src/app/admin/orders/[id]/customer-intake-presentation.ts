@@ -8,7 +8,7 @@ import {
   refundAttemptStatusLabel,
 } from "@/app/admin/refunds/intake-labels";
 import { getAdminCustomerRefundIntakeErrorMessage } from "@/lib/admin-messages";
-import { CURRENCY_META, formatPrice } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import type { AdminCustomerRefundIntakeDetail } from "./admin-order-detail-data";
 
 export type CustomerRefundIntakeApproveState = "enabled" | "disabled" | "misconfigured";
@@ -114,7 +114,7 @@ export function buildCustomerRefundIntakeSectionViewModel(
       approvedRefundAttempt: intake.approvedRefundAttempt
         ? {
             statusLabel: refundAttemptStatusLabel(intake.approvedRefundAttempt.status),
-            amount: formatMoney(
+            amount: formatPersistedMoney(
               intake.approvedRefundAttempt.amount,
               intake.approvedRefundAttempt.currency,
             ),
@@ -225,9 +225,4 @@ function formatDateTime(date: Date): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function formatMoney(amount: number, currency: string): string {
-  const meta = CURRENCY_META[currency];
-  return meta ? formatPrice(amount, meta) : `${amount.toLocaleString("ko-KR")} ${currency}`;
 }

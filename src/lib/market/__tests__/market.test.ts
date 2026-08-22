@@ -9,6 +9,7 @@ import {
   formatPrice,
   resolveMarketCode,
 } from "../types";
+import { formatPersistedMoney } from "../persisted-money";
 import { Locale, preferredEnabledLocale } from "../locale";
 import { resolveRootLocale, resolveRootMarket } from "../resolution";
 import {
@@ -76,6 +77,42 @@ describe("formatPrice — zero-decimal (JPY)", () => {
   it("소수점이 절대 붙지 않는다", () => {
     const result = formatPrice(9800, CURRENCY_META.JPY);
     expect(result).not.toContain(".");
+  });
+});
+
+describe("formatPersistedMoney — persisted historical currency", () => {
+  it("preserves the installed formatter for exact known currency codes", () => {
+    expect(formatPersistedMoney(85_000, "KRW")).toBe(formatPrice(85_000, CURRENCY_META.KRW));
+    expect(formatPersistedMoney(2_999, "USD")).toBe(formatPrice(2_999, CURRENCY_META.USD));
+    expect(formatPersistedMoney(9_800, "JPY")).toBe(formatPrice(9_800, CURRENCY_META.JPY));
+    expect(formatPersistedMoney(85_000, "KRW")).toContain("85,000");
+    expect(formatPersistedMoney(2_999, "USD")).toContain("29.99");
+    expect(formatPersistedMoney(9_800, "JPY")).toContain("9,800");
+  });
+
+  it("preserves unknown identity and raw integer without inventing a decimal scale", () => {
+    const result = formatPersistedMoney(12_345, "XYZ");
+
+    expect(result).toBe("XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가");
+    expect(result).not.toMatch(/KRW|₩|123\.45/);
+  });
+
+  it.each(["toString", "constructor", "__proto__", "hasOwnProperty"])(
+    "treats inherited object property name %s as an unknown persisted currency",
+    (currencyCode) => {
+      expect(formatPersistedMoney(12_345, currencyCode)).toBe(
+        `${currencyCode} · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가`,
+      );
+    },
+  );
+
+  it("fails blank codes safely and does not normalize a spaced known code", () => {
+    expect(formatPersistedMoney(12_345, " \t ")).toBe(
+      "통화 코드 없음 · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가",
+    );
+    expect(formatPersistedMoney(2_999, " USD ")).toBe(
+      " USD  · 저장된 최소 단위 2999 · 소수 자릿수 확인 불가",
+    );
   });
 });
 

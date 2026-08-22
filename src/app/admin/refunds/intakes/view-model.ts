@@ -1,4 +1,4 @@
-import { CURRENCY_META, formatPrice } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import type { AdminCustomerRefundIntakeQueuePage } from "@/lib/payment/refund/admin/customer-intake-read";
 import {
   adminOrderStatusLabel,
@@ -31,7 +31,7 @@ export function buildAdminCustomerRefundIntakeQueueViewModel(
       reasonLabel: customerRefundIntakeReasonLabel(item.reasonCode),
       submittedAt: formatDateTime(item.submittedAt),
       orderStatusLabel: adminOrderStatusLabel(item.orderStatus),
-      orderTotal: formatMoney(item.totalAmount, item.currency),
+      orderTotal: formatPersistedMoney(item.totalAmount, item.currency),
       ownershipWarning: item.ownershipConsistent
         ? null
         : "소유자 확인 필요 — 소유권 변경 이력이 있어 승인이 차단됩니다. 상세 화면에서 검토 후 거절로 종결하세요.",
@@ -49,9 +49,4 @@ function formatDateTime(date: Date): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function formatMoney(amount: number, currency: string): string {
-  const meta = CURRENCY_META[currency];
-  return meta ? formatPrice(amount, meta) : `${amount.toLocaleString("ko-KR")} ${currency}`;
 }
