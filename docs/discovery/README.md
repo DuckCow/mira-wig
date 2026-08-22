@@ -80,9 +80,11 @@ Model agreement is not evidence.
    The companion [Deployment Qualification Annex v0.1](./product-media-deployment-qualification-annex-v0.1.md)
    remains UNPOPULATED and grants no technical source or deployment
    qualification. The [Deferred Capability Register v0.1](./product-media-deferred-capability-register-v0.1.md)
-   and [Live Boundary Defect Register v0.2](./product-media-live-boundary-defect-register-v0.2.md)
+   and the current [Live Boundary Defect Register v0.3](./product-media-live-boundary-defect-register-v0.3.md)
    govern deferred re-entry and LBD-01 through LBD-07 without granting risk
-   acceptance. Source, migration, enforcement, and machine use remain
+   acceptance. The [v0.2 register](./product-media-live-boundary-defect-register-v0.2.md)
+   remains the preserved historical audited baseline. Source, migration,
+   enforcement, and machine use remain
    unauthorized. No known external Product Truth Authority exists; bounded
    internal Catalog Product Specification authority design is the next product
    task after reviewed documentation install. The
