@@ -111,6 +111,11 @@ commerce, order, or manufacturing behavior.
   vendor-email environment bullets as a pending conflict, and unblocks EX2B2
   for Design Contract work only. It grants no source, provider-contact,
   SDK/browser, credential, sandbox, live, or BF4 authority.
+- [Eximbay Provider Communication Evidence Ledger v0.1](./eximbay-provider-communication-evidence-v0.1.md)
+  — documentation-only historical ledger for recovered Eximbay communications;
+  it distinguishes reconstructed direct replies from official documentation
+  and TEST observations, preserves the unresolved retry-wording conflict, and
+  grants no runtime, provider-contact, activation, or LIVE authority.
 - [Eximbay EX2B2 READY Transport + JavaScript SDK Browser Handoff Design Contract v0.2](./eximbay-ex2b2-ready-transport-sdk-handoff-design-contract-v0.2.md)
   — reviewed normative overlay and sole owner of the E1A/E1B branch
   sequencing delta: after S3, account-bound E1A and credential-free,
