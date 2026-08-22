@@ -8,7 +8,7 @@ import {
   refundAttemptStatusLabel,
 } from "@/app/admin/refunds/intake-labels";
 import { getAdminCustomerRefundIntakeErrorMessage } from "@/lib/admin-messages";
-import { formatPersistedMoney } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import type { AdminCustomerRefundIntakeDetail } from "./admin-order-detail-data";
 
 export type CustomerRefundIntakeApproveState = "enabled" | "disabled" | "misconfigured";

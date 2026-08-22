@@ -8,7 +8,7 @@ import {
 } from "@prisma/client";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { formatPersistedMoney } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import { getSession } from "@/lib/session";

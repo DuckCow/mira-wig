@@ -6,10 +6,10 @@ import {
   CURRENCY_META,
   DEFAULT_MARKET_CODE,
   MARKET_CONFIGS,
-  formatPersistedMoney,
   formatPrice,
   resolveMarketCode,
 } from "../types";
+import { formatPersistedMoney } from "../persisted-money";
 import { Locale, preferredEnabledLocale } from "../locale";
 import { resolveRootLocale, resolveRootMarket } from "../resolution";
 import {

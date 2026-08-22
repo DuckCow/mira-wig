@@ -117,20 +117,6 @@ export function formatPrice(
   }).format(value);
 }
 
-export function formatPersistedMoney(
-  amountMinor: number,
-  persistedCurrencyCode: string,
-): string {
-  if (isCurrencyCode(persistedCurrencyCode)) {
-    return formatPrice(amountMinor, CURRENCY_META[persistedCurrencyCode]);
-  }
-
-  const currencyLabel = persistedCurrencyCode.trim().length > 0
-    ? persistedCurrencyCode
-    : "통화 코드 없음";
-  return `${currencyLabel} · 저장된 최소 단위 ${String(amountMinor)} · 소수 자릿수 확인 불가`;
-}
-
 // ── 마켓 결정 순수 함수 (테스트 가능, 서버 의존성 없음) ─────────
 //
 // 우선순위: (1) 명시 쿠키 > (2) geo 국가코드 > (3) 폴백 기본 마켓
