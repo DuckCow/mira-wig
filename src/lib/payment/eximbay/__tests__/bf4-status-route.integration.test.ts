@@ -579,7 +579,7 @@ function statusRaw(input: Pick<Fixture, "providerOrderId" | "transactionId" | "a
     "currency=USD",
     `amount=${amountWire(input.amount)}`,
     "rescode=0000",
-    "resmsg=Success%20exact",
+    "resmsg=Success+exact",
     "fgkey=status-only-not-ready",
     `transaction_id=${input.transactionId}`,
   ].join("&");
