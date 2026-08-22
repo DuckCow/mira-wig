@@ -62,6 +62,7 @@ interface RetrieveOverrides {
   readonly transactionId?: string;
   readonly currency?: string;
   readonly amount?: string;
+  readonly realisticExtras?: boolean;
 }
 
 describe.sequential("Eximbay BF4 dormant engine integration", () => {
@@ -134,7 +135,7 @@ describe.sequential("Eximbay BF4 dormant engine integration", () => {
       expect(event.providerPaymentKey).toBeNull();
       await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
         .resolves.toMatchObject({ providerPaymentKey: null, status: PaymentAttemptStatus.INITIATED });
-      return retrieveSuccess(fixture);
+      return retrieveSuccess(fixture, { realisticExtras: true });
     });
 
     const first = await process(fixture.raw, transport);
@@ -710,18 +711,32 @@ function retrieveSuccess(
   fixture: Fixture,
   overrides: RetrieveOverrides = {},
 ): Response {
+  const payment = {
+    order_id: overrides.orderId ?? fixture.providerOrderId,
+    currency: overrides.currency ?? "USD",
+    amount: overrides.amount ?? amountWire(fixture.amount),
+    transaction_id: overrides.transactionId ?? fixture.transactionId,
+    status: overrides.status ?? "SALE",
+    transaction_date: "20260817010100",
+    ...(overrides.realisticExtras
+      ? {
+        auth_code: "SYNTHETIC_AUTH",
+        balance: amountWire(fixture.amount),
+        payment_method: "P000",
+      }
+      : {}),
+  };
   return jsonResponse({
     rescode: "0000",
     resmsg: "retrieved",
     mid: overrides.mid ?? MID,
-    payment: {
-      order_id: overrides.orderId ?? fixture.providerOrderId,
-      currency: overrides.currency ?? "USD",
-      amount: overrides.amount ?? amountWire(fixture.amount),
-      transaction_id: overrides.transactionId ?? fixture.transactionId,
-      status: overrides.status ?? "SALE",
-      transaction_date: "20260817010100",
-    },
+    payment,
+    ...(overrides.realisticExtras
+      ? {
+        card_info: { brand: "SYNTHETIC_CARD" },
+        other_param: { param1: "SYNTHETIC_PARAM" },
+      }
+      : {}),
   });
 }
 
