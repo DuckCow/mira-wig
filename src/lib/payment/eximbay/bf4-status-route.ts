@@ -11,9 +11,10 @@ import {
 
 export const EXIMBAY_BF4_STATUS_ROUTE_ENABLED = "EXIMBAY_BF4_STATUS_ROUTE_ENABLED";
 
-// DESIGN_CHOICE_REQUIRES_SANDBOX_EVIDENCE: Eximbay does not currently freeze
-// the callback method, carrier, media type, charset, or HTTP acknowledgement.
-const RESPONSE_CONTENT_TYPE = "text/plain; charset=utf-8";
+// The successful ACK media type follows installed provider communication evidence.
+// Fail-closed representation remains a Mira choice; actual TEST observation is pending.
+const SUCCESS_RESPONSE_CONTENT_TYPE = "text/html; charset=utf-8";
+const FAIL_CLOSED_RESPONSE_CONTENT_TYPE = "text/plain; charset=utf-8";
 const MAX_REQUEST_CHUNKS = 256;
 const CANONICAL_CONTENT_LENGTH = /^(?:0|[1-9]\d*)$/u;
 const MAX_CONTENT_LENGTH_DECIMAL = String(EXIMBAY_RAW_QUERY_MAX_BYTES);
@@ -204,18 +205,18 @@ function renderEngineResult(result: ProcessEximbayBf4StatusResult): Response {
   if (result.acknowledgement.kind !== "SUCCESS") return emptyResponse(503);
   return new Response(result.acknowledgement.body, {
     status: 200,
-    headers: responseHeaders(),
+    headers: responseHeaders(SUCCESS_RESPONSE_CONTENT_TYPE),
   });
 }
 
 function emptyResponse(status: number): Response {
-  return new Response(null, { status, headers: responseHeaders() });
+  return new Response(null, { status, headers: responseHeaders(FAIL_CLOSED_RESPONSE_CONTENT_TYPE) });
 }
 
-function responseHeaders(): HeadersInit {
+function responseHeaders(contentType: string): HeadersInit {
   return {
     "Cache-Control": "no-store",
-    "Content-Type": RESPONSE_CONTENT_TYPE,
+    "Content-Type": contentType,
     "X-Content-Type-Options": "nosniff",
   };
 }
