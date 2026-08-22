@@ -78,7 +78,9 @@ describe("admin order list view model", () => {
 
   it("formats known currency and preserves unknown currency identity", () => {
     expect(rowFor(source({ currency: "USD", totalAmount: 2_999 })).totalAmountLabel).toBe("$29.99");
-    expect(rowFor(source({ currency: "XYZ", totalAmount: 12_345 })).totalAmountLabel).toBe("XYZ 12345");
+    expect(rowFor(source({ currency: "XYZ", totalAmount: 12_345 })).totalAmountLabel).toBe(
+      "XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가",
+    );
   });
 
   it("summarizes STOCKED-only lines by order line", () => {

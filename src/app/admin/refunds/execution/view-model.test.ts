@@ -51,6 +51,18 @@ describe("refund execution worklist view model", () => {
     expect(view.orderHref).toBe("/admin/orders/order_123");
   });
 
+  it("presents the RefundAttempt's unknown currency without an invented scale", () => {
+    const row = buildRefundExecutionWorklistViewModel(buildResult({
+      refundAmount: 12_345,
+      currency: "XYZ",
+    })).rows[0];
+
+    expect(row.refundAmount).toBe(
+      "XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가",
+    );
+    expect(row.refundAmount).not.toMatch(/KRW|₩|123\.45/);
+  });
+
   it("omits null diagnostics and keeps code and message as separate fields", () => {
     const absent = buildRefundExecutionWorklistViewModel(buildResult()).rows[0];
     const present = buildRefundExecutionWorklistViewModel(buildResult({

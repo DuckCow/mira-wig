@@ -1,14 +1,17 @@
 import {
   CustomerRefundIntakeReasonCode,
   CustomerRefundIntakeStatus,
+  FulfillmentType,
   OrderStatus,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
 } from "@prisma/client";
 import { isValidElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
+import type { CustomerOrderDetailRecord } from "./customer-order-detail-data";
 
 const mocks = vi.hoisted(() => {
   const orderFindFirst = vi.fn();
@@ -180,6 +183,34 @@ describe("customer Order-detail authorization and intake composition", () => {
       "submissionUnavailableReason",
     ]);
   });
+
+  it("uses Order.currency for item money even when snapshot currency differs", () => {
+    const order = orderFixture();
+    order.currency = "USD";
+    order.subtotalAmount = 2_999;
+    order.totalAmount = 2_999;
+    order.payment = { ...order.payment, amount: 2_999, currency: "USD" };
+    order.items = [orderItem(2_999, "JPY")];
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture() }));
+
+    expect(html).toContain("$29.99");
+    expect(html).not.toContain("¥2,999");
+  });
+
+  it("keeps unknown Order and Payment currency identity without snapshot override", () => {
+    const order = orderFixture();
+    order.currency = "XYZ";
+    order.subtotalAmount = 12_345;
+    order.totalAmount = 12_345;
+    order.payment = { ...order.payment, amount: 12_345, currency: "XYZ" };
+    order.items = [orderItem(12_345, "KRW")];
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture() }));
+
+    expect(html).toContain("XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가");
+    expect(html).not.toMatch(/KRW|₩|123\.45/);
+  });
 });
 
 class TrackedParams extends Promise<{ id: string }> {
@@ -210,7 +241,7 @@ function customerSession(id: string) {
   };
 }
 
-function orderFixture() {
+function orderFixture(): CustomerOrderDetailRecord {
   return {
     id: "order_1",
     status: OrderStatus.PAID,
@@ -227,6 +258,24 @@ function orderFixture() {
       currency: "KRW",
       provider: PaymentProvider.MOCK,
       mode: PaymentMode.SANDBOX,
+    },
+  };
+}
+
+function orderItem(unitAmount: number, snapshotCurrency: string): CustomerOrderDetailRecord["items"][number] {
+  return {
+    id: "item_1",
+    quantity: 1,
+    unitAmount,
+    fulfillmentType: FulfillmentType.MTO,
+    snapshotData: {
+      styleName: "Historical item",
+      color: "Black",
+      colorHex: "#000000",
+      length: "MEDIUM",
+      curl: "STRAIGHT",
+      coverImageKey: null,
+      currencyCode: snapshotCurrency,
     },
   };
 }

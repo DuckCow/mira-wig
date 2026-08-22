@@ -54,6 +54,38 @@ describe("admin order detail view model", () => {
     expect(JSON.stringify(view)).not.toContain("must-not-leak.jpg");
   });
 
+  it("uses Order.currency for item money despite snapshot mismatch or malformed snapshot", () => {
+    const mismatched = source({ currency: "USD", subtotalAmount: 5_000, totalAmount: 5_000 });
+    mismatched.items[0].unitAmount = 2_999;
+    mismatched.items[0].quantity = 1;
+    mismatched.items[0].snapshotData = snapshot("JPY");
+    const malformed = source({ currency: "USD" });
+    malformed.items[0].unitAmount = 2_999;
+    malformed.items[0].quantity = 1;
+    malformed.items[0].snapshotData = null;
+
+    expect(buildAdminOrderDetailViewModel(mismatched).items[0]).toMatchObject({
+      unitAmount: "$29.99",
+      lineTotal: "$29.99",
+    });
+    expect(buildAdminOrderDetailViewModel(malformed).items[0]).toMatchObject({
+      unitAmount: "$29.99",
+      lineTotal: "$29.99",
+    });
+  });
+
+  it("presents unknown Order item money without using snapshot currency metadata", () => {
+    const order = source({ currency: "XYZ", subtotalAmount: 12_345, totalAmount: 12_345 });
+    order.items[0].unitAmount = 12_345;
+    order.items[0].quantity = 1;
+    order.items[0].snapshotData = snapshot("KRW");
+
+    const itemView = buildAdminOrderDetailViewModel(order).items[0];
+
+    expect(itemView.unitAmount).toBe("XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가");
+    expect(itemView.lineTotal).toBe("XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가");
+  });
+
   it("exposes only a safe execution-reference label", () => {
     const order = source();
     order.payment.providerPaymentKeyPresent = false;
@@ -122,6 +154,24 @@ describe("admin order detail view model", () => {
     expect(enabled.canCloseRequest).toBe(true);
     expect(disabled.claim.control).toBeNull();
     expect(disabled.claim.advisory).toContain("비활성화");
+  });
+
+  it("preserves a coherent unknown RefundAttempt currency in the claim", () => {
+    const order = source({
+      status: OrderStatus.REFUND_PENDING,
+      currency: "XYZ",
+      payment: { ...source().payment, currency: "XYZ" },
+      refundAttempts: [attempt("refund_claim_unknown", 1_000, RefundAttemptStatus.REQUESTED, "XYZ")],
+    });
+
+    const claim = buildAdminOrderDetailViewModel(order, { claimActivationState: "enabled" })
+      .refundAttempts[0].claim;
+
+    expect(claim.control).toMatchObject({
+      amount: "XYZ · 저장된 최소 단위 1000 · 소수 자릿수 확인 불가",
+      currency: "XYZ",
+    });
+    expect(claim.control?.amount).not.toContain("₩");
   });
 
   it("withholds close advice and explains REQUESTED provider evidence", () => {
@@ -370,6 +420,18 @@ function source(
     },
     refundAttempts: [],
     ...overrides,
+  };
+}
+
+function snapshot(currencyCode: string) {
+  return {
+    styleName: "테스트 스타일",
+    color: "Black",
+    colorHex: "#000000",
+    length: "MEDIUM",
+    curl: "STRAIGHT",
+    coverImageKey: "must-not-leak.jpg",
+    currencyCode,
   };
 }
 

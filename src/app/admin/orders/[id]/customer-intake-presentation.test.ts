@@ -77,6 +77,25 @@ describe("customer refund intake labels and history presentation", () => {
     expect(result.rows[0]?.missingApprovedAttemptWarning).toContain("데이터 정합성 검토");
   });
 
+  it("preserves an approved unknown RefundAttempt currency with explicit unknown scale", () => {
+    const result = buildCustomerRefundIntakeSectionViewModel([intake({
+      status: CustomerRefundIntakeStatus.APPROVED,
+      reviewedAt: new Date("2026-07-15T01:00:00.000Z"),
+      approvedRefundAttemptId: "attempt_unknown",
+      approvedRefundAttempt: {
+        id: "attempt_unknown",
+        status: RefundAttemptStatus.REQUESTED,
+        amount: 12_345,
+        currency: "XYZ",
+        requestedAt: new Date("2026-07-15T01:00:00.000Z"),
+      },
+    })]);
+
+    expect(result.rows[0]?.approvedRefundAttempt?.amount).toBe(
+      "XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가",
+    );
+  });
+
   it("keeps terminal intake history free of mutation targets", () => {
     const result = buildCustomerRefundIntakeSectionViewModel([
       intake({ status: CustomerRefundIntakeStatus.WITHDRAWN, withdrawnAt: new Date() }),

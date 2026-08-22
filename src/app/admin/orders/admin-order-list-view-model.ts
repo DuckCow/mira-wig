@@ -4,7 +4,7 @@ import {
   OrderStatus,
   PaymentAttemptStatus,
 } from "@prisma/client";
-import { CURRENCY_META, formatPrice } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type {
   AdminOrderListPage,
@@ -73,7 +73,7 @@ function buildOrderRow(order: AdminOrderListSourceItem): AdminOrderListRowViewMo
       : "결제 상태 확인 필요",
     manufacturingSummaryLabel: manufacturing.summary,
     manufacturingWarning: manufacturing.warning,
-    totalAmountLabel: formatMoney(order.totalAmount, order.currency),
+    totalAmountLabel: formatPersistedMoney(order.totalAmount, order.currency),
     marketContextLabel: `${order.marketCode} · ${order.currency}`,
   };
 }
@@ -199,11 +199,6 @@ function manufacturingSummary(counts: ManufacturingCounts): string {
 
 function appendCount(parts: string[], label: string, count: number): void {
   if (count > 0) parts.push(`${label} ${count}`);
-}
-
-function formatMoney(amount: number, currency: string): string {
-  const meta = CURRENCY_META[currency];
-  return meta ? formatPrice(amount, meta) : `${currency || "통화 확인 필요"} ${amount}`;
 }
 
 function formatDateTime(date: Date): string {

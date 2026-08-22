@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { CURRENCY_META, formatPrice, type CurrencyMeta } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import { getSession } from "@/lib/session";
@@ -94,7 +94,9 @@ function OrderCard({ order }: { order: OrderListItem }) {
           <span className="inline-flex rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white">
             {orderStatusLabel(order.status)}
           </span>
-          <p className="text-base font-semibold text-gray-900">{formatMoney(order.totalAmount, order.currency)}</p>
+          <p className="text-base font-semibold text-gray-900">
+            {formatPersistedMoney(order.totalAmount, order.currency)}
+          </p>
         </div>
       </div>
       <Link
@@ -126,14 +128,6 @@ function safeParseSnapshotData(raw: unknown): SnapshotData | null {
   } catch {
     return null;
   }
-}
-
-function currencyMeta(currencyCode: string): CurrencyMeta {
-  return CURRENCY_META[currencyCode] ?? CURRENCY_META.KRW;
-}
-
-function formatMoney(amount: number, currencyCode: string): string {
-  return formatPrice(amount, currencyMeta(currencyCode));
 }
 
 function formatDateTime(date: Date): string {

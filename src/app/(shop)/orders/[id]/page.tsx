@@ -8,7 +8,7 @@ import {
 } from "@prisma/client";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { CURRENCY_META, formatPrice, type CurrencyMeta } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import { getSession } from "@/lib/session";
@@ -58,8 +58,6 @@ export function CustomerOrderDetailView({
   order: OrderDetail;
   intake: CustomerRefundIntakeReadModel;
 }) {
-  const currency = currencyMeta(order.currency);
-
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
       <Link href="/orders" className="text-sm text-gray-500 hover:text-gray-900">
@@ -68,7 +66,7 @@ export function CustomerOrderDetailView({
 
       <OrderHeader order={order} />
       <CustomerRefundIntakeSection model={intake} />
-      <OrderItems items={order.items} currency={currency} />
+      <OrderItems items={order.items} currency={order.currency} />
       <ShippingSection shipping={order.shipping} />
       <PaymentDetails order={order} />
       <FooterLinks />
@@ -117,7 +115,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function OrderItems({ items, currency }: { items: OrderLine[]; currency: CurrencyMeta }) {
+function OrderItems({ items, currency }: { items: OrderLine[]; currency: string }) {
   return (
     <Section title="주문 상품">
       <ul className="divide-y divide-gray-100">
@@ -143,12 +141,12 @@ function PaymentDetails({ order }: { order: OrderDetail }) {
   return (
     <Section title="결제 정보">
       <div className="space-y-3">
-        <SummaryRow label="상품 합계" value={formatMoney(order.subtotalAmount, order.currency)} />
-        <SummaryRow label="배송비" value={`${formatMoney(order.shippingAmount, order.currency)} · 배송비 정책 확정 전`} />
+        <SummaryRow label="상품 합계" value={formatPersistedMoney(order.subtotalAmount, order.currency)} />
+        <SummaryRow label="배송비" value={`${formatPersistedMoney(order.shippingAmount, order.currency)} · 배송비 정책 확정 전`} />
         <SummaryRow label="세금·관세" value="세금·관세는 정책 확정 전이며, 현재 주문 금액으로 별도 계산하지 않았습니다." />
-        <SummaryRow label="총 결제 금액" value={formatMoney(order.totalAmount, order.currency)} strong />
+        <SummaryRow label="총 결제 금액" value={formatPersistedMoney(order.totalAmount, order.currency)} strong />
         <SummaryRow label="결제 상태" value={paymentStatusLabel(order.payment.status)} />
-        <SummaryRow label="결제 금액" value={formatMoney(order.payment.amount, order.payment.currency)} />
+        <SummaryRow label="결제 금액" value={formatPersistedMoney(order.payment.amount, order.payment.currency)} />
         <SummaryRow label="결제 수단" value={paymentMethodLabel(order.payment)} />
       </div>
     </Section>
@@ -171,7 +169,7 @@ function FooterLinks() {
   );
 }
 
-function OrderItemRow({ item, currency }: { item: OrderLine; currency: CurrencyMeta }) {
+function OrderItemRow({ item, currency }: { item: OrderLine; currency: string }) {
   const snapshot = safeParseSnapshotData(item.snapshotData);
   const lineTotal = item.unitAmount * item.quantity;
   return (
@@ -182,10 +180,10 @@ function OrderItemRow({ item, currency }: { item: OrderLine; currency: CurrencyM
           <p className="mt-1 text-xs text-gray-500">{itemOptionLabel(snapshot)}</p>
           <p className="mt-1 text-xs text-gray-500">{fulfillmentLabel(item.fulfillmentType)}</p>
         </div>
-        <p className="shrink-0 font-semibold text-gray-900">{formatPrice(lineTotal, currency)}</p>
+        <p className="shrink-0 font-semibold text-gray-900">{formatPersistedMoney(lineTotal, currency)}</p>
       </div>
       <p className="text-xs text-gray-500">
-        {formatPrice(item.unitAmount, currency)} × {item.quantity}
+        {formatPersistedMoney(item.unitAmount, currency)} × {item.quantity}
       </p>
     </div>
   );
@@ -221,14 +219,6 @@ function loginPath(orderId: string): string {
 
 function customerOrderDetailInvariant(): Error {
   return new Error("Customer Order-detail boundary invariant failed.");
-}
-
-function currencyMeta(currencyCode: string): CurrencyMeta {
-  return CURRENCY_META[currencyCode] ?? CURRENCY_META.KRW;
-}
-
-function formatMoney(amount: number, currencyCode: string): string {
-  return formatPrice(amount, currencyMeta(currencyCode));
 }
 
 function formatDateTime(date: Date): string {

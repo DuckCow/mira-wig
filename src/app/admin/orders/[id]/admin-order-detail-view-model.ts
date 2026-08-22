@@ -7,7 +7,7 @@ import {
   RefundAttemptStatus,
   ShippingCountry,
 } from "@prisma/client";
-import { CURRENCY_META, formatPrice, type CurrencyMeta } from "@/lib/market/types";
+import { formatPersistedMoney } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
 import {
@@ -50,9 +50,9 @@ export function buildAdminOrderDetailViewModel(
       email: order.user.email,
     },
     amounts: {
-      subtotal: formatMoney(order.subtotalAmount, order.currency),
-      shipping: formatMoney(order.shippingAmount, order.currency),
-      total: formatMoney(order.totalAmount, order.currency),
+      subtotal: formatPersistedMoney(order.subtotalAmount, order.currency),
+      shipping: formatPersistedMoney(order.shippingAmount, order.currency),
+      total: formatPersistedMoney(order.totalAmount, order.currency),
     },
     shipping: buildShipping(order.shipping),
     items: order.items.map((item) => buildItem(item, order.currency)),
@@ -87,8 +87,8 @@ function buildItem(
     options: itemOptions(snapshot),
     fulfillment: fulfillmentLabel(item.fulfillmentType),
     quantity: item.quantity,
-    unitAmount: formatMoney(item.unitAmount, currency),
-    lineTotal: formatMoney(item.unitAmount * item.quantity, currency),
+    unitAmount: formatPersistedMoney(item.unitAmount, currency),
+    lineTotal: formatPersistedMoney(item.unitAmount * item.quantity, currency),
     mrStatus: item.mr ? mrStatusLabel(item.mr.status) : "제작 요청 없음",
     mrCreatedAt: item.mr ? formatDateTime(item.mr.createdAt) : "-",
     mrStartedAt: item.mr?.startedAt ? formatDateTime(item.mr.startedAt) : "-",
@@ -100,7 +100,7 @@ function buildPayment(payment: AdminOrderDetailSource["payment"]): AdminOrderDet
   return {
     id: payment.id,
     status: paymentStatusLabel(payment.status),
-    amount: formatMoney(payment.amount, payment.currency),
+    amount: formatPersistedMoney(payment.amount, payment.currency),
     providerContext: `${payment.provider} / ${payment.mode}`,
     createdAt: formatDateTime(payment.createdAt),
     updatedAt: formatDateTime(payment.updatedAt),
@@ -115,8 +115,8 @@ function buildRefundReview(
   const paymentIdentityMatches = order.totalAmount === order.payment.amount
     && order.currency === order.payment.currency;
   return {
-    orderTotal: formatMoney(order.totalAmount, order.currency),
-    paymentAmount: formatMoney(order.payment.amount, order.payment.currency),
+    orderTotal: formatPersistedMoney(order.totalAmount, order.currency),
+    paymentAmount: formatPersistedMoney(order.payment.amount, order.payment.currency),
     succeededAmount: amounts.succeeded,
     guardedAmount: amounts.guarded,
     remainingRefundableAmount: amounts.remainingRefundable,
@@ -151,10 +151,10 @@ function buildRefundAmounts(order: AdminOrderDetailSource): RefundAmountLabels {
   if (attempts.some((attempt) => attempt.currency !== order.currency)) return unavailableAmounts();
   try {
     return {
-      succeeded: formatMoney(sumSucceededRefundAmount(attempts), order.currency),
-      guarded: formatMoney(sumGuardedRefundAmount(attempts), order.currency),
-      remainingRefundable: formatMoney(remainingRefundableAmount(order.totalAmount, attempts), order.currency),
-      remainingRequestable: formatMoney(remainingRequestableRefundAmount(order.totalAmount, attempts), order.currency),
+      succeeded: formatPersistedMoney(sumSucceededRefundAmount(attempts), order.currency),
+      guarded: formatPersistedMoney(sumGuardedRefundAmount(attempts), order.currency),
+      remainingRefundable: formatPersistedMoney(remainingRefundableAmount(order.totalAmount, attempts), order.currency),
+      remainingRequestable: formatPersistedMoney(remainingRequestableRefundAmount(order.totalAmount, attempts), order.currency),
     };
   } catch (error) {
     if (error instanceof RangeError) return unavailableAmounts();
@@ -187,7 +187,7 @@ function buildRefundAttempt(
     refundAttemptId: attempt.id,
     shortId: attempt.id.slice(0, 8),
     status: refundAttemptStatusLabel(attempt.status),
-    amount: formatMoney(attempt.amount, attempt.currency),
+    amount: formatPersistedMoney(attempt.amount, attempt.currency),
     reason: attempt.reason,
     actor: attempt.actorType === RefundAttemptActorType.ADMIN ? "관리자" : "시스템",
     requestedAt: formatDateTime(attempt.requestedAt),
@@ -201,7 +201,7 @@ function buildRefundAttempt(
       order,
       attempt,
       singleOpenTarget,
-      formattedAmount: formatMoney(attempt.amount, attempt.currency),
+      formattedAmount: formatPersistedMoney(attempt.amount, attempt.currency),
     }),
     transitionHistory: buildRefundTransitionHistory(attempt.transitions),
   };
@@ -295,14 +295,6 @@ function safeParseSnapshotData(raw: unknown): SnapshotData | null {
   } catch {
     return null;
   }
-}
-
-function currencyMeta(currency: string): CurrencyMeta {
-  return CURRENCY_META[currency] ?? CURRENCY_META.KRW;
-}
-
-function formatMoney(amount: number, currency: string): string {
-  return formatPrice(amount, currencyMeta(currency));
 }
 
 function formatDateTime(date: Date): string {
