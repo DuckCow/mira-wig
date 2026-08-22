@@ -26,8 +26,8 @@ const MID = "BF4_ROUTE_MID";
 const NOW = new Date("2026-08-17T02:00:00.000Z");
 const RECEIVED_AT = new Date("2026-08-17T02:01:00.000Z");
 
-// DESIGN_CHOICE_REQUIRES_SANDBOX_EVIDENCE: these tests freeze Mira's dormant
-// POST/body/media/status profile without claiming undocumented Eximbay behavior.
+// Ingress and fail-closed behavior remain Mira's installed contract. The successful
+// ACK media type follows provider communication evidence; actual TEST acceptance is pending.
 
 interface Fixture {
   readonly userId: string;
@@ -308,11 +308,12 @@ describe.sequential("Eximbay BF4 status route provider-free integration", () => 
     const duplicate = await routeRequest(fixture.raw, transport);
 
     expect(first.status).toBe(200);
-    expect(first.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+    expect(first.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(first.headers.get("Cache-Control")).toBe("no-store");
     expect(first.headers.get("X-Content-Type-Options")).toBe("nosniff");
     await expect(first.text()).resolves.toBe("rescode=0000&resmsg=Success");
     expect(duplicate.status).toBe(200);
+    expect(duplicate.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     await expect(duplicate.text()).resolves.toBe("rescode=0000&resmsg=Success");
     expect(transport).toHaveBeenCalledTimes(2);
     expect(transport.mock.calls.filter(([input]) => requestUrl(input).endsWith("/verify"))).toHaveLength(1);
