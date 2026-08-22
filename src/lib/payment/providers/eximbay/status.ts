@@ -90,7 +90,6 @@ export function parseUnverifiedEximbayStatus(rawQuery: string): UnverifiedEximba
 
 function parsePair(rawPair: string, progress: ParserProgress): EximbayUntrustedStatusPair {
   const [rawKey, rawValue] = splitRawPair(rawPair, progress);
-  if (rawKey.includes("+") || rawValue.includes("+")) fail("UNESCAPED_PLUS", progress);
 
   const key = strictPercentDecode(rawKey, progress);
   const value = strictPercentDecode(rawValue, progress);
@@ -124,7 +123,7 @@ function strictPercentDecode(value: string, progress: ParserProgress): string {
     index += 2;
   }
   try {
-    return decodeURIComponent(value);
+    return decodeURIComponent(value.replaceAll("+", " "));
   } catch {
     fail("INVALID_UTF8", progress);
   }

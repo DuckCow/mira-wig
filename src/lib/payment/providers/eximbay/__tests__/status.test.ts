@@ -71,13 +71,16 @@ describe("Eximbay exact raw status carrier", () => {
     expect(Object.isFrozen(parsed.fields)).toBe(true);
   });
 
-  it("rejects raw plus without changing the caller-owned exact representation", () => {
-    const raw = validRaw(["message=a+b"]);
+  it("decodes form spaces and literal pluses without changing the caller-owned exact representation", () => {
+    const raw = validRaw(["message=a+b", "literal=a%2Bb", "encoded_space=a%20b"]);
     const before = raw;
-    const error = parserError(raw);
+    const parsed = parseUnverifiedEximbayStatus(raw);
 
     expect(raw).toBe(before);
-    expect(error.diagnostics.code).toBe("UNESCAPED_PLUS");
+    expect(parsed.exactRawQuery).toBe(before);
+    expect(parsed.fields.message).toBe("a b");
+    expect(parsed.fields.literal).toBe("a+b");
+    expect(parsed.fields.encoded_space).toBe("a b");
   });
 });
 
