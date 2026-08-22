@@ -327,9 +327,13 @@ type RetrieveHeader =
   | Readonly<{ ok: false; code: "UNKNOWN_SHAPE" }>;
 
 function retrieveHeader(value: Record<string, unknown>): RetrieveHeader {
-  const allowed = value.rescode === "0000" ? ["mid", "payment"] : [];
+  const allowed = value.rescode === "0000"
+    ? ["mid", "payment", "card_info", "other_param"]
+    : [];
   try {
     requireExactKeys(value, ["rescode", "resmsg"], allowed);
+    requireOptionalRecord(value, "card_info");
+    requireOptionalRecord(value, "other_param");
   } catch {
     return Object.freeze({ ok: false, code: "UNKNOWN_SHAPE" });
   }
@@ -349,7 +353,10 @@ function retrievePayment(root: Record<string, unknown>): EximbayBf4RetrievedPaym
       "transaction_id",
       "status",
       "transaction_date",
-    ]);
+    ], ["auth_code", "balance", "payment_method"]);
+    requireOptionalString(root.payment, "auth_code");
+    requireOptionalString(root.payment, "balance");
+    requireOptionalString(root.payment, "payment_method");
     const status = classifyEximbayInquiryStatus(root.payment.status).status;
     return Object.freeze({
       mid: boundedResponseText(root.mid, 512),
@@ -362,6 +369,18 @@ function retrievePayment(root: Record<string, unknown>): EximbayBf4RetrievedPaym
     });
   } catch {
     return null;
+  }
+}
+
+function requireOptionalRecord(value: Record<string, unknown>, key: string): void {
+  if (Object.hasOwn(value, key) && !isRecord(value[key])) {
+    throw new Error("INVALID_OPTIONAL_RESPONSE_OBJECT");
+  }
+}
+
+function requireOptionalString(value: Record<string, unknown>, key: string): void {
+  if (Object.hasOwn(value, key) && typeof value[key] !== "string") {
+    throw new Error("INVALID_OPTIONAL_RESPONSE_STRING");
   }
 }
 

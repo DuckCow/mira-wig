@@ -60,8 +60,10 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
       language: "EN",
     }, transport);
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       kind: "admitted",
+      rescode: "0000",
+      resmsg: "ok",
       payment: {
         mid: MID,
         orderId: "order-1",
@@ -72,6 +74,35 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
         transactionDate: "20260817010203",
       },
     });
+  });
+
+  it.each([
+    ["card_info", () => ({ ...retrieveResponseValue("SALE"), card_info: "invalid" })],
+    ["other_param", () => ({ ...retrieveResponseValue("SALE"), other_param: [] })],
+    ["auth_code", () => invalidPaymentExtra("auth_code", 1)],
+    ["balance", () => invalidPaymentExtra("balance", null)],
+    ["payment_method", () => invalidPaymentExtra("payment_method", {})],
+  ])("rejects a wrong coarse type for documented extra %s", async (_field, value) => {
+    const result = await retrieveEximbayBf4Status(
+      config(),
+      retrieveRequest(),
+      () => Promise.resolve(jsonResponse(value())),
+    );
+
+    expect(result).toEqual({ kind: "outcomeUnknown", code: "UNKNOWN_SHAPE" });
+  });
+
+  it.each([
+    ["root", () => ({ ...retrieveResponseValue("SALE"), unknown_root: true })],
+    ["payment", () => invalidPaymentExtra("unknown_payment", true)],
+  ])("keeps a truly unknown successful retrieve %s key fail closed", async (_level, value) => {
+    const result = await retrieveEximbayBf4Status(
+      config(),
+      retrieveRequest(),
+      () => Promise.resolve(jsonResponse(value())),
+    );
+
+    expect(result).toEqual({ kind: "outcomeUnknown", code: "UNKNOWN_SHAPE" });
   });
 
   const statuses: readonly ("AUTH" | "REGISTERED" | "NONE")[] = ["AUTH", "REGISTERED", "NONE"];
@@ -167,7 +198,11 @@ function retrieveResponse(status: "SALE" | "AUTH" | "REGISTERED" | "NONE"): Resp
 }
 
 function retrieveResponseWithStatus(status: string): Response {
-  return jsonResponse({
+  return jsonResponse(retrieveResponseValue(status));
+}
+
+function retrieveResponseValue(status: string) {
+  return {
     rescode: "0000",
     resmsg: "ok",
     mid: MID,
@@ -177,9 +212,22 @@ function retrieveResponseWithStatus(status: string): Response {
       amount: "12.34",
       transaction_id: "tx-1",
       status,
+      auth_code: "SYNTHETIC_AUTH",
       transaction_date: "20260817010203",
+      balance: "12.34",
+      payment_method: "P000",
     },
-  });
+    card_info: { brand: "SYNTHETIC_CARD" },
+    other_param: { param1: "SYNTHETIC_PARAM" },
+  };
+}
+
+function invalidPaymentExtra(key: string, value: unknown) {
+  const response = retrieveResponseValue("SALE");
+  return {
+    ...response,
+    payment: { ...response.payment, [key]: value },
+  };
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
