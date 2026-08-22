@@ -1,6 +1,7 @@
 import {
   OrderStatus,
   PaymentAttemptStatus,
+  PaymentMode,
   PaymentProvider,
   Prisma,
   RefundAttemptStatus,
@@ -39,6 +40,14 @@ export interface RequestRefundAttemptInput {
   actorUserId?: string | null;
   now: Date;
 }
+
+export interface RefundRequestProviderAdmission {
+  readonly allowEximbaySandboxCustomerApproval: boolean;
+}
+
+const DEFAULT_PROVIDER_ADMISSION: RefundRequestProviderAdmission = Object.freeze({
+  allowEximbaySandboxCustomerApproval: false,
+});
 
 export type RequestRefundAttemptFailureCode =
   | PrepareRefundAttemptFailureCode
@@ -86,6 +95,15 @@ export async function requestRefundAttempt(
 export async function requestRefundAttemptInTransaction(
   tx: RefundRequestTx,
   input: RequestRefundAttemptInput,
+  providerAdmission: RefundRequestProviderAdmission = DEFAULT_PROVIDER_ADMISSION,
+): Promise<RequestRefundAttemptResult> {
+  return requestRefundAttemptWithProviderAdmissionInTransaction(tx, input, providerAdmission);
+}
+
+async function requestRefundAttemptWithProviderAdmissionInTransaction(
+  tx: RefundRequestTx,
+  input: RequestRefundAttemptInput,
+  providerAdmission: RefundRequestProviderAdmission,
 ): Promise<RequestRefundAttemptResult> {
   if (!(await lockOrder(tx, input.orderId))) {
     return failure("ORDER_NOT_FOUND", "Order was not found.");
@@ -105,7 +123,7 @@ export async function requestRefundAttemptInTransaction(
   if (!hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)) {
     return failure("REFUND_LEDGER_INCONSISTENT", "Historical refund ledger identity is inconsistent.");
   }
-  const eligibilityFailure = validateEligibility(order);
+  const eligibilityFailure = validateEligibility(order, providerAdmission);
   if (eligibilityFailure) return eligibilityFailure;
 
   const prepared = prepareAgainst(order, input, order.refundAttempts);
@@ -214,7 +232,10 @@ function resolveExistingReplay(
   return { ok: true, refundAttempt, orderStatus, replayed: true };
 }
 
-function validateEligibility(order: RefundRequestOrder): RequestRefundAttemptFailure | null {
+function validateEligibility(
+  order: RefundRequestOrder,
+  providerAdmission: RefundRequestProviderAdmission,
+): RequestRefundAttemptFailure | null {
   if (order.status === OrderStatus.REFUND_PENDING) {
     return failure("REFUND_IN_PROGRESS", "A refund request is already in progress.");
   }
@@ -224,7 +245,7 @@ function validateEligibility(order: RefundRequestOrder): RequestRefundAttemptFai
   if (order.disputeStatus !== null) {
     return failure("DISPUTE_REVIEW_REQUIRED", "Order dispute state requires manual review.");
   }
-  if (!isRefundablePayment(order)) {
+  if (!isRefundablePayment(order, providerAdmission)) {
     return failure("PAYMENT_NOT_REFUNDABLE", "Payment is not eligible for a refund request.");
   }
   if (!hasMatchingPaymentIdentity(order)) {
@@ -240,10 +261,20 @@ function isRefundableOrderStatus(status: OrderStatus): boolean {
   return status === OrderStatus.PAID || status === OrderStatus.PARTIALLY_REFUNDED;
 }
 
-function isRefundablePayment(order: RefundRequestOrder): boolean {
-  return order.payment.status === PaymentAttemptStatus.SUCCEEDED
-    && order.payment.provider !== PaymentProvider.EXIMBAY
-    && Boolean(order.payment.providerPaymentKey?.trim());
+function isRefundablePayment(
+  order: RefundRequestOrder,
+  providerAdmission: RefundRequestProviderAdmission,
+): boolean {
+  if (
+    order.payment.status !== PaymentAttemptStatus.SUCCEEDED
+    || !order.payment.providerPaymentKey?.trim()
+  ) {
+    return false;
+  }
+  if (order.payment.provider !== PaymentProvider.EXIMBAY) return true;
+  return providerAdmission.allowEximbaySandboxCustomerApproval
+    && order.payment.mode === PaymentMode.SANDBOX
+    && (order.payment.currency === "USD" || order.payment.currency === "JPY");
 }
 
 function hasMatchingPaymentIdentity(order: RefundRequestOrder): boolean {

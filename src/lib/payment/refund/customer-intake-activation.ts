@@ -2,6 +2,7 @@ type ActivationEnv = Readonly<Record<string, string | undefined>>;
 
 const SUBMIT_KEY = "CUSTOMER_REFUND_INTAKE_SUBMIT_ENABLED";
 const APPROVE_KEY = "CUSTOMER_REFUND_INTAKE_APPROVE_ENABLED";
+const EXIMBAY_APPROVE_KEY = "CUSTOMER_REFUND_INTAKE_EXIMBAY_APPROVE_ENABLED";
 
 export class CustomerRefundIntakeActivationConfigError extends Error {
   constructor(key: string) {
@@ -20,6 +21,12 @@ export function isCustomerRefundIntakeApproveEnabled(
   env: ActivationEnv = process.env,
 ): boolean {
   return parseActivation(env, APPROVE_KEY);
+}
+
+export function isCustomerRefundIntakeEximbayApproveEnabled(
+  env: ActivationEnv = process.env,
+): boolean {
+  return parseActivation(env, EXIMBAY_APPROVE_KEY);
 }
 
 function parseActivation(env: ActivationEnv, key: string): boolean {

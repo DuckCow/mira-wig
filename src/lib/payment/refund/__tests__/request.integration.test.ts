@@ -24,6 +24,9 @@ import {
 
 const NOW = new Date("2026-07-10T04:00:00.000Z");
 const MARKET_CODE = "KR";
+const EXIMBAY_CUSTOMER_APPROVAL = Object.freeze({
+  allowEximbaySandboxCustomerApproval: true,
+});
 
 class CallerOwnedTransactionRollbackProbe extends Error {}
 
@@ -241,12 +244,72 @@ describe("requestRefundAttempt", () => {
     await expectFailure(fixture, "PAYMENT_NOT_REFUNDABLE");
   });
 
-  it("does not admit a refund request for disabled Eximbay identity", async () => {
+  it("keeps default/global refund request admission blocked for Eximbay", async () => {
     const fixture = await createOrder(ctx, { provider: PaymentProvider.EXIMBAY });
 
     await expectFailure(fixture, "PAYMENT_NOT_REFUNDABLE");
     await expect(refundCount(fixture.orderId)).resolves.toBe(0);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.PAID);
+  });
+
+  it.each(["USD", "JPY"])(
+    "admits Eximbay SANDBOX %s only with explicit customer-approval capability",
+    async (currency) => {
+      const fixture = await createOrder(ctx, {
+        orderCurrency: currency,
+        paymentCurrency: currency,
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+
+      const result = success(await requestWithEximbayCustomerApproval(fixture));
+      const transitions = await creationTransitions(result.refundAttempt.id);
+
+      expect(result.refundAttempt).toMatchObject({
+        paymentId: fixture.paymentId,
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+        currency,
+        status: RefundAttemptStatus.REQUESTED,
+        providerRefundId: null,
+      });
+      expect(transitions).toHaveLength(1);
+      await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+    },
+  );
+
+  it("keeps Eximbay LIVE blocked with explicit customer-approval capability", async () => {
+    const fixture = await createOrder(ctx, {
+      orderCurrency: "USD",
+      paymentCurrency: "USD",
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.LIVE,
+    });
+
+    await expect(requestWithEximbayCustomerApproval(fixture))
+      .resolves.toMatchObject({ ok: false, code: "PAYMENT_NOT_REFUNDABLE" });
+    await expect(requestPersistenceState(fixture)).resolves.toMatchObject({
+      orderStatus: OrderStatus.PAID,
+      refundAttemptCount: 0,
+      transitionCount: 0,
+    });
+  });
+
+  it("keeps unsupported Eximbay currency blocked with explicit customer-approval capability", async () => {
+    const fixture = await createOrder(ctx, {
+      orderCurrency: "KRW",
+      paymentCurrency: "KRW",
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+    });
+
+    await expect(requestWithEximbayCustomerApproval(fixture))
+      .resolves.toMatchObject({ ok: false, code: "PAYMENT_NOT_REFUNDABLE" });
+    await expect(requestPersistenceState(fixture)).resolves.toMatchObject({
+      orderStatus: OrderStatus.PAID,
+      refundAttemptCount: 0,
+      transitionCount: 0,
+    });
   });
 
   it("rejects an order/payment amount mismatch", async () => {
@@ -877,6 +940,16 @@ async function expectFailure(
   expect(result).toMatchObject({ ok: false, code });
   await expect(orderStatus(fixture.orderId)).resolves.not.toBe(OrderStatus.REFUND_PENDING);
   await expect(refundCount(fixture.orderId)).resolves.toBe(0);
+}
+
+function requestWithEximbayCustomerApproval(
+  fixture: OrderFixture,
+): Promise<RequestRefundAttemptResult> {
+  return db.$transaction((tx) => requestRefundAttemptInTransaction(
+    tx,
+    input(fixture.orderId),
+    EXIMBAY_CUSTOMER_APPROVAL,
+  ));
 }
 
 function success(result: RequestRefundAttemptResult): Extract<RequestRefundAttemptResult, { ok: true }> {

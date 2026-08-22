@@ -16,10 +16,12 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import {
   approveCustomerRefundIntake,
   CustomerIntakeReviewInvariantError,
   rejectCustomerRefundIntake,
+  type CustomerRefundIntakeApprovalCapabilities,
   type CustomerIntakeReviewClient,
 } from "../customer-intake-review";
 import type {
@@ -38,6 +40,9 @@ import {
 const NOW = new Date("2026-07-15T03:00:00.000Z");
 const MARKET_CODE = "KR";
 const CUSTOMER_DETAIL = "customer private detail";
+const EXIMBAY_CUSTOMER_APPROVAL = Object.freeze({
+  allowEximbaySandboxCustomerApproval: true,
+});
 
 interface TestContext {
   ownerUserId: string;
@@ -55,6 +60,8 @@ interface OrderOptions {
   paymentStatus?: PaymentAttemptStatus;
   paymentAmount?: number;
   paymentCurrency?: string;
+  provider?: PaymentProvider;
+  mode?: PaymentMode;
   providerPaymentKey?: string | null;
   disputeStatus?: string | null;
 }
@@ -67,6 +74,8 @@ interface ReviewFixture {
   customerUserId: string;
   amount: number;
   currency: string;
+  provider: PaymentProvider;
+  mode: PaymentMode;
 }
 
 interface AttemptOptions {
@@ -80,6 +89,8 @@ interface AttemptOptions {
   reason?: string;
   idempotencyKey?: string;
   createTransition?: boolean;
+  provider?: PaymentProvider;
+  mode?: PaymentMode;
 }
 
 class ApprovalRollbackProbe extends Error {}
@@ -257,6 +268,202 @@ describe("CustomerRefundIntake administrator review core", () => {
       expect(commandCount).toBe(0);
       expect(evidenceCount).toBe(0);
       await expect(orderStatusOf(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+    });
+
+    it("keeps fresh Eximbay approval blocked when the B3 capability is omitted", async () => {
+      const fixture = await createFixture(ctx, {
+        orderCurrency: "USD",
+        paymentCurrency: "USD",
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+
+      await expectApprovalFailure(fixture, "PAYMENT_NOT_REFUNDABLE");
+    });
+
+    it.each(["USD", "JPY"])(
+      "approves bounded Eximbay SANDBOX %s without creating execution state",
+      async (currency) => {
+        const fixture = await createFixture(ctx, {
+          orderCurrency: currency,
+          paymentCurrency: currency,
+          provider: PaymentProvider.EXIMBAY,
+          mode: PaymentMode.SANDBOX,
+        });
+
+        const result = approveSuccess(await approveCustomerRefundIntake(
+          db,
+          approveInput(fixture),
+          EXIMBAY_CUSTOMER_APPROVAL,
+        ));
+        const [attempt, state] = await Promise.all([
+          db.refundAttempt.findUniqueOrThrow({ where: { id: result.attempt.id } }),
+          reviewState(fixture),
+        ]);
+
+        expect(attempt).toMatchObject({
+          paymentId: fixture.paymentId,
+          provider: PaymentProvider.EXIMBAY,
+          mode: PaymentMode.SANDBOX,
+          currency,
+          status: RefundAttemptStatus.REQUESTED,
+          providerRefundId: null,
+        });
+        expect(state).toMatchObject({
+          order: { status: OrderStatus.REFUND_PENDING },
+          intake: {
+            status: CustomerRefundIntakeStatus.APPROVED,
+            approvedRefundAttemptId: attempt.id,
+          },
+          attempts: 1,
+          transitions: 1,
+          commands: 0,
+          evidence: 0,
+        });
+      },
+    );
+
+    it("keeps Eximbay LIVE blocked when the B3 capability is enabled", async () => {
+      const fixture = await createFixture(ctx, {
+        orderCurrency: "USD",
+        paymentCurrency: "USD",
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.LIVE,
+      });
+
+      await expectApprovalFailure(
+        fixture,
+        "PAYMENT_NOT_REFUNDABLE",
+        {},
+        EXIMBAY_CUSTOMER_APPROVAL,
+      );
+    });
+
+    it("keeps unsupported Eximbay currency blocked when the B3 capability is enabled", async () => {
+      const fixture = await createFixture(ctx, {
+        orderCurrency: "KRW",
+        paymentCurrency: "KRW",
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+
+      await expectApprovalFailure(
+        fixture,
+        "PAYMENT_NOT_REFUNDABLE",
+        {},
+        EXIMBAY_CUSTOMER_APPROVAL,
+      );
+    });
+
+    it("preserves generic eligibility failures for B3-enabled Eximbay approval", async () => {
+      const failedPayment = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX, paymentStatus: PaymentAttemptStatus.FAILED,
+      });
+      await expectApprovalFailure(
+        failedPayment, "PAYMENT_NOT_REFUNDABLE", {}, EXIMBAY_CUSTOMER_APPROVAL,
+      );
+
+      const blankKey = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX, providerPaymentKey: " \t",
+      });
+      await expectApprovalFailure(blankKey, "PAYMENT_NOT_REFUNDABLE", {}, EXIMBAY_CUSTOMER_APPROVAL);
+
+      const amountMismatch = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", orderAmount: 900, paymentAmount: 1_000,
+        provider: PaymentProvider.EXIMBAY, mode: PaymentMode.SANDBOX,
+      });
+      await expectApprovalFailure(
+        amountMismatch, "PAYMENT_IDENTITY_MISMATCH", {}, EXIMBAY_CUSTOMER_APPROVAL,
+      );
+
+      const currencyMismatch = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "JPY", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+      await expectApprovalFailure(
+        currencyMismatch, "PAYMENT_IDENTITY_MISMATCH", {}, EXIMBAY_CUSTOMER_APPROVAL,
+      );
+
+      const disputed = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX, disputeStatus: "OPEN",
+      });
+      await expectApprovalFailure(
+        disputed, "DISPUTE_REVIEW_REQUIRED", {}, EXIMBAY_CUSTOMER_APPROVAL,
+      );
+
+      const open = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+      await seedAttempt(open, { status: RefundAttemptStatus.PROCESSING });
+      await expectApprovalFailure(open, "REFUND_IN_PROGRESS", {}, EXIMBAY_CUSTOMER_APPROVAL);
+
+      const overRefund = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+      await seedAttempt(overRefund, { status: RefundAttemptStatus.SUCCEEDED, amount: 800 });
+      await expectApprovalFailure(overRefund, "OVER_REFUND", { amount: 201 }, EXIMBAY_CUSTOMER_APPROVAL);
+
+      const ledgerMismatch = await createFixture(ctx, {
+        orderCurrency: "USD", paymentCurrency: "USD", provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+      await seedAttempt(ledgerMismatch, {
+        status: RefundAttemptStatus.FAILED_TERMINAL,
+        provider: PaymentProvider.MOCK,
+      });
+      await expectApprovalFailure(
+        ledgerMismatch, "REFUND_LEDGER_INCONSISTENT", {}, EXIMBAY_CUSTOMER_APPROVAL,
+      );
+    });
+
+    it("replays a durable Eximbay approval after the B3 capability is disabled", async () => {
+      const fixture = await createFixture(ctx, {
+        orderCurrency: "USD",
+        paymentCurrency: "USD",
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      });
+      const approved = approveSuccess(await approveCustomerRefundIntake(
+        db,
+        approveInput(fixture),
+        EXIMBAY_CUSTOMER_APPROVAL,
+      ));
+      const before = await reviewState(fixture);
+
+      const replay = approveSuccess(await approveCustomerRefundIntake(db, approveInput(fixture)));
+
+      expect(replay).toEqual({ ...approved, replayed: true });
+      await expect(reviewState(fixture)).resolves.toEqual(before);
+    });
+
+    it("keeps Toss approval semantics unchanged with the B3 capability off and on", async () => {
+      const disabled = await createFixture(ctx, { provider: PaymentProvider.TOSS });
+      const enabled = await createFixture(ctx, { provider: PaymentProvider.TOSS });
+
+      const disabledResult = approveSuccess(await approveCustomerRefundIntake(db, approveInput(disabled)));
+      const enabledResult = approveSuccess(await approveCustomerRefundIntake(
+        db,
+        approveInput(enabled),
+        EXIMBAY_CUSTOMER_APPROVAL,
+      ));
+      const attempts = await db.refundAttempt.findMany({
+        where: { id: { in: [disabledResult.attempt.id, enabledResult.attempt.id] } },
+        orderBy: { id: "asc" },
+      });
+
+      expect(disabledResult.attempt).toMatchObject({
+        amount: enabledResult.attempt.amount,
+        currency: enabledResult.attempt.currency,
+        status: enabledResult.attempt.status,
+      });
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]?.provider).toBe(PaymentProvider.TOSS);
+      expect(attempts[1]?.provider).toBe(PaymentProvider.TOSS);
     });
 
     it("approves the remaining amount after a previous partial refund", async () => {
@@ -740,11 +947,16 @@ async function createOrder(context: TestContext, options: OrderOptions) {
   });
   context.sessionIds.push(session.id);
   const paymentFixture = normalizePaymentFixture(options);
+  const provider = options.provider ?? PaymentProvider.MOCK;
+  const mode = options.mode ?? PaymentMode.SANDBOX;
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: session.id,
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
+      provider,
+      mode,
+      providerOrderId: provider === PaymentProvider.EXIMBAY
+        ? syntheticEximbayProviderOrderId()
+        : null,
       ...paymentFixture,
       idempotencyKey: `payment_idem_${randomUUID()}`,
     },
@@ -772,6 +984,8 @@ async function createOrder(context: TestContext, options: OrderOptions) {
     sessionId: session.id,
     amount,
     currency,
+    provider,
+    mode,
   };
 }
 
@@ -822,8 +1036,8 @@ async function seedAttempt(fixture: ReviewFixture, options: AttemptOptions = {})
       reason,
       actorType: options.actorType ?? RefundAttemptActorType.ADMIN,
       actorUserId: options.actorUserId === undefined ? "direct_admin" : options.actorUserId,
-      provider: PaymentProvider.MOCK,
-      mode: PaymentMode.SANDBOX,
+      provider: options.provider ?? fixture.provider,
+      mode: options.mode ?? fixture.mode,
       idempotencyKey: identity.idempotencyKey,
       requestedAt: NOW,
     },
@@ -862,9 +1076,14 @@ async function expectApprovalFailure(
   fixture: ReviewFixture,
   code: string,
   override: Partial<ApproveCustomerRefundIntakeInput> = {},
+  capabilities?: CustomerRefundIntakeApprovalCapabilities,
 ): Promise<void> {
   const before = await reviewState(fixture);
-  const result = await approveCustomerRefundIntake(db, approveInput(fixture, override));
+  const result = await approveCustomerRefundIntake(
+    db,
+    approveInput(fixture, override),
+    capabilities,
+  );
   expect(result).toMatchObject({ ok: false, code });
   await expect(reviewState(fixture)).resolves.toEqual(before);
 }
