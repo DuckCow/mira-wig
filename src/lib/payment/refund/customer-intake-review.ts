@@ -46,6 +46,14 @@ type AuditedRefundAttempt = RefundAttempt & { transitions: RefundAttemptTransiti
 
 export class CustomerIntakeReviewInvariantError extends Error {}
 
+export interface CustomerRefundIntakeApprovalCapabilities {
+  readonly allowEximbaySandboxCustomerApproval: boolean;
+}
+
+const DEFAULT_APPROVAL_CAPABILITIES: CustomerRefundIntakeApprovalCapabilities = Object.freeze({
+  allowEximbaySandboxCustomerApproval: false,
+});
+
 export async function rejectCustomerRefundIntake(
   client: CustomerIntakeReviewClient,
   input: RejectCustomerRefundIntakeInput,
@@ -58,11 +66,17 @@ export async function rejectCustomerRefundIntake(
 export async function approveCustomerRefundIntake(
   client: CustomerIntakeReviewClient,
   input: ApproveCustomerRefundIntakeInput,
+  capabilities: CustomerRefundIntakeApprovalCapabilities = DEFAULT_APPROVAL_CAPABILITIES,
 ): Promise<ApproveCustomerRefundIntakeResult> {
   const normalized = normalizeApproveCustomerRefundIntakeInput(input);
   if (!normalized.ok) return normalized;
   const refundAttemptId = randomUUID();
-  return client.$transaction((tx) => approveInTransaction(tx, normalized.input, refundAttemptId));
+  return client.$transaction((tx) => approveInTransaction(
+    tx,
+    normalized.input,
+    refundAttemptId,
+    capabilities,
+  ));
 }
 
 async function rejectInTransaction(
@@ -113,6 +127,7 @@ async function approveInTransaction(
   tx: CustomerIntakeReviewTx,
   input: NormalizedApproveCustomerRefundIntakeInput,
   refundAttemptId: string,
+  capabilities: CustomerRefundIntakeApprovalCapabilities,
 ): Promise<ApproveCustomerRefundIntakeResult> {
   const order = await lockOrder(tx, input.orderId);
   if (!order) return approveFailure("ORDER_NOT_FOUND", "Order was not found.");
@@ -129,7 +144,7 @@ async function approveInTransaction(
   ) {
     return approveFailure("NOT_APPROVABLE", "Customer refund intake is no longer approvable.");
   }
-  return persistApproval(tx, intake, input, refundAttemptId);
+  return persistApproval(tx, intake, input, refundAttemptId, capabilities);
 }
 
 async function persistApproval(
@@ -137,6 +152,7 @@ async function persistApproval(
   intake: LockedIntake,
   input: NormalizedApproveCustomerRefundIntakeInput,
   refundAttemptId: string,
+  capabilities: CustomerRefundIntakeApprovalCapabilities,
 ): Promise<ApproveCustomerRefundIntakeResult> {
   const request = await requestRefundAttemptInTransaction(tx, {
     refundAttemptId,
@@ -146,6 +162,8 @@ async function persistApproval(
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: input.reviewedByUserId,
     now: input.reviewedAt,
+  }, {
+    allowEximbaySandboxCustomerApproval: capabilities.allowEximbaySandboxCustomerApproval,
   });
   if (!request.ok) {
     const resolution = classifyApprovalRequestFailure(request);

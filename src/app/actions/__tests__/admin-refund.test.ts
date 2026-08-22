@@ -103,6 +103,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe("requestRefundAttemptAction authorization", () => {
@@ -204,6 +205,20 @@ describe("requestRefundAttemptAction delegation", () => {
     });
     expect(mockRevalidatePath).toHaveBeenCalledOnce();
     expect(mockRevalidatePath).toHaveBeenCalledWith("/admin/orders/order_123");
+  });
+
+  it("does not inherit the customer Eximbay approval capability", async () => {
+    vi.stubEnv("CUSTOMER_REFUND_INTAKE_EXIMBAY_APPROVE_ENABLED", "ENABLED");
+
+    await requestRefundAttemptAction(VALID_INPUT);
+
+    expect(mockRequestRefundAttempt).toHaveBeenCalledWith(mockDb, {
+      refundAttemptId: GENERATED_ID,
+      ...VALID_INPUT,
+      actorType: RefundAttemptActorType.ADMIN,
+      actorUserId: ADMIN_ID,
+      now: NOW,
+    });
   });
 
   it("revalidates the validated detail path for an exact core replay", async () => {

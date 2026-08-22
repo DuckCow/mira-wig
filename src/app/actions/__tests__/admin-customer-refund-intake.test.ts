@@ -11,6 +11,7 @@ vi.mock("@/lib/db", () => ({ db: mockDb }));
 vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn() }));
 vi.mock("@/lib/payment/refund/customer-intake-activation", () => ({
   isCustomerRefundIntakeApproveEnabled: vi.fn(),
+  isCustomerRefundIntakeEximbayApproveEnabled: vi.fn(),
 }));
 vi.mock("@/lib/payment/refund/customer-intake-review", () => ({
   approveCustomerRefundIntake: vi.fn(),
@@ -29,7 +30,10 @@ vi.mock("@/lib/payment/refund/customer-intake-review-contract", async () => {
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
-import { isCustomerRefundIntakeApproveEnabled } from "@/lib/payment/refund/customer-intake-activation";
+import {
+  isCustomerRefundIntakeApproveEnabled,
+  isCustomerRefundIntakeEximbayApproveEnabled,
+} from "@/lib/payment/refund/customer-intake-activation";
 import {
   normalizeApproveCustomerRefundIntakeInput,
   normalizeRejectCustomerRefundIntakeInput,
@@ -63,6 +67,7 @@ const VALID_APPROVE = {
 
 const mockRequireAdmin = vi.mocked(requireAdmin);
 const mockApproveEnabled = vi.mocked(isCustomerRefundIntakeApproveEnabled);
+const mockEximbayApproveEnabled = vi.mocked(isCustomerRefundIntakeEximbayApproveEnabled);
 const mockNormalizeReject = vi.mocked(normalizeRejectCustomerRefundIntakeInput);
 const mockNormalizeApprove = vi.mocked(normalizeApproveCustomerRefundIntakeInput);
 const mockReject = vi.mocked(rejectCustomerRefundIntake);
@@ -75,6 +80,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   mockRequireAdmin.mockResolvedValue(adminGuard());
   mockApproveEnabled.mockReturnValue(true);
+  mockEximbayApproveEnabled.mockReturnValue(false);
   mockReject.mockResolvedValue(rejectSuccess());
   mockApprove.mockResolvedValue(approveSuccess());
 });
@@ -94,6 +100,7 @@ describe("administrator authorization and actor ownership", () => {
     await expect(rejectCustomerRefundIntakeAction(null)).resolves.toEqual({ success: false, errorCode });
 
     expect(mockApproveEnabled).not.toHaveBeenCalled();
+    expect(mockEximbayApproveEnabled).not.toHaveBeenCalled();
     expect(mockApprove).not.toHaveBeenCalled();
     expect(mockReject).not.toHaveBeenCalled();
   });
@@ -113,6 +120,7 @@ describe("administrator authorization and actor ownership", () => {
       "Administrator customer refund intake action invariant failed.",
     );
     expect(mockApproveEnabled).not.toHaveBeenCalled();
+    expect(mockEximbayApproveEnabled).not.toHaveBeenCalled();
   });
 
   it("derives the normalized reviewer from the guard session", async () => {
@@ -240,6 +248,7 @@ describe("administrator approve gate and exact input", () => {
       errorCode: "FEATURE_DISABLED",
     });
     expect(mockNormalizeApprove).not.toHaveBeenCalled();
+    expect(mockEximbayApproveEnabled).not.toHaveBeenCalled();
     expect(mockApprove).not.toHaveBeenCalled();
   });
 
@@ -259,6 +268,18 @@ describe("administrator approve gate and exact input", () => {
     await expect(approveCustomerRefundIntakeAction(VALID_APPROVE)).rejects.toThrow(
       "activation configuration failed",
     );
+    expect(mockEximbayApproveEnabled).not.toHaveBeenCalled();
+    expect(mockApprove).not.toHaveBeenCalled();
+  });
+
+  it("propagates malformed Eximbay approval configuration without invoking the core", async () => {
+    mockEximbayApproveEnabled.mockImplementation(() => {
+      throw new Error("Eximbay approval activation configuration failed");
+    });
+
+    await expect(approveCustomerRefundIntakeAction(VALID_APPROVE)).rejects.toThrow(
+      "Eximbay approval activation configuration failed",
+    );
     expect(mockApprove).not.toHaveBeenCalled();
   });
 
@@ -268,6 +289,9 @@ describe("administrator approve gate and exact input", () => {
     ["extra key", { ...VALID_APPROVE, extra: true }],
     ["spoofed reviewer", { ...VALID_APPROVE, reviewedByUserId: "attacker" }],
     ["spoofed currency", { ...VALID_APPROVE, currency: "USD" }],
+    ["spoofed provider", { ...VALID_APPROVE, provider: "EXIMBAY" }],
+    ["spoofed mode", { ...VALID_APPROVE, mode: "SANDBOX" }],
+    ["spoofed capability", { ...VALID_APPROVE, allowEximbaySandboxCustomerApproval: true }],
     ["spoofed attempt", { ...VALID_APPROVE, approvedRefundAttemptId: "attempt" }],
     ["symbol key", { ...VALID_APPROVE, [Symbol("spoof")]: true }],
     ["non-string amount", { ...VALID_APPROVE, amountMinor: 4000 }],
@@ -312,7 +336,11 @@ describe("administrator approve canonical minor-unit parser", () => {
 
       const amount = Number(amountMinor);
       expect(mockNormalizeApprove).toHaveBeenCalledWith(expect.objectContaining({ amount }));
-      expect(mockApprove).toHaveBeenCalledWith(mockDb, expect.objectContaining({ amount }));
+      expect(mockApprove).toHaveBeenCalledWith(
+        mockDb,
+        expect.objectContaining({ amount }),
+        { allowEximbaySandboxCustomerApproval: false },
+      );
     },
   );
 });
@@ -339,14 +367,18 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
       merchantRationale: "  retry rationale  ",
     });
 
-    expect(mockApprove).toHaveBeenCalledWith(mockDb, {
-      orderId: "order_123",
-      intakeId: "intake_123",
-      reviewedByUserId: ADMIN_ID,
-      amount: 4000,
-      merchantRationale: "retry rationale",
-      now: NOW,
-    });
+    expect(mockApprove).toHaveBeenCalledWith(
+      mockDb,
+      {
+        orderId: "order_123",
+        intakeId: "intake_123",
+        reviewedByUserId: ADMIN_ID,
+        amount: 4000,
+        merchantRationale: "retry rationale",
+        now: NOW,
+      },
+      { allowEximbaySandboxCustomerApproval: false },
+    );
     expect(result).toEqual({
       success: true,
       outcome,
@@ -378,6 +410,18 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
     expect(serialized).not.toContain("paymentId");
     expect(serialized).not.toContain("provider");
     expect(serialized).not.toContain("idempotency");
+  });
+
+  it("passes the Eximbay capability only from trusted server configuration", async () => {
+    mockEximbayApproveEnabled.mockReturnValue(true);
+
+    await approveCustomerRefundIntakeAction(VALID_APPROVE);
+
+    expect(mockApprove).toHaveBeenCalledWith(
+      mockDb,
+      expect.objectContaining({ orderId: VALID_APPROVE.orderId }),
+      { allowEximbaySandboxCustomerApproval: true },
+    );
   });
 
   it.each([

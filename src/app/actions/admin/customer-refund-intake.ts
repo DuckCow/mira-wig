@@ -9,6 +9,7 @@ import { requireAdmin } from "@/lib/admin";
 import { db } from "@/lib/db";
 import {
   isCustomerRefundIntakeApproveEnabled,
+  isCustomerRefundIntakeEximbayApproveEnabled,
 } from "@/lib/payment/refund/customer-intake-activation";
 import {
   normalizeApproveCustomerRefundIntakeInput,
@@ -189,6 +190,9 @@ export async function approveCustomerRefundIntakeAction(
   const reviewedByUserId = guard.session.user.id.trim();
   if (!reviewedByUserId) throw actionInvariant();
   if (!isCustomerRefundIntakeApproveEnabled()) return failure("FEATURE_DISABLED");
+  const capabilities = Object.freeze({
+    allowEximbaySandboxCustomerApproval: isCustomerRefundIntakeEximbayApproveEnabled(),
+  });
   const parsed = parseApproveInput(input);
   if (!parsed.success) return failure(parsed.errorCode);
   const operationAt = new Date();
@@ -206,7 +210,7 @@ export async function approveCustomerRefundIntakeAction(
     amount: normalized.input.amount,
     merchantRationale: normalized.input.merchantRationale,
     now: normalized.input.reviewedAt,
-  });
+  }, capabilities);
   if (!result.ok) return failure(mappedFailureOrInvariant(APPROVE_CORE_FAILURES[result.code]));
 
   const storedOrderId = result.intake.orderId;
