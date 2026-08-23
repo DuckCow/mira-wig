@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { createCheckoutSessionAction, type CheckoutActionResult } from "@/app/actions/checkout";
 import { type CurrencyMeta, type MarketCode } from "@/lib/market/types";
 import { COUNTRY_FORM_CONFIGS, type CountryFormConfig } from "@/lib/order/address-config";
@@ -11,12 +12,12 @@ import {
   hasSubmitError,
 } from "@/lib/order/validation";
 import { AddressFields } from "./AddressFields";
-import { CartSnapshot, SessionSnapshot, type CheckoutCartItem } from "./checkout-summary";
-import { PaymentMethodSection } from "./PaymentMethodSection";
-import type { CheckoutShippingInput, CreateCheckoutSessionResult } from "@/lib/payment/session/types";
+import { CartSnapshot, type CheckoutCartItem } from "./checkout-summary";
+import type { CheckoutShippingInput } from "@/lib/payment/session/types";
 import type { AddressKey } from "./types";
 import type { Locale } from "@/lib/market/locale";
 import { messagesFor } from "@/lib/market/messages";
+import { checkoutSessionResumeHref } from "./checkout-url";
 
 interface CheckoutFormProps {
   marketCode: MarketCode;
@@ -25,8 +26,6 @@ interface CheckoutFormProps {
   shippingCountry: CheckoutShippingInput["country"];
   cartItems: CheckoutCartItem[];
   productSubtotal: number;
-  mockPaymentEnabled: boolean;
-  eximbayCardEnabled: boolean;
   locale: Locale;
 }
 
@@ -38,7 +37,6 @@ interface CheckoutSessionFormState {
   values: CheckoutShippingInput;
   errors: FieldErrors;
   formError: string | null;
-  created: CreateCheckoutSessionResult | null;
   isPending: boolean;
   handleChange: (field: AddressKey, value: string) => void;
   handleBlur: (field: AddressKey, domValue: string) => void;
@@ -67,12 +65,17 @@ export function CheckoutForm({
   shippingCountry,
   cartItems,
   productSubtotal,
-  mockPaymentEnabled,
-  eximbayCardEnabled,
   locale,
 }: CheckoutFormProps) {
+  const router = useRouter();
   const config = COUNTRY_FORM_CONFIGS[shippingCountry];
-  const form = useCheckoutSessionForm(shippingCountry, config, marketCode, locale);
+  const form = useCheckoutSessionForm(
+    shippingCountry,
+    config,
+    marketCode,
+    locale,
+    (href) => router.replace(href),
+  );
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -87,19 +90,6 @@ export function CheckoutForm({
 
       <aside className="space-y-4">
         <CartSnapshot cartItems={cartItems} subtotal={productSubtotal} currency={currency} locale={locale} />
-        {form.created && (
-          <>
-            <SessionSnapshot session={form.created} fallbackCurrency={currency} locale={locale} />
-            <PaymentMethodSection
-              key={form.created.sessionId}
-              checkoutSessionId={form.created.sessionId}
-              mockPaymentEnabled={mockPaymentEnabled}
-              eximbayCardEnabled={eximbayCardEnabled}
-              locale={locale}
-              marketCode={marketCode}
-            />
-          </>
-        )}
       </aside>
     </div>
   );
@@ -107,11 +97,7 @@ export function CheckoutForm({
 
 function ShippingForm({ marketCode, marketLabel, countryLabel, config, form, locale }: ShippingFormProps) {
   const messages = messagesFor(locale).checkout;
-  const submitLabel = form.isPending
-    ? messages.creating
-    : form.created
-      ? messages.recreate
-      : messages.create;
+  const submitLabel = form.isPending ? messages.creating : messages.create;
 
   return (
     <form onSubmit={form.handleSubmit} className="space-y-6 rounded-lg border border-gray-200 bg-white p-5">
@@ -191,23 +177,21 @@ function useCheckoutSessionForm(
   config: CountryFormConfig,
   marketCode: MarketCode,
   locale: Locale,
+  replace: (href: string) => void,
 ): CheckoutSessionFormState {
   const [values, setValues] = useState(() => emptyShipping(shippingCountry));
   const [touched, setTouched] = useState<TouchedFields>({});
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [created, setCreated] = useState<CreateCheckoutSessionResult | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleChange(field: AddressKey, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
-    setCreated(null);
     if (!touched[field]) return;
     setErrors((current) => withFieldError(current, field, localizedFieldError(field, value, config, locale)));
   }
 
   function handleBlur(field: AddressKey, domValue: string) {
-    if (values[field] !== domValue) setCreated(null);
     setValues((current) => ({ ...current, [field]: domValue }));
     setTouched((current) => ({ ...current, [field]: true }));
     setErrors((current) => withFieldError(current, field, localizedFieldError(field, domValue, config, locale)));
@@ -220,12 +204,11 @@ function useCheckoutSessionForm(
     setTouched(touchRequiredFields());
     setErrors(collectErrors(nextValues, config, locale));
     setFormError(null);
-    setCreated(null);
     if (hasSubmitError(nextValues, config)) return;
-    startTransition(async () => createSession(nextValues, marketCode, locale, setCreated, setFormError));
+    startTransition(async () => createSessionAndNavigate(nextValues, marketCode, locale, replace, setFormError));
   }
 
-  return { values, errors, formError, created, isPending, handleChange, handleBlur, handleSubmit };
+  return { values, errors, formError, isPending, handleChange, handleBlur, handleSubmit };
 }
 
 function collectErrors(address: CheckoutShippingInput, config: CountryFormConfig, locale: Locale): FieldErrors {
@@ -256,16 +239,16 @@ function actionErrorMessage(result: FailedCheckout, locale: Locale): string {
   return messages.errors[result.errorCode] ?? messages.errors.SHIPPING_ADDRESS_INVALID;
 }
 
-async function createSession(
+export async function createSessionAndNavigate(
   address: CheckoutShippingInput,
   expectedMarketCode: MarketCode,
   locale: Locale,
-  setCreated: (session: CreateCheckoutSessionResult | null) => void,
+  replace: (href: string) => void,
   setFormError: (error: string | null) => void,
 ) {
   const result = await createCheckoutSessionAction({ ...address, expectedMarketCode });
   if (result.success) {
-    setCreated(result.session);
+    replace(checkoutSessionResumeHref(result.session.sessionId, { marketCode: expectedMarketCode, locale }));
     return;
   }
   setFormError(actionErrorMessage(result, locale));

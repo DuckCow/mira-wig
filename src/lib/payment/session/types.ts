@@ -1,5 +1,6 @@
-import type { ShippingCountry } from "@prisma/client";
+import type { CheckoutSessionStatus, FulfillmentType, ShippingCountry } from "@prisma/client";
 import type { MarketCode } from "@/lib/market/types";
+import type { SnapshotData } from "@/lib/order/types";
 
 // 30 minutes keeps stale payment intents short-lived while leaving room for address/payment entry.
 export const SESSION_TTL_MS = 30 * 60 * 1_000;
@@ -56,6 +57,50 @@ export interface CreateCheckoutSessionResult {
   shippingAmount: number;
   totalAmount: number;
   currency: string;
+}
+
+export type CheckoutSessionResumeDisposition =
+  | "PAYMENT_ELIGIBLE"
+  | "PAYMENT_EXISTS"
+  | "EXPIRED"
+  | "COMPLETED"
+  | "TERMINAL"
+  | "MARKET_UNAVAILABLE";
+
+export interface CheckoutSessionResumeLine {
+  id: string;
+  quantity: number;
+  unitAmount: number;
+  fulfillmentType: FulfillmentType;
+  snapshot: SnapshotData;
+}
+
+export interface CheckoutSessionResumeShipping {
+  recipientName: string;
+  phone: string;
+  country: ShippingCountry;
+  postalCode: string;
+  administrativeArea: string;
+  city: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  memo: string | null;
+}
+
+export interface CheckoutSessionResumeResult {
+  sessionId: string;
+  marketCode: MarketCode;
+  currency: string;
+  status: CheckoutSessionStatus;
+  submittedAt: Date | null;
+  expiresAt: Date;
+  subtotalAmount: number;
+  shippingAmount: number;
+  totalAmount: number;
+  lines: readonly CheckoutSessionResumeLine[];
+  shipping: CheckoutSessionResumeShipping;
+  disposition: CheckoutSessionResumeDisposition;
+  orderId: string | null;
 }
 
 export interface ExpireStaleInput {
