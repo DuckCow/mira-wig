@@ -1,4 +1,7 @@
-import type { PaymentProvider as ProviderCode } from "@prisma/client";
+import type {
+  PaymentAdapterExecutionKind,
+  PaymentProvider as ProviderCode,
+} from "@prisma/client";
 import type { NormalizedProviderConfirmResult } from "./contract";
 
 export interface PaymentInitiateInput {
@@ -48,12 +51,14 @@ export interface PaymentConfirmFacts {
 export type PaymentConfirmResult = PaymentConfirmFacts | NormalizedProviderConfirmResult;
 
 export interface PaymentInitiationProvider<Result extends PaymentInitiateResult = PaymentInitiateResult> {
-  code: ProviderCode;
+  readonly code: ProviderCode;
+  readonly adapterExecutionKind: PaymentAdapterExecutionKind;
   initiate(input: PaymentInitiateInput): Promise<Result>;
 }
 
 export interface PaymentConfirmationProvider<Result extends PaymentConfirmResult = PaymentConfirmResult> {
-  code: ProviderCode;
+  readonly code: ProviderCode;
+  readonly adapterExecutionKind: PaymentAdapterExecutionKind;
   confirm(input: PaymentConfirmInput): Promise<Result>;
 }
 

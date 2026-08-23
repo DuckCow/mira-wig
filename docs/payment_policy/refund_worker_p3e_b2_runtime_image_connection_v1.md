@@ -79,14 +79,14 @@ runtime. Client generation happens without a database in the build stage.
 
 The repository root is not an authoritative Docker context. The build orchestrator asks esbuild
 for the actual three-entrypoint graph, rejects symlinks and path escape, and copies only the
-reachable repository inputs plus the exact lockfile, package manifest, Prisma inputs, 36
+reachable repository inputs plus the exact lockfile, package manifest, Prisma inputs, 37
 migrations, build script, and Dockerfile into an empty temporary directory outside the
 repository. It normalizes regular files to `0644`, directories to `0755`, and timestamps to
 `SOURCE_DATE_EPOCH`, then emits a sorted path/size/mode/content-SHA-256 manifest and digest.
 The context is removed in `finally`.
 
-The corrected exact context contains 154 files and has canonical manifest SHA-256
-`428242f39290d2561333cd90e89422c34bfc00c3ced3b3890c9e3ca9dab1b4a4`.
+The corrected exact context contains 178 files and has canonical manifest SHA-256
+`a0f43bcfb53720c3ebe3ab1369fc802af5d03b15a826fb304cd16a716f595fb9`.
 
 The 45 packaged graph inputs are not copied from local `node_modules`; the pinned root lockfile
 recreates them inside the build stage. No Next route, webhook or admin route, reconciliation or
@@ -113,13 +113,13 @@ image-native metadata manifest digest, and exact content manifest digest. Metada
 type, numeric UID/GID, mode, and symlink target as observed inside the Linux image. Content
 hashing is likewise performed inside the image and does not depend on archive extraction,
 invoking-host UID/GID, or umask. The closure contains only the three bundles, Prisma generated
-runtime and required external runtime modules, 36 migration SQL files, and their required package
+runtime and required external runtime modules, 37 migration SQL files, and their required package
 metadata. No unrelated repository source is present.
 
-The corrected image-native application closure contains 170 entries. Its metadata-manifest
-SHA-256 is `c32e4ddf79e1644328003d1d9155007d32044ca03272028ab07930f0ee44a14a`;
+The corrected image-native application closure contains 172 entries. Its metadata-manifest
+SHA-256 is `eec172e4f230c8e3508bbbaca9b07ccbea22f3462c63208bd5b955afad2bb6c8`;
 its content-manifest SHA-256 is
-`badfc782598a7661134051e4c0e79b69077c4d5582e7d3bac885bc495e165a17`.
+`4106d370ff1aa41f03f498619046951e32ff4981018d3f872a78560a2885def4`.
 
 The runtime contains no TypeScript compiler, tsx, esbuild, tests, source TypeScript, Next.js app,
 web server, Prisma CLI, executable npm/npx/Corepack/pnpm/Yarn surface, executable apt/dpkg
@@ -179,14 +179,14 @@ The exact `PINNED_NODE_BASE_DELTA_V1` authority is:
   `fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab`;
 - 3 reviewed retained-base metadata changes; before/after metadata-content SHA-256
   `d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da`;
-- 173 exact runtime additions; metadata-content SHA-256
-  `d5330eba9313f008ee9ca5273a5056a607f11ce7252501625c430db42684a6ab`.
+- 175 exact runtime additions; metadata-content SHA-256
+  `e7af7552b4079387ef2d4de8c754c089c9289b196301d48ffdb80372e9a3dd49`.
 
 The removals are exactly 73 apt/dpkg executable, metadata, and scheduler entries; 2,542 Node
 package-manager package/cache/shim entries; 4 interactive shell entries; and the one `gpgv`
 package-signature verifier. The three retained-base changes are `/run/lock`, `/tmp`, and
 `/var/tmp`, each changed from root-owned `01777` to root-owned `0755` to remove runtime-user
-write. The additions are exactly the 170-entry application closure, two bounded runtime-user
+write. The additions are exactly the 172-entry application closure, two bounded runtime-user
 writable directories, and the verified proxy executable.
 
 ## Private network and socket contract

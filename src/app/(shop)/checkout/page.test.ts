@@ -1,6 +1,6 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CURRENCY_META } from "@/lib/market/types";
 import type { CartItemView } from "@/lib/cart";
 
@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getStorefrontContext: vi.fn(),
   getCart: vi.fn(),
   getActiveMarketCommercialFacts: vi.fn(),
+  paymentMode: "SANDBOX",
   redirect: vi.fn((path: string): never => { throw new Error(`REDIRECT:${path}`); }),
 }));
 
@@ -24,20 +25,24 @@ vi.mock("@/lib/cart", () => ({ getCart: mocks.getCart }));
 vi.mock("@/lib/market/active-market", () => ({
   getActiveMarketCommercialFacts: mocks.getActiveMarketCommercialFacts,
 }));
-vi.mock("@/lib/payment/mode", () => ({ configuredPaymentMode: () => "SANDBOX" }));
+vi.mock("@/lib/payment/mode", () => ({ configuredPaymentMode: () => mocks.paymentMode }));
 vi.mock("./CheckoutForm", () => ({
   CheckoutForm: (props: {
     marketLabel: string;
     currency: { code: string };
     shippingCountry: string;
+    eximbayCardEnabled: boolean;
   }) => createElement("section", {
     "data-market-label": props.marketLabel,
     "data-currency": props.currency.code,
     "data-shipping-country": props.shippingCountry,
+    "data-eximbay-card-enabled": String(props.eximbayCardEnabled),
   }),
 }));
 
 import CheckoutPage, { checkoutCountry } from "./page";
+
+const ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED = process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
 
 describe("checkout current Market commercial facts", () => {
   beforeEach(() => {
@@ -54,6 +59,16 @@ describe("checkout current Market commercial facts", () => {
       requestTarget: "/checkout",
     });
     mocks.getCart.mockResolvedValue([cartLine()]);
+    mocks.paymentMode = "SANDBOX";
+    delete process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED === undefined) {
+      delete process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+    } else {
+      process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED = ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+    }
   });
 
   it("renders DB currency and DB-authorized shipping country even when they drift from former static values", async () => {
@@ -77,6 +92,52 @@ describe("checkout current Market commercial facts", () => {
     expect(() => checkoutCountry("US", [])).toThrow("exactly one shipping country");
     expect(() => checkoutCountry("US", ["US", "JP"])).toThrow("exactly one shipping country");
     expect(() => checkoutCountry("US", ["CA"])).toThrow("Unsupported checkout shipping country");
+  });
+
+  it("passes an enabled Eximbay card capability only for exact US USD SANDBOX activation", async () => {
+    process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED = "ENABLED";
+    mocks.getActiveMarketCommercialFacts.mockResolvedValue({
+      code: "US",
+      isActive: true,
+      currency: CURRENCY_META.USD,
+      shippableCountries: ["US"],
+    });
+
+    const html = renderToStaticMarkup(await CheckoutPage());
+
+    expect(html).toContain('data-eximbay-card-enabled="true"');
+  });
+
+  it.each([
+    ["absent activation", undefined, "SANDBOX", "US", CURRENCY_META.USD],
+    ["invalid activation", "enabled", "SANDBOX", "US", CURRENCY_META.USD],
+    ["wrong market", "ENABLED", "SANDBOX", "KR", CURRENCY_META.USD],
+    ["wrong currency", "ENABLED", "SANDBOX", "US", CURRENCY_META.JPY],
+    ["LIVE mode", "ENABLED", "LIVE", "US", CURRENCY_META.USD],
+  ] as const)("keeps Eximbay card disabled for %s", async (_label, activation, mode, marketCode, currency) => {
+    if (activation === undefined) delete process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+    else process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED = activation;
+    mocks.paymentMode = mode;
+    mocks.getStorefrontContext.mockResolvedValue({
+      marketCode,
+      confirmedMarketCode: marketCode,
+      locale: "en",
+      marketSource: "EXPLICIT_COOKIE",
+      localeSource: "EXPLICIT_COOKIE",
+      marketConfirmed: true,
+      pathname: "/checkout",
+      requestTarget: "/checkout",
+    });
+    mocks.getActiveMarketCommercialFacts.mockResolvedValue({
+      code: marketCode,
+      isActive: true,
+      currency,
+      shippableCountries: [marketCode],
+    });
+
+    const html = renderToStaticMarkup(await CheckoutPage());
+
+    expect(html).toContain('data-eximbay-card-enabled="false"');
   });
 });
 

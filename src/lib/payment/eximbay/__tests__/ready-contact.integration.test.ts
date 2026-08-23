@@ -1,5 +1,6 @@
 import {
   FulfillmentType,
+  PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentInitiationOutputKind,
@@ -21,6 +22,7 @@ import { EXIMBAY_READY_TOTAL_DEADLINE_MS, type EximbayReadyFetch } from "../read
 
 const provider = vi.hoisted<PaymentInitiationProvider>(() => ({
   code: "EXIMBAY",
+  adapterExecutionKind: "EXTERNAL",
   initiate: () => Promise.reject(new Error("generic Eximbay provider seam must remain unused")),
 }));
 
@@ -376,6 +378,7 @@ async function createExistingAuthorizedPayment(
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.EXIMBAY,
       mode,
+      adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
       routingRuleId: "synthetic.eximbay.s2",
       status: PaymentAttemptStatus.INITIATED,
       attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,

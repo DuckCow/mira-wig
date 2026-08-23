@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { PaymentProvider } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +17,13 @@ import type {
   InitiatePaymentActionResult,
   PaymentActionResult,
 } from "@/app/actions/payment";
-import { runMockPayment, type PaymentState } from "./PaymentMethodSection";
+import {
+  PaymentMethodSection,
+  runEximbayCardPayment,
+  runMockPayment,
+  runPaymentOnce,
+  type PaymentState,
+} from "./PaymentMethodSection";
 
 const mockInitiatePayment = vi.mocked(initiatePayment);
 const mockConfirmPayment = vi.mocked(confirmPayment);
@@ -80,21 +88,25 @@ describe("checkout payment result handling", () => {
     });
   });
 
-  it("delegates an admitted fresh Eximbay handoff through the checkout-owned consumer", async () => {
+  it("delegates an admitted fresh Eximbay CARD handoff through the checkout-owned consumer", async () => {
     const requestPay = vi.fn();
     loadSdk.mockResolvedValue(requestPay);
     const fresh = freshEximbayExecution();
     mockInitiatePayment.mockResolvedValue(fresh);
     const states: PaymentState[] = [];
 
-    await runMockPayment("checkout-session", (state) => states.push(state));
+    await runEximbayCardPayment("checkout-session", (state) => states.push(state));
 
     expect(mockConfirmPayment).not.toHaveBeenCalled();
+    expect(mockInitiatePayment).toHaveBeenCalledWith("checkout-session", { method: "CARD" });
     expect(loadSdk).toHaveBeenCalledTimes(1);
     expect(loadSdk).toHaveBeenCalledWith("SANDBOX");
     expect(requestPay).toHaveBeenCalledTimes(1);
     expect(requestPay).toHaveBeenCalledWith(fresh.transientHandoff.payload);
-    expect(states).toEqual([]);
+    expect(states.at(-1)).toEqual({
+      kind: "inProgress",
+      message: "결제가 처리 중입니다. 주문 내역에서 확인해 주세요.",
+    });
   });
 
   it("rejects a fresh Eximbay handoff whose Payment identity does not match", async () => {
@@ -102,13 +114,13 @@ describe("checkout payment result handling", () => {
     mockInitiatePayment.mockResolvedValue(mismatched);
     const states: PaymentState[] = [];
 
-    await runMockPayment("checkout-session", (state) => states.push(state));
+    await runEximbayCardPayment("checkout-session", (state) => states.push(state));
 
     expect(mockConfirmPayment).not.toHaveBeenCalled();
     expect(loadSdk).not.toHaveBeenCalled();
     expect(states.at(-1)).toEqual({
       kind: "failed",
-      message: "사용 가능한 테스트 결제 수단이 없습니다.",
+      message: "현재 사용할 수 있는 카드 결제 수단이 없습니다.",
     });
     expect(JSON.stringify(states)).not.toMatch(/SYNTHETIC_UI|synthetic-ui|EXIMBAY/u);
   });
@@ -187,6 +199,48 @@ describe("checkout payment result handling", () => {
     });
     expectProviderNamesAbsent(states);
   });
+
+  it("renders one active provider-neutral international card option only when admitted", () => {
+    const disabled = renderPaymentMethods(false);
+    const enabled = renderPaymentMethods(true);
+
+    expect(disabled).toContain("해외 결제 (준비 중)");
+    expect(disabled).not.toContain("해외 카드로 결제");
+    expect(enabled).toContain("해외 카드 결제");
+    expect(enabled).toContain("해외 카드로 결제");
+    expect(enabled).not.toContain("EXIMBAY");
+  });
+
+  it("fails a browser handoff publicly without confirmation or internal detail", async () => {
+    loadSdk.mockRejectedValue(new Error("HOSTILE_SDK_DETAIL"));
+    mockInitiatePayment.mockResolvedValue(freshEximbayExecution());
+    const states: PaymentState[] = [];
+
+    await runEximbayCardPayment("checkout-session", (state) => states.push(state));
+
+    expect(mockConfirmPayment).not.toHaveBeenCalled();
+    expect(states.at(-1)).toEqual({
+      kind: "failed",
+      message: "현재 사용할 수 있는 카드 결제 수단이 없습니다.",
+    });
+    expect(JSON.stringify(states)).not.toContain("HOSTILE_SDK_DETAIL");
+  });
+
+  it("admits only one rapid payment execution through the shared click guard", async () => {
+    const control = { current: false };
+    const gate = promiseGate<void>();
+    const run = vi.fn(() => gate.promise);
+    const states: PaymentState[] = [];
+    const initial: PaymentState = { kind: "idle" };
+
+    const first = runPaymentOnce(control, initial, (state) => states.push(state), run);
+    const second = runPaymentOnce(control, initial, (state) => states.push(state), run);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(states).toEqual([{ kind: "processing" }]);
+    gate.resolve();
+    await Promise.all([first, second]);
+  });
 });
 
 function durableInitiation(durable: PaymentActionResult): InitiatePaymentActionResult {
@@ -237,6 +291,24 @@ function expectProviderNamesAbsent(states: PaymentState[]): void {
       expect(value.toLowerCase()).not.toContain(providerName.toLowerCase());
     }
   }
+}
+
+function renderPaymentMethods(eximbayCardEnabled: boolean): string {
+  return renderToStaticMarkup(createElement(PaymentMethodSection, {
+    checkoutSessionId: "checkout-session",
+    mockPaymentEnabled: false,
+    eximbayCardEnabled,
+    locale: "ko",
+    marketCode: "US",
+  }));
+}
+
+function promiseGate<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function collectStringValues(value: unknown): string[] {

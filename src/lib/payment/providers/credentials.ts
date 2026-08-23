@@ -39,6 +39,24 @@ const PROVIDER_CREDENTIALS: readonly ProviderCredentialRequirement[] = [
     capability: ProviderCapability.ACTION_ADAPTER,
     name: TOSS_LIVE_SECRET_KEY,
   },
+  {
+    provider: ProviderCode.EXIMBAY,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.ACTION_ADAPTER,
+    name: EXIMBAY_SANDBOX_API_KEY,
+  },
+  {
+    provider: ProviderCode.EXIMBAY,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.ACTION_ADAPTER,
+    name: EXIMBAY_SANDBOX_MID,
+  },
+  {
+    provider: ProviderCode.EXIMBAY,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.ACTION_ADAPTER,
+    name: PAYMENT_PUBLIC_ORIGIN,
+  },
 ];
 
 export interface ProviderCredentialRequirementInput {

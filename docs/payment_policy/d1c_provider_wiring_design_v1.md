@@ -127,9 +127,18 @@ Representation decision:
 
 - This is adapter selection under existing `PaymentMode.SANDBOX`.
 - Do not add a third `PaymentMode` enum member such as `PROVIDER_SANDBOX`.
-- Mock vs provider-test may be represented as internal adapter selection or diagnostic state only.
-- The `mock:` `providerPaymentKey` prefix remains the current data discriminator for mock-created rows.
-- No schema change is needed for this policy.
+- Mock vs provider-test remains an internal adapter selection, but configuration can change between contact
+  authorization/contact and a later confirmation request. Provider, mode, and routing-rule identity therefore do not
+  durably identify the adapter class that was authorized.
+- `Payment.adapterExecutionKind` records `MOCK` or `EXTERNAL` before provider contact. Confirmation must fail closed
+  unless the current resolved adapter class exactly matches that durable value.
+- The `mock:` `providerPaymentKey` prefix remains useful post-completion evidence for mock-created rows, but it does
+  not exist before confirmation and is not pre-contact or pre-confirmation authority.
+- The earlier conclusion that no schema change was needed is superseded only for durable cross-request adapter
+  continuity. Legacy pending rows whose adapter class is `NULL` remain ambiguous and fail closed; terminal historical
+  financial facts are not rewritten.
+- This continuity amendment does not change the permanent mock-backed default or the two-key external opt-in
+  semantics above.
 
 Scope and interaction:
 

@@ -49,6 +49,7 @@ type InitiatedPayment = Pick<
   | "checkoutSessionId"
   | "provider"
   | "mode"
+  | "adapterExecutionKind"
   | "status"
   | "attemptLifecycle"
   | "remediationStatus"
@@ -606,6 +607,7 @@ async function supersedeUncontactedAuthorized(
       status: PaymentAttemptStatus.INITIATED,
       attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
       remediationStatus: PaymentRemediationStatus.NONE,
+      adapterExecutionKind: payment.adapterExecutionKind,
       contactStartedAt: null,
       providerRef: null,
       providerPaymentKey: null,
@@ -637,6 +639,7 @@ async function createContactAuthorizedPayment(
       checkoutSessionId: session.id,
       provider: input.provider.code,
       mode: input.mode,
+      adapterExecutionKind: input.provider.adapterExecutionKind,
       routingRuleId: input.routingRuleId,
       status: PaymentAttemptStatus.INITIATED,
       attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
@@ -778,6 +781,7 @@ function uncontactedPaymentClaimWhere(payment: InitiatedPayment): Prisma.Payment
     status: PaymentAttemptStatus.INITIATED,
     attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
     remediationStatus: PaymentRemediationStatus.NONE,
+    adapterExecutionKind: payment.adapterExecutionKind,
     contactStartedAt: null,
     providerRef: null,
     providerPaymentKey: null,
@@ -1002,6 +1006,7 @@ function isCompatibleAttempt(
 ): boolean {
   return payment.provider === input.provider.code
     && payment.mode === input.mode
+    && payment.adapterExecutionKind === input.provider.adapterExecutionKind
     && payment.routingRuleId === input.routingRuleId
     && payment.remediationStatus === PaymentRemediationStatus.NONE
     && payment.amount === session.totalAmount
@@ -1095,6 +1100,7 @@ function paymentSelect(): Prisma.PaymentSelect {
     checkoutSessionId: true,
     provider: true,
     mode: true,
+    adapterExecutionKind: true,
     status: true,
     attemptLifecycle: true,
     remediationStatus: true,

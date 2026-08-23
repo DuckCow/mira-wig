@@ -1,4 +1,4 @@
-import { PaymentProvider } from "@prisma/client";
+import { PaymentProvider, type PaymentAdapterExecutionKind } from "@prisma/client";
 import { PaymentModeConfigException, configuredPaymentMode } from "@/lib/payment/mode";
 import { ProviderCapability } from "@/lib/payment/providers/capabilities";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
@@ -55,6 +55,7 @@ export interface ActionConfirmAdapterInput {
   payment: {
     provider: PaymentProvider;
     mode: PaymentMode;
+    adapterExecutionKind: PaymentAdapterExecutionKind | null;
     routingRuleId: string | null;
   };
 }
@@ -107,6 +108,7 @@ export function resolveActionConfirmAdapter(input: ActionConfirmAdapterInput): A
     const method = input.method ?? defaultPaymentMethodForMarket(input.marketCode);
     const configuredMode = configuredPaymentMode();
     if (configuredMode !== input.payment.mode) return paymentUnavailable();
+    if (input.payment.adapterExecutionKind === null) return paymentUnavailable();
     const routing = resolveProviderForPayment({
       market: input.marketCode,
       method,
@@ -119,7 +121,11 @@ export function resolveActionConfirmAdapter(input: ActionConfirmAdapterInput): A
       mode: input.payment.mode,
       ruleId: input.payment.routingRuleId ?? routing.ruleId,
     });
-    return { success: true, provider: resolveConfirmationProvider(context) };
+    const provider = resolveConfirmationProvider(context);
+    if (provider.adapterExecutionKind !== input.payment.adapterExecutionKind) {
+      return paymentUnavailable();
+    }
+    return { success: true, provider };
   } catch (e) {
     if (e instanceof ProviderResolveException
       || e instanceof NoEligibleProviderError

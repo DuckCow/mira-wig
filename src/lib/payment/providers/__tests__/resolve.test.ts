@@ -1,8 +1,15 @@
-import { PaymentProvider } from "@prisma/client";
+import { PaymentAdapterExecutionKind, PaymentProvider } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProviderFactoryContext } from "../contract";
 import { ProviderCapability } from "../capabilities";
-import { credentialChecksForProvider, TOSS_SANDBOX_SECRET_KEY } from "../credentials";
+import {
+  EXIMBAY_SANDBOX_API_KEY,
+  EXIMBAY_SANDBOX_MID,
+  PAYMENT_PUBLIC_ORIGIN,
+  credentialChecksForProvider,
+  TOSS_SANDBOX_SECRET_KEY,
+} from "../credentials";
+import { EXIMBAY_CHECKOUT_SANDBOX_ENABLED } from "@/lib/payment/eximbay/checkout-activation";
 import {
   TOSS_SANDBOX_EXTERNAL_ENABLED,
   sandboxExternalDeploymentKeyEnabled,
@@ -18,6 +25,10 @@ import type { PaymentConfirmInput, PaymentInitiateInput, PaymentProvider as Paym
 
 const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
 const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env.TOSS_SANDBOX_SECRET_KEY;
+const ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED = process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+const ORIGINAL_EXIMBAY_SANDBOX_API_KEY = process.env.EXIMBAY_SANDBOX_API_KEY;
+const ORIGINAL_EXIMBAY_SANDBOX_MID = process.env.EXIMBAY_SANDBOX_MID;
+const ORIGINAL_PAYMENT_PUBLIC_ORIGIN = process.env.PAYMENT_PUBLIC_ORIGIN;
 type TestProviderOptions = CreateInitiationProviderOptions & CreateConfirmationProviderOptions;
 
 function resolveProvider(
@@ -28,6 +39,7 @@ function resolveProvider(
   const confirmation = resolveConfirmationProvider(context, options);
   return {
     code: initiation.code,
+    adapterExecutionKind: initiation.adapterExecutionKind,
     initiate: (input) => initiation.initiate(input),
     confirm: (input) => confirmation.confirm(input),
   };
@@ -37,11 +49,19 @@ describe("payment provider adapter resolution", () => {
   beforeEach(() => {
     delete process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
     delete process.env.TOSS_SANDBOX_SECRET_KEY;
+    delete process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+    delete process.env.EXIMBAY_SANDBOX_API_KEY;
+    delete process.env.EXIMBAY_SANDBOX_MID;
+    delete process.env.PAYMENT_PUBLIC_ORIGIN;
   });
 
   afterEach(() => {
     restoreEnv("TOSS_SANDBOX_EXTERNAL_ENABLED", ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
     restoreEnv("TOSS_SANDBOX_SECRET_KEY", ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
+    restoreEnv(EXIMBAY_CHECKOUT_SANDBOX_ENABLED, ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED);
+    restoreEnv(EXIMBAY_SANDBOX_API_KEY, ORIGINAL_EXIMBAY_SANDBOX_API_KEY);
+    restoreEnv(EXIMBAY_SANDBOX_MID, ORIGINAL_EXIMBAY_SANDBOX_MID);
+    restoreEnv(PAYMENT_PUBLIC_ORIGIN, ORIGINAL_PAYMENT_PUBLIC_ORIGIN);
   });
 
   it.each([
@@ -57,6 +77,7 @@ describe("payment provider adapter resolution", () => {
     }));
 
     expect(resolved.code).toBe(provider);
+    expect(resolved.adapterExecutionKind).toBe(PaymentAdapterExecutionKind.MOCK);
     await expect(resolved.initiate(initiateInput(provider))).resolves.toEqual({ kind: "ready" });
     await expect(resolved.confirm(confirmInput(provider))).resolves.toMatchObject({
       providerPaymentKey: "mock:checkout_123",
@@ -152,6 +173,7 @@ describe("payment provider adapter resolution", () => {
       amount: 12_000,
       currency: "KRW",
     });
+    expect(resolved.adapterExecutionKind).toBe(PaymentAdapterExecutionKind.EXTERNAL);
   });
 
   it("redacts SANDBOX external opt-in config and credential values from resolver failures", () => {
@@ -177,50 +199,58 @@ describe("payment provider adapter resolution", () => {
     );
   });
 
-  it.each([PaymentMode.SANDBOX, PaymentMode.LIVE])(
-    "fails Eximbay %s resolution before constructing any supplied adapter",
-    (mode) => {
-      const adapter = throwingAdapter();
-      const options: TestProviderOptions = {
-        env: { TOSS_SANDBOX_EXTERNAL_ENABLED: "ENABLED" },
-        sandboxExternalCodeRegistry: [{
-          provider: PaymentProvider.EXIMBAY,
-          mode: PaymentMode.SANDBOX,
-          capability: ProviderCapability.ACTION_ADAPTER,
-        }],
-        sandboxExternalInitiationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
-        sandboxExternalConfirmationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
-        liveInitiationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
-        liveConfirmationAdapters: { [PaymentProvider.EXIMBAY]: adapter.create },
-      };
+  it("fails Eximbay initiation closed when deployment activation is absent", () => {
+    expect(() => resolveInitiationProvider(eximbayFactoryContext(configuredEximbayEnv())))
+      .toThrowError(expect.objectContaining({ code: "SANDBOX_EXTERNAL_MISCONFIGURED" }));
+  });
 
-      expectResolutionFailure(factoryContext({
-        provider: PaymentProvider.EXIMBAY,
-        mode,
-        market: "US",
-        currency: "USD",
-      }), "PROVIDER_NOT_ENABLED", undefined, options);
-      expect(adapter.calls).toBe(0);
+  it.each(["enabled", " ENABLED", "ENABLED ", " ", "TRUE", "1"])(
+    "fails Eximbay initiation closed for noncanonical activation %j",
+    (value) => {
+      setEximbayProcessEnv({ ...configuredEximbayEnv(), [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: value });
+      expect(() => resolveInitiationProvider(eximbayFactoryContext(process.env)))
+        .toThrowError(expect.objectContaining({ code: "SANDBOX_EXTERNAL_CONFIG_INVALID" }));
     },
   );
 
-  it("reads no credential or deployment environment key for disabled Eximbay", () => {
-    const reads: PropertyKey[] = [];
-    const env = new Proxy<Record<string, string | undefined>>({}, {
-      get: (_target, key) => {
-        reads.push(key);
-        return undefined;
-      },
-    });
-    const input = {
-      provider: PaymentProvider.EXIMBAY,
-      mode: PaymentMode.SANDBOX,
-      capability: ProviderCapability.ACTION_ADAPTER,
-    };
+  it("requires all Eximbay SANDBOX action configuration after activation", () => {
+    setEximbayProcessEnv({ [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: "ENABLED" });
+    expect(() => resolveInitiationProvider(eximbayFactoryContext(process.env)))
+      .toThrowError(expect.objectContaining({ code: "SANDBOX_EXTERNAL_CREDENTIALS_MISSING" }));
+  });
 
-    expect(credentialChecksForProvider(input, env)).toEqual([]);
-    expect(sandboxExternalDeploymentKeyEnabled(input, env)).toBe(false);
-    expect(reads).toEqual([]);
+  it("resolves only the defensive Eximbay special-READY carrier when fully admitted", async () => {
+    setEximbayProcessEnv({
+      ...configuredEximbayEnv(),
+      [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: "ENABLED",
+    });
+    const carrier = resolveInitiationProvider(eximbayFactoryContext(process.env));
+
+    expect(carrier.code).toBe(PaymentProvider.EXIMBAY);
+    expect(carrier.adapterExecutionKind).toBe(PaymentAdapterExecutionKind.EXTERNAL);
+    await expect(carrier.initiate(initiateInput(PaymentProvider.EXIMBAY)))
+      .rejects.toThrow("special READY attempt path");
+  });
+
+  it.each([undefined, "ENABLED"])(
+    "forbids direct Eximbay confirmation with activation %s",
+    (activation) => {
+    setEximbayProcessEnv({
+      ...configuredEximbayEnv(),
+      [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: activation,
+    });
+    expect(() => resolveConfirmationProvider(eximbayFactoryContext(process.env)))
+      .toThrowError(expect.objectContaining({ code: "EXIMBAY_CONFIRM_ACTION_FORBIDDEN" }));
+    },
+  );
+
+  it("keeps Eximbay LIVE unavailable even with activation and LIVE-shaped credentials", () => {
+    setEximbayProcessEnv({
+      ...configuredEximbayEnv(),
+      [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: "ENABLED",
+    });
+    expect(() => resolveInitiationProvider(eximbayFactoryContext(process.env, PaymentMode.LIVE)))
+      .toThrowError(expect.objectContaining({ code: "PROVIDER_MODE_UNSUPPORTED" }));
   });
 
   it.each([
@@ -255,6 +285,29 @@ describe("payment provider adapter resolution", () => {
       mode: PaymentMode.SANDBOX,
       capability: ProviderCapability.ACTION_ADAPTER,
     }, sandboxEnabledEnv())).toBe(true);
+  });
+
+  it("uses the canonical exact Eximbay checkout activation parser", () => {
+    const input = {
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    };
+    expect(sandboxExternalDeploymentKeyEnabled(input, {})).toBe(false);
+    expect(sandboxExternalDeploymentKeyEnabled(input, {
+      [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: "",
+    })).toBe(false);
+    expect(sandboxExternalDeploymentKeyEnabled(input, {
+      [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: "ENABLED",
+    })).toBe(true);
+    for (const value of ["enabled", " ENABLED", "ENABLED ", " ", "TRUE", "1"]) {
+      expect(() => sandboxExternalDeploymentKeyEnabled(input, {
+        [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: value,
+      })).toThrowError(expect.objectContaining({ code: "SANDBOX_EXTERNAL_CONFIG_INVALID" }));
+    }
+    expect(sandboxExternalDeploymentKeyEnabled({ ...input, mode: PaymentMode.LIVE }, {
+      [EXIMBAY_CHECKOUT_SANDBOX_ENABLED]: "ENABLED",
+    })).toBe(false);
   });
 
   it("fails LIVE before credential checks when the provider is not live-enabled", () => {
@@ -391,9 +444,51 @@ function missingSandboxCredential() {
   return { name: TOSS_SANDBOX_SECRET_KEY, required: true, present: false };
 }
 
+function configuredEximbayEnv(): Record<string, string> {
+  return {
+    [EXIMBAY_SANDBOX_API_KEY]: "synthetic-eximbay-api-key",
+    [EXIMBAY_SANDBOX_MID]: "synthetic-eximbay-mid",
+    [PAYMENT_PUBLIC_ORIGIN]: "https://payments.example.test",
+  };
+}
+
+function eximbayFactoryContext(
+  env: Readonly<Record<string, string | undefined>>,
+  mode: PaymentMode = PaymentMode.SANDBOX,
+): ProviderFactoryContext {
+  return factoryContext({
+    provider: PaymentProvider.EXIMBAY,
+    mode,
+    market: "US",
+    method: PaymentMethod.CARD,
+    currency: "USD",
+    ruleId: "cfa.us.card.usd",
+    credentials: credentialChecksForProvider({
+      provider: PaymentProvider.EXIMBAY,
+      mode,
+      capability: ProviderCapability.ACTION_ADAPTER,
+    }, env),
+    liveGuard: { kind: "blocked", liveEnabled: false, reason: "Eximbay LIVE is unavailable" },
+  });
+}
+
+function setEximbayProcessEnv(env: Readonly<Record<string, string | undefined>>): void {
+  for (const key of [
+    EXIMBAY_CHECKOUT_SANDBOX_ENABLED,
+    EXIMBAY_SANDBOX_API_KEY,
+    EXIMBAY_SANDBOX_MID,
+    PAYMENT_PUBLIC_ORIGIN,
+  ]) {
+    const value = env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
 function fakeSandboxExternalAdapter(context: ProviderFactoryContext): PaymentProviderPort {
   return {
     code: context.provider,
+    adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
     initiate: (input) => Promise.resolve({ kind: "ready", providerRef: `external:${input.paymentId}` }),
     confirm: (input) => Promise.resolve({
       providerPaymentKey: "external:sandbox_payment_123",

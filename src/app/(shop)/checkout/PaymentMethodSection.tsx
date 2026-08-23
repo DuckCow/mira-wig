@@ -12,11 +12,13 @@ import type { Locale } from "@/lib/market/locale";
 import type { MarketCode } from "@/lib/market/types";
 import { messagesFor, type StorefrontMessages } from "@/lib/market/messages";
 import { withStorefrontHandoff } from "@/lib/market/request-context";
+import { PaymentMethod } from "@/lib/payment/providers/routing";
 import { createCheckoutEximbayBrowserConsumer } from "./eximbay-browser-consumer";
 
 interface PaymentMethodSectionProps {
   checkoutSessionId: string;
   mockPaymentEnabled: boolean;
+  eximbayCardEnabled: boolean;
   locale: Locale;
   marketCode: MarketCode;
 }
@@ -34,9 +36,11 @@ export type PaymentState =
 
 const MOCK_METHOD = "MOCK";
 const MOCK_PROVIDER = "MOCK";
+const EXIMBAY_PROVIDER = "EXIMBAY";
 export function PaymentMethodSection({
   checkoutSessionId,
   mockPaymentEnabled,
+  eximbayCardEnabled,
   locale,
   marketCode,
 }: PaymentMethodSectionProps) {
@@ -46,18 +50,21 @@ export function PaymentMethodSection({
   const buttonDisabled = inFlightRef.current || state.kind === "processing" || isTerminalState(state);
 
   function handleMockPaymentClick() {
-    void handleMockPayment();
+    void runPaymentOnce(
+      inFlightRef,
+      state,
+      setState,
+      () => runMockPayment(checkoutSessionId, setState, locale),
+    );
   }
 
-  async function handleMockPayment() {
-    if (inFlightRef.current || isTerminalState(state)) return;
-    inFlightRef.current = true;
-    setState({ kind: "processing" });
-    try {
-      await runMockPayment(checkoutSessionId, setState, locale);
-    } finally {
-      inFlightRef.current = false;
-    }
+  function handleEximbayCardPaymentClick() {
+    void runPaymentOnce(
+      inFlightRef,
+      state,
+      setState,
+      () => runEximbayCardPayment(checkoutSessionId, setState, locale),
+    );
   }
 
   return (
@@ -65,7 +72,20 @@ export function PaymentMethodSection({
       <h2 className="text-lg font-semibold text-gray-900">{messages.title}</h2>
       <div className="mt-4 space-y-3">
         <DisabledPaymentMethod title={messages.cardPending} description={messages.cardDisabled} />
-        <DisabledPaymentMethod title={messages.overseasPending} description={messages.overseasDisabled} />
+        {eximbayCardEnabled ? (
+          <ActivePaymentMethod
+            title={messages.internationalCardTitle}
+            description={messages.internationalCardDescription}
+            disabled={buttonDisabled}
+            state={state}
+            idleLabel={messages.internationalCardStart}
+            processingLabel={messages.internationalCardProcessing}
+            onClick={handleEximbayCardPaymentClick}
+            messages={messages}
+          />
+        ) : (
+          <DisabledPaymentMethod title={messages.overseasPending} description={messages.overseasDisabled} />
+        )}
         {mockPaymentEnabled && (
           <MockPaymentMethod
             disabled={buttonDisabled}
@@ -119,6 +139,42 @@ function MockPaymentMethod({
   );
 }
 
+function ActivePaymentMethod({
+  title,
+  description,
+  disabled,
+  state,
+  idleLabel,
+  processingLabel,
+  onClick,
+  messages,
+}: {
+  title: string;
+  description: string;
+  disabled: boolean;
+  state: PaymentState;
+  idleLabel: string;
+  processingLabel: string;
+  onClick: () => void;
+  messages: StorefrontMessages["checkout"]["payment"];
+}) {
+  return (
+    <div className="rounded-lg border border-gray-900 bg-white px-3 py-3">
+      <p className="text-sm font-medium text-gray-900">{title}</p>
+      <p className="mt-1 text-xs text-gray-500">{description}</p>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-busy={state.kind === "processing"}
+        onClick={onClick}
+        className="mt-3 w-full rounded-lg bg-gray-900 px-4 py-3 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+      >
+        {paymentButtonLabel(state, idleLabel, processingLabel, messages)}
+      </button>
+    </div>
+  );
+}
+
 function PaymentStateMessage({ state, messages, locale, marketCode }: { state: PaymentState; messages: StorefrontMessages["checkout"]["payment"]; locale: Locale; marketCode: MarketCode }) {
   if (state.kind === "idle") return null;
   if (state.kind === "processing") {
@@ -159,45 +215,91 @@ export async function runMockPayment(
 ) {
   const messages = messagesFor(locale).checkout.payment;
   const initiated = await initiatePayment(checkoutSessionId, { method: MOCK_METHOD });
-  if (!await handleInitiationExecution(initiated, setState, messages)) return;
+  if (initiated.channel !== "DURABLE_ONLY") {
+    setState({ kind: "failed", message: messages.unavailableMock });
+    return;
+  }
+  if (!handleInitiationResult(
+    initiated.durable,
+    setState,
+    messages,
+    MOCK_PROVIDER,
+    messages.unavailableMock,
+    true,
+  )) return;
 
   const confirmed = await confirmPayment(checkoutSessionId, { method: MOCK_METHOD });
   handleConfirmationResult(confirmed, setState, messages);
 }
 
-async function handleInitiationExecution(
-  execution: InitiatePaymentActionResult,
+export async function runPaymentOnce(
+  control: { current: boolean },
+  state: PaymentState,
   setState: (state: PaymentState) => void,
-  messages: StorefrontMessages["checkout"]["payment"],
-): Promise<boolean> {
+  run: () => Promise<void>,
+): Promise<void> {
+  if (control.current || isTerminalState(state)) return;
+  control.current = true;
+  setState({ kind: "processing" });
+  try {
+    await run();
+  } finally {
+    control.current = false;
+  }
+}
+
+export async function runEximbayCardPayment(
+  checkoutSessionId: string,
+  setState: (state: PaymentState) => void,
+  locale: Locale = "ko",
+): Promise<void> {
+  const messages = messagesFor(locale).checkout.payment;
+  const execution = await initiatePayment(checkoutSessionId, { method: PaymentMethod.CARD });
   if (execution.channel === "FRESH_EXIMBAY_READY") {
     await delegateFreshEximbayHandoff(execution, setState, messages);
-    return false;
+    return;
   }
-  return handleInitiationResult(execution.durable, setState, messages);
+  const ready = handleInitiationResult(
+    execution.durable,
+    setState,
+    messages,
+    EXIMBAY_PROVIDER,
+    messages.unavailableCard,
+    false,
+  );
+  if (ready) setState({ kind: "inProgress", message: messages.orderProcessing });
 }
 
 async function delegateFreshEximbayHandoff(
-  execution: Extract<InitiatePaymentActionResult, { channel: "FRESH_EXIMBAY_READY" }>,
+  execution: InitiatePaymentActionResult,
   setState: (state: PaymentState) => void,
   messages: StorefrontMessages["checkout"]["payment"],
 ): Promise<void> {
+  if (execution.channel !== "FRESH_EXIMBAY_READY") {
+    setState({ kind: "failed", message: messages.unavailableCard });
+    return;
+  }
   const created = createCheckoutEximbayBrowserConsumer(execution);
   if (!created.ok) {
-    setState({ kind: "failed", message: messages.unavailableMock });
+    setState({ kind: "failed", message: messages.unavailableCard });
     return;
   }
   const result = await created.consumer.invokeFromUserAction();
   created.consumer.dispose();
   if (result.kind === "BROWSER_HANDOFF_FAILED") {
-    setState({ kind: "failed", message: messages.unavailableMock });
+    setState({ kind: "failed", message: messages.unavailableCard });
+    return;
   }
+  setState({ kind: "inProgress", message: messages.orderProcessing });
 }
 
 function handleInitiationResult(
   initiated: PaymentActionResult,
   setState: (state: PaymentState) => void,
   messages: StorefrontMessages["checkout"]["payment"],
+  expectedProvider: string,
+  unavailableMessage: string,
+  allowRedirect: boolean,
 ): boolean {
   if (initiated.kind === "IN_PROGRESS") {
     setState({ kind: "inProgress", message: messages.initiationInProgress });
@@ -215,11 +317,15 @@ function handleInitiationResult(
     setState({ kind: "failed", message: paymentErrorMessage(initiated, messages) });
     return false;
   }
-  if (initiated.provider !== MOCK_PROVIDER) {
-    setState({ kind: "failed", message: messages.unavailableMock });
+  if (initiated.provider !== expectedProvider) {
+    setState({ kind: "failed", message: unavailableMessage });
     return false;
   }
   if (initiated.kind === "REDIRECT") {
+    if (!allowRedirect) {
+      setState({ kind: "failed", message: unavailableMessage });
+      return false;
+    }
     window.location.assign(initiated.redirectTo);
     return false;
   }
@@ -267,6 +373,22 @@ function mockButtonLabel(state: PaymentState, messages: StorefrontMessages["chec
   if (state.kind === "success") return messages.completed;
   if (state.kind === "failed") return messages.retry;
   return messages.start;
+}
+
+function paymentButtonLabel(
+  state: PaymentState,
+  idleLabel: string,
+  processingLabel: string,
+  messages: StorefrontMessages["checkout"]["payment"],
+): string {
+  if (state.kind === "idle") return idleLabel;
+  if (state.kind === "processing") return processingLabel;
+  if (state.kind === "inProgress") return messages.checkingState;
+  if (state.kind === "outcomeUnknown") return messages.checkingOutcome;
+  if (state.kind === "remediationRequired") return messages.checkingProblem;
+  if (state.kind === "checkingOrders") return messages.checkingOrders;
+  if (state.kind === "success") return messages.completed;
+  return messages.retry;
 }
 
 function isTerminalState(state: PaymentState): boolean {

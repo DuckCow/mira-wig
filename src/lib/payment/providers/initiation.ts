@@ -1,4 +1,7 @@
-import { PaymentProvider as ProviderCode } from "@prisma/client";
+import {
+  PaymentAdapterExecutionKind,
+  PaymentProvider as ProviderCode,
+} from "@prisma/client";
 import { ProviderCapability } from "./capabilities";
 import type { ProviderEnv } from "./credentials";
 import type { ProviderFactoryContext } from "./contract";
@@ -21,27 +24,51 @@ export function resolveInitiationProvider(
 }
 
 function defaultInitiationProviderOptions(env: ProviderEnv = process.env): CreateInitiationProviderOptions {
-  if (!hasSandboxExternalIntent(env)) return { env };
+  const sandboxExternalCodeRegistry = [{
+    provider: ProviderCode.EXIMBAY,
+    mode: PaymentMode.SANDBOX,
+    capability: ProviderCapability.ACTION_ADAPTER,
+  }];
+  const sandboxExternalInitiationAdapters: NonNullable<
+    CreateInitiationProviderOptions["sandboxExternalInitiationAdapters"]
+  > = {
+    [ProviderCode.EXIMBAY]: () => eximbaySpecialReadyInitiationCarrier(),
+  };
+  if (!hasTossSandboxExternalIntent(env)) {
+    return { env, sandboxExternalCodeRegistry, sandboxExternalInitiationAdapters };
+  }
   return {
     env,
-    sandboxExternalCodeRegistry: [{
+    sandboxExternalCodeRegistry: [...sandboxExternalCodeRegistry, {
       provider: ProviderCode.TOSS,
       mode: PaymentMode.SANDBOX,
       capability: ProviderCapability.ACTION_ADAPTER,
     }],
     sandboxExternalInitiationAdapters: {
+      ...sandboxExternalInitiationAdapters,
       [ProviderCode.TOSS]: () => tossBrowserInitiationProvider(),
     },
+  };
+}
+
+function eximbaySpecialReadyInitiationCarrier(): PaymentInitiationProvider {
+  return {
+    code: ProviderCode.EXIMBAY,
+    adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+    initiate: () => Promise.reject(new Error(
+      "Eximbay initiation is owned by the special READY attempt path.",
+    )),
   };
 }
 
 function tossBrowserInitiationProvider(): PaymentInitiationProvider {
   return {
     code: ProviderCode.TOSS,
+    adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
     initiate: () => Promise.resolve<PaymentInitiateResult>({ kind: "ready" }),
   };
 }
 
-function hasSandboxExternalIntent(env: ProviderEnv): boolean {
+function hasTossSandboxExternalIntent(env: ProviderEnv): boolean {
   return (env[TOSS_SANDBOX_EXTERNAL_ENABLED]?.trim() ?? "").length > 0;
 }

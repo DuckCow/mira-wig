@@ -125,13 +125,13 @@ export const PROVIDER_REGISTRY: Record<PaymentProvider, ProviderRegistryEntry> =
   },
   [PaymentProvider.EXIMBAY]: {
     provider: PaymentProvider.EXIMBAY,
-    enabled: false,
-    allowedModes: [],
-    supportedMethods: [],
-    supportedCurrencies: [],
+    enabled: true,
+    allowedModes: [PaymentMode.SANDBOX],
+    supportedMethods: [PaymentMethod.CARD],
+    supportedCurrencies: ["USD"],
     mockOnly: false,
     liveEnabled: [],
-    notes: "Disabled EX1 provider identity. No runtime capabilities are authorized.",
+    notes: "US CARD USD SANDBOX source capability. Deployment activation remains explicit.",
   },
 };
 
@@ -149,6 +149,13 @@ export const ROUTING_RULES: readonly RoutingRule[] = [
     method: PaymentMethod.PAYPAL_WALLET,
     currency: "USD",
     candidates: [PaymentProvider.PAYPAL],
+  },
+  {
+    id: "cfa.us.card.usd",
+    market: MarketCode.US,
+    method: PaymentMethod.CARD,
+    currency: "USD",
+    candidates: [PaymentProvider.EXIMBAY],
   },
   {
     id: "d1a.jp.paypal_wallet.jpy",
@@ -228,7 +235,7 @@ export function liveGuardForProviderContext(
   registry: Partial<Record<PaymentProvider, ProviderRegistryEntry>> = PROVIDER_REGISTRY,
 ): ProviderLiveGuardResult {
   const provider = context.provider;
-  const activationFailure = canonicalActivationFailure(provider);
+  const activationFailure = canonicalActivationFailure(provider, PaymentMode.LIVE);
   if (activationFailure) return { kind: "blocked", liveEnabled: false, reason: activationFailure };
   const entry = registry[provider];
   if (!entry) return { kind: "blocked", liveEnabled: false, reason: "provider is not registered" };
@@ -251,7 +258,7 @@ function eligibleProviders(
   filteredOut: FilteredProvider[],
 ): PaymentProvider[] {
   return candidates.filter((provider) => {
-    const activationFailure = canonicalActivationFailure(provider);
+    const activationFailure = canonicalActivationFailure(provider, context.mode);
     if (activationFailure) {
       filteredOut.push({ provider, reason: activationFailure });
       return false;
@@ -264,10 +271,10 @@ function eligibleProviders(
   });
 }
 
-function canonicalActivationFailure(provider: unknown): string | null {
+function canonicalActivationFailure(provider: unknown, mode: unknown): string | null {
   if (!isCanonicalPaymentProvider(provider)) return "provider identity is invalid";
-  if (provider === PaymentProvider.EXIMBAY) {
-    return "provider is disabled by EX1 activation authority";
+  if (provider === PaymentProvider.EXIMBAY && mode === PaymentMode.LIVE) {
+    return "provider is unavailable in LIVE by customer SANDBOX activation authority";
   }
   return null;
 }

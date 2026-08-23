@@ -9,7 +9,8 @@ import { getStorefrontContext } from "@/lib/market";
 import { getActiveMarketCommercialFacts } from "@/lib/market/active-market";
 import { MARKET_CONFIGS, formatPrice } from "@/lib/market/types";
 import { configuredPaymentMode } from "@/lib/payment/mode";
-import { PaymentMode } from "@/lib/payment/providers/routing";
+import { PaymentMethod, PaymentMode } from "@/lib/payment/providers/routing";
+import { isEximbayCheckoutSandboxAvailable } from "@/lib/payment/eximbay/checkout-activation";
 import { localizedVariantOptionLabel } from "@/lib/market/catalog-presentation";
 import type { CartItemView } from "@/lib/cart";
 import type { MarketCode } from "@/lib/market/types";
@@ -63,6 +64,19 @@ function mockPaymentEnabled(): boolean {
   }
 }
 
+function eximbayCardEnabled(marketCode: MarketCode, currency: string): boolean {
+  try {
+    return isEximbayCheckoutSandboxAvailable({
+      mode: configuredPaymentMode(),
+      market: marketCode,
+      method: PaymentMethod.CARD,
+      currency,
+    });
+  } catch {
+    return false;
+  }
+}
+
 export default async function CheckoutPage() {
   const [session, context] = await Promise.all([getSession(), getStorefrontContext()]);
   const presentationVariant = { marketCode: context.marketCode, locale: context.locale };
@@ -106,6 +120,7 @@ export default async function CheckoutPage() {
         cartItems={cartLines}
         productSubtotal={subtotal}
         mockPaymentEnabled={mockPaymentEnabled()}
+        eximbayCardEnabled={eximbayCardEnabled(marketCode, market.currency.code)}
         locale={context.locale}
       />
     </main>

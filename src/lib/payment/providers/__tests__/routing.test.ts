@@ -85,44 +85,65 @@ describe("provider routing", () => {
     expect(error.filteredOut).toContainEqual({ provider: PaymentProvider.TOSS, reason: "provider is disabled" });
   });
 
-  it("keeps Eximbay disabled and unselectable across every market, method, currency, and mode", () => {
+  it("selects Eximbay only for the bounded US CARD USD SANDBOX source context", () => {
     expect(PROVIDER_REGISTRY.EXIMBAY).toMatchObject({
       provider: PaymentProvider.EXIMBAY,
-      enabled: false,
-      allowedModes: [],
-      supportedMethods: [],
-      supportedCurrencies: [],
+      enabled: true,
+      allowedModes: [PaymentMode.SANDBOX],
+      supportedMethods: [PaymentMethod.CARD],
+      supportedCurrencies: ["USD"],
       liveEnabled: [],
     });
-    expect(PROVIDER_REGISTRY.EXIMBAY.notes).toContain("Disabled");
-    expect(ROUTING_RULES.every((rule) => !rule.candidates.includes(PaymentProvider.EXIMBAY)))
-      .toBe(true);
+    expect(ROUTING_RULES.filter((rule) => rule.candidates.includes(PaymentProvider.EXIMBAY))).toEqual([{
+      id: "cfa.us.card.usd",
+      market: MarketCode.US,
+      method: PaymentMethod.CARD,
+      currency: "USD",
+      candidates: [PaymentProvider.EXIMBAY],
+    }]);
 
-    for (const context of eximbayRoutingContexts()) {
-      const registryProbe = accessCountingRegistry(maliciousEximbayRegistryEntry(context));
-      const error = expectNoEligible(() => resolveProviderForPayment(context, {
-        registry: registryProbe.registry,
-        rules: [{
-          id: "ex1.disabled-proof",
-          market: context.market,
-          method: context.method,
-          currency: context.currency,
-          candidates: [PaymentProvider.EXIMBAY],
-        }],
-      }));
-      expect(error.filteredOut).toEqual([
-        {
-          provider: PaymentProvider.EXIMBAY,
-          reason: "provider is disabled by EX1 activation authority",
-        },
-      ]);
-      expect(registryProbe.getAccessCount()).toBe(0);
-    }
+    expect(resolveProviderForPayment(baseContext({
+      market: MarketCode.US,
+      method: PaymentMethod.CARD,
+      currency: "USD",
+    })).selectedProvider).toBe(PaymentProvider.EXIMBAY);
   });
 
-  it("hard-denies Eximbay in the live guard despite an injected allow-all registry", () => {
-    const context = eximbayRoutingContexts()[0];
-    if (!context) throw new Error("Missing Eximbay routing context.");
+  it("does not broaden Eximbay to other markets, currencies, methods, or LIVE", () => {
+    expect(resolveProviderForPayment(baseContext()).selectedProvider).toBe(PaymentProvider.TOSS);
+    expect(resolveProviderForPayment(baseContext({
+      market: MarketCode.US,
+      method: PaymentMethod.PAYPAL_WALLET,
+      currency: "USD",
+    })).selectedProvider).toBe(PaymentProvider.PAYPAL);
+    expect(resolveProviderForPayment(baseContext({
+      market: MarketCode.JP,
+      method: PaymentMethod.PAYPAL_WALLET,
+      currency: "JPY",
+    })).selectedProvider).toBe(PaymentProvider.PAYPAL);
+
+    for (const context of [
+      baseContext({ market: MarketCode.JP, method: PaymentMethod.CARD, currency: "JPY" }),
+      baseContext({ market: MarketCode.US, method: PaymentMethod.CARD, currency: "JPY" }),
+    ]) {
+      const error = expectNoEligible(() => resolveProviderForPayment(context));
+      expect(error.candidates).toEqual([]);
+    }
+
+    const liveError = expectNoEligible(() => resolveProviderForPayment(baseContext({
+      market: MarketCode.US,
+      method: PaymentMethod.CARD,
+      currency: "USD",
+      mode: PaymentMode.LIVE,
+    })));
+    expect(liveError.filteredOut).toEqual([{
+      provider: PaymentProvider.EXIMBAY,
+      reason: "provider is unavailable in LIVE by customer SANDBOX activation authority",
+    }]);
+  });
+
+  it("hard-denies Eximbay LIVE in the live guard despite an injected allow-all registry", () => {
+    const context = baseContext({ market: MarketCode.US, method: PaymentMethod.CARD, currency: "USD" });
     const registryProbe = accessCountingRegistry(maliciousEximbayRegistryEntry(context));
 
     expect(liveGuardForProviderContext({
@@ -134,7 +155,7 @@ describe("provider routing", () => {
     }, registryProbe.registry)).toEqual({
       kind: "blocked",
       liveEnabled: false,
-      reason: "provider is disabled by EX1 activation authority",
+      reason: "provider is unavailable in LIVE by customer SANDBOX activation authority",
     });
     expect(registryProbe.getAccessCount()).toBe(0);
   });
@@ -233,7 +254,7 @@ describe("provider routing", () => {
     expect(liveGuardForProviderContext(contextProbe.context, registryProbe.registry)).toEqual({
       kind: "blocked",
       liveEnabled: false,
-      reason: "provider is disabled by EX1 activation authority",
+      reason: "provider is unavailable in LIVE by customer SANDBOX activation authority",
     });
     expect(contextProbe.getProviderReadCount()).toBe(1);
     expect(contextProbe.getReturnedProviders()).toEqual([PaymentProvider.EXIMBAY]);
@@ -367,23 +388,6 @@ function baseContext(overrides: Partial<PaymentContext> = {}): PaymentContext {
     mode: PaymentMode.SANDBOX,
     ...overrides,
   };
-}
-
-function eximbayRoutingContexts(): readonly PaymentContext[] {
-  const marketMethods = Object.values(MarketCode).flatMap((market) => (
-    Object.values(PaymentMethod).map((method) => ({ market, method }))
-  ));
-  return marketMethods.flatMap(({ market, method }) => (
-    ["KRW", "USD", "JPY"].flatMap((currency) => (
-      Object.values(PaymentMode).map((mode) => ({
-        market,
-        method,
-        currency,
-        amountMinor: 12_000,
-        mode,
-      }))
-    ))
-  ));
 }
 
 function testRule(overrides: Partial<RoutingRule> = {}): RoutingRule {

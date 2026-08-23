@@ -2,16 +2,17 @@ import { describe, expect, it } from "vitest";
 import nextConfig, { EXIMBAY_SDK_CSP_BOUNDARY } from "../../../../../next.config";
 import { EXIMBAY_SDK_ORIGINS, EXIMBAY_SDK_SOURCES } from "../sdk-origins";
 
-describe("dormant Eximbay SDK CSP boundary", () => {
-  it("represents only the exact SANDBOX and LIVE origins with neither mode active", () => {
+describe("bounded Eximbay SDK CSP source-capability boundary", () => {
+  it("represents only the exact origins with SANDBOX active and LIVE inactive", () => {
     expect(EXIMBAY_SDK_CSP_BOUNDARY).toEqual({
       origins: {
         SANDBOX: "https://api-test.eximbay.com",
         LIVE: "https://api.eximbay.com",
       },
-      activeModes: [],
+      activeModes: ["SANDBOX"],
     });
-    expect(EXIMBAY_SDK_CSP_BOUNDARY.activeModes).toHaveLength(0);
+    expect(EXIMBAY_SDK_CSP_BOUNDARY.activeModes).toEqual(["SANDBOX"]);
+    expect(EXIMBAY_SDK_CSP_BOUNDARY.activeModes).not.toContain("LIVE");
     expect(EXIMBAY_SDK_SOURCES).toEqual({
       SANDBOX: `${EXIMBAY_SDK_ORIGINS.SANDBOX}/v2/javascriptSDK.js`,
       LIVE: `${EXIMBAY_SDK_ORIGINS.LIVE}/v2/javascriptSDK.js`,

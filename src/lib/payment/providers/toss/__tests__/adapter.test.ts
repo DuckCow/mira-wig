@@ -51,6 +51,7 @@ function resolveProvider(
   const confirmation = resolveConfirmationProvider(context, options);
   return {
     code: initiation.code,
+    adapterExecutionKind: initiation.adapterExecutionKind,
     initiate: (input) => initiation.initiate(input),
     confirm: (input) => confirmation.confirm(input),
   };
