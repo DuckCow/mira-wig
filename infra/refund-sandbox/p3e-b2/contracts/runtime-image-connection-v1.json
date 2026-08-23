@@ -170,8 +170,8 @@
     "modePolicy": "REGULAR_0644_DIRECTORY_0755",
     "timestampEpochSeconds": 1784764800,
     "manifestAlgorithm": "SORTED_PATH_SIZE_MODE_SHA256_JSON",
-    "expectedFileCount": 177,
-    "expectedManifestSha256": "40bcd95ed69ca5854147e8519d6c9dc7c04189d20e638cebca7ea0206b887070",
+    "expectedFileCount": 178,
+    "expectedManifestSha256": "a0f43bcfb53720c3ebe3ab1369fc802af5d03b15a826fb304cd16a716f595fb9",
     "repositoryGraphInputCount": 133,
     "packagedGraphInputCount": 45,
     "entrypointCount": 3,
@@ -211,8 +211,8 @@
     "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
     "changedEntryCount": 3,
     "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
-    "addedEntryCount": 173,
-    "addedMetadataContentManifestSha256": "d5330eba9313f008ee9ca5273a5056a607f11ce7252501625c430db42684a6ab",
+    "addedEntryCount": 175,
+    "addedMetadataContentManifestSha256": "e7af7552b4079387ef2d4de8c754c089c9289b196301d48ffdb80372e9a3dd49",
     "removalCategories": [
       {
         "code": "APT_DPKG_EXECUTABLE_METADATA_AND_SCHEDULER_SURFACE",
@@ -254,7 +254,7 @@
     "additionCategories": [
       {
         "code": "EXACT_APPLICATION_CLOSURE",
-        "entryCount": 170
+        "entryCount": 172
       },
       {
         "code": "RUNTIME_USER_WRITABLE_DIRECTORIES",
@@ -268,9 +268,9 @@
   },
   "applicationClosure": {
     "authority": "EXACT_IMAGE_NATIVE_METADATA_AND_CONTENT_MANIFEST",
-    "entryCount": 170,
-    "metadataManifestSha256": "c32e4ddf79e1644328003d1d9155007d32044ca03272028ab07930f0ee44a14a",
-    "contentManifestSha256": "badfc782598a7661134051e4c0e79b69077c4d5582e7d3bac885bc495e165a17"
+    "entryCount": 172,
+    "metadataManifestSha256": "eec172e4f230c8e3508bbbaca9b07ccbea22f3462c63208bd5b955afad2bb6c8",
+    "contentManifestSha256": "4106d370ff1aa41f03f498619046951e32ff4981018d3f872a78560a2885def4"
   },
   "forbiddenRuntimeExecutables": [
     "apt",

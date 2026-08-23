@@ -39,6 +39,7 @@ vi.mock("@/lib/payment/providers/eximbay/amount", async (importOriginal) => {
 
 const provider = vi.hoisted<PaymentInitiationProvider>(() => ({
   code: "EXIMBAY",
+  adapterExecutionKind: "EXTERNAL",
   initiate: () => Promise.reject(new Error("generic Eximbay provider seam must remain unused")),
 }));
 

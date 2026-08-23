@@ -15,9 +15,16 @@ const PRODUCTION_FILES = [
 ];
 
 describe("provider-neutral return flow isolation", () => {
-  it("keeps Eximbay disabled and absent from routing", () => {
-    expect(PROVIDER_REGISTRY.EXIMBAY).toMatchObject({ enabled: false, allowedModes: [] });
-    expect(ROUTING_RULES.every((rule) => !rule.candidates.includes(PaymentProvider.EXIMBAY))).toBe(true);
+  it("keeps bounded Eximbay routing outside the provider-neutral return flow", () => {
+    expect(PROVIDER_REGISTRY.EXIMBAY).toMatchObject({
+      enabled: true,
+      allowedModes: ["SANDBOX"],
+      supportedMethods: ["CARD"],
+      supportedCurrencies: ["USD"],
+      liveEnabled: [],
+    });
+    expect(ROUTING_RULES.filter((rule) => rule.candidates.includes(PaymentProvider.EXIMBAY)))
+      .toEqual([expect.objectContaining({ market: "US", method: "CARD", currency: "USD" })]);
   });
 
   it("adds no provider SDK, factory, callback, credential, or provider-contact surface", () => {

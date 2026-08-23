@@ -1,4 +1,4 @@
-import { PaymentProvider } from "@prisma/client";
+import { PaymentAdapterExecutionKind, PaymentProvider } from "@prisma/client";
 import type { NormalizedProviderConfirmResult, ProviderConfirmFailed } from "@/lib/payment/providers/contract";
 import type {
   PaymentConfirmInput,
@@ -34,6 +34,7 @@ export type TossConfirmHttpClient = (
 
 export interface TossConfirmAdapter {
   code: typeof PaymentProvider.TOSS;
+  readonly adapterExecutionKind: typeof PaymentAdapterExecutionKind.EXTERNAL;
   confirm(input: PaymentConfirmInput): Promise<NormalizedProviderConfirmResult>;
 }
 
@@ -53,6 +54,7 @@ const DEFAULT_TOSS_CONFIRM_TIMEOUT_MS = 10_000;
 export function createTossConfirmAdapter(options: TossConfirmAdapterOptions): TossConfirmAdapter {
   return {
     code: PaymentProvider.TOSS,
+    adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
     confirm: (input) => confirmWithFakeHttp(input, options.httpClient),
   };
 }
@@ -61,6 +63,7 @@ export function createTossSandboxPaymentProvider(options: TossConfirmAdapterOpti
   const confirmAdapter = createTossConfirmAdapter(options);
   return {
     code: PaymentProvider.TOSS,
+    adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
     initiate: tossBrowserInitiateReady,
     confirm: (input) => confirmAdapter.confirm(input),
   };

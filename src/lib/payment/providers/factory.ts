@@ -1,4 +1,8 @@
 import { PaymentProvider as ProviderCode } from "@prisma/client";
+import {
+  EXIMBAY_CHECKOUT_SANDBOX_ENABLED,
+  parseEximbayCheckoutSandboxActivation,
+} from "@/lib/payment/eximbay/checkout-activation";
 import type { ProviderFactoryContext } from "./contract";
 import { ProviderCapability, type ProviderCapability as ProviderCapabilityValue } from "./capabilities";
 import {
@@ -22,7 +26,8 @@ export type ProviderResolveErrorCode =
   | "SANDBOX_EXTERNAL_ADAPTER_UNAVAILABLE"
   | "PROVIDER_MODE_UNSUPPORTED"
   | "PROVIDER_NOT_ENABLED"
-  | "PROVIDER_NOT_REGISTERED";
+  | "PROVIDER_NOT_REGISTERED"
+  | "EXIMBAY_CONFIRM_ACTION_FORBIDDEN";
 
 export const TOSS_SANDBOX_EXTERNAL_ENABLED = "TOSS_SANDBOX_EXTERNAL_ENABLED";
 
@@ -151,6 +156,9 @@ export function sandboxExternalCodeKeyEnabled(
 }
 
 export function sandboxExternalDeploymentKeyEnabled(input: SandboxExternalCapabilityInput, env: ProviderEnv): boolean {
+  if (input.provider === ProviderCode.EXIMBAY) {
+    return eximbaySandboxDeploymentKeyEnabled(input, env);
+  }
   const key = sandboxDeploymentKeyName(input.provider);
   if (!key) return false;
   const value = env[key]?.trim() ?? "";
@@ -164,13 +172,34 @@ export function sandboxExternalDeploymentKeyEnabled(input: SandboxExternalCapabi
   );
 }
 
+function eximbaySandboxDeploymentKeyEnabled(
+  input: SandboxExternalCapabilityInput,
+  env: ProviderEnv,
+): boolean {
+  if (input.mode !== PaymentMode.SANDBOX || input.capability !== ProviderCapability.ACTION_ADAPTER) {
+    return false;
+  }
+  const activation = parseEximbayCheckoutSandboxActivation(
+    env[EXIMBAY_CHECKOUT_SANDBOX_ENABLED],
+  );
+  if (activation === "DISABLED") return false;
+  if (activation === "ENABLED") return true;
+  throw new ProviderResolveException(
+    "SANDBOX_EXTERNAL_CONFIG_INVALID",
+    input.provider,
+    String(input.mode),
+    "Sandbox external provider opt-in config is invalid.",
+  );
+}
+
 function sandboxDeploymentKeyName(provider: ProviderCode): string | null {
   switch (provider) {
     case ProviderCode.TOSS:
       return TOSS_SANDBOX_EXTERNAL_ENABLED;
+    case ProviderCode.EXIMBAY:
+      return EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
     case ProviderCode.MOCK:
     case ProviderCode.PAYPAL:
-    case ProviderCode.EXIMBAY:
     default:
       return null;
   }

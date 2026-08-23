@@ -9,6 +9,7 @@ import { PaymentMethod, PaymentMode } from "../routing";
 import { normalizeRefundRequestFingerprintInput } from "../../refund/refund-request-fingerprint";
 import { EXIMBAY_SDK_ORIGINS, EXIMBAY_SDK_SOURCES } from "../../eximbay/sdk-origins";
 import nextConfig, { EXIMBAY_SDK_CSP_BOUNDARY } from "../../../../../next.config";
+import { EXIMBAY_CHECKOUT_SANDBOX_ENABLED } from "../../eximbay/checkout-activation";
 
 const ROOT = process.cwd();
 const MIGRATION = "prisma/migrations/20260803100000_eximbay_ex1_provider_identity/migration.sql";
@@ -18,7 +19,7 @@ const S3_ORIGIN_OWNER = "src/lib/payment/eximbay/sdk-origins.ts";
 const CHECKOUT_PAYMENT_OWNER = "src/app/(shop)/checkout/PaymentMethodSection.tsx";
 const CHECKOUT_BROWSER_CONSUMER = "src/app/(shop)/checkout/eximbay-browser-consumer.ts";
 
-describe("Eximbay EX1 disabled architecture", () => {
+describe("Eximbay customer SANDBOX source capability with default-off activation", () => {
   it("adds only the fourth provider enum identity through one canonical migration", () => {
     const schema = readFileSync(join(ROOT, "prisma/schema.prisma"), "utf8");
     const providerEnum = schema.match(/enum PaymentProvider \{([^}]+)\}/u)?.[1];
@@ -48,10 +49,9 @@ describe("Eximbay EX1 disabled architecture", () => {
     }
   });
 
-  it("keeps reviewed dormant S3 SDK authority path-exact with only the default-off status route", () => {
+  it("keeps reviewed S3 SDK authority path-exact with only the separately gated status route", () => {
     const routes = repositoryFiles(join(ROOT, "src/app/api/payments"));
     const packageJson = source("package.json");
-    const production = productionSource();
 
     expect(routes).toEqual([
       "src/app/api/payments/eximbay/status/route.ts",
@@ -64,7 +64,10 @@ describe("Eximbay EX1 disabled architecture", () => {
     ]);
     expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(true);
     expect(packageJson.toLowerCase()).not.toContain("eximbay");
-    expect(production).not.toMatch(/EXIMBAY_(?:EXTERNAL_)?ENABLED/u);
+    expect(productionPathsContaining(EXIMBAY_CHECKOUT_SANDBOX_ENABLED)).toEqual([
+      "src/lib/payment/eximbay/checkout-activation.ts",
+      "src/lib/payment/providers/factory.ts",
+    ]);
     expect(EXIMBAY_SDK_ORIGINS).toEqual({
       SANDBOX: "https://api-test.eximbay.com",
       LIVE: "https://api.eximbay.com",
@@ -86,7 +89,7 @@ describe("Eximbay EX1 disabled architecture", () => {
     ]);
   });
 
-  it("keeps checkout ownership dormant behind the canonical activation fence", () => {
+  it("keeps checkout ownership behind the canonical default-off activation fence", () => {
     const paymentMethod = source(CHECKOUT_PAYMENT_OWNER);
     const consumer = source(CHECKOUT_BROWSER_CONSUMER);
 
@@ -99,8 +102,9 @@ describe("Eximbay EX1 disabled architecture", () => {
 
     expect(EXIMBAY_SDK_CSP_BOUNDARY).toEqual({
       origins: EXIMBAY_SDK_ORIGINS,
-      activeModes: [],
+      activeModes: ["SANDBOX"],
     });
+    expect(EXIMBAY_SDK_CSP_BOUNDARY.activeModes).not.toContain("LIVE");
     expect(nextConfig.headers).toBeUndefined();
     const dormantPolicy = JSON.stringify(EXIMBAY_SDK_CSP_BOUNDARY);
     expect(dormantPolicy).not.toContain("*");
@@ -108,7 +112,7 @@ describe("Eximbay EX1 disabled architecture", () => {
     expect(dormantPolicy).not.toContain("unsafe-eval");
   });
 
-  it("keeps routing and factory reachability disabled even when every dormant S2 config name is present", () => {
+  it("keeps provider contact default-off when credentials exist without deployment activation", () => {
     const env = {
       EXIMBAY_SANDBOX_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
       EXIMBAY_SANDBOX_MID: "synthetic-sandbox-mid",
@@ -131,9 +135,19 @@ describe("Eximbay EX1 disabled architecture", () => {
       liveGuard: { kind: "blocked" as const, liveEnabled: false as const, reason: "disabled" },
     };
 
-    expect(context.credentials).toEqual([]);
-    expect(() => createInitiationProvider(context, { env }))
-      .toThrowError(expect.objectContaining({ code: "PROVIDER_NOT_ENABLED" }));
+    expect(context.credentials).toEqual([
+      { name: "EXIMBAY_SANDBOX_API_KEY", required: true, present: true },
+      { name: "EXIMBAY_SANDBOX_MID", required: true, present: true },
+      { name: "PAYMENT_PUBLIC_ORIGIN", required: true, present: true },
+    ]);
+    expect(() => createInitiationProvider(context, {
+      env,
+      sandboxExternalCodeRegistry: [{
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+        capability: ProviderCapability.ACTION_ADAPTER,
+      }],
+    })).toThrowError(expect.objectContaining({ code: "SANDBOX_EXTERNAL_MISCONFIGURED" }));
   });
 
   it("preserves Toss-only runtime activation while the Eximbay worker route remains separately gated", () => {
@@ -151,10 +165,6 @@ describe("Eximbay EX1 disabled architecture", () => {
 
 function source(path: string): string {
   return readFileSync(join(ROOT, path), "utf8");
-}
-
-function productionSource(): string {
-  return productionFiles().map((path) => readFileSync(path, "utf8")).join("\n");
 }
 
 function productionFiles(): readonly string[] {

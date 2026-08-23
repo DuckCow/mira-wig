@@ -58,7 +58,13 @@ type BoundaryResult =
 type ActionProviderConfirmResult = { success: true; captureFacts: CaptureFacts } | PaymentActionNonSuccess;
 type PendingConfirmPayment = Pick<
   Payment,
-  "id" | "provider" | "providerRef" | "providerConfirmIdempotencyKey" | "mode" | "routingRuleId"
+  | "id"
+  | "provider"
+  | "providerRef"
+  | "providerConfirmIdempotencyKey"
+  | "mode"
+  | "adapterExecutionKind"
+  | "routingRuleId"
 >;
 type PendingConfirmPaymentWithKey = PendingConfirmPayment & { providerConfirmIdempotencyKey: string };
 type ConfirmAttemptResult = { success: true; payment: PendingConfirmPaymentWithKey } | PaymentActionNonSuccess;
@@ -340,6 +346,7 @@ async function prepareConfirmPayment(
       return actionError("PAYMENT_UNAVAILABLE", false);
     }
     if (payments[0].mode !== mode) return actionError("PAYMENT_UNAVAILABLE", false);
+    if (payments[0].adapterExecutionKind === null) return actionError("PAYMENT_UNAVAILABLE", false);
     return ensureConfirmIdempotencyKey(tx, checkoutSessionId, payments[0]);
   });
 }
@@ -442,6 +449,7 @@ function pendingConfirmSelect() {
     providerRef: true,
     providerConfirmIdempotencyKey: true,
     mode: true,
+    adapterExecutionKind: true,
     routingRuleId: true,
   };
 }

@@ -17,16 +17,17 @@ const BF4_SOURCE = [
 ];
 
 describe("Eximbay BF4 I1 dormancy invariants", () => {
-  it("installs the default-off public status route while EXIMBAY checkout routing stays disabled", () => {
+  it("keeps BF4 ownership separate from the bounded Eximbay customer SANDBOX route", () => {
     expect(existsSync(join(ROOT, "src/app/api/payments/eximbay/status/route.ts"))).toBe(true);
     expect(PROVIDER_REGISTRY.EXIMBAY).toMatchObject({
-      enabled: false,
-      allowedModes: [],
-      supportedMethods: [],
-      supportedCurrencies: [],
+      enabled: true,
+      allowedModes: ["SANDBOX"],
+      supportedMethods: ["CARD"],
+      supportedCurrencies: ["USD"],
+      liveEnabled: [],
     });
-    expect(ROUTING_RULES.every((rule) => !rule.candidates.includes(PaymentProvider.EXIMBAY)))
-      .toBe(true);
+    expect(ROUTING_RULES.filter((rule) => rule.candidates.includes(PaymentProvider.EXIMBAY)))
+      .toEqual([expect.objectContaining({ market: "US", method: "CARD", currency: "USD" })]);
   });
 
   it("leaves the generic webhook owner explicitly unavailable for EXIMBAY", async () => {

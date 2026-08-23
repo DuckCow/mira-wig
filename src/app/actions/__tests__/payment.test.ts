@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentInitiationOutputKind,
@@ -16,11 +17,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "next-auth";
 import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { createCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import { createMockPaymentProvider } from "@/lib/payment/providers/mock";
 import { ProviderCapability } from "@/lib/payment/providers/capabilities";
-import { credentialChecksForProvider } from "@/lib/payment/providers/credentials";
+import {
+  EXIMBAY_SANDBOX_API_KEY,
+  EXIMBAY_SANDBOX_MID,
+  PAYMENT_PUBLIC_ORIGIN,
+  credentialChecksForProvider,
+} from "@/lib/payment/providers/credentials";
 import { TOSS_SANDBOX_EXTERNAL_ENABLED } from "@/lib/payment/providers/factory";
+import { EXIMBAY_CHECKOUT_SANDBOX_ENABLED } from "@/lib/payment/eximbay/checkout-activation";
 import { ProviderResolveException } from "@/lib/payment/providers/resolve";
 import { createTossSandboxPaymentProvider, type TossConfirmHttpRequest } from "@/lib/payment/providers/toss/adapter";
 import { deriveTossOrderId } from "@/lib/payment/providers/toss/order-id";
@@ -137,6 +145,10 @@ const ORIGINAL_PAYMENT_MODE = process.env.PAYMENT_MODE;
 const ORIGINAL_TOSS_SANDBOX_SECRET_KEY = process.env.TOSS_SANDBOX_SECRET_KEY;
 const ORIGINAL_TOSS_LIVE_SECRET_KEY = process.env.TOSS_LIVE_SECRET_KEY;
 const ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED = process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+const ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED = process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+const ORIGINAL_EXIMBAY_SANDBOX_API_KEY = process.env.EXIMBAY_SANDBOX_API_KEY;
+const ORIGINAL_EXIMBAY_SANDBOX_MID = process.env.EXIMBAY_SANDBOX_MID;
+const ORIGINAL_PAYMENT_PUBLIC_ORIGIN = process.env.PAYMENT_PUBLIC_ORIGIN;
 const ORIGINAL_TOSS_LIVE_ENABLED = PROVIDER_REGISTRY.TOSS.liveEnabled;
 
 function confirmPayment(
@@ -194,6 +206,7 @@ interface VariantOptions {
 }
 
 interface PendingPaymentOptions {
+  adapterExecutionKind?: PaymentAdapterExecutionKind | null;
   mode?: PersistedPaymentMode;
   provider?: PaymentProvider;
   providerRef?: string;
@@ -224,6 +237,10 @@ describe("payment actions", () => {
     delete process.env.TOSS_SANDBOX_SECRET_KEY;
     delete process.env.TOSS_LIVE_SECRET_KEY;
     delete process.env.TOSS_SANDBOX_EXTERNAL_ENABLED;
+    delete process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+    delete process.env.EXIMBAY_SANDBOX_API_KEY;
+    delete process.env.EXIMBAY_SANDBOX_MID;
+    delete process.env.PAYMENT_PUBLIC_ORIGIN;
     storefrontBoundary.marketCookie = "KR";
     storefrontBoundary.headers = new Headers({
       "x-mira-context-attested": "proxy-v1",
@@ -245,6 +262,10 @@ describe("payment actions", () => {
     restoreEnv("TOSS_SANDBOX_SECRET_KEY", ORIGINAL_TOSS_SANDBOX_SECRET_KEY);
     restoreEnv("TOSS_LIVE_SECRET_KEY", ORIGINAL_TOSS_LIVE_SECRET_KEY);
     restoreEnv("TOSS_SANDBOX_EXTERNAL_ENABLED", ORIGINAL_TOSS_SANDBOX_EXTERNAL_ENABLED);
+    restoreEnv(EXIMBAY_CHECKOUT_SANDBOX_ENABLED, ORIGINAL_EXIMBAY_CHECKOUT_SANDBOX_ENABLED);
+    restoreEnv(EXIMBAY_SANDBOX_API_KEY, ORIGINAL_EXIMBAY_SANDBOX_API_KEY);
+    restoreEnv(EXIMBAY_SANDBOX_MID, ORIGINAL_EXIMBAY_SANDBOX_MID);
+    restoreEnv(PAYMENT_PUBLIC_ORIGIN, ORIGINAL_PAYMENT_PUBLIC_ORIGIN);
     restorePaymentMode();
     restoreMockMode();
     restoreEnv("PAYMENT_MOCK_FORCE_FAIL", ORIGINAL_MOCK_FORCE_FAIL);
@@ -436,6 +457,118 @@ describe("payment actions", () => {
       amount: 2_999,
       currency: "USD",
     });
+  });
+
+  it.each([
+    ["activation absent", false],
+    ["credentials present without activation", true],
+  ])("fails direct US CARD before Payment creation when Eximbay %s", async (_label, credentialsPresent) => {
+    const session = await submitSessionForMarket(ctx, MarketCode.US);
+    if (credentialsPresent) {
+      process.env[EXIMBAY_SANDBOX_API_KEY] = "synthetic-api-key";
+      process.env[EXIMBAY_SANDBOX_MID] = "synthetic-mid";
+      process.env[PAYMENT_PUBLIC_ORIGIN] = "https://payments.example.test";
+    }
+    mockResolveProvider.mockImplementation((input) => {
+      expect(input).toMatchObject({
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+        market: MarketCode.US,
+        method: PaymentMethod.CARD,
+        currency: "USD",
+        ruleId: "cfa.us.card.usd",
+      });
+      throw new ProviderResolveException(
+        "SANDBOX_EXTERNAL_MISCONFIGURED",
+        PaymentProvider.EXIMBAY,
+        PaymentMode.SANDBOX,
+        "Synthetic default-off Eximbay resolution",
+      );
+    });
+
+    const execution = await initiatePaymentAction(session.sessionId, { method: PaymentMethod.CARD });
+
+    expect(execution).toEqual({
+      channel: "DURABLE_ONLY",
+      durable: {
+        kind: "FAILED",
+        success: false,
+        errorCode: "PROVIDER_UNAVAILABLE",
+        error: "No payment provider is available.",
+        retryable: false,
+      },
+    });
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("fails activated Eximbay with incomplete configuration before Payment creation", async () => {
+    const session = await submitSessionForMarket(ctx, MarketCode.US);
+    process.env[EXIMBAY_CHECKOUT_SANDBOX_ENABLED] = "ENABLED";
+    mockResolveProvider.mockImplementation((input) => {
+      expect(input.credentials).toEqual([
+        { name: EXIMBAY_SANDBOX_API_KEY, required: true, present: false },
+        { name: EXIMBAY_SANDBOX_MID, required: true, present: false },
+        { name: PAYMENT_PUBLIC_ORIGIN, required: true, present: false },
+      ]);
+      throw new ProviderResolveException(
+        "SANDBOX_EXTERNAL_CREDENTIALS_MISSING",
+        PaymentProvider.EXIMBAY,
+        PaymentMode.SANDBOX,
+        "Synthetic missing Eximbay configuration",
+      );
+    });
+
+    const execution = await initiatePaymentAction(session.sessionId, { method: PaymentMethod.CARD });
+
+    expect(execution).toMatchObject({
+      channel: "DURABLE_ONLY",
+      durable: { kind: "FAILED", errorCode: "PROVIDER_UNAVAILABLE" },
+    });
+    await expect(paymentCount(session.sessionId)).resolves.toBe(0);
+  });
+
+  it("reaches the installed fresh Eximbay special path from fully admitted US CARD routing without network", async () => {
+    const session = await submitSessionForMarket(ctx, MarketCode.US);
+    const paymentId = `synthetic_cfa_payment_${randomUUID()}`;
+    const authority = Object.freeze({ authority: "SYNTHETIC_TEST_ONLY" });
+    const handoff = syntheticS3Handoff(paymentId);
+    s3ActionControl.attempt = (_client, input) => {
+      expect(input).toMatchObject({
+        sessionId: session.sessionId,
+        userId: ctx.userId,
+        adapterContext: {
+          provider: PaymentProvider.EXIMBAY,
+          mode: PaymentMode.SANDBOX,
+          market: MarketCode.US,
+          method: PaymentMethod.CARD,
+          currency: "USD",
+          ruleId: "cfa.us.card.usd",
+        },
+      });
+      return Promise.resolve({
+        channel: "FRESH_EXIMBAY_READY",
+        durable: {
+          paymentId,
+          provider: PaymentProvider.EXIMBAY,
+          status: PaymentAttemptStatus.INITIATED,
+          initiateResult: { kind: "ready" },
+        },
+        freshAuthority: authority,
+      });
+    };
+    s3ActionControl.materialize = () => Promise.resolve(handoff);
+
+    await expect(initiatePaymentAction(session.sessionId, { method: PaymentMethod.CARD })).resolves.toEqual({
+      channel: "FRESH_EXIMBAY_READY",
+      durable: {
+        kind: "READY",
+        success: true,
+        paymentId,
+        provider: PaymentProvider.EXIMBAY,
+      },
+      transientHandoff: handoff,
+    });
+    expect(mockResolveProvider).not.toHaveBeenCalled();
   });
 
   it("keeps owned sessions in different Markets independently payable", async () => {
@@ -786,6 +919,113 @@ describe("payment actions", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
     expect(mockResolveProvider).toHaveBeenLastCalledWith(expectedResolverContext());
   });
+
+  it.each([
+    {
+      name: "persisted EXTERNAL now resolves MOCK",
+      persisted: PaymentAdapterExecutionKind.EXTERNAL,
+      resolved: PaymentAdapterExecutionKind.MOCK,
+    },
+    {
+      name: "persisted MOCK now resolves EXTERNAL",
+      persisted: PaymentAdapterExecutionKind.MOCK,
+      resolved: PaymentAdapterExecutionKind.EXTERNAL,
+    },
+  ])("fails confirmation closed before provider contact when $name", async ({ persisted, resolved }) => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session, { adapterExecutionKind: persisted });
+    const inputs: PaymentConfirmInput[] = [];
+    mockResolveProvider.mockReturnValueOnce({
+      ...fakeConfirmProvider(PaymentProvider.TOSS, { inputs }),
+      adapterExecutionKind: resolved,
+    });
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result).toMatchObject({ success: false, errorCode: "PAYMENT_UNAVAILABLE" });
+    expect(inputs).toHaveLength(0);
+    expect(mockCompleteFromCapture).not.toHaveBeenCalled();
+    await expect(loadPayment(payment.id)).resolves.toMatchObject({
+      adapterExecutionKind: persisted,
+      status: PaymentAttemptStatus.INITIATED,
+      providerPaymentKey: null,
+    });
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it("allows same-identity EXTERNAL confirmation through an injected provider-free seam", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session, {
+      adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+    });
+    const inputs: PaymentConfirmInput[] = [];
+    mockResolveProvider.mockReturnValueOnce({
+      ...fakeConfirmProvider(PaymentProvider.TOSS, { inputs }),
+      adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+    });
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result).toMatchObject({ success: true, paymentId: payment.id });
+    expect(inputs).toHaveLength(1);
+    await expect(orderCount(ctx.userId)).resolves.toBe(1);
+  });
+
+  it("fails a legacy NULL adapter identity before resolver, provider contact, or completion", async () => {
+    const session = await submitSessionWithOneLine(ctx);
+    const payment = await createPendingPayment(session, { adapterExecutionKind: null });
+    const inputs: PaymentConfirmInput[] = [];
+    mockResolveProvider.mockReturnValueOnce(fakeConfirmProvider(PaymentProvider.TOSS, { inputs }));
+
+    const result = await confirmPayment(session.sessionId, PaymentProvider.TOSS, {
+      providerPaymentKey: providerPaymentKey(ctx),
+    });
+
+    expect(result).toMatchObject({ success: false, errorCode: "PAYMENT_UNAVAILABLE" });
+    expect(mockResolveProvider).not.toHaveBeenCalled();
+    expect(inputs).toHaveLength(0);
+    expect(mockCompleteFromCapture).not.toHaveBeenCalled();
+    await expect(confirmKeyOf(payment.id)).resolves.toBeNull();
+    await expect(orderCount(ctx.userId)).resolves.toBe(0);
+  });
+
+  it.each([undefined, "ENABLED"])(
+    "keeps direct Eximbay confirmation forbidden when checkout activation is %s",
+    async (activation) => {
+      if (activation === undefined) delete process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED;
+      else process.env.EXIMBAY_CHECKOUT_SANDBOX_ENABLED = activation;
+      const session = await submitSessionWithOneLine(ctx);
+      const payment = await createPendingPayment(session, {
+        provider: PaymentProvider.EXIMBAY,
+        adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+      });
+      mockResolveProvider.mockImplementationOnce(() => {
+        throw new ProviderResolveException(
+          "EXIMBAY_CONFIRM_ACTION_FORBIDDEN",
+          PaymentProvider.EXIMBAY,
+          PaymentMode.SANDBOX,
+          "synthetic forbidden confirmation",
+        );
+      });
+
+      const result = await confirmPayment(session.sessionId, PaymentProvider.EXIMBAY, {
+        providerPaymentKey: providerPaymentKey(ctx),
+      });
+
+      expect(result).toMatchObject({ success: false, errorCode: "PROVIDER_UNAVAILABLE" });
+      expect(mockResolveProvider).toHaveBeenCalledTimes(1);
+      expect(mockCompleteFromCapture).not.toHaveBeenCalled();
+      await expect(loadPayment(payment.id)).resolves.toMatchObject({
+        status: PaymentAttemptStatus.INITIATED,
+        providerPaymentKey: null,
+      });
+      await expect(orderCount(ctx.userId)).resolves.toBe(0);
+    },
+  );
 
   it("infers confirmation provider from the exact Payment and ignores hostile extra client provenance", async () => {
     const session = await submitSessionWithOneLine(ctx);
@@ -1172,7 +1412,10 @@ describe("payment actions", () => {
   it("Toss sandbox confirm adapter completes through local completion using fake HTTP", async () => {
     const session = await submitSessionWithOneLine(ctx);
     const providerRef = `toss_action_${randomUUID()}`;
-    const payment = await createPendingPayment(session, { providerRef });
+    const payment = await createPendingPayment(session, {
+      providerRef,
+      adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+    });
     const calls: TossConfirmHttpRequest[] = [];
     mockResolveProvider.mockReturnValueOnce(createTossSandboxPaymentProvider({
       httpClient: (request) => {
@@ -1719,6 +1962,12 @@ async function createPendingPayment(
       checkoutSessionId: session.sessionId,
       provider,
       mode: options.mode ?? PersistedPaymentMode.SANDBOX,
+      adapterExecutionKind: options.adapterExecutionKind === undefined
+        ? PaymentAdapterExecutionKind.MOCK
+        : options.adapterExecutionKind,
+      providerOrderId: provider === PaymentProvider.EXIMBAY
+        ? syntheticEximbayProviderOrderId()
+        : null,
       status: options.status ?? PaymentAttemptStatus.INITIATED,
       amount: session.totalAmount,
       currency: session.currency,
@@ -1769,6 +2018,7 @@ async function loadPayment(paymentId: string) {
     where: { id: paymentId },
     select: {
       provider: true,
+      adapterExecutionKind: true,
       status: true,
       attemptLifecycle: true,
       providerConfirmIdempotencyKey: true,

@@ -303,6 +303,11 @@ enum PaymentMode {
   LIVE
 }
 
+enum PaymentAdapterExecutionKind {
+  MOCK
+  EXTERNAL
+}
+
 enum PaymentAttemptStatus {
   INITIATED
   AWAITING
@@ -533,6 +538,7 @@ model Payment {
   session                       CheckoutSession              @relation(fields: [checkoutSessionId], references: [id])
   provider                      PaymentProvider
   mode                          PaymentMode
+  adapterExecutionKind          PaymentAdapterExecutionKind?
   routingRuleId                 String?
   /// Financial result axis. Logical attempt/contact authority is attemptLifecycle.
   status                        PaymentAttemptStatus         @default(INITIATED)

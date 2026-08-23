@@ -26,6 +26,7 @@ interface CheckoutFormProps {
   cartItems: CheckoutCartItem[];
   productSubtotal: number;
   mockPaymentEnabled: boolean;
+  eximbayCardEnabled: boolean;
   locale: Locale;
 }
 
@@ -67,6 +68,7 @@ export function CheckoutForm({
   cartItems,
   productSubtotal,
   mockPaymentEnabled,
+  eximbayCardEnabled,
   locale,
 }: CheckoutFormProps) {
   const config = COUNTRY_FORM_CONFIGS[shippingCountry];
@@ -92,6 +94,7 @@ export function CheckoutForm({
               key={form.created.sessionId}
               checkoutSessionId={form.created.sessionId}
               mockPaymentEnabled={mockPaymentEnabled}
+              eximbayCardEnabled={eximbayCardEnabled}
               locale={locale}
               marketCode={marketCode}
             />

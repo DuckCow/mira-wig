@@ -1,4 +1,4 @@
-import { PaymentProvider } from "@prisma/client";
+import { PaymentAdapterExecutionKind, PaymentProvider } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { createMockPaymentProvider } from "../mock";
 import { TOSS_SANDBOX_SECRET_KEY } from "../credentials";
@@ -35,6 +35,7 @@ function resolveProvider(
   const confirmation = resolveConfirmationProvider(context, options);
   return {
     code: initiation.code,
+    adapterExecutionKind: initiation.adapterExecutionKind,
     initiate: (input) => initiation.initiate(input),
     confirm: (input) => confirmation.confirm(input),
   };
@@ -265,6 +266,7 @@ interface FakePaymentAdapter extends ProviderPaymentAdapter {
 function createFakePaymentAdapter(provider: PaymentProvider): FakePaymentAdapter {
   return {
     code: provider,
+    adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
     initiate: (input) => Promise.resolve({
       kind: "redirect",
       provider,

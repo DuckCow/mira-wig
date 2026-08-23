@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentInitiationOutputKind,
@@ -201,6 +202,7 @@ describe("payment initiate providerRef persistence", () => {
       const authorized = await onlyPayment(session.sessionId);
       expect(authorized).toMatchObject({
         provider: PaymentProvider.EXIMBAY,
+        adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
         providerOrderId: `c${"0".repeat(24)}`,
         attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
         contactStartedAt: null,
@@ -577,6 +579,7 @@ describe("payment initiate providerRef persistence", () => {
     const calls: PaymentInitiateInput[] = [];
     const provider: PaymentInitiationProvider = {
       code: PaymentProvider.TOSS,
+      adapterExecutionKind: PaymentAdapterExecutionKind.MOCK,
       initiate: async (input) => {
         calls.push(input);
         await db.payment.update({
@@ -677,6 +680,49 @@ describe("payment initiate providerRef persistence", () => {
     expect(calls[0]?.idempotencyKey).toBe(authorized.idempotencyKey);
     await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(1);
   });
+
+  it.each([
+    [PaymentAdapterExecutionKind.MOCK, PaymentAdapterExecutionKind.EXTERNAL],
+    [PaymentAdapterExecutionKind.EXTERNAL, PaymentAdapterExecutionKind.MOCK],
+  ])(
+    "supersedes an uncontacted %s attempt before authorizing %s",
+    async (persistedKind, currentKind) => {
+      const session = await submitSessionWithOneLine(ctx);
+      const old = await createUncontactedAuthorizedPayment(
+        session,
+        "test.route.adapter-drift",
+        new Date(),
+        persistedKind,
+      );
+      const calls: PaymentInitiateInput[] = [];
+
+      const result = await initiatePaymentAttemptForTest(db, {
+        sessionId: session.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider(
+          { kind: "ready" },
+          calls,
+          PaymentProvider.TOSS,
+          currentKind,
+        ),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: "test.route.adapter-drift",
+      });
+
+      expect(result.paymentId).not.toBe(old.paymentId);
+      expect(calls).toHaveLength(1);
+      await expect(db.payment.findUniqueOrThrow({ where: { id: old.paymentId } }))
+        .resolves.toMatchObject({
+          adapterExecutionKind: persistedKind,
+          attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+        });
+      await expect(db.payment.findUniqueOrThrow({ where: { id: result.paymentId } }))
+        .resolves.toMatchObject({
+          adapterExecutionKind: currentKind,
+          attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        });
+    },
+  );
 
   it("C2I expiry-first closes the exact auditor race before provider contact", async () => {
     const session = await moveSessionExpiryIntoPast(await submitSessionWithOneLine(ctx));
@@ -2103,9 +2149,13 @@ function fakeProvider(
   initiateResult: PaymentInitiateResult,
   calls: PaymentInitiateInput[] = [],
   code: PaymentProvider = PaymentProvider.TOSS,
+  adapterExecutionKind: PaymentAdapterExecutionKind = code === PaymentProvider.EXIMBAY
+    ? PaymentAdapterExecutionKind.EXTERNAL
+    : PaymentAdapterExecutionKind.MOCK,
 ): PaymentInitiationProvider {
   const provider: PaymentInitiationProvider = {
     code,
+    adapterExecutionKind,
     initiate: (input: PaymentInitiateInput) => {
       calls.push(input);
       return Promise.resolve(initiateResult);
@@ -2185,6 +2235,7 @@ function entropyChunk(byte: number): Uint8Array {
 function failingProvider(calls: PaymentInitiateInput[]): PaymentInitiationProvider {
   return {
     code: PaymentProvider.TOSS,
+    adapterExecutionKind: PaymentAdapterExecutionKind.MOCK,
     initiate: (input: PaymentInitiateInput) => {
       calls.push(input);
       return Promise.reject(new Error("Fake provider initiate failure"));
@@ -2235,6 +2286,7 @@ function barrierProvider(
 ): PaymentInitiationProvider {
   return {
     code: PaymentProvider.TOSS,
+    adapterExecutionKind: PaymentAdapterExecutionKind.MOCK,
     initiate: async (input) => {
       calls.push(input);
       await barrier.wait();
@@ -2473,12 +2525,14 @@ async function createUncontactedAuthorizedPayment(
   session: { sessionId: string; totalAmount: number; currency: string },
   routingRuleId: string,
   contactAuthorizedAt: Date = new Date(),
+  adapterExecutionKind: PaymentAdapterExecutionKind | null = PaymentAdapterExecutionKind.MOCK,
 ): Promise<{ paymentId: string; idempotencyKey: string }> {
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
+      adapterExecutionKind,
       routingRuleId,
       status: PaymentAttemptStatus.INITIATED,
       attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
@@ -2502,6 +2556,7 @@ async function createEximbayContactedPayment(
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.EXIMBAY,
       mode: PaymentMode.SANDBOX,
+      adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
       routingRuleId,
       status: PaymentAttemptStatus.INITIATED,
       attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,

@@ -3,6 +3,7 @@ import {
   CheckoutSessionStatus,
   FulfillmentType,
   OutboxStatus,
+  PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
@@ -395,6 +396,7 @@ async function createSuspendedSuccess(
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
+      adapterExecutionKind: PaymentAdapterExecutionKind.MOCK,
       status: PaymentAttemptStatus.INITIATED,
       attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
       amount: session.totalAmount,
@@ -411,6 +413,7 @@ async function createSuspendedSuccess(
       checkoutSessionId: session.sessionId,
       provider: PaymentProvider.TOSS,
       mode: PaymentMode.SANDBOX,
+      adapterExecutionKind: PaymentAdapterExecutionKind.MOCK,
       status: PaymentAttemptStatus.SUCCEEDED,
       attemptLifecycle: PaymentAttemptLifecycle.SUSPENDED,
       remediationStatus: PaymentRemediationStatus.PENDING,
@@ -442,6 +445,7 @@ async function createSuspendedSuccess(
 function initiationProvider(calls: PaymentInitiateInput[]): PaymentInitiationProvider {
   return {
     code: PaymentProvider.TOSS,
+    adapterExecutionKind: PaymentAdapterExecutionKind.MOCK,
     initiate: (input) => {
       calls.push(input);
       return Promise.resolve({ kind: "ready" });

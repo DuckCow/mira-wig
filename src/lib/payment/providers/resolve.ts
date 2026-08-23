@@ -23,6 +23,14 @@ export function resolveConfirmationProvider(
   input: ResolveProviderInput,
   options?: CreateConfirmationProviderOptions,
 ): PaymentConfirmationProvider {
+  if (input.provider === ProviderCode.EXIMBAY) {
+    throw new ProviderResolveException(
+      "EXIMBAY_CONFIRM_ACTION_FORBIDDEN",
+      input.provider,
+      input.mode,
+      "Eximbay financial completion is owned by the verified callback path.",
+    );
+  }
   return createConfirmationProvider(input, options ?? defaultProviderAdapterOptions());
 }
 

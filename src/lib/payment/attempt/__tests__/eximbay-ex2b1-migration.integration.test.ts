@@ -134,7 +134,7 @@ describe("EX2B1 repository migration history", () => {
       FROM ${quoteIdentifier(schema)}."_prisma_migrations"
       WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL
     `);
-    expect(applied.rows[0]?.count).toBe(36);
+    expect(applied.rows[0]?.count).toBe(37);
   });
 
   it("fails on a real prior-migration schema with a historical EXIMBAY row before partial installation", async () => {
