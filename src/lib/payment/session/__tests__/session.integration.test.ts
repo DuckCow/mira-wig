@@ -24,6 +24,7 @@ import {
   expireStale,
   isDefinedTransition,
   isUsable,
+  readCheckoutSessionResume,
   transitionCheckoutSession,
   type CheckoutShippingInput,
 } from "@/lib/payment/session";
@@ -598,6 +599,187 @@ describe("checkout session lifecycle", () => {
 
     expect(first.sessionId).not.toBe(second.sessionId);
     await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(2);
+  });
+
+  it("rehydrates frozen session authority without reading or rewriting current Cart/catalog facts", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 2);
+    const created = await createCheckoutSession(db, baseInput(ctx));
+
+    await Promise.all([
+      db.cartItem.updateMany({ where: { userId: ctx.userId }, data: { quantity: 1 } }),
+      db.variantMarketPrice.update({
+        where: { variantId_marketCode: { variantId: variant.id, marketCode: MarketCode.KR } },
+        data: { amount: 99_000 },
+      }),
+      db.wigStyle.update({ where: { id: variant.styleId }, data: { name: "Current catalog name" } }),
+    ]);
+
+    const resumed = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    });
+
+    expect(resumed).toMatchObject({
+      sessionId: created.sessionId,
+      currency: "KRW",
+      subtotalAmount: 24_000,
+      totalAmount: 24_000,
+      disposition: "PAYMENT_ELIGIBLE",
+      shipping: { recipientName: "홍길동", addressLine1: "테헤란로 1" },
+    });
+    expect(resumed?.lines[0]).toMatchObject({
+      quantity: 2,
+      unitAmount: 12_000,
+      snapshot: { styleName: variant.styleName, currencyCode: "KRW" },
+    });
+    await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(1);
+    await expect(db.payment.count({ where: { checkoutSessionId: created.sessionId } })).resolves.toBe(0);
+  });
+
+  it("returns the same external absence for nonexistent and wrong-user explicit IDs", async () => {
+    const created = await createReadySession(ctx);
+    const otherUserId = `b1_other_${randomUUID()}`;
+    await db.user.create({ data: { id: otherUserId, email: `${otherUserId}@example.test` } });
+    try {
+      await expect(readCheckoutSessionResume(db, {
+        checkoutSessionId: created.sessionId,
+        authenticatedUserId: otherUserId,
+      })).resolves.toBeNull();
+      await expect(readCheckoutSessionResume(db, {
+        checkoutSessionId: `missing_${randomUUID()}`,
+        authenticatedUserId: otherUserId,
+      })).resolves.toBeNull();
+    } finally {
+      await db.user.deleteMany({ where: { id: otherUserId } });
+    }
+  });
+
+  it("isolates two explicit session IDs for the same user's two tabs", async () => {
+    const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const first = await createCheckoutSession(db, baseInput(ctx));
+    const second = await createCheckoutSession(db, baseInput(ctx));
+
+    const [tabA, tabB] = await Promise.all([
+      readCheckoutSessionResume(db, {
+        checkoutSessionId: first.sessionId,
+        authenticatedUserId: ctx.userId,
+      }),
+      readCheckoutSessionResume(db, {
+        checkoutSessionId: second.sessionId,
+        authenticatedUserId: ctx.userId,
+      }),
+    ]);
+
+    expect(tabA?.sessionId).toBe(first.sessionId);
+    expect(tabB?.sessionId).toBe(second.sessionId);
+    expect(tabA?.sessionId).not.toBe(tabB?.sessionId);
+  });
+
+  it("gates every existing Payment from the resumed initiation surface", async () => {
+    const created = await createReadySession(ctx);
+    await createSessionPayment(created, PaymentAttemptLifecycle.CONTACTED);
+
+    const resumed = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    });
+
+    expect(resumed?.disposition).toBe("PAYMENT_EXISTS");
+    await expect(db.payment.count({ where: { checkoutSessionId: created.sessionId } })).resolves.toBe(1);
+  });
+
+  it("keeps frozen market/currency amounts visible but gates a drifted current Market relationship", async () => {
+    const created = await createReadySession(ctx);
+    await db.market.update({ where: { code: MarketCode.KR }, data: { currency: "JPY" } });
+
+    const resumed = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    });
+
+    expect(resumed).toMatchObject({
+      sessionId: created.sessionId,
+      marketCode: "KR",
+      currency: "KRW",
+      totalAmount: 12_000,
+      disposition: "MARKET_UNAVAILABLE",
+    });
+    expect(resumed?.lines[0]?.snapshot.currencyCode).toBe("KRW");
+  });
+
+  it("classifies expiry lazily without mutating the durable session", async () => {
+    const createdAt = new Date("2026-08-23T00:00:00.000Z");
+    const created = await createReadySession(ctx, createdAt);
+
+    const resumed = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+      now: created.expiresAt,
+    });
+
+    expect(resumed?.disposition).toBe("EXPIRED");
+    await expect(statusOf(created.sessionId)).resolves.toBe(CheckoutSessionStatus.SUBMITTED);
+    await expect(db.payment.count({ where: { checkoutSessionId: created.sessionId } })).resolves.toBe(0);
+  });
+
+  it("fails closed for a COMPLETED session without its required Order", async () => {
+    const created = await createReadySession(ctx);
+    await db.checkoutSession.update({
+      where: { id: created.sessionId },
+      data: { status: CheckoutSessionStatus.COMPLETED, completedAt: new Date() },
+    });
+
+    const resumed = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    });
+
+    expect(resumed?.disposition).toBe("TERMINAL");
+    await expect(db.payment.count({ where: { checkoutSessionId: created.sessionId } })).resolves.toBe(0);
+  });
+
+  it("fails closed when required frozen shipping presentation is structurally incomplete", async () => {
+    const created = await createReadySession(ctx);
+    await db.checkoutSessionShipping.update({
+      where: { sessionId: created.sessionId },
+      data: { addressLine1: "" },
+    });
+
+    await expect(readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    })).resolves.toBeNull();
+    await expect(db.payment.count({ where: { checkoutSessionId: created.sessionId } })).resolves.toBe(0);
+  });
+
+  it("reconstructs the same R10D-style zero-Payment session on repeated server reads", async () => {
+    const variant = await createCartVariant(ctx, { amount: 4_999, stock: 5, marketCode: MarketCode.US });
+    await addCart(ctx, variant, 1);
+    const created = await createCheckoutSession(db, baseInput(ctx, {
+      marketCode: MarketCode.US,
+      shipping: validShipping(ShippingCountry.US),
+    }));
+
+    const firstRequest = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    });
+    const reconstructedRequest = await readCheckoutSessionResume(db, {
+      checkoutSessionId: created.sessionId,
+      authenticatedUserId: ctx.userId,
+    });
+
+    expect(firstRequest).toMatchObject({
+      sessionId: created.sessionId,
+      totalAmount: 4_999,
+      currency: "USD",
+      disposition: "PAYMENT_ELIGIBLE",
+    });
+    expect(reconstructedRequest).toEqual(firstRequest);
+    await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(1);
+    await expect(db.payment.count({ where: { checkoutSessionId: created.sessionId } })).resolves.toBe(0);
   });
 });
 

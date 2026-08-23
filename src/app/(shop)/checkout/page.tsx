@@ -2,7 +2,10 @@ import { ShippingCountry } from "@prisma/client";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CheckoutForm } from "./CheckoutForm";
+import { CheckoutSessionResume, CheckoutSessionUnavailable } from "./CheckoutSessionResume";
 import type { CheckoutCartItem } from "./checkout-summary";
+import { checkoutPageMode, checkoutSessionResumeHref } from "./checkout-url";
+import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { getCart } from "@/lib/cart";
 import { getStorefrontContext } from "@/lib/market";
@@ -16,6 +19,13 @@ import type { CartItemView } from "@/lib/cart";
 import type { MarketCode } from "@/lib/market/types";
 import { loginHref, withStorefrontHandoff } from "@/lib/market/request-context";
 import { messagesFor } from "@/lib/market/messages";
+import { readCheckoutSessionResume } from "@/lib/payment/session";
+
+interface CheckoutPageProps {
+  searchParams?: Promise<{ checkoutSessionId?: string | string[] }>;
+}
+
+type StorefrontContext = Awaited<ReturnType<typeof getStorefrontContext>>;
 
 function pricedItems(items: CartItemView[]): CartItemView[] {
   return items.filter((item) => item.price !== null && item.unavailableCode === null);
@@ -77,15 +87,72 @@ function eximbayCardEnabled(marketCode: MarketCode, currency: string): boolean {
   }
 }
 
-export default async function CheckoutPage() {
-  const [session, context] = await Promise.all([getSession(), getStorefrontContext()]);
+export default async function CheckoutPage(props: CheckoutPageProps = {}) {
+  const queryPromise: Promise<{ checkoutSessionId?: string | string[] }> = props.searchParams ?? Promise.resolve({});
+  const [session, context, query] = await Promise.all([
+    getSession(),
+    getStorefrontContext(),
+    queryPromise,
+  ]);
+  const mode = checkoutPageMode(query.checkoutSessionId);
   const presentationVariant = { marketCode: context.marketCode, locale: context.locale };
-  if (!session) redirect(loginHref(context.requestTarget, presentationVariant));
+  const loginTarget = mode.kind === "RESUME"
+    ? checkoutSessionResumeHref(mode.checkoutSessionId, presentationVariant)
+    : context.requestTarget;
+  if (!session) redirect(loginHref(loginTarget, presentationVariant));
+
+  if (mode.kind === "INVALID_RESUME") return unavailableResume(context);
+  if (mode.kind === "RESUME") {
+    return resumeCheckout(context, session.user.id, mode.checkoutSessionId);
+  }
+  return createCheckout(context, session.user.id);
+}
+
+async function resumeCheckout(context: StorefrontContext, userId: string, checkoutSessionId: string) {
+  const resumed = await readCheckoutSessionResume(db, {
+    checkoutSessionId,
+    authenticatedUserId: userId,
+  });
+  if (!resumed) return unavailableResume(context);
+  const variant = { marketCode: resumed.marketCode, locale: context.locale };
+  const messages = messagesFor(context.locale).checkout;
+  return (
+    <main className="max-w-5xl mx-auto px-4 py-8">
+      <nav aria-label={messages.back} className="mb-6">
+        <Link href={withStorefrontHandoff("/cart", variant)} className="text-sm text-gray-500 hover:text-gray-900">
+          ← {messages.back}
+        </Link>
+      </nav>
+      <CheckoutSessionResume
+        session={resumed}
+        locale={context.locale}
+        mockPaymentEnabled={mockPaymentEnabled()}
+        eximbayCardEnabled={resumed.disposition === "PAYMENT_ELIGIBLE"
+          && eximbayCardEnabled(resumed.marketCode, resumed.currency)}
+      />
+    </main>
+  );
+}
+
+function unavailableResume(context: StorefrontContext) {
+  const variant = { marketCode: context.marketCode, locale: context.locale };
+  return (
+    <main className="max-w-xl mx-auto px-4 py-8">
+      <CheckoutSessionUnavailable
+        locale={context.locale}
+        freshCheckoutHref={withStorefrontHandoff("/checkout", variant)}
+      />
+    </main>
+  );
+}
+
+async function createCheckout(context: StorefrontContext, userId: string) {
+  const presentationVariant = { marketCode: context.marketCode, locale: context.locale };
   if (!context.confirmedMarketCode) redirect(withStorefrontHandoff("/cart", presentationVariant));
   const marketCode = context.confirmedMarketCode;
   const variant = { marketCode, locale: context.locale };
   const [items, market] = await Promise.all([
-    getCart(session.user.id, marketCode),
+    getCart(userId, marketCode),
     getActiveMarketCommercialFacts(marketCode),
   ]);
   if (items.length === 0) redirect(withStorefrontHandoff("/cart", variant));
@@ -119,8 +186,6 @@ export default async function CheckoutPage() {
         shippingCountry={checkoutCountry(marketCode, market.shippableCountries)}
         cartItems={cartLines}
         productSubtotal={subtotal}
-        mockPaymentEnabled={mockPaymentEnabled()}
-        eximbayCardEnabled={eximbayCardEnabled(marketCode, market.currency.code)}
         locale={context.locale}
       />
     </main>

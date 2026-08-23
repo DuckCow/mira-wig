@@ -4,6 +4,10 @@ export {
   SessionException,
   type CheckoutShippingInput,
   type CheckoutSessionTransition,
+  type CheckoutSessionResumeDisposition,
+  type CheckoutSessionResumeLine,
+  type CheckoutSessionResumeResult,
+  type CheckoutSessionResumeShipping,
   type CreateCheckoutSessionInput,
   type CreateCheckoutSessionResult,
   type ExpireStaleInput,
@@ -12,4 +16,5 @@ export {
 } from "./types";
 export { createCheckoutSession } from "./create";
 export { expireStale, isUsable } from "./expiry";
+export { readCheckoutSessionResume } from "./resume";
 export { isDefinedTransition, transitionCheckoutSession } from "./transitions";

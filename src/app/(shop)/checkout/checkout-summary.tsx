@@ -1,5 +1,5 @@
-import { CURRENCY_META, formatPrice, type CurrencyMeta } from "@/lib/market/types";
-import type { CreateCheckoutSessionResult } from "@/lib/payment/session/types";
+import { currencyMetaForCode, formatPrice, type CurrencyMeta } from "@/lib/market/types";
+import type { CheckoutSessionResumeLine, CheckoutSessionResumeResult } from "@/lib/payment/session/types";
 import type { Locale } from "@/lib/market/locale";
 import { messagesFor } from "@/lib/market/messages";
 
@@ -42,20 +42,25 @@ export function CartSnapshot({
   );
 }
 
-export function SessionSnapshot({
+export function FrozenSessionSnapshot({
   session,
-  fallbackCurrency,
   locale,
 }: {
-  session: CreateCheckoutSessionResult;
-  fallbackCurrency: CurrencyMeta;
+  session: CheckoutSessionResumeResult;
   locale: Locale;
 }) {
-  const sessionCurrency = CURRENCY_META[session.currency] ?? fallbackCurrency;
+  const sessionCurrency = currencyMetaForCode(session.currency);
   const messages = messagesFor(locale).checkout;
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5">
       <h2 className="text-lg font-semibold text-gray-900">{messages.sessionSnapshot}</h2>
+      <ul className="mt-4 divide-y divide-gray-100">
+        {session.lines.map((line) => (
+          <li key={line.id} className="py-3 text-sm">
+            <FrozenSessionLineRow line={line} currency={sessionCurrency} locale={locale} />
+          </li>
+        ))}
+      </ul>
       <div className="mt-4 space-y-3">
         <SummaryRow label={messages.subtotal} value={formatPrice(session.subtotalAmount, sessionCurrency, locale)} />
         <SummaryRow label={messages.shipping} value={shippingLabel(session, sessionCurrency, locale)} />
@@ -66,6 +71,34 @@ export function SessionSnapshot({
         {messages.sessionNotice}
       </p>
     </section>
+  );
+}
+
+function FrozenSessionLineRow({
+  line,
+  currency,
+  locale,
+}: {
+  line: CheckoutSessionResumeLine;
+  currency: CurrencyMeta;
+  locale: Locale;
+}) {
+  const lineSubtotal = line.unitAmount * line.quantity;
+  return (
+    <>
+      <div className="flex justify-between gap-3">
+        <div>
+          <p className="font-medium text-gray-900">{line.snapshot.styleName}</p>
+          <p className="mt-1 text-xs text-gray-500">
+            {[line.snapshot.color, line.snapshot.length, line.snapshot.curl].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <p className="shrink-0 font-medium text-gray-900">{formatPrice(lineSubtotal, currency, locale)}</p>
+      </div>
+      <p className="mt-1 text-xs text-gray-500">
+        {formatPrice(line.unitAmount, currency, locale)} × {line.quantity}
+      </p>
+    </>
   );
 }
 
@@ -95,6 +128,6 @@ function SummaryRow({ label, value, strong = false }: { label: string; value: st
   );
 }
 
-function shippingLabel(session: CreateCheckoutSessionResult, currency: CurrencyMeta, locale: Locale): string {
+function shippingLabel(session: CheckoutSessionResumeResult, currency: CurrencyMeta, locale: Locale): string {
   return `${formatPrice(session.shippingAmount, currency, locale)} · ${messagesFor(locale).checkout.shippingPolicyPending}`;
 }
