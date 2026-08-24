@@ -24,12 +24,15 @@ describe("EditorialMarkdown LPC-A1 pilot syntax", () => {
   });
 
   it("groups paragraph lines, treats whitespace as blank, and preserves list transitions", () => {
-    const html = renderMarkdown(`first line
-second **strong** line
-   
-- first item
-- second item
-after list`);
+    const body = [
+      "first line",
+      "second **strong** line",
+      "   ",
+      "- first item",
+      "- second item",
+      "after list",
+    ].join("\n");
+    const html = renderMarkdown(body);
 
     expect(html).toContain("<p>first line second <strong>strong</strong> line</p>");
     expect(html).toContain("<ul");
