@@ -3698,3 +3698,38 @@ DeliveryCountry, audience, tax jurisdiction, fulfillment zone, culture, or
 hreflang region. `HreflangTarget` is explicit SiteVariant search metadata and
 must not be derived from `MarketCode`. A repository-wide source-symbol rename is
 deferred; no duplicate `CommerceMarket` alias is introduced by this decision.
+
+## 2026-08-24 — Localized Public Content Authority & Approval v0.1 design adjudication
+
+```text
+ADOPT FOR REVIEWED DOCUMENTATION INSTALL
+
+Record these human decisions:
+1. Mira uses one public-content authority model but not one physical content
+   store.
+2. Localized WigStyle merchandising content is planned as a Mira-owned
+   DB-backed immutable revision authority.
+3. Guide / Explainer, Comparison / Decision, Evidence / Methodology, and Video
+   Companion content initially use repository-reviewed authoring.
+4. Product, Commerce/policy, Evidence, and Product Media truth remain owned by
+   their existing governing domains; localized content consumes references and
+   does not manufacture those truths.
+5. Approval binds to an exact localized revision; approval, publication,
+   indexability, hreflang admission, structured-data admission, catalog
+   activation, and checkout/payment activation remain distinct.
+6. Generic ADMIN does not itself establish claim, policy, localized-content,
+   or publication approval authority.
+7. Current solo-owner operation may combine author/reviewer/publisher actions
+   while retaining logically distinct decision records.
+8. Silent cross-language fallback for approved main content is prohibited;
+   machine/model translation remains draft until appropriate human review.
+9. Detailed future organization/delegated-role design and external CMS adoption
+   are deferred behind explicit re-entry triggers rather than implemented now.
+
+Authority / effect statement:
+This adjudication authorizes documentation installation only.
+It grants no source, schema, migration, content publication, search indexing,
+structured-data, external CMS, crawler, deployment, or production activation.
+The contract becomes normative only through reviewed merge of the exact
+candidate.
+```
