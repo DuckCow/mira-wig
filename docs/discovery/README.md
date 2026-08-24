@@ -134,6 +134,13 @@ retrieval/recommendation, product truth, or commerce authority.
    It does not own internal retrieval/recommendation, product truth, commerce,
    content approval, or production activation.
 
+20. [`localized-public-content-authority-and-approval-contract-v0.1.md`](./localized-public-content-authority-and-approval-contract-v0.1.md)
+   Localized public-content authority and approval design for locale-scoped
+   expression, exact revision approval, publication/withdrawal, product-content
+   versus repository-editorial storage boundaries, claim/evidence/media
+   references, and deferred CMS/organizational re-entry. It does not grant
+   source, schema, content-publication, indexing, or production authority.
+
 ## Related repository documentation
 
 These are cross-references, not discovery contracts:
