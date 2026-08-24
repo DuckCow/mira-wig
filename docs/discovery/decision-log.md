@@ -3683,3 +3683,18 @@ This decision changes repository collaboration/process documentation only. It
 does not change application source, schema, runtime, provider contact,
 credentials, production activation, or any existing exact-baseline execution
 track.
+
+## 2026-08-24 — CommerceMarket meaning and explicit hreflang authority
+
+The human adjudicated that the repository symbols `Market` and `MarketCode`
+officially mean `CommerceMarket`: the commercial-policy bundle owning the
+customer offer, including currency, price book, commercial availability,
+seller/contract context, payment routing capability, baseline
+shipping/return/remake/warranty policy, and checkout financial authority.
+
+`Market` is not an ISO-country authority. Its current `KR`, `US`, and `JP`
+values happen to coincide with country codes but do not define language,
+DeliveryCountry, audience, tax jurisdiction, fulfillment zone, culture, or
+hreflang region. `HreflangTarget` is explicit SiteVariant search metadata and
+must not be derived from `MarketCode`. A repository-wide source-symbol rename is
+deferred; no duplicate `CommerceMarket` alias is introduced by this decision.

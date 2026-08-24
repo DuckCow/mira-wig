@@ -16,6 +16,7 @@ import { VariantSelector } from "@/app/(shop)/styles/[id]/VariantSelector";
 import { RelatedStylesSection } from "@/app/(shop)/styles/[id]/RelatedStylesSection";
 import type { WigStyleDetail } from "@/lib/catalog.types";
 import type { CurrencyMeta } from "@/lib/market/types";
+import { PublicPageClass } from "@/lib/public-discovery/policy";
 
 type PageParams = Promise<{ market: string; locale: string; id: string }>;
 const getStyleForRoute = cache(getWigStyleById);
@@ -31,14 +32,22 @@ export async function generateMetadata({ params }: { params: PageParams }): Prom
     getPublishedSiteVariants(raw.id),
   ]);
   const messages = messagesFor(variant.locale);
-  if (!style) return storefrontMetadata(variant, `/styles/${encodeURIComponent(raw.id)}`, messages.styles.title, messages.home.description, []);
-  return storefrontMetadata(
+  if (!style) return storefrontMetadata({
     variant,
-    `/styles/${encodeURIComponent(raw.id)}`,
-    style.name,
-    style.description?.trim() || messages.home.description,
-    publishedVariants,
-  );
+    suffix: `/styles/${encodeURIComponent(raw.id)}`,
+    title: messages.styles.title,
+    description: messages.home.description,
+    pageClass: PublicPageClass.CATALOG_DETAIL,
+    alternateVariants: [],
+  });
+  return storefrontMetadata({
+    variant,
+    suffix: `/styles/${encodeURIComponent(raw.id)}`,
+    title: style.name,
+    description: style.description?.trim() || messages.home.description,
+    pageClass: PublicPageClass.CATALOG_DETAIL,
+    alternateVariants: publishedVariants,
+  });
 }
 
 export default async function PublicStyleDetailPage({ params }: { params: PageParams }) {

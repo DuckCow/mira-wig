@@ -19,8 +19,9 @@ describe("bounded Eximbay SDK CSP source-capability boundary", () => {
     });
   });
 
-  it("does not install a global CSP header or broad script allowance", () => {
-    expect(nextConfig.headers).toBeUndefined();
+  it("does not install a global CSP header or broad script allowance", async () => {
+    const configuredHeaders = await nextConfig.headers?.();
+    expect(JSON.stringify(configuredHeaders)).not.toContain("Content-Security-Policy");
 
     const representation = JSON.stringify(EXIMBAY_SDK_CSP_BOUNDARY);
     expect(representation).not.toContain("*");

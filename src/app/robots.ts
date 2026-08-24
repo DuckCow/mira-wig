@@ -1,23 +1,34 @@
 import type { MetadataRoute } from "next";
 import { siteBaseUrl } from "@/lib/market/seo";
+import type { PublicDiscoveryEnv } from "@/lib/public-discovery/policy";
+
+const NON_PUBLIC_ROUTE_PREFIXES = [
+  "/admin",
+  "/api",
+  "/cart",
+  "/checkout",
+  "/orders",
+  "/fitting",
+  "/login",
+] as const;
 
 export default function robots(): MetadataRoute.Robots {
+  return buildRobotsPolicy();
+}
+
+export function buildRobotsPolicy(
+  env: PublicDiscoveryEnv = process.env,
+): MetadataRoute.Robots {
   return {
-    // Private/auth surfaces are crawl-disallowed as defense-in-depth on top of auth redirects.
-    // Fitting pages may contain face-photo or user-specific content and should not be crawled.
-    rules: {
-      userAgent: "*",
-      allow: "/",
-      disallow: [
-        "/admin",
-        "/api",
-        "/cart",
-        "/checkout",
-        "/orders",
-        "/fitting",
-        "/login",
-      ],
-    },
-    sitemap: new URL("/sitemap.xml", siteBaseUrl()).toString(),
+    rules: [
+      { userAgent: "*", allow: "/", disallow: [...NON_PUBLIC_ROUTE_PREFIXES] },
+      {
+        userAgent: "OAI-SearchBot",
+        allow: "/",
+        disallow: [...NON_PUBLIC_ROUTE_PREFIXES],
+      },
+      { userAgent: "GPTBot", disallow: "/" },
+    ],
+    sitemap: new URL("/sitemap.xml", siteBaseUrl(env)).toString(),
   };
 }

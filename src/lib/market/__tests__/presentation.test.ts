@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../active-market", () => ({
   getActiveSiteVariants: vi.fn().mockResolvedValue([
-    { marketCode: "KR", locale: "ko" },
-    { marketCode: "KR", locale: "en" },
-    { marketCode: "US", locale: "en" },
-    { marketCode: "US", locale: "ko" },
-    { marketCode: "JP", locale: "ja" },
-    { marketCode: "JP", locale: "en" },
+    { marketCode: "KR", locale: "ko", hreflang: "ko-KR" },
+    { marketCode: "KR", locale: "en", hreflang: "en-KR" },
+    { marketCode: "US", locale: "en", hreflang: "en-US" },
+    { marketCode: "US", locale: "ko", hreflang: "ko-US" },
+    { marketCode: "JP", locale: "ja", hreflang: "ja-JP" },
+    { marketCode: "JP", locale: "en", hreflang: "en-JP" },
   ]),
 }));
 import { selectPresentationAsset, type PresentationAsset } from "../presentation";
@@ -36,16 +36,11 @@ describe("site-variant presentation", () => {
     expect(selected).toBeNull();
   });
 
-  it("emits exact canonical, all enabled alternates, and global x-default", async () => {
+  it("keeps the untranslated catalog canonical and crawlable noindex without alternates", async () => {
     const metadata = await publicPageMetadata({ marketCode: "US", locale: "ko" }, "STYLES");
     expect(metadata.alternates?.canonical).toBe("/us/ko/styles");
-    expect(metadata.alternates?.languages).toMatchObject({
-      "ko-KR": "/kr/ko/styles",
-      "en-US": "/us/en/styles",
-      "ja-JP": "/jp/ja/styles",
-      "x-default": "/global",
-    });
-    expect(Object.keys(metadata.alternates?.languages ?? {})).toHaveLength(7);
+    expect(metadata.alternates?.languages).toBeUndefined();
+    expect(metadata.robots).toEqual({ index: false, follow: true });
   });
 
   it.each([

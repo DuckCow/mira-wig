@@ -36,9 +36,12 @@ export {
   enabledLocalesForMarket,
   equivalentSiteVariantPath,
   fallbackLocaleForMarket,
+  hreflangForSiteVariant,
   isEnabledSiteVariant,
   resolveRouteSiteVariant,
   siteVariantPath,
+  type HreflangTag,
+  type SearchTargetSiteVariant,
   type SiteVariant,
 } from "./site-variant";
 export { resolveRootLocale, resolveRootMarket, type RootLocaleResolution, type RootMarketResolution } from "./resolution";
