@@ -5,7 +5,10 @@ import {
   REFUND_EXECUTION_WORKER_ENABLED,
   RefundExecutionActivationConfigError,
 } from "../execution-activation";
-import { EXIMBAY_SANDBOX_MID } from "@/lib/payment/providers/credentials";
+import {
+  EXIMBAY_SANDBOX_API_KEY,
+  EXIMBAY_SANDBOX_MID,
+} from "@/lib/payment/providers/credentials";
 import {
   EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
   EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING,
@@ -29,6 +32,7 @@ const CONFIGURED_ENV = Object.freeze({ REFUND_EXECUTION_WORKER_ENABLED: "ENABLED
 const EXIMBAY_CONFIGURED_ENV = Object.freeze({
   ...CONFIGURED_ENV,
   [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED]: "ENABLED",
+  [EXIMBAY_SANDBOX_API_KEY]: "synthetic-api-key-never-log",
   [EXIMBAY_SANDBOX_MID]: "synthetic-mid",
   [EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING]: "merchant-test-1",
   [EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING]: "generation-test-1",
@@ -197,6 +201,7 @@ describe("runRefundExecutionWorkerHost run-once", () => {
         credentialGenerationBindingId: "generation-test-1",
       },
     });
+    expect(JSON.stringify(configured)).not.toContain("synthetic-api-key-never-log");
     expect(JSON.stringify({ dormant: dormant.eximbay })).not.toContain("synthetic-mid");
   });
 

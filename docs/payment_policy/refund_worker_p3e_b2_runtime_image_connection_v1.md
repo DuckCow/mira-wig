@@ -85,8 +85,8 @@ repository. It normalizes regular files to `0644`, directories to `0755`, and ti
 `SOURCE_DATE_EPOCH`, then emits a sorted path/size/mode/content-SHA-256 manifest and digest.
 The context is removed in `finally`.
 
-The corrected exact context contains 178 files and has canonical manifest SHA-256
-`a0f43bcfb53720c3ebe3ab1369fc802af5d03b15a826fb304cd16a716f595fb9`.
+The corrected exact context contains 179 files and has canonical manifest SHA-256
+`f86b5bbc2e6417d283e333f9e3979d48073bdcb12bf51c40716776829e57c01f`.
 
 The 45 packaged graph inputs are not copied from local `node_modules`; the pinned root lockfile
 recreates them inside the build stage. No Next route, webhook or admin route, reconciliation or

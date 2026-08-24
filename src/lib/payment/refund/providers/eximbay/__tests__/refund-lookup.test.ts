@@ -10,8 +10,14 @@ import {
   type EximbayRefundLookupAuthority,
 } from "../refund-lookup";
 import { deriveEximbayMerchantRefundId } from "../refund-id";
+import {
+  createAuthenticatedEximbayRefundRestFetch,
+  createEximbayRefundRestCredentials,
+} from "../authenticated-transport";
 
 const R1 = deriveEximbayMerchantRefundId("a".repeat(64), 1);
+const API_KEY = "synthetic-api-key-never-log";
+const BASIC_AUTHORIZATION = `Basic ${Buffer.from(`${API_KEY}:`, "utf8").toString("base64")}`;
 
 const full: EximbayRefundLookupAuthority = Object.freeze({
   targetDispatchAttemptId: "dispatch-1",
@@ -28,6 +34,30 @@ const full: EximbayRefundLookupAuthority = Object.freeze({
 });
 
 describe("Eximbay refund-id lookup", () => {
+  it("sends exact Basic authentication and JSON content type for refund-id lookup", async () => {
+    const calls: RequestInit[] = [];
+    const transport = createAuthenticatedEximbayRefundRestFetch(
+      createEximbayRefundRestCredentials(API_KEY),
+      (_input, init) => {
+        calls.push(init ?? {});
+        return Promise.resolve(new Response(JSON.stringify(foundResponse()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      },
+    );
+
+    await expect(executeEximbayRefundLookup(
+      createEximbayRefundLookupPlan(full),
+      full,
+      transport,
+    )).resolves.toMatchObject({ kind: "found", status: "REFUND" });
+    expect(calls).toHaveLength(1);
+    const headers = new Headers(calls[0].headers);
+    expect(headers.get("Authorization")).toBe(BASIC_AUTHORIZATION);
+    expect(headers.get("Content-Type")).toBe("application/json");
+  });
+
   it("serializes the exact persisted refund_id request including required transaction_id", () => {
     const plan = createEximbayRefundLookupPlan(full);
     expect(plan.targetDispatchAttemptId).toBe("dispatch-1");

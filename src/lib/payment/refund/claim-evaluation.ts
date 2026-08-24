@@ -3,6 +3,7 @@ import {
   PaymentAttemptStatus,
   RefundAttemptActorType,
   RefundAttemptStatus,
+  type CustomerRefundIntake,
   type Order,
   type Payment,
   type PrismaClient,
@@ -33,6 +34,7 @@ type ClaimAggregateReader = Pick<PrismaClient, "order">;
 export type RefundExecutionClaimTarget = RefundAttempt & {
   transitions: RefundAttemptTransition[];
   executionCommand: RefundExecutionCommand | null;
+  approvedCustomerRefundIntake: CustomerRefundIntake | null;
 };
 
 export type RefundExecutionClaimAggregate = Order & {
@@ -62,6 +64,7 @@ export async function loadRefundExecutionClaimAggregate(
         include: {
           transitions: { orderBy: { createdAt: "asc" } },
           executionCommand: true,
+          approvedCustomerRefundIntake: true,
         },
       },
     },

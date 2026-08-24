@@ -1,6 +1,10 @@
 import { PaymentMode, PaymentProvider } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createAuthenticatedEximbayRefundRestFetch,
+  createEximbayRefundRestCredentials,
+} from "../authenticated-transport";
+import {
   classifyEximbayRefundType,
   createEximbayRefundPreflightConfig,
   EXIMBAY_REFUND_CANCEL_WIRE_VERSION,
@@ -22,23 +26,28 @@ const CONFIG = createEximbayRefundPreflightConfig({
   credentialGenerationBindingId: "generation-1",
 });
 const UTF8 = new TextEncoder();
+const API_KEY = "synthetic-api-key-never-log";
+const BASIC_AUTHORIZATION = `Basic ${Buffer.from(`${API_KEY}:`, "utf8").toString("base64")}`;
 
 afterEach(() => vi.useRealTimers());
 
 describe("provider-free Eximbay refund retrieve", () => {
   it("materializes the exact transaction-ID inquiry and admits trusted facts", async () => {
     const calls: Array<Readonly<{ input: string | URL | Request; init?: RequestInit }>> = [];
-    const result = await executeEximbayRefundRetrieve(plan(), (input, init) => {
-      calls.push({ input, init });
-      return Promise.resolve(response());
-    });
+    const transport = createAuthenticatedEximbayRefundRestFetch(
+      createEximbayRefundRestCredentials(API_KEY),
+      (input, init) => {
+        calls.push({ input, init });
+        return Promise.resolve(response());
+      },
+    );
+    const result = await executeEximbayRefundRetrieve(plan(), transport);
     expect(calls).toHaveLength(1);
     expect(calls[0].input).toBe("https://api-test.eximbay.com/v1/payments/retrieve");
-    expect(calls[0].init).toMatchObject({
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      redirect: "error",
-    });
+    expect(calls[0].init).toMatchObject({ method: "POST", redirect: "error" });
+    const headers = new Headers(calls[0].init?.headers);
+    expect(headers.get("Authorization")).toBe(BASIC_AUTHORIZATION);
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(calls[0].init?.signal).toBeInstanceOf(AbortSignal);
     const requestBody = calls[0].init?.body;
     if (typeof requestBody !== "string") throw new Error("Expected a string retrieve body.");

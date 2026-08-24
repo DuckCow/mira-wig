@@ -10,7 +10,7 @@ import {
   type CloseRefundRequestFailureCode,
 } from "@/lib/payment/refund/close";
 import {
-  claimRefundAttemptForManualSandboxExecution,
+  claimRefundAttemptForAdminSandboxExecution,
   classifyExistingRefundExecutionClaim,
   type ClaimRefundAttemptForExecutionFailureCode,
 } from "@/lib/payment/refund/claim";
@@ -224,11 +224,19 @@ export async function claimRefundExecutionAction(
   const validated = validateClaimInput(input);
   if (!validated.success) return validated;
 
-  const result = await claimRefundAttemptForManualSandboxExecution(db, {
-    ...validated.input,
-    actorUserId: guard.session.user.id,
-    now: new Date(),
-  });
+  let result: Awaited<ReturnType<typeof claimRefundAttemptForAdminSandboxExecution>>;
+  try {
+    result = await claimRefundAttemptForAdminSandboxExecution(db, {
+      ...validated.input,
+      actorUserId: guard.session.user.id,
+      now: new Date(),
+    });
+  } catch (error) {
+    if (error instanceof RefundExecutionActivationConfigError) {
+      return { success: false, errorCode: "FEATURE_DISABLED" };
+    }
+    throw error;
+  }
   if (!result.ok) return mapClaimFailure(result.code, validated.input);
 
   revalidatePath(`/admin/orders/${validated.input.orderId}`);

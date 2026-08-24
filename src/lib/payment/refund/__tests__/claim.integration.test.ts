@@ -1,7 +1,10 @@
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
+  CustomerRefundIntakeReasonCode,
+  CustomerRefundIntakeStatus,
   OrderStatus,
+  PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
@@ -17,6 +20,7 @@ import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import {
   buildRefundExecutionClaimOperationKey,
+  claimRefundAttemptForAdminSandboxExecution,
   claimRefundAttemptForExecution,
   claimRefundAttemptForManualSandboxExecution,
   classifyExistingRefundExecutionClaim,
@@ -24,6 +28,11 @@ import {
   type ClaimRefundAttemptForExecutionResult,
   type ClaimRefundAttemptForManualSandboxExecutionInput,
 } from "../claim";
+import {
+  REFUND_EXECUTION_CLAIM_ENABLED,
+  REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED,
+  RefundExecutionActivationConfigError,
+} from "../execution-activation";
 import {
   createNamedDbSession,
   disconnectSessions,
@@ -50,6 +59,8 @@ interface OrderOptions {
   provider?: PaymentProvider;
   mode?: PaymentMode;
   providerPaymentKey?: string | null;
+  paymentAdapterExecutionKind?: PaymentAdapterExecutionKind | null;
+  paymentAttemptLifecycle?: PaymentAttemptLifecycle;
 }
 
 interface OrderFixture {
@@ -74,7 +85,15 @@ interface AttemptOptions {
   idempotencyKey?: string;
   createRequestTransition?: boolean;
   transitionReason?: string;
+  actorType?: RefundAttemptActorType;
+  actorUserId?: string | null;
 }
+
+const EXIMBAY_APPROVER_ID = "eximbay_refund_approver";
+const BOTH_EXIMBAY_CLAIM_GATES = Object.freeze({
+  [REFUND_EXECUTION_CLAIM_ENABLED]: "ENABLED",
+  [REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED]: "ENABLED",
+});
 
 describe("claimRefundAttemptForExecution", () => {
   let ctx: TestContext;
@@ -261,6 +280,178 @@ describe("claimRefundAttemptForExecution", () => {
     await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
     await expect(commandCount(targetId)).resolves.toBe(0);
     await expect(claimTransitionCount(targetId)).resolves.toBe(0);
+  });
+
+  it.each([
+    ["all claim gates OFF", {}],
+    ["generic claim gate alone", { [REFUND_EXECUTION_CLAIM_ENABLED]: "ENABLED" }],
+  ] as const)("keeps an approved Eximbay attempt blocked with %s", async (_label, env) => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx);
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      env,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+  });
+
+  it("keeps the provider-specific Eximbay gate insufficient without the generic claim gate", async () => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx);
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      { [REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED]: "ENABLED" },
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+  });
+
+  it("claims one authorized finalized external Eximbay SANDBOX attempt and replays exactly", async () => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx);
+    const input = manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID);
+
+    const first = success(await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      input,
+      BOTH_EXIMBAY_CLAIM_GATES,
+    ));
+    const beforeReplay = await persistenceState(fixture, targetId);
+    const replay = success(await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      input,
+      BOTH_EXIMBAY_CLAIM_GATES,
+    ));
+
+    expect(first.replayed).toBe(false);
+    expect(replay).toEqual({ ...first, replayed: true });
+    await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.PROCESSING);
+    await expect(commandCount(targetId)).resolves.toBe(1);
+    await expect(claimTransitionCount(targetId)).resolves.toBe(1);
+    await expect(db.refundExecutionCommand.findUniqueOrThrow({
+      where: { refundAttemptId: targetId },
+      select: { status: true },
+    })).resolves.toEqual({ status: RefundExecutionCommandStatus.READY });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(beforeReplay);
+  });
+
+  it("rejects approved Eximbay provenance with a mismatched creation-transition timestamp", async () => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx);
+    const mismatchedCreationAt = new Date(NOW.getTime() + 1_000);
+    await db.refundAttemptTransition.update({
+      where: { operationKey: `refund-request:${targetId}` },
+      data: { createdAt: mismatchedCreationAt },
+    });
+    const [attempt, intake, creation] = await Promise.all([
+      db.refundAttempt.findUniqueOrThrow({
+        where: { id: targetId },
+        select: { requestedAt: true },
+      }),
+      db.customerRefundIntake.findUniqueOrThrow({
+        where: { approvedRefundAttemptId: targetId },
+        select: { reviewedAt: true },
+      }),
+      db.refundAttemptTransition.findUniqueOrThrow({
+        where: { operationKey: `refund-request:${targetId}` },
+        select: { createdAt: true },
+      }),
+    ]);
+    expect(attempt.requestedAt).toEqual(NOW);
+    expect(intake.reviewedAt).toEqual(NOW);
+    expect(creation.createdAt).toEqual(mismatchedCreationAt);
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      BOTH_EXIMBAY_CLAIM_GATES,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+    await expect(attemptStatus(targetId)).resolves.toBe(RefundAttemptStatus.REQUESTED);
+    await expect(commandCount(targetId)).resolves.toBe(0);
+    await expect(claimTransitionCount(targetId)).resolves.toBe(0);
+    await expect(db.refundExecutionDispatchAttempt.count({
+      where: { command: { refundAttemptId: targetId } },
+    })).resolves.toBe(0);
+  });
+
+  it("fails closed on a malformed provider-specific Eximbay claim gate without writes", async () => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx);
+    const before = await persistenceState(fixture, targetId);
+
+    await expect(claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      {
+        [REFUND_EXECUTION_CLAIM_ENABLED]: "ENABLED",
+        [REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED]: "true",
+      },
+    )).rejects.toBeInstanceOf(RefundExecutionActivationConfigError);
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+  });
+
+  it.each([
+    ["LIVE mode", { mode: PaymentMode.LIVE }],
+    ["unsupported currency", { orderCurrency: "EUR" }],
+  ] as const)("keeps approved Eximbay %s unsupported", async (_label, options) => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx, options);
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      BOTH_EXIMBAY_CLAIM_GATES,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+  });
+
+  it.each([
+    ["missing external adapter identity", { paymentAdapterExecutionKind: null }],
+    ["non-finalized payment lifecycle", { paymentAttemptLifecycle: PaymentAttemptLifecycle.CONTACTED }],
+  ] as const)("rejects Eximbay payment authority with %s", async (_label, options) => {
+    const { fixture, targetId } = await seedApprovedEximbayAttempt(ctx, options);
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      BOTH_EXIMBAY_CLAIM_GATES,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "PAYMENT_NOT_REFUNDABLE" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
+  });
+
+  it("does not admit a direct admin Eximbay attempt without approved customer-intake provenance", async () => {
+    const fixture = await createOrder(ctx, {
+      provider: PaymentProvider.EXIMBAY,
+      orderCurrency: "USD",
+      paymentAdapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+    });
+    const targetId = await seedAttempt(fixture, {
+      actorType: RefundAttemptActorType.ADMIN,
+      actorUserId: EXIMBAY_APPROVER_ID,
+    });
+    const before = await persistenceState(fixture, targetId);
+
+    const result = await claimRefundAttemptForAdminSandboxExecution(
+      db,
+      manualClaimInput(fixture.orderId, targetId, EXIMBAY_APPROVER_ID),
+      BOTH_EXIMBAY_CLAIM_GATES,
+    );
+
+    expect(result).toMatchObject({ ok: false, code: "CLAIM_CAPABILITY_UNSUPPORTED" });
+    await expect(persistenceState(fixture, targetId)).resolves.toEqual(before);
   });
 
   it.each([
@@ -676,15 +867,15 @@ async function createPayment(
   options: OrderOptions,
 ): Promise<string> {
   const status = options.paymentStatus ?? PaymentAttemptStatus.SUCCEEDED;
+  const attemptLifecycle = resolvePaymentAttemptLifecycle(options, status);
   const payment = await db.payment.create({
     data: {
       checkoutSessionId: sessionId,
       provider,
       mode,
+      adapterExecutionKind: options.paymentAdapterExecutionKind,
       status,
-      attemptLifecycle: status === PaymentAttemptStatus.SUCCEEDED
-        ? PaymentAttemptLifecycle.FINALIZED
-        : PaymentAttemptLifecycle.TERMINAL_FAILURE,
+      attemptLifecycle,
       amount: options.paymentAmount ?? amount,
       currency: options.paymentCurrency ?? currency,
       providerOrderId: provider === PaymentProvider.EXIMBAY
@@ -695,7 +886,7 @@ async function createPayment(
         : options.providerPaymentKey,
       idempotencyKey: `payment_idem_${randomUUID()}`,
       financialSucceededAt: status === PaymentAttemptStatus.SUCCEEDED ? NOW : undefined,
-      blockingEndedAt: NOW,
+      ...paymentLifecycleEvidence(attemptLifecycle),
     },
   });
   context.paymentIds.push(payment.id);
@@ -731,6 +922,7 @@ async function createOrderRow(
 async function seedAttempt(fixture: OrderFixture, options: AttemptOptions = {}): Promise<string> {
   const id = options.id ?? `refund_${randomUUID()}`;
   const identity = attemptIdentity(fixture, options);
+  const actor = attemptActor(options);
   const reason = "Seed refund request";
   await db.refundAttempt.create({
     data: {
@@ -741,17 +933,22 @@ async function seedAttempt(fixture: OrderFixture, options: AttemptOptions = {}):
       currency: identity.currency,
       status: options.status ?? RefundAttemptStatus.REQUESTED,
       reason,
-      actorType: RefundAttemptActorType.SYSTEM,
-      actorUserId: null,
       provider: identity.provider,
       mode: identity.mode,
       providerRefundId: options.providerRefundId ?? null,
       idempotencyKey: options.idempotencyKey ?? `refund:${identity.paymentId}:${id}`,
       requestedAt: NOW,
+      actorType: actor.type,
+      actorUserId: actor.userId,
     },
   });
   if (options.createRequestTransition !== false) {
-    await seedRequestTransition(id, options.transitionReason ?? reason);
+    await seedRequestTransition(
+      id,
+      options.transitionReason ?? reason,
+      actor.type,
+      actor.userId,
+    );
   }
   return id;
 }
@@ -766,7 +963,69 @@ function attemptIdentity(fixture: OrderFixture, options: AttemptOptions) {
   };
 }
 
-async function seedRequestTransition(refundAttemptId: string, reason: string): Promise<void> {
+function attemptActor(options: AttemptOptions) {
+  return {
+    type: options.actorType ?? RefundAttemptActorType.SYSTEM,
+    userId: options.actorUserId ?? null,
+  };
+}
+
+function resolvePaymentAttemptLifecycle(
+  options: OrderOptions,
+  status: PaymentAttemptStatus,
+): PaymentAttemptLifecycle {
+  if (options.paymentAttemptLifecycle) return options.paymentAttemptLifecycle;
+  return status === PaymentAttemptStatus.SUCCEEDED
+    ? PaymentAttemptLifecycle.FINALIZED
+    : PaymentAttemptLifecycle.TERMINAL_FAILURE;
+}
+
+function paymentLifecycleEvidence(attemptLifecycle: PaymentAttemptLifecycle) {
+  const hasOpenContact = attemptLifecycle === PaymentAttemptLifecycle.CONTACTED
+    || attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN;
+  return {
+    contactIntentAt: hasOpenContact ? NOW : undefined,
+    contactStartedAt: hasOpenContact ? NOW : undefined,
+    blockingEndedAt: hasOpenContact ? undefined : NOW,
+  };
+}
+
+async function seedApprovedEximbayAttempt(
+  context: TestContext,
+  options: OrderOptions = {},
+): Promise<{ fixture: OrderFixture; targetId: string }> {
+  const fixture = await createOrder(context, {
+    provider: PaymentProvider.EXIMBAY,
+    orderCurrency: "USD",
+    paymentAdapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL,
+    paymentAttemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+    ...options,
+  });
+  const targetId = await seedAttempt(fixture, {
+    actorType: RefundAttemptActorType.ADMIN,
+    actorUserId: EXIMBAY_APPROVER_ID,
+  });
+  await db.customerRefundIntake.create({
+    data: {
+      orderId: fixture.orderId,
+      customerUserId: context.userId,
+      status: CustomerRefundIntakeStatus.APPROVED,
+      reasonCode: CustomerRefundIntakeReasonCode.OTHER,
+      submittedAt: NOW,
+      reviewedAt: NOW,
+      reviewedByUserId: EXIMBAY_APPROVER_ID,
+      approvedRefundAttemptId: targetId,
+    },
+  });
+  return { fixture, targetId };
+}
+
+async function seedRequestTransition(
+  refundAttemptId: string,
+  reason: string,
+  actorType: RefundAttemptActorType = RefundAttemptActorType.SYSTEM,
+  actorUserId: string | null = null,
+): Promise<void> {
   await db.refundAttemptTransition.create({
     data: {
       refundAttemptId,
@@ -774,8 +1033,8 @@ async function seedRequestTransition(refundAttemptId: string, reason: string): P
       toStatus: RefundAttemptStatus.REQUESTED,
       orderStatusBefore: OrderStatus.PAID,
       orderStatusAfter: OrderStatus.REFUND_PENDING,
-      actorType: RefundAttemptActorType.SYSTEM,
-      actorUserId: null,
+      actorType,
+      actorUserId,
       reason,
       operationKey: `refund-request:${refundAttemptId}`,
       createdAt: NOW,
@@ -923,6 +1182,7 @@ async function cleanup(context: TestContext): Promise<void> {
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
   await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });
+  await db.customerRefundIntake.deleteMany({ where: { orderId: { in: context.orderIds } } });
   await db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } });
   await db.order.deleteMany({ where: { id: { in: context.orderIds } } });
   await db.payment.deleteMany({ where: { id: { in: context.paymentIds } } });
