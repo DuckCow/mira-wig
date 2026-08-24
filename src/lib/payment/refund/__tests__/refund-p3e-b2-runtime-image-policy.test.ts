@@ -173,7 +173,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       manifestDigest: contract.buildContext.expectedManifestSha256,
       fileCount: contract.buildContext.expectedFileCount,
       repositoryGraphInputCount: contract.buildContext.repositoryGraphInputCount,
-      packagedGraphInputCount: 45,
+      packagedGraphInputCount: contract.buildContext.packagedGraphInputCount,
       entrypointCount: 3,
       temporaryContextsRemoved: true,
     });

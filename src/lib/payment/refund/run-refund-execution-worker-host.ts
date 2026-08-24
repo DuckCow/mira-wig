@@ -10,6 +10,7 @@ import {
 import {
   parseEximbayRefundWorkerConfig,
 } from "./providers/eximbay/refund-worker-config";
+import { createAuthenticatedEximbayRefundRestFetch } from "./providers/eximbay/authenticated-transport";
 import {
   parseTossRefundCredentialConfig,
   TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
@@ -519,13 +520,17 @@ function createDefaultWorkerDependencies(env: HostEnv): RefundExecutionWorkerDep
   if (!isRefundExecutionEximbayRoutingEnabled(env)) return Object.freeze(dependencies);
   const eximbay = parseEximbayRefundWorkerConfig(env);
   if (eximbay.status !== "CONFIGURED") throw new Error("EXIMBAY_REFUND_WORKER_CONFIG_REQUIRED");
+  const authenticatedTransport = createAuthenticatedEximbayRefundRestFetch(
+    eximbay.credentials,
+    globalThis.fetch,
+  );
   return Object.freeze({
     ...dependencies,
     eximbay: Object.freeze({
       config: eximbay.config,
-      retrieve: globalThis.fetch,
-      cancellation: globalThis.fetch,
-      lookup: globalThis.fetch,
+      retrieve: authenticatedTransport,
+      cancellation: authenticatedTransport,
+      lookup: authenticatedTransport,
     }),
   });
 }

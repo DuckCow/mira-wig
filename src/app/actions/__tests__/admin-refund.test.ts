@@ -26,7 +26,7 @@ vi.mock("@/lib/admin", () => ({ requireAdmin: vi.fn() }));
 vi.mock("@/lib/payment/refund/close", () => ({ closeRefundRequest: vi.fn() }));
 vi.mock("@/lib/payment/refund/request", () => ({ requestRefundAttempt: vi.fn() }));
 vi.mock("@/lib/payment/refund/claim", () => ({
-  claimRefundAttemptForManualSandboxExecution: claimMocks.claim,
+  claimRefundAttemptForAdminSandboxExecution: claimMocks.claim,
   classifyExistingRefundExecutionClaim: claimMocks.classify,
 }));
 vi.mock("@/lib/payment/refund/execution-activation", async (importOriginal) => {
@@ -589,6 +589,18 @@ describe("claimRefundExecutionAction delegation and revalidation", () => {
     claimMocks.claim.mockRejectedValue(new Error("database unavailable"));
 
     await expect(claimRefundExecutionAction(VALID_CLAIM_INPUT)).rejects.toThrow("database unavailable");
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the provider-specific claim gate is malformed", async () => {
+    claimMocks.claim.mockRejectedValue(new RefundExecutionActivationConfigError(
+      "REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED",
+    ));
+
+    await expect(claimRefundExecutionAction(VALID_CLAIM_INPUT)).resolves.toEqual({
+      success: false,
+      errorCode: "FEATURE_DISABLED",
+    });
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });

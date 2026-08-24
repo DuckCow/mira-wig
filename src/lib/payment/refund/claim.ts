@@ -1,11 +1,15 @@
 import {
+  CustomerRefundIntakeStatus,
   OrderStatus,
+  PaymentAdapterExecutionKind,
+  PaymentAttemptLifecycle,
   PaymentMode,
   PaymentProvider,
   Prisma,
   RefundAttemptActorType,
   RefundAttemptStatus,
   RefundExecutionCommandStatus,
+  type CustomerRefundIntake,
   type PrismaClient,
 } from "@prisma/client";
 import {
@@ -28,10 +32,23 @@ import {
   type RefundExecutionClaimAggregate,
   type RefundExecutionClaimTarget,
 } from "./claim-evaluation";
+import {
+  isRefundExecutionClaimEnabled,
+  isRefundExecutionEximbayClaimEnabled,
+} from "./execution-activation";
+import {
+  buildRefundRequestOperationKey,
+  resolveRefundRequestCreationEvidence,
+} from "./request-evidence";
 
 type ClaimTx = Prisma.TransactionClient;
 
-type ClaimCapability = "provider-neutral" | "manual-mock-sandbox";
+type ClaimActivationEnv = Readonly<Record<string, string | undefined>>;
+
+type ClaimCapability =
+  | "provider-neutral"
+  | "manual-mock-sandbox"
+  | Readonly<{ kind: "admin-sandbox"; env: ClaimActivationEnv }>;
 
 export async function claimRefundAttemptForExecution(
   client: PrismaClient,
@@ -48,6 +65,20 @@ export async function claimRefundAttemptForManualSandboxExecution(
     ...input,
     actorType: RefundAttemptActorType.ADMIN,
   }, "manual-mock-sandbox");
+}
+
+export async function claimRefundAttemptForAdminSandboxExecution(
+  client: PrismaClient,
+  input: ClaimRefundAttemptForManualSandboxExecutionInput,
+  env: ClaimActivationEnv = process.env,
+): Promise<ClaimRefundAttemptForExecutionResult> {
+  if (!isRefundExecutionClaimEnabled(env)) {
+    return failure("CLAIM_CAPABILITY_UNSUPPORTED", "Refund execution claim is disabled.");
+  }
+  return runClaim(client, {
+    ...input,
+    actorType: RefundAttemptActorType.ADMIN,
+  }, Object.freeze({ kind: "admin-sandbox", env }));
 }
 
 async function runClaim(
@@ -81,7 +112,7 @@ async function claimInTransaction(
   const target = aggregate.refundAttempts.find((attempt) => attempt.id === input.refundAttemptId);
   if (!target) return failure("REFUND_ATTEMPT_NOT_FOUND", "Refund attempt was not found for the order.");
 
-  const capabilityFailure = validateClaimCapability(aggregate, capability);
+  const capabilityFailure = validateClaimCapability(aggregate, target, capability);
   if (capabilityFailure) return capabilityFailure;
 
   const artifacts = await resolveRefundExecutionClaimArtifacts(tx, target, input);
@@ -122,22 +153,105 @@ function resultFromExistingArtifacts(
 
 function validateClaimCapability(
   aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
   capability: ClaimCapability,
 ): ClaimRefundAttemptForExecutionFailure | null {
   if (aggregate.payment.provider === PaymentProvider.EXIMBAY) {
-    return failure(
-      "CLAIM_CAPABILITY_UNSUPPORTED",
-      "Eximbay refund execution is disabled.",
-    );
+    return validateEximbayClaimCapability(aggregate, target, capability);
   }
   if (capability === "provider-neutral") return null;
-  if (aggregate.payment.provider === PaymentProvider.MOCK && aggregate.payment.mode === PaymentMode.SANDBOX) {
+  if (aggregate.payment.provider === PaymentProvider.MOCK
+    && aggregate.payment.mode === PaymentMode.SANDBOX) {
     return null;
   }
   return failure(
     "CLAIM_CAPABILITY_UNSUPPORTED",
     "Manual refund execution claim supports only MOCK payments in SANDBOX mode.",
   );
+}
+
+function validateEximbayClaimCapability(
+  aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
+  capability: ClaimCapability,
+): ClaimRefundAttemptForExecutionFailure | null {
+  if (typeof capability === "string" || !isRefundExecutionEximbayClaimEnabled(capability.env)) {
+    return failure(
+      "CLAIM_CAPABILITY_UNSUPPORTED",
+      "Eximbay refund execution claim is disabled.",
+    );
+  }
+  if (!isSupportedEximbaySandboxIdentity(aggregate, target)
+    || !hasApprovedCustomerIntakeProvenance(aggregate, target)) {
+    return failure(
+      "CLAIM_CAPABILITY_UNSUPPORTED",
+      "Eximbay refund execution claim authority is unsupported.",
+    );
+  }
+  if (aggregate.payment.adapterExecutionKind !== PaymentAdapterExecutionKind.EXTERNAL
+    || aggregate.payment.attemptLifecycle !== PaymentAttemptLifecycle.FINALIZED) {
+    return failure(
+      "PAYMENT_NOT_REFUNDABLE",
+      "Payment is not eligible for Eximbay refund execution.",
+    );
+  }
+  return null;
+}
+
+function isSupportedEximbaySandboxIdentity(
+  aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
+): boolean {
+  const payment = aggregate.payment;
+  return target.provider === PaymentProvider.EXIMBAY
+    && target.mode === PaymentMode.SANDBOX
+    && payment.mode === PaymentMode.SANDBOX
+    && isSupportedEximbayRefundCurrency(target.currency)
+    && target.currency === payment.currency
+    && payment.currency === aggregate.currency;
+}
+
+function isSupportedEximbayRefundCurrency(currency: string): boolean {
+  return currency === "USD" || currency === "JPY";
+}
+
+function hasApprovedCustomerIntakeProvenance(
+  aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
+): boolean {
+  const intake = target.approvedCustomerRefundIntake;
+  if (intake === null) return false;
+  return hasApprovedIntakeIdentity(aggregate, target, intake)
+    && hasApprovedIntakeActorProvenance(target, intake);
+}
+
+function hasApprovedIntakeIdentity(
+  aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
+  intake: CustomerRefundIntake,
+): boolean {
+  return intake.status === CustomerRefundIntakeStatus.APPROVED
+    && intake.orderId === aggregate.id
+    && intake.customerUserId === aggregate.userId
+    && intake.approvedRefundAttemptId === target.id;
+}
+
+function hasApprovedIntakeActorProvenance(
+  target: RefundExecutionClaimTarget,
+  intake: CustomerRefundIntake,
+): boolean {
+  const actorUserId = target.actorUserId?.trim();
+  const creation = target.transitions.find((transition) => (
+    transition.operationKey === buildRefundRequestOperationKey(target.id)
+  ));
+  return [
+    target.actorType === RefundAttemptActorType.ADMIN,
+    Boolean(actorUserId),
+    intake.reviewedByUserId === actorUserId,
+    resolveRefundRequestCreationEvidence(target.transitions, target).kind === "matched",
+    creation?.createdAt.getTime() === target.requestedAt.getTime(),
+    target.requestedAt.getTime() === intake.reviewedAt?.getTime(),
+  ].every(Boolean);
 }
 
 async function persistClaim(
@@ -207,10 +321,10 @@ async function classifyUniqueConflict(
 ): Promise<ClaimRefundAttemptForExecutionResult> {
   const aggregate = await loadRefundExecutionClaimAggregate(client, input.orderId);
   if (!aggregate) return failure("CLAIM_ARTIFACT_CONFLICT", "Refund execution claim evidence is inconsistent.");
-  const capabilityFailure = validateClaimCapability(aggregate, capability);
-  if (capabilityFailure) return capabilityFailure;
   const target = aggregate.refundAttempts.find((attempt) => attempt.id === input.refundAttemptId);
   if (target) {
+    const capabilityFailure = validateClaimCapability(aggregate, target, capability);
+    if (capabilityFailure) return capabilityFailure;
     const artifacts = await resolveRefundExecutionClaimArtifacts(client, target, input);
     if (artifacts.kind === "replay") return success(target.id, artifacts.commandId, true);
   }

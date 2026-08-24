@@ -7,7 +7,10 @@ import {
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
-import { EXIMBAY_SANDBOX_MID } from "@/lib/payment/providers/credentials";
+import {
+  EXIMBAY_SANDBOX_API_KEY,
+  EXIMBAY_SANDBOX_MID,
+} from "@/lib/payment/providers/credentials";
 import { encodeEximbayAmount } from "@/lib/payment/providers/eximbay/amount";
 import { isRecord } from "@/lib/payment/providers/eximbay/validation";
 import { acquireRefundExecutionLease, type RefundExecutionLeaseHandle } from "../../../acquire-lease";
@@ -50,6 +53,7 @@ const WORKER_EXIMBAY_ENV = Object.freeze({
   [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED]: "ENABLED",
   [REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED]: "ENABLED",
   [REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED]: "ENABLED",
+  [EXIMBAY_SANDBOX_API_KEY]: "synthetic-api-key-never-log",
   [EXIMBAY_SANDBOX_MID]: CONFIG.mid,
   [EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING]: CONFIG.merchantAccountBindingId,
   [EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING]:

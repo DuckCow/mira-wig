@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REFUND_EXECUTION_ACTIVATION_KEYS,
   isRefundExecutionClaimEnabled,
+  isRefundExecutionEximbayClaimEnabled,
   inspectRefundExecutionActivationInventory,
   isRefundExecutionLeaseEnabled,
   isRefundExecutionLeaseReleaseEnabled,
@@ -16,6 +17,7 @@ import {
   isRefundExecutionTossRecoveryLookupEnabled,
   isRefundExecutionTossRecoveryRecontactEnabled,
   REFUND_EXECUTION_CLAIM_ENABLED,
+  REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED,
   REFUND_EXECUTION_LEASE_ENABLED,
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
   REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
@@ -45,6 +47,7 @@ describe("refund execution activation inventory", () => {
 
   it.each([
     REFUND_EXECUTION_CLAIM_ENABLED,
+    REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED,
     REFUND_EXECUTION_LEASE_ENABLED,
     REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
     REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED,
@@ -179,6 +182,44 @@ describe(REFUND_EXECUTION_CLAIM_ENABLED, () => {
     expect(isRefundExecutionClaimEnabled({
       CUSTOMER_REFUND_INTAKE_SUBMIT_ENABLED: "ENABLED",
       CUSTOMER_REFUND_INTAKE_APPROVE_ENABLED: "ENABLED",
+    })).toBe(false);
+  });
+});
+
+describe(REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED, () => {
+  it.each([undefined, "", "   "])("treats %j as disabled", (value) => {
+    expect(isRefundExecutionEximbayClaimEnabled({
+      [REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED]: value,
+    })).toBe(false);
+  });
+
+  it.each(["ENABLED", "  ENABLED  "])("treats %j as enabled", (value) => {
+    expect(isRefundExecutionEximbayClaimEnabled({
+      [REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED]: value,
+    })).toBe(true);
+  });
+
+  it("rejects malformed configuration without retaining its value", () => {
+    const malformed = "unexpected-secret-value";
+    let thrown: unknown;
+    try {
+      isRefundExecutionEximbayClaimEnabled({
+        [REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED]: malformed,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(RefundExecutionActivationConfigError);
+    if (!(thrown instanceof Error)) throw new Error("Expected a configuration error.");
+    expect(thrown.message).toContain(REFUND_EXECUTION_EXIMBAY_CLAIM_ENABLED);
+    expect(thrown.message).not.toContain(malformed);
+  });
+
+  it("does not inherit generic claim, customer approval, or worker routing authority", () => {
+    expect(isRefundExecutionEximbayClaimEnabled({
+      [REFUND_EXECUTION_CLAIM_ENABLED]: "ENABLED",
+      CUSTOMER_REFUND_INTAKE_EXIMBAY_APPROVE_ENABLED: "ENABLED",
+      [REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED]: "ENABLED",
     })).toBe(false);
   });
 });

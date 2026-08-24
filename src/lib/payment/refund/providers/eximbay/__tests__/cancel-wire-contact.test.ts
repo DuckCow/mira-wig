@@ -12,9 +12,15 @@ import {
   executeEximbayCancel,
 } from "../cancel-contact";
 import { deriveEximbayMerchantRefundId } from "../refund-id";
+import {
+  createAuthenticatedEximbayRefundRestFetch,
+  createEximbayRefundRestCredentials,
+} from "../authenticated-transport";
 
 const R1 = deriveEximbayMerchantRefundId("a".repeat(64), 1);
 const R2 = deriveEximbayMerchantRefundId("a".repeat(64), 2);
+const API_KEY = "synthetic-api-key-never-log";
+const BASIC_AUTHORIZATION = `Basic ${Buffer.from(`${API_KEY}:`, "utf8").toString("base64")}`;
 
 const full: EximbayCancelWireAuthority = Object.freeze({
   mid: "mid-1",
@@ -88,6 +94,27 @@ describe("Eximbay dormant cancel wire", () => {
 });
 
 describe("Eximbay cancel response trust boundary", () => {
+  it("sends exact Basic authentication and JSON content type for cancel", async () => {
+    const calls: RequestInit[] = [];
+    const transport = createAuthenticatedEximbayRefundRestFetch(
+      createEximbayRefundRestCredentials(API_KEY),
+      (_input, init) => {
+        calls.push(init ?? {});
+        return Promise.resolve(new Response(JSON.stringify(successResponse()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      },
+    );
+
+    await expect(executeEximbayCancel(createEximbayCancelPlan(full), full, transport))
+      .resolves.toMatchObject({ kind: "succeeded" });
+    expect(calls).toHaveLength(1);
+    const headers = new Headers(calls[0].headers);
+    expect(headers.get("Authorization")).toBe(BASIC_AUTHORIZATION);
+    expect(headers.get("Content-Type")).toBe("application/json");
+  });
+
   it("admits only exact coherent success and projects provider refund_transaction_id", () => {
     expect(admitCancelResponse(successResponse(), full)).toEqual({
       kind: "succeeded",
