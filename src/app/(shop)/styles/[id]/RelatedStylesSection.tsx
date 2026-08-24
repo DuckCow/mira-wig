@@ -29,6 +29,7 @@ interface RelatedStyleViewItem {
   tags: string[];
   imageUrl: string | null;
   basePrice: number;
+  usesLegacyFallback: boolean;
 }
 
 export interface RelatedStyleViewGroups {
@@ -39,10 +40,11 @@ export interface RelatedStyleViewGroups {
 export async function loadRelatedStylesForPdp(
   sourceStyleId: string,
   marketCode: MarketCode,
+  locale: Locale,
   env?: ManualItemRelationsActivationEnv,
 ): Promise<ManualRelatedStyleGroups> {
   try {
-    return await getManualRelatedStyles(sourceStyleId, marketCode, env);
+    return await getManualRelatedStyles(sourceStyleId, marketCode, locale, env);
   } catch (error) {
     if (error instanceof ManualItemRelationsActivationConfigError) {
       return { SIMILAR_STYLE: [], COMPARE_WITH: [] };
@@ -63,6 +65,7 @@ async function resolveViewGroups(groups: ManualRelatedStyleGroups): Promise<Rela
       ? await catalogStorage.getViewUrl(style.coverImageKey).catch(() => null)
       : null,
     basePrice: style.basePrice,
+    usesLegacyFallback: style.contentProvenance.kind === "LEGACY_ORIGINAL",
   })));
   return {
     SIMILAR_STYLE: await resolveGroup(groups.SIMILAR_STYLE),
@@ -85,8 +88,14 @@ export function RelatedStylesSectionView({
     (purpose) => groups[purpose].length > 0,
   );
   if (!hasItems) return null;
+  const usesLegacyFallback = MANUAL_RELATED_STYLE_GROUP_ORDER.some(
+    (purpose) => groups[purpose].some((style) => style.usesLegacyFallback),
+  );
   return (
     <section aria-label={messagesFor(locale).detail.relatedStyles} className="mt-12 space-y-8">
+      {usesLegacyFallback ? (
+        <p className="text-xs text-gray-500">{messagesFor(locale).detail.productLanguageNotice}</p>
+      ) : null}
       {MANUAL_RELATED_STYLE_GROUP_ORDER.map((purpose) => {
         const styles = groups[purpose];
         if (styles.length === 0) return null;
@@ -127,7 +136,7 @@ export async function RelatedStylesSection({
   currency: CurrencyMeta;
   locale: Locale;
 }) {
-  const groups = await loadRelatedStylesForPdp(sourceStyleId, marketCode);
+  const groups = await loadRelatedStylesForPdp(sourceStyleId, marketCode, locale);
   const viewGroups = await resolveViewGroups(groups);
   return <RelatedStylesSectionView groups={viewGroups} marketCode={marketCode} currency={currency} locale={locale} />;
 }

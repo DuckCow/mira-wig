@@ -12,19 +12,26 @@ import {
 } from "@/lib/manual-item-relations/admin";
 import { getManualRelationCustomerGateStates } from "@/lib/manual-item-relations/activation";
 import { ManualItemRelationsSection } from "./ManualItemRelationsSection";
+import { requireAdmin } from "@/lib/admin";
+import { getLocalizedContentCapabilities } from "@/lib/wig-style-localized-content/authority";
+import { getAdminLocalizedContentState } from "@/lib/wig-style-localized-content/admin";
+import { LocalizedContentSection } from "./LocalizedContentSection";
 
 type Params = Promise<{ id: string }>;
 
 export default async function StyleDetailPage({ params }: { params: Params }) {
   const { id } = await params;
+  const guard = await requireAdmin();
+  if (!guard.success) notFound();
   const customerGateStates = getManualRelationCustomerGateStates("KR");
-  const [style, marketData, relations, targetChoices] = await Promise.all([
-    getStyleDetail(id),
+  const style = await getStyleDetail(id);
+  if (!style) notFound();
+  const [marketData, relations, targetChoices, localizedContent] = await Promise.all([
     getStyleMarketData(id),
     getAdminManualStyleRelations(id, "KR"),
     getManualRelationTargetChoices(id, "KR"),
+    getAdminLocalizedContentState(id),
   ]);
-  if (!style) notFound();
   const initialCoverUrl = style.coverImageKey
     ? await catalogStorage.getViewUrl(style.coverImageKey).catch(() => null)
     : null;
@@ -36,6 +43,11 @@ export default async function StyleDetailPage({ params }: { params: Params }) {
         <span className="text-sm text-gray-700 font-medium">{style.name}</span>
       </div>
       <StyleEditForm style={style} initialCoverUrl={initialCoverUrl} />
+      <LocalizedContentSection
+        wigStyleId={style.id}
+        state={localizedContent}
+        capabilities={getLocalizedContentCapabilities(guard.session.user.id)}
+      />
       <VariantSection variants={style.variants} wigStyleId={style.id} />
       <MarketAvailabilitySection wigStyleId={style.id} markets={marketData.markets} />
       <MarketPriceSection

@@ -30,7 +30,7 @@ export default async function PublicStylesPage({ params, searchParams }: Props) 
     : undefined;
   const query = typeof raw.q === "string" && raw.q.trim() ? raw.q.trim() : undefined;
   const [styles, market] = await Promise.all([
-    getWigStyles({ category, query }, variant.marketCode),
+    getWigStyles({ category, query }, variant.marketCode, variant.locale),
     getActiveMarketCommercialFacts(variant.marketCode),
   ]);
   const withImages = await Promise.all(styles.map(async (style) => ({
@@ -59,10 +59,15 @@ function StylesView({
 }) {
   const messages = messagesFor(variant.locale);
   const basePath = siteVariantPath(variant, "/styles");
+  const usesLegacyFallback = styles.some(
+    (style) => style.contentProvenance.kind === "LEGACY_ORIGINAL",
+  );
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
       <h1 className="mb-2 text-2xl font-bold text-gray-900">{messages.styles.title}</h1>
-      <p className="mb-6 text-xs text-gray-500">{messages.styles.productLanguageNotice}</p>
+      {usesLegacyFallback ? (
+        <p className="mb-6 text-xs text-gray-500">{messages.styles.productLanguageNotice}</p>
+      ) : null}
       <div className="mb-6">
         <MarketConfirmation currentMarketCode={currentMarketCode} targetMarketCode={variant.marketCode} locale={variant.locale} />
       </div>

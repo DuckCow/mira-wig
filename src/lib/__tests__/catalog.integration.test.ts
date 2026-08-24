@@ -68,8 +68,8 @@ describe("catalog market pricing", () => {
     const style = await createStyle(ctx, { markets: [MarketCode.KR] });
     await createVariant(ctx, { styleId: style.id, marketPrices: { KR: 12_000, US: 2_999 } });
 
-    const usListing = await getWigStyles({}, MarketCode.US);
-    const usDetail = await getWigStyleById(style.id, MarketCode.US);
+    const usListing = await getWigStyles({}, MarketCode.US, "en");
+    const usDetail = await getWigStyleById(style.id, MarketCode.US, "en");
 
     expect(usListing.some((item) => item.id === style.id)).toBe(false);
     expect(usDetail).toBeNull();
@@ -79,7 +79,7 @@ describe("catalog market pricing", () => {
     const style = await createStyle(ctx, { markets: [MarketCode.US] });
     await createVariant(ctx, { styleId: style.id, marketPrices: { KR: 12_000 } });
 
-    const summaries = await getWigStyles({}, MarketCode.US);
+    const summaries = await getWigStyles({}, MarketCode.US, "en");
     const summary = summaries.find((item) => item.id === style.id);
 
     expect(summary?.id).toBe(style.id);
@@ -93,7 +93,7 @@ describe("catalog market pricing", () => {
     await createVariant(ctx, { styleId: style.id, skuPrefix: "HIGH", marketPrices: { US: 4_500 } });
     await createVariant(ctx, { styleId: style.id, skuPrefix: "LOW", marketPrices: { US: 2_999 } });
 
-    const summaries = await getWigStyles({}, MarketCode.US);
+    const summaries = await getWigStyles({}, MarketCode.US, "en");
     const summary = summaries.find((item) => item.id === style.id);
 
     expect(summary?.id).toBe(style.id);
@@ -120,10 +120,10 @@ describe("catalog market pricing", () => {
     await db.market.update({ where: { code: MarketCode.US }, data: { isActive: false } });
 
     try {
-      await expect(getWigStyles({}, MarketCode.US)).resolves.not.toEqual(
+      await expect(getWigStyles({}, MarketCode.US, "en")).resolves.not.toEqual(
         expect.arrayContaining([expect.objectContaining({ id: style.id })]),
       );
-      await expect(getWigStyleById(style.id, MarketCode.US)).resolves.toBeNull();
+      await expect(getWigStyleById(style.id, MarketCode.US, "en")).resolves.toBeNull();
       await expect(getCart(ctx.userId, MarketCode.US)).resolves.toEqual([
         expect.objectContaining({ variantId: variant.id, unavailableCode: "STYLE_UNPUBLISHED" }),
       ]);
@@ -204,7 +204,7 @@ async function createMarketPrices(variantId: string, prices: Partial<Record<Mark
 }
 
 async function detailVariantPrice(styleId: string, variantId: string, marketCode: MarketCode): Promise<number | null> {
-  const style = await getWigStyleById(styleId, marketCode);
+  const style = await getWigStyleById(styleId, marketCode, "en");
   const variant = style?.variants.find((item) => item.id === variantId);
   if (!variant) throw new Error(`Missing variant ${variantId}`);
   return variant.price;
