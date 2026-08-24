@@ -1,0 +1,10 @@
+{
+  "contentIdentity": "lpc-a1-editorial-pilot",
+  "family": "GUIDE",
+  "locale": "ko",
+  "revision": "r1",
+  "sourceLocale": "ko",
+  "sourceRevision": null,
+  "title": "LPC-A1 편집 콘텐츠 파일럿",
+  "summary": "Repository editorial content의 로딩, exact revision 식별, 안전한 렌더링 경계를 검증하는 비프로덕션 파일럿입니다."
+}
