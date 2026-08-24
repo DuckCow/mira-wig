@@ -89,7 +89,7 @@ describe("Eximbay customer SANDBOX source capability with default-off activation
     ]);
   });
 
-  it("keeps checkout ownership behind the canonical default-off activation fence", () => {
+  it("keeps checkout ownership behind the canonical default-off activation fence", async () => {
     const paymentMethod = source(CHECKOUT_PAYMENT_OWNER);
     const consumer = source(CHECKOUT_BROWSER_CONSUMER);
 
@@ -105,7 +105,8 @@ describe("Eximbay customer SANDBOX source capability with default-off activation
       activeModes: ["SANDBOX"],
     });
     expect(EXIMBAY_SDK_CSP_BOUNDARY.activeModes).not.toContain("LIVE");
-    expect(nextConfig.headers).toBeUndefined();
+    const configuredHeaders = await nextConfig.headers?.();
+    expect(JSON.stringify(configuredHeaders)).not.toContain("Content-Security-Policy");
     const dormantPolicy = JSON.stringify(EXIMBAY_SDK_CSP_BOUNDARY);
     expect(dormantPolicy).not.toContain("*");
     expect(dormantPolicy).not.toContain("unsafe-inline");

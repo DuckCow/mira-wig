@@ -1,4 +1,4 @@
-# Discovery, Search and Recommendation
+# Discovery, Public Search and Recommendation
 
 ## Status
 
@@ -13,7 +13,9 @@ This directory is the canonical entry point for Mira work involving:
 - recommendation;
 - catalog image similarity and visual search;
 - result-card and variant landing;
-- discovery analytics and evaluation.
+- discovery analytics and evaluation;
+- public Search–Answer–Citation discoverability, canonical URLs, indexing,
+  hreflang, crawler policy, and sitemap membership.
 
 Read this index, the task-relevant contract, and the current evidence-status summary before changing related source, schema, events, UI, fixtures, or catalog behavior.
 
@@ -40,6 +42,18 @@ Where current source and a normative contract disagree, record a finding. The co
 Where two normative contracts claim the same question, stop and create or request a decision record. Do not choose by file age, model agreement, or apparent implementation convenience.
 
 Model agreement is not evidence.
+
+## Two discovery families
+
+Internal product discovery/recommendation owns query interpretation, candidate
+admission and retrieval, result presentation, recommendation, and discovery
+events under the Discovery Foundation.
+
+Public Search–Answer–Citation discovery owns public page classes, canonical and
+indexing policy, localized-page equivalence, explicit hreflang search targets,
+crawler/sitemap policy, answer-ready composition, citation/evidence readability,
+and future structured-data projection admission. It does not own internal
+retrieval/recommendation, product truth, or commerce authority.
 
 ## Current contracts
 
@@ -113,11 +127,18 @@ Model agreement is not evidence.
 18. [`../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md`](../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md)
    Cross-domain Product Specification and configurable-product foundation authority. It owns governed product truth, Technical Model and immutable Configuration Revision meanings required before C1 source work, Product Media truth references, and any discovery vocabulary backed by product facts. It grants no source, schema, migration, customer or production activation.
 
+19. [`public-discovery-architecture-contract-v0.1.md`](./public-discovery-architecture-contract-v0.1.md)
+   Public Search–Answer–Citation authority for public page classes, canonical
+   URL/indexing policy, explicit SiteVariant hreflang targets, crawler/sitemap
+   policy, answer/citation composition, and future structured-data admission.
+   It does not own internal retrieval/recommendation, product truth, commerce,
+   content approval, or production activation.
+
 ## Related repository documentation
 
 These are cross-references, not discovery contracts:
 
-- [`../engineering/feature-documentation-standard-v0.1.md`](../engineering/feature-documentation-standard-v0.1.md)
+- [`../engineering/feature-documentation-standard-v0.2.md`](../engineering/feature-documentation-standard-v0.2.md)
   defines repository-wide documentation classification, artifacts, lifecycle,
   and default model/tool roles.
 - [`../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md`](../product/catalog-product-specification-and-configurable-product-foundation-contract-v0.1.md)

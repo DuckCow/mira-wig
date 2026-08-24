@@ -6,14 +6,30 @@ export interface SiteVariant {
   locale: LocaleCode;
 }
 
-export const ENABLED_SITE_VARIANTS: readonly SiteVariant[] = [
-  { marketCode: "KR", locale: Locale.KO },
-  { marketCode: "KR", locale: Locale.EN },
-  { marketCode: "US", locale: Locale.EN },
-  { marketCode: "US", locale: Locale.KO },
-  { marketCode: "JP", locale: Locale.JA },
-  { marketCode: "JP", locale: Locale.EN },
+export type HreflangTag =
+  | "ko-KR"
+  | "en-KR"
+  | "en-US"
+  | "ko-US"
+  | "ja-JP"
+  | "en-JP";
+
+export interface SearchTargetSiteVariant extends SiteVariant {
+  hreflang: HreflangTag;
+}
+
+export const ENABLED_SITE_VARIANTS: readonly SearchTargetSiteVariant[] = [
+  { marketCode: "KR", locale: Locale.KO, hreflang: "ko-KR" },
+  { marketCode: "KR", locale: Locale.EN, hreflang: "en-KR" },
+  { marketCode: "US", locale: Locale.EN, hreflang: "en-US" },
+  { marketCode: "US", locale: Locale.KO, hreflang: "ko-US" },
+  { marketCode: "JP", locale: Locale.JA, hreflang: "ja-JP" },
+  { marketCode: "JP", locale: Locale.EN, hreflang: "en-JP" },
 ];
+
+export function hreflangForSiteVariant(variant: SearchTargetSiteVariant): HreflangTag {
+  return variant.hreflang;
+}
 
 export type RouteSiteVariantResolution =
   | { kind: "EXACT"; variant: SiteVariant }

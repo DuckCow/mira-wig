@@ -2,14 +2,13 @@ import Link from "next/link";
 import { siteVariantPath } from "@/lib/market/site-variant";
 import { MARKET_CONFIGS } from "@/lib/market/types";
 import { getActiveSiteVariants } from "@/lib/market/active-market";
+import { globalSelectorMetadata } from "@/lib/market/seo";
 
 const LANGUAGE_NAMES = { ko: "한국어", en: "English", ja: "日本語" } as const;
 
-export const metadata = {
-  title: "Mira global storefront",
-  description: "Choose a Mira delivery region and language.",
-  alternates: { canonical: "/global" },
-};
+export async function generateMetadata() {
+  return globalSelectorMetadata((await getActiveSiteVariants()).length);
+}
 
 export default async function GlobalSelectorPage() {
   const activeVariants = await getActiveSiteVariants();

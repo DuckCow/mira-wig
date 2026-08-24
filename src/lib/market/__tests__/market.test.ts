@@ -189,12 +189,12 @@ describe("MARKET_CONFIGS presentation metadata", () => {
 describe("Market × Locale resolution", () => {
   it("contains exactly the six explicitly enabled variants", () => {
     expect(ENABLED_SITE_VARIANTS).toEqual([
-      { marketCode: "KR", locale: "ko" },
-      { marketCode: "KR", locale: "en" },
-      { marketCode: "US", locale: "en" },
-      { marketCode: "US", locale: "ko" },
-      { marketCode: "JP", locale: "ja" },
-      { marketCode: "JP", locale: "en" },
+      { marketCode: "KR", locale: "ko", hreflang: "ko-KR" },
+      { marketCode: "KR", locale: "en", hreflang: "en-KR" },
+      { marketCode: "US", locale: "en", hreflang: "en-US" },
+      { marketCode: "US", locale: "ko", hreflang: "ko-US" },
+      { marketCode: "JP", locale: "ja", hreflang: "ja-JP" },
+      { marketCode: "JP", locale: "en", hreflang: "en-JP" },
     ]);
   });
 

@@ -30,10 +30,10 @@ describe("server-owned active Market adapter", () => {
 
     await expect(getActiveMarketCodes()).resolves.toEqual(["KR", "JP"]);
     await expect(getActiveSiteVariants()).resolves.toEqual([
-      { marketCode: "KR", locale: "ko" },
-      { marketCode: "KR", locale: "en" },
-      { marketCode: "JP", locale: "ja" },
-      { marketCode: "JP", locale: "en" },
+      { marketCode: "KR", locale: "ko", hreflang: "ko-KR" },
+      { marketCode: "KR", locale: "en", hreflang: "en-KR" },
+      { marketCode: "JP", locale: "ja", hreflang: "ja-JP" },
+      { marketCode: "JP", locale: "en", hreflang: "en-JP" },
     ]);
   });
 
@@ -84,10 +84,10 @@ describe("server-owned active Market adapter", () => {
     });
 
     await expect(getPublishedSiteVariants("style-a")).resolves.toEqual([
-      { marketCode: "KR", locale: "ko" },
-      { marketCode: "KR", locale: "en" },
-      { marketCode: "JP", locale: "ja" },
-      { marketCode: "JP", locale: "en" },
+      { marketCode: "KR", locale: "ko", hreflang: "ko-KR" },
+      { marketCode: "KR", locale: "en", hreflang: "en-KR" },
+      { marketCode: "JP", locale: "ja", hreflang: "ja-JP" },
+      { marketCode: "JP", locale: "en", hreflang: "en-JP" },
     ]);
     expect(dbMock.styleFindFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "style-a", isActive: true },
