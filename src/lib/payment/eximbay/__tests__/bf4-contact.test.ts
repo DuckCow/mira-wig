@@ -178,14 +178,27 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
     vi.useRealTimers();
   });
 
-  it("retains bounded metadata for a synthetic Q004-like unknown recovery shape", async () => {
+  it("provides real-canary-observed root envelope compatibility for Q004 without consuming nested values", async () => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse(realCanaryObservedQ004Envelope())),
+    );
+
+    expect(result).toEqual({
+      kind: "q004",
+      rescode: "Q004",
+      resmsg: "synthetic Q004 message",
+    });
+  });
+
+  it("keeps a seventh Q004 root member fail closed with bounded diagnostics", async () => {
     const result = await retrieveEximbayCheckoutRecoveryStatus(
       config(),
       recoveryRequest(),
       () => Promise.resolve(jsonResponse({
-        rescode: "Q004",
-        resmsg: "synthetic only; not a provider-authoritative response shape",
-        extra_root_member: { arbitrary_provider_value: "MUST_NOT_ESCAPE" },
+        ...realCanaryObservedQ004Envelope(),
+        unexpected_root_member: { arbitrary_provider_value: "MUST_NOT_ESCAPE" },
       })),
     );
 
@@ -198,7 +211,15 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
         httpStatus: 200,
         responseContentTypeClass: "JSON",
         observedRescode: "Q004",
-        rootKeys: ["extra_root_member", "rescode", "resmsg"],
+        rootKeys: [
+          "card_info",
+          "mid",
+          "other_param",
+          "payment",
+          "rescode",
+          "resmsg",
+          "unexpected_root_member",
+        ],
         rootKeysTruncated: false,
       },
     });
@@ -206,6 +227,60 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
     expect(result.diagnostic.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(result.diagnostic.responseByteCount).toBeGreaterThan(0);
     expect(JSON.stringify(result.diagnostic)).not.toContain("MUST_NOT_ESCAPE");
+  });
+
+  it.each([
+    ["missing rescode", () => {
+      const value = realCanaryObservedQ004Envelope();
+      delete value.rescode;
+      return value;
+    }],
+    ["missing resmsg", () => {
+      const value = realCanaryObservedQ004Envelope();
+      delete value.resmsg;
+      return value;
+    }],
+    ["non-string rescode", () => ({ ...realCanaryObservedQ004Envelope(), rescode: 4 })],
+    ["non-string resmsg", () => ({ ...realCanaryObservedQ004Envelope(), resmsg: null })],
+  ])("rejects a recovery envelope with %s", async (_label, value) => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse(value())),
+    );
+
+    expect(result).toMatchObject({
+      kind: "outcomeUnknown",
+      code: "UNKNOWN_SHAPE",
+      diagnostic: { failureCode: "UNKNOWN_SHAPE" },
+    });
+  });
+
+  it.each([
+    ["rescode", '{"card_info":null,"mid":7,"other_param":["synthetic"],"payment":"synthetic","rescode":"Q004","rescode":"Q004","resmsg":"synthetic Q004 message"}'],
+    ["resmsg", '{"card_info":null,"mid":7,"other_param":["synthetic"],"payment":"synthetic","rescode":"Q004","resmsg":"synthetic Q004 message","resmsg":"synthetic Q004 message"}'],
+  ])("rejects a duplicate recovery %s key", async (_key, body) => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonTextResponse(body)),
+    );
+
+    expect(result).toMatchObject({
+      kind: "outcomeUnknown",
+      code: "DUPLICATE_JSON_KEY",
+      diagnostic: { failureCode: "DUPLICATE_JSON_KEY" },
+    });
+  });
+
+  it("does not widen the generic retrieve parser for the Q004 recovery envelope", async () => {
+    const result = await retrieveEximbayBf4Status(
+      config(),
+      retrieveRequest(),
+      () => Promise.resolve(jsonResponse(realCanaryObservedQ004Envelope())),
+    );
+
+    expect(result).toEqual({ kind: "outcomeUnknown", code: "UNKNOWN_SHAPE" });
   });
 
   it("bounds and sorts recovery root field names without retaining overlong names", async () => {
@@ -341,6 +416,18 @@ function retrieveResponseValue(status: string) {
     },
     card_info: { brand: "SYNTHETIC_CARD" },
     other_param: { param1: "SYNTHETIC_PARAM" },
+  };
+}
+
+function realCanaryObservedQ004Envelope(): Record<string, unknown> {
+  // Root member names and Q004 are canary evidence; optional field values are synthetic and ignored.
+  return {
+    card_info: null,
+    mid: 7,
+    other_param: ["synthetic"],
+    payment: "synthetic",
+    rescode: "Q004",
+    resmsg: "synthetic Q004 message",
   };
 }
 

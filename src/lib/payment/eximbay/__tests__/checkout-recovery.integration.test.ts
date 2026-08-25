@@ -125,11 +125,13 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
         status: PaymentAttemptStatus.INITIATED,
         attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
         remediationStatus: PaymentRemediationStatus.NONE,
+        providerOrderId: fixture.providerOrderId,
         providerPaymentKey: null,
         financialSucceededAt: null,
         blockingEndedAt: RECOVERY_AT,
         errorCode: "EXIMBAY_NO_TRANSACTION_OBSERVED",
       });
+    await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
     const resumed = await readCheckoutSessionResume(db, {
       checkoutSessionId: fixture.sessionId,
       authenticatedUserId: fixture.userId,
@@ -157,8 +159,7 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
       const result = await recoverEximbayCheckout(db, recoveryInput(
         fixture,
         () => Promise.resolve(jsonResponse({
-          rescode: "Q004",
-          resmsg: resmsgSentinel,
+          ...realCanaryObservedQ004Envelope(resmsgSentinel),
           extra_root_member: { secret: rawValueSentinel },
         })),
       ));
@@ -178,7 +179,7 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
         httpStatus: 200,
         responseContentTypeClass: "JSON",
         observedRescode: "Q004",
-        rootKeys: ["extra_root_member", "rescode", "resmsg"],
+        rootKeys: ["card_info", "extra_root_member", "mid", "other_param", "payment", "rescode", "resmsg"],
         rootKeysTruncated: false,
       }));
       if (typeof record !== "object" || record === null || Array.isArray(record)) {
@@ -648,8 +649,20 @@ function recoveryInput(
 
 function q004Transport() {
   return vi.fn<EximbayBf4Fetch>(() => Promise.resolve(
-    jsonResponse({ rescode: "Q004", resmsg: "not observed" }),
+    jsonResponse(realCanaryObservedQ004Envelope("not observed")),
   ));
+}
+
+function realCanaryObservedQ004Envelope(resmsg: string): Record<string, unknown> {
+  // Root member names and Q004 are canary evidence; optional field values are synthetic and ignored.
+  return {
+    card_info: null,
+    mid: 7,
+    other_param: ["synthetic"],
+    payment: "synthetic",
+    rescode: "Q004",
+    resmsg,
+  };
 }
 
 function transactionObservedTransport() {
