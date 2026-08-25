@@ -1326,7 +1326,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       "a9936e59dfd5f19492112fa120ec889e3feb06bdc09d7c36a1fa63f58f6506ad",
     );
     expect(migrationRuntimeDigest()).toBe(
-      "18a1e82fba9322b1a9e51a35afed66080ff29162eb99c1efed0494f2ce5e61a3",
+      "fdf53976401e7267090057b98ef6e73acb8d2befc4d13f81639e816c972adb61",
     );
     const terraform = repositoryRelativeFiles(INFRA)
       .filter((path) => !path.startsWith(

@@ -33,6 +33,7 @@ export type CapturedPayment = Pick<
   | "supersededAt"
   | "blockingEndedAt"
   | "suspendedByPaymentId"
+  | "errorCode"
 >;
 
 export type CompletionFailureCode =

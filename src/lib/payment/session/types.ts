@@ -61,6 +61,7 @@ export interface CreateCheckoutSessionResult {
 
 export type CheckoutSessionResumeDisposition =
   | "PAYMENT_ELIGIBLE"
+  | "PAYMENT_RECOVERY_AVAILABLE"
   | "PAYMENT_EXISTS"
   | "EXPIRED"
   | "COMPLETED"
@@ -100,6 +101,7 @@ export interface CheckoutSessionResumeResult {
   lines: readonly CheckoutSessionResumeLine[];
   shipping: CheckoutSessionResumeShipping;
   disposition: CheckoutSessionResumeDisposition;
+  recoveryPaymentId: string | null;
   orderId: string | null;
 }
 

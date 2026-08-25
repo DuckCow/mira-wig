@@ -26,6 +26,11 @@ import {
 import { bridgeProviderConfirmResult, type ProviderConfirmActionErrorCode } from "@/lib/payment/providers/confirm-bridge";
 import type { PaymentMethod } from "@/lib/payment/providers/routing";
 import type { PaymentConfirmationProvider, PaymentInitiateResult } from "@/lib/payment/providers/types";
+import { revalidatePath } from "next/cache";
+import {
+  recoverEximbayCheckout,
+  type EximbayCheckoutRecoveryResult,
+} from "@/lib/payment/eximbay/checkout-recovery";
 import {
   resolveActionConfirmAdapter,
   resolveActionMode,
@@ -77,6 +82,13 @@ export interface ConfirmPaymentInput {
 export interface InitiatePaymentInput {
   method?: PaymentMethod;
 }
+
+export type CheckoutRecoveryActionResult =
+  | Readonly<{ success: true; kind: "RELEASED" | "REPLAYED" }>
+  | Readonly<{
+      success: false;
+      kind: "DISABLED" | "NOT_ELIGIBLE" | "TRANSACTION_OBSERVED" | "OUTCOME_UNKNOWN" | "STATE_CHANGED" | "FAILED";
+    }>;
 
 export type PaymentActionResult =
   | { kind: "READY"; success: true; orderId?: string; paymentId: string; provider: PaymentProvider }
@@ -152,6 +164,38 @@ export async function initiatePayment(
     if (e instanceof PaymentInitiateException) return durableAction(initiateError(e));
     return durableAction(actionError("PAYMENT_FAILED", false));
   }
+}
+
+export async function recoverCheckoutPayment(
+  checkoutSessionId: string,
+  paymentId: string,
+): Promise<CheckoutRecoveryActionResult> {
+  try {
+    const boundary = await resolveBoundary(checkoutSessionId);
+    if (!boundary.success) return Object.freeze({ success: false, kind: "NOT_ELIGIBLE" });
+    const result = await recoverEximbayCheckout(db, {
+      checkoutSessionId,
+      paymentId,
+      authenticatedUserId: boundary.userId,
+      transport: fetch,
+    });
+    if (result.kind === "released" || result.kind === "replayed") {
+      revalidatePath("/checkout");
+      return Object.freeze({
+        success: true,
+        kind: result.kind === "released" ? "RELEASED" : "REPLAYED",
+      });
+    }
+    return recoveryActionFailure(result);
+  } catch {
+    return Object.freeze({ success: false, kind: "FAILED" });
+  }
+}
+
+function recoveryActionFailure(
+  result: Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>,
+): CheckoutRecoveryActionResult {
+  return Object.freeze({ success: false, kind: result.reason });
 }
 
 async function prepareInitiationAction(

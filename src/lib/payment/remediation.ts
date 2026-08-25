@@ -1,13 +1,37 @@
-import { PaymentRemediationStatus } from "@prisma/client";
-import type { PaymentMode, PaymentProvider, Prisma } from "@prisma/client";
+import {
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
+  PaymentMode,
+  PaymentProvider,
+  PaymentRemediationStatus,
+} from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { enqueue } from "@/lib/payment/outbox";
 
 export const PAYMENT_REMEDIATION_REQUIRED_TOPIC = "payment.remediation_required";
 
 export const unresolvedSessionExposureWhere = {
-  remediationStatus: {
-    notIn: [PaymentRemediationStatus.NONE, PaymentRemediationStatus.REMEDIATED],
-  },
+  OR: [
+    {
+      remediationStatus: {
+        notIn: [PaymentRemediationStatus.NONE, PaymentRemediationStatus.REMEDIATED],
+      },
+    },
+    {
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+      status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+      attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+      remediationStatus: PaymentRemediationStatus.NONE,
+      providerOrderId: { not: null },
+      contactStartedAt: { not: null },
+      providerPaymentKey: null,
+      financialSucceededAt: null,
+      blockingEndedAt: { not: null },
+      suspendedByPaymentId: null,
+      errorCode: "EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN",
+    },
+  ],
 } satisfies Prisma.PaymentWhereInput;
 
 export async function hasUnresolvedSessionExposure(

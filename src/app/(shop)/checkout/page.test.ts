@@ -225,6 +225,7 @@ function resumeSession(
     disposition: "PAYMENT_ELIGIBLE",
     orderId: null,
     ...overrides,
+    recoveryPaymentId: overrides.recoveryPaymentId ?? null,
   };
 }
 

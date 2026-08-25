@@ -14,6 +14,14 @@ vi.mock("./PaymentMethodSection", () => ({
     createElement("section", { "data-payment-session-id": checkoutSessionId })
   ),
 }));
+vi.mock("./CheckoutRecoveryControl", () => ({
+  CheckoutRecoveryControl: ({ checkoutSessionId, paymentId }: { checkoutSessionId: string; paymentId: string }) => (
+    createElement("section", {
+      "data-recovery-session-id": checkoutSessionId,
+      "data-recovery-payment-id": paymentId,
+    })
+  ),
+}));
 
 import { CheckoutSessionResume } from "./CheckoutSessionResume";
 
@@ -45,6 +53,17 @@ describe("frozen CheckoutSession resume presentation", () => {
     const html = renderResume(sessionFixture({ disposition: "PAYMENT_EXISTS" }));
 
     expect(html).toContain("/checkout/return/session-a");
+    expect(html).not.toContain("data-payment-session-id");
+  });
+
+  it("renders the bounded recovery control only for the exact recovery disposition", () => {
+    const html = renderResume(sessionFixture({
+      disposition: "PAYMENT_RECOVERY_AVAILABLE",
+      recoveryPaymentId: "payment-recovery-a",
+    }));
+
+    expect(html).toContain('data-recovery-session-id="session-a"');
+    expect(html).toContain('data-recovery-payment-id="payment-recovery-a"');
     expect(html).not.toContain("data-payment-session-id");
   });
 
@@ -112,5 +131,6 @@ function sessionFixture(
     disposition: "PAYMENT_ELIGIBLE",
     orderId: null,
     ...overrides,
+    recoveryPaymentId: overrides.recoveryPaymentId ?? null,
   };
 }

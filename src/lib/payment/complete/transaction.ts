@@ -175,6 +175,7 @@ async function requireCurrentPayment(
       supersededAt: true,
       blockingEndedAt: true,
       suspendedByPaymentId: true,
+      errorCode: true,
     },
   });
   if (!payment) {

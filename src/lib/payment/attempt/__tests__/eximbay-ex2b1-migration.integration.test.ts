@@ -134,7 +134,7 @@ describe("EX2B1 repository migration history", () => {
       FROM ${quoteIdentifier(schema)}."_prisma_migrations"
       WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL
     `);
-    expect(applied.rows[0]?.count).toBe(38);
+    expect(applied.rows[0]?.count).toBe(39);
   });
 
   it("fails on a real prior-migration schema with a historical EXIMBAY row before partial installation", async () => {
@@ -201,7 +201,7 @@ async function createPreviousMigrationProject(): Promise<string> {
   );
   const entries = await readdir(join(process.cwd(), "prisma/migrations"), { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === MIGRATION_DIRECTORY) continue;
+    if (!entry.isDirectory() || entry.name >= MIGRATION_DIRECTORY) continue;
     await cp(
       join(process.cwd(), "prisma/migrations", entry.name),
       join(migrationsTarget, entry.name),
