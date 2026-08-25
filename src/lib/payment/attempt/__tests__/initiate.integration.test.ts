@@ -19,6 +19,11 @@ import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { completeFromCapture, recordCapture, type CaptureFacts } from "@/lib/payment/complete";
 import { EXIMBAY_READY_TOTAL_DEADLINE_MS } from "@/lib/payment/eximbay/ready-contact";
+import {
+  EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED,
+  recoverEximbayCheckout,
+} from "@/lib/payment/eximbay/checkout-recovery";
+import type { EximbayBf4Fetch } from "@/lib/payment/eximbay/bf4-contact";
 import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
 import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import { PaymentMethod, PaymentMode } from "@/lib/payment/providers/routing";
@@ -248,6 +253,69 @@ describe("payment initiate providerRef persistence", () => {
     expect(secondPayment.providerOrderId).not.toBe(secondPayment.idempotencyKey);
     expect(providerOrderEntropy.calls).toBe(1);
     expect(calls).toHaveLength(1);
+  });
+
+  it("keeps initiation blocked before Q004 commit, then creates a fresh identity while accepting the same FGKey", async () => {
+    const session = await submitUsSessionWithOneLine(ctx);
+    const calls: PaymentInitiateInput[] = [];
+    const provider = fakeProvider({ kind: "ready" }, calls, PaymentProvider.EXIMBAY);
+    const input = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider,
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: "test.eximbay.r11a-retry",
+    };
+    providerOrderEntropy.chunks.push(entropyChunk(5), entropyChunk(6));
+    const first = await initiatePaymentAttemptForTest(db, input);
+    const firstPayment = await db.payment.findUniqueOrThrow({ where: { id: first.paymentId } });
+    let resolveQ004!: (response: Response) => void;
+    const q004Response = new Promise<Response>((resolve) => { resolveQ004 = resolve; });
+    const recovery = recoverEximbayCheckout(db, {
+      checkoutSessionId: session.sessionId,
+      paymentId: first.paymentId,
+      authenticatedUserId: ctx.userId,
+      env: {
+        [EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED]: "ENABLED",
+        EXIMBAY_SANDBOX_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
+        EXIMBAY_SANDBOX_MID: "synthetic-sandbox-mid",
+      },
+      transport: vi.fn<EximbayBf4Fetch>(() => q004Response),
+    });
+
+    const beforeRelease = await initiatePaymentAttemptForTest(db, input);
+    expect(beforeRelease.paymentId).toBe(first.paymentId);
+    await expect(db.payment.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(1);
+
+    resolveQ004(new Response(JSON.stringify({ rescode: "Q004", resmsg: "not observed" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await expect(recovery).resolves.toMatchObject({ kind: "released", paymentId: first.paymentId });
+
+    const second = await initiatePaymentAttemptForTest(db, input);
+    const secondPayment = await db.payment.findUniqueOrThrow({ where: { id: second.paymentId } });
+    expect(second.paymentId).not.toBe(first.paymentId);
+    expect(firstPayment.providerOrderId).toBe(`c${"5".repeat(24)}`);
+    expect(secondPayment.providerOrderId).toBe(`c${"6".repeat(24)}`);
+    expect(secondPayment.providerOrderId).not.toBe(firstPayment.providerOrderId);
+    expect(first.initiateResult).toMatchObject({ kind: "ready" });
+    expect(second.initiateResult).toMatchObject({ kind: "ready" });
+
+    const replay = await recoverEximbayCheckout(db, {
+      checkoutSessionId: session.sessionId,
+      paymentId: first.paymentId,
+      authenticatedUserId: ctx.userId,
+      env: {
+        [EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED]: "ENABLED",
+        EXIMBAY_SANDBOX_API_KEY: "SYNTHETIC_EXIMBAY_API_KEY_DO_NOT_LOG",
+        EXIMBAY_SANDBOX_MID: "synthetic-sandbox-mid",
+      },
+      transport: vi.fn<EximbayBf4Fetch>(),
+    });
+    expect(replay).toMatchObject({ kind: "replayed", paymentId: first.paymentId });
+    await expect(db.payment.findUniqueOrThrow({ where: { id: second.paymentId } }))
+      .resolves.toMatchObject({ blockingEndedAt: null, providerOrderId: secondPayment.providerOrderId });
   });
 
   it("deterministically converges simultaneous compatible EXIMBAY starts under the session row lock", async () => {

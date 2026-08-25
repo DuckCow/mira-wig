@@ -6,6 +6,7 @@ import { withStorefrontHandoff } from "@/lib/market/request-context";
 import type { CheckoutSessionResumeResult } from "@/lib/payment/session/types";
 import { FrozenSessionSnapshot } from "./checkout-summary";
 import { PaymentMethodSection } from "./PaymentMethodSection";
+import { CheckoutRecoveryControl } from "./CheckoutRecoveryControl";
 
 interface CheckoutSessionResumeProps {
   session: CheckoutSessionResumeResult;
@@ -54,6 +55,12 @@ export function CheckoutSessionResume({
               eximbayCardEnabled={eximbayCardEnabled}
               locale={locale}
               marketCode={session.marketCode}
+            />
+          ) : session.disposition === "PAYMENT_RECOVERY_AVAILABLE" && session.recoveryPaymentId ? (
+            <CheckoutRecoveryControl
+              checkoutSessionId={session.sessionId}
+              paymentId={session.recoveryPaymentId}
+              locale={locale}
             />
           ) : (
             <ResumeStatus session={session} locale={locale} />
@@ -139,5 +146,6 @@ function resumeStatusMessage(session: CheckoutSessionResumeResult, locale: Local
   if (session.disposition === "EXPIRED") return messages.resumeExpired;
   if (session.disposition === "COMPLETED") return messages.resumeCompleted;
   if (session.disposition === "PAYMENT_EXISTS") return messages.resumePaymentExists;
+  if (session.disposition === "PAYMENT_RECOVERY_AVAILABLE") return messages.recoveryDescription;
   return messages.resumeTerminal;
 }

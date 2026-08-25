@@ -1,11 +1,5 @@
 import "server-only";
-import {
-  PaymentAttemptLifecycle,
-  PaymentAttemptStatus,
-  PaymentProvider,
-  PaymentRemediationStatus,
-  type PrismaClient,
-} from "@prisma/client";
+import { PaymentProvider, type PrismaClient } from "@prisma/client";
 import { completeFromCapture, type CaptureFacts, type CompleteFromCaptureResult } from "@/lib/payment/complete";
 import type { ProviderEnv } from "@/lib/payment/providers/credentials";
 import {
@@ -43,6 +37,7 @@ import {
   loadEximbayBf4Event,
   transitionEximbayBf4ContactMarker,
   transitionEximbayBf4Event,
+  transitionEximbayBf4PaymentOutcomeUnknown,
   transitionEximbayBf4SaleMoneyMismatch,
   type EximbayBf4PaymentCorrelation,
   type EximbayBf4RecordedEvent,
@@ -600,29 +595,10 @@ function requireExactRaw(envelope: EximbayBf4Envelope): string {
 }
 
 async function markPaymentOutcomeUnknown(
-  client: Pick<PrismaClient, "payment">,
+  client: Pick<PrismaClient, "$transaction">,
   payment: EximbayBf4PaymentCorrelation,
 ): Promise<void> {
-  await client.payment.updateMany({
-    where: safePaymentTransitionWhere(payment),
-    data: { attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN },
-  });
-}
-
-function safePaymentTransitionWhere(payment: EximbayBf4PaymentCorrelation) {
-  return {
-    id: payment.id,
-    provider: PaymentProvider.EXIMBAY,
-    providerOrderId: payment.providerOrderId,
-    providerPaymentKey: null,
-    contactStartedAt: { not: null },
-    financialSucceededAt: null,
-    remediationStatus: PaymentRemediationStatus.NONE,
-    blockingEndedAt: null,
-    suspendedByPaymentId: null,
-    status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
-    attemptLifecycle: { in: [PaymentAttemptLifecycle.CONTACTED, PaymentAttemptLifecycle.OUTCOME_UNKNOWN] },
-  };
+  await transitionEximbayBf4PaymentOutcomeUnknown(client, payment);
 }
 
 function changedTimestamps(envelope: EximbayBf4Envelope, now: Date): EximbayBf4Envelope["timestamps"] {

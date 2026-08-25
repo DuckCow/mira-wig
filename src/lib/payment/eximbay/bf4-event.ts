@@ -3,6 +3,7 @@ import {
   PaymentEventFailureStage,
   PaymentEventSource,
   PaymentEventStatus,
+  PaymentMode,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentRemediationStatus,
@@ -24,6 +25,12 @@ import {
   validateEximbayBf4Envelope,
   type EximbayBf4Envelope,
 } from "./bf4-envelope";
+import {
+  checkoutRecoveryTransmissionId,
+  EXIMBAY_NO_TRANSACTION_OBSERVED,
+  EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN,
+  isExactQ004RecoveryEvent,
+} from "./checkout-recovery";
 
 type ClaimTx = Prisma.TransactionClient;
 type EventClient = Pick<PrismaClient, "$transaction" | "paymentEvent">;
@@ -65,6 +72,11 @@ export type EximbayBf4SaleMoneyMismatchTransitionResult =
   | "EVENT_ONLY_UNSAFE_PAYMENT"
   | "CONFLICT";
 
+export type EximbayBf4OutcomeUnknownTransitionResult =
+  | "TRANSITIONED"
+  | "REPLAYED"
+  | "CONFLICT";
+
 class PostClaimTombstoneError extends Error {
   constructor() {
     super("BF4_POST_CLAIM_TOMBSTONE");
@@ -99,6 +111,7 @@ export async function correlateEximbayBf4Payment(
       financialSucceededAt: true,
       blockingEndedAt: true,
       suspendedByPaymentId: true,
+      errorCode: true,
     },
   });
 }
@@ -113,7 +126,9 @@ export async function transitionEximbayBf4ContactMarker(
       SELECT "id" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE
     `);
     const current = await correlateEximbayBf4Payment(tx, requireProviderOrderId(payment));
-    if (!current || !sameContactAuthority(current, payment) || !contactSafePayment(current)) return false;
+    if (!current
+      || !sameContactAuthority(current, payment)
+      || !await contactSafePayment(tx, current)) return false;
     return transitionEximbayBf4Event(tx, input);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
@@ -130,7 +145,7 @@ export async function transitionEximbayBf4SaleMoneyMismatch(
     const current = await correlateEximbayBf4Payment(tx, requireProviderOrderId(payment));
     const safePayment = current !== null
       && sameContactAuthority(current, payment)
-      && contactSafePayment(current)
+      && await contactSafePayment(tx, current)
       ? current
       : null;
     const eventPersisted = await transitionEximbayBf4Event(tx, input);
@@ -138,10 +153,32 @@ export async function transitionEximbayBf4SaleMoneyMismatch(
     if (!safePayment) return "EVENT_ONLY_UNSAFE_PAYMENT";
     const updated = await tx.payment.updateMany({
       where: { id: safePayment.id },
-      data: { attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN },
+      data: releasedOutcomeUnknownData(safePayment),
     });
     if (updated.count !== 1) throw new Error("BF4_SALE_MONEY_MISMATCH_PAYMENT_UPDATE_FAILED");
     return "ATOMIC_PAYMENT_AND_EVENT";
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+export async function transitionEximbayBf4PaymentOutcomeUnknown(
+  client: Pick<PrismaClient, "$transaction">,
+  payment: EximbayBf4PaymentCorrelation,
+): Promise<EximbayBf4OutcomeUnknownTransitionResult> {
+  return client.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE
+    `);
+    const current = await correlateEximbayBf4Payment(tx, requireProviderOrderId(payment));
+    if (!current
+      || !sameContactAuthority(current, payment)
+      || !await contactSafePayment(tx, current)) return "CONFLICT";
+    if (current.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN) return "REPLAYED";
+    const updated = await tx.payment.updateMany({
+      where: { id: current.id, attemptLifecycle: PaymentAttemptLifecycle.CONTACTED },
+      data: releasedOutcomeUnknownData(current),
+    });
+    if (updated.count !== 1) throw new Error("BF4_PAYMENT_OUTCOME_UNKNOWN_UPDATE_FAILED");
+    return "TRANSITIONED";
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
@@ -153,9 +190,27 @@ export async function claimEximbayBf4Event(
   const envelope = validateEximbayBf4Envelope(envelopeInput);
   const activeClaim = activeTransmissionId(envelope);
   const tombstone = eximbayBf4RejectTombstone(envelope.exactRawSha256);
+  const rejectedReplay = await findByTransmissionId(client, tombstone);
+  if (rejectedReplay) return exactRejectedReplay(rejectedReplay, payment, envelope);
+  const activeReplay = await findByTransmissionId(client, activeClaim);
+  if (activeReplay) {
+    if (!exactActiveReplay(activeReplay, payment, envelope)) return Object.freeze({ kind: "conflict" });
+    if (canReplayWithoutClaimRotation(activeReplay)) {
+      return Object.freeze({ kind: "event", event: activeReplay, created: false });
+    }
+  }
   try {
     return await client.$transaction(
-      (tx) => admitClaim(tx, payment, envelope, activeClaim, tombstone),
+      async (tx) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE
+        `);
+        const current = await correlateEximbayBf4Payment(tx, requireProviderOrderId(payment));
+        if (!current
+          || !sameContactAuthority(current, payment)
+          || !await contactSafePayment(tx, current)) return Object.freeze({ kind: "conflict" });
+        return admitClaim(tx, current, envelope, activeClaim, tombstone);
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
     );
   } catch (error) {
@@ -165,6 +220,14 @@ export async function claimEximbayBf4Event(
     if (isUniqueConflict(error)) return loadActiveReplay(client, payment, envelope, activeClaim);
     throw error;
   }
+}
+
+function canReplayWithoutClaimRotation(event: EximbayBf4RecordedEvent): boolean {
+  const stage = validateEximbayBf4Envelope(event.raw).stage;
+  return stage === EximbayBf4Stage.VERIFIED_SALE_PENDING_COMPLETION
+    || stage === EximbayBf4Stage.COMPLETION_RETRYABLE
+    || stage === EximbayBf4Stage.TERMINAL_PROCESSED
+    || stage === EximbayBf4Stage.TERMINAL_REJECTED;
 }
 
 export async function transitionEximbayBf4Event(
@@ -354,23 +417,72 @@ function sameContactAuthority(
     && current.currency === expected.currency;
 }
 
-function contactSafePayment(payment: EximbayBf4PaymentCorrelation): boolean {
+async function contactSafePayment(
+  client: Pick<ClaimTx, "paymentEvent">,
+  payment: EximbayBf4PaymentCorrelation,
+): Promise<boolean> {
   const lifecycleSafe = payment.attemptLifecycle === PaymentAttemptLifecycle.CONTACTED
     || payment.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN;
   const statusSafe = payment.status === PaymentAttemptStatus.INITIATED
     || payment.status === PaymentAttemptStatus.AWAITING;
-  return ![
+  const commonSafe = ![
     payment.provider !== PaymentProvider.EXIMBAY,
+    payment.mode !== PaymentMode.SANDBOX,
     payment.providerOrderId === null,
     payment.providerPaymentKey !== null,
     payment.contactStartedAt === null,
     payment.financialSucceededAt !== null,
     payment.remediationStatus !== PaymentRemediationStatus.NONE,
-    payment.blockingEndedAt !== null,
     payment.suspendedByPaymentId !== null,
     !lifecycleSafe,
     !statusSafe,
   ].some(Boolean);
+  if (!commonSafe) return false;
+  if (payment.blockingEndedAt === null) return true;
+  const releasedDiagnostic = payment.attemptLifecycle === PaymentAttemptLifecycle.CONTACTED
+    ? EXIMBAY_NO_TRANSACTION_OBSERVED
+    : EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN;
+  if (payment.errorCode !== releasedDiagnostic) return false;
+  return hasExactQ004RecoveryEvidence(client, payment);
+}
+
+async function hasExactQ004RecoveryEvidence(
+  client: Pick<ClaimTx, "paymentEvent">,
+  payment: EximbayBf4PaymentCorrelation,
+): Promise<boolean> {
+  const event = await client.paymentEvent.findUnique({
+    where: {
+      provider_transmissionId: {
+        provider: PaymentProvider.EXIMBAY,
+        transmissionId: checkoutRecoveryTransmissionId(payment.id),
+      },
+    },
+    select: {
+      source: true,
+      eventType: true,
+      verifiedMode: true,
+      verifiedCredentialBinding: true,
+      checkoutSessionId: true,
+      raw: true,
+      status: true,
+      receivedAt: true,
+      processedAt: true,
+    },
+  });
+  return event !== null && isExactQ004RecoveryEvent(event, payment);
+}
+
+function releasedOutcomeUnknownData(
+  payment: EximbayBf4PaymentCorrelation,
+): Prisma.PaymentUpdateManyMutationInput {
+  if (payment.blockingEndedAt === null) {
+    return { attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN };
+  }
+  return {
+    attemptLifecycle: PaymentAttemptLifecycle.OUTCOME_UNKNOWN,
+    errorCode: EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN,
+    errorMessage: "A released Eximbay attempt has a later callback whose provider outcome is unresolved.",
+  };
 }
 
 function requireProviderOrderId(payment: EximbayBf4PaymentCorrelation): string {

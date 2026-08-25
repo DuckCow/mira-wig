@@ -7,6 +7,10 @@ import {
 } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { enqueuePaymentRemediationRequired } from "@/lib/payment/remediation";
+import {
+  EXIMBAY_NO_TRANSACTION_OBSERVED,
+  EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN,
+} from "@/lib/payment/eximbay/checkout-recovery";
 import type { CaptureFacts, CapturedPayment, CompletionTerminalFailure } from "./types";
 
 type CaptureTx = Prisma.TransactionClient;
@@ -160,7 +164,133 @@ async function captureExactAttempt(
   if (payment.attemptLifecycle === PaymentAttemptLifecycle.SUPERSEDED) {
     return recordLateSupersededSuccess(tx, payment, facts);
   }
+  if (isReleasedEximbayAttempt(payment)) {
+    return recordReleasedEximbaySuccess(tx, payment, facts);
+  }
   return recordOrdinaryExactSuccess(tx, payment, facts);
+}
+
+async function recordReleasedEximbaySuccess(
+  tx: CaptureTx,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+): Promise<CapturedPayment> {
+  const current = await loadCurrentPaymentAuthority(tx, payment);
+  if (current?.contactStartedAt === null) {
+    await supersedeUncontactedSuccessor(tx, current.id, facts.receivedAt);
+  }
+  if (current === null || current.contactStartedAt === null) {
+    const reclaimed = await tx.payment.updateMany({
+      where: {
+        id: payment.id,
+        provider: PaymentProvider.EXIMBAY,
+        providerPaymentKey: null,
+        blockingEndedAt: payment.blockingEndedAt,
+        errorCode: { in: [EXIMBAY_NO_TRANSACTION_OBSERVED, EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN] },
+        status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+        attemptLifecycle: { in: [PaymentAttemptLifecycle.CONTACTED, PaymentAttemptLifecycle.OUTCOME_UNKNOWN] },
+      },
+      data: {
+        ...captureUpdateData(facts, PaymentAttemptLifecycle.CONTACTED),
+        blockingEndedAt: null,
+        suspendedByPaymentId: null,
+        errorCode: null,
+        errorMessage: null,
+      },
+    });
+    if (reclaimed.count !== 1) throw new PaymentCaptureClaimConflictError();
+    return requirePaymentById(tx, payment.id);
+  }
+
+  const remediating = await tx.payment.updateMany({
+    where: {
+      id: payment.id,
+      provider: PaymentProvider.EXIMBAY,
+      providerPaymentKey: null,
+      blockingEndedAt: payment.blockingEndedAt,
+      errorCode: { in: [EXIMBAY_NO_TRANSACTION_OBSERVED, EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN] },
+      status: { in: [PaymentAttemptStatus.INITIATED, PaymentAttemptStatus.AWAITING] },
+      attemptLifecycle: { in: [PaymentAttemptLifecycle.CONTACTED, PaymentAttemptLifecycle.OUTCOME_UNKNOWN] },
+    },
+    data: {
+      ...captureUpdateData(facts, PaymentAttemptLifecycle.SUSPENDED),
+      remediationStatus: PaymentRemediationStatus.PENDING,
+      suspendedByPaymentId: current.id,
+      errorCode: "EXIMBAY_LATE_SUCCESS_CANCELLATION_REQUIRED",
+      errorMessage: "A Q004-released Eximbay attempt later succeeded while another payment owns customer/order authority.",
+    },
+  });
+  if (remediating.count !== 1) throw new PaymentCaptureClaimConflictError();
+  await enqueuePaymentRemediationRequired(tx, {
+    paymentId: payment.id,
+    provider: facts.provider,
+    mode: facts.mode,
+    providerPaymentKey: facts.providerPaymentKey,
+    reason: "EXIMBAY_LATE_SUCCESS_CANCELLATION_REQUIRED",
+  });
+  return requirePaymentById(tx, payment.id);
+}
+
+function isReleasedEximbayAttempt(payment: CapturedPayment): boolean {
+  return payment.provider === PaymentProvider.EXIMBAY
+    && payment.blockingEndedAt !== null
+    && payment.providerPaymentKey === null
+    && payment.remediationStatus === PaymentRemediationStatus.NONE
+    && (payment.attemptLifecycle === PaymentAttemptLifecycle.CONTACTED
+      || payment.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN)
+    && (payment.errorCode === EXIMBAY_NO_TRANSACTION_OBSERVED
+      || payment.errorCode === EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN);
+}
+
+async function loadCurrentPaymentAuthority(
+  tx: CaptureTx,
+  releasedPayment: CapturedPayment,
+): Promise<BlockingPayment | null> {
+  const blocker = await loadCurrentBlockingPayment(tx, releasedPayment);
+  if (blocker) return blocker;
+  const order = await tx.order.findUnique({
+    where: { checkoutSessionId: releasedPayment.checkoutSessionId },
+    select: { payment: { select: { id: true, contactStartedAt: true } } },
+  });
+  if (order && order.payment.id !== releasedPayment.id) return order.payment;
+  return tx.payment.findFirst({
+    where: {
+      checkoutSessionId: releasedPayment.checkoutSessionId,
+      id: { not: releasedPayment.id },
+      status: PaymentAttemptStatus.SUCCEEDED,
+      providerPaymentKey: { not: null },
+      financialSucceededAt: { not: null },
+    },
+    orderBy: { financialSucceededAt: "desc" },
+    select: { id: true, contactStartedAt: true },
+  });
+}
+
+async function supersedeUncontactedSuccessor(
+  tx: CaptureTx,
+  paymentId: string,
+  now: Date,
+): Promise<void> {
+  const result = await tx.payment.updateMany({
+    where: {
+      id: paymentId,
+      status: PaymentAttemptStatus.INITIATED,
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      remediationStatus: PaymentRemediationStatus.NONE,
+      contactStartedAt: null,
+      providerPaymentKey: null,
+      financialSucceededAt: null,
+      blockingEndedAt: null,
+    },
+    data: {
+      attemptLifecycle: PaymentAttemptLifecycle.SUPERSEDED,
+      supersededAt: now,
+      blockingEndedAt: now,
+      errorCode: "PAYMENT_ATTEMPT_SUPERSEDED_BY_LATE_SUCCESS",
+      errorMessage: "Superseded before provider contact because a released predecessor reported financial success.",
+    },
+  });
+  if (result.count !== 1) throw new PaymentCaptureClaimConflictError();
 }
 
 async function recordOrdinaryExactSuccess(
@@ -381,7 +511,8 @@ function paymentSelect(): Prisma.PaymentSelect {
     contactStartedAt: true,
     supersededAt: true,
     blockingEndedAt: true,
-    suspendedByPaymentId: true,
+      suspendedByPaymentId: true,
+      errorCode: true,
   };
 }
 

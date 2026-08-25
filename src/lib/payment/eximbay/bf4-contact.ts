@@ -106,6 +106,18 @@ export type EximbayBf4RetrieveResult =
   | Readonly<{ kind: "admitted"; rescode: "0000"; resmsg: string; payment: EximbayBf4RetrievedPayment }>
   | Readonly<{ kind: "outcomeUnknown"; code: EximbayBf4ContactFailureCode }>;
 
+export interface EximbayCheckoutRecoveryRetrieveRequest {
+  readonly providerOrderId: string;
+  readonly currency: string;
+  readonly amountWire: string;
+  readonly language: "EN" | "JP";
+}
+
+export type EximbayCheckoutRecoveryRetrieveResult =
+  | Readonly<{ kind: "q004"; rescode: "Q004"; resmsg: string }>
+  | Readonly<{ kind: "transactionObserved"; rescode: string }>
+  | Readonly<{ kind: "outcomeUnknown"; code: EximbayBf4ContactFailureCode }>;
+
 export type EximbayBf4ConfigErrorCode =
   | "INVALID_MODE"
   | "INVALID_API_KEY"
@@ -184,6 +196,27 @@ export async function retrieveEximbayBf4Status(
   const response = await executePreparedContact(prepared, transport);
   if (!response.ok) return outcomeUnknown(response.code);
   return admitRetrieve(response.text);
+}
+
+export async function retrieveEximbayCheckoutRecoveryStatus(
+  config: EximbayBf4Config,
+  request: EximbayCheckoutRecoveryRetrieveRequest,
+  transport: EximbayBf4Fetch,
+): Promise<EximbayCheckoutRecoveryRetrieveResult> {
+  const authority = requireConfig(config);
+  const prepared = prepareContact(config, ENDPOINTS[authority.mode].retrieve, JSON.stringify({
+    mid: authority.mid,
+    key_field: "order_id",
+    payment: {
+      order_id: request.providerOrderId,
+      currency: request.currency,
+      amount: request.amountWire,
+      lang: request.language,
+    },
+  }));
+  const response = await executePreparedContact(prepared, transport);
+  if (!response.ok) return outcomeUnknown(response.code);
+  return admitCheckoutRecoveryRetrieve(response.text);
 }
 
 function prepareContact(
@@ -320,6 +353,18 @@ function admitRetrieve(text: string): EximbayBf4RetrieveResult {
   const payment = retrievePayment(parsed.value);
   if (!payment) return outcomeUnknown("UNKNOWN_SHAPE");
   return Object.freeze({ kind: "admitted", rescode: "0000", resmsg: header.resmsg, payment });
+}
+
+function admitCheckoutRecoveryRetrieve(text: string): EximbayCheckoutRecoveryRetrieveResult {
+  const parsed = parseClosedJson(text);
+  if (!parsed.ok) return outcomeUnknown(parsed.code);
+  if (!isRecord(parsed.value)) return outcomeUnknown("INVALID_ROOT");
+  const header = retrieveHeader(parsed.value);
+  if (!header.ok) return outcomeUnknown(header.code);
+  if (header.rescode === "Q004") {
+    return Object.freeze({ kind: "q004", rescode: "Q004", resmsg: boundedResponseText(header.resmsg, 512) });
+  }
+  return Object.freeze({ kind: "transactionObserved", rescode: boundedResponseText(header.rescode, 64) });
 }
 
 type RetrieveHeader =
