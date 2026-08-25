@@ -26,6 +26,7 @@ import type { EximbayReadyFetch } from "../ready-http";
 import {
   checkoutRecoveryTransmissionId,
   EXIMBAY_CHECKOUT_RECOVERY_EVENT_TYPE,
+  EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_LOG_EVENT,
   EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED,
   recoverEximbayCheckout,
 } from "../checkout-recovery";
@@ -137,15 +138,126 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
     expect(resumed).toMatchObject({ disposition: "PAYMENT_ELIGIBLE", recoveryPaymentId: null });
   });
 
-  it.each([
-    ["observed transaction", transactionObservedTransport(), "TRANSACTION_OBSERVED"],
-    ["ambiguous transport", ambiguousTransport(), "OUTCOME_UNKNOWN"],
-  ] as const)("does not release for %s", async (_label, transport, reason) => {
-    const result = await recoverEximbayCheckout(db, recoveryInput(fixture, transport));
-    expect(result).toEqual({ kind: "notReleased", reason });
+  it("does not release an observed transaction", async () => {
+    const result = await recoverEximbayCheckout(db, recoveryInput(fixture, transactionObservedTransport()));
+    expect(result).toEqual({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
     await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
     await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
       .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });
+  });
+
+  it("logs one bounded redacted diagnostic while keeping provider outcome unknown fail closed", async () => {
+    const rawValueSentinel = "RAW_PROVIDER_VALUE_MUST_NOT_ESCAPE";
+    const resmsgSentinel = "RESMSG_MUST_NOT_ESCAPE";
+    const logged: unknown[] = [];
+    const warning = vi.spyOn(console, "warn").mockImplementation((value: unknown) => {
+      logged.push(value);
+    });
+    try {
+      const result = await recoverEximbayCheckout(db, recoveryInput(
+        fixture,
+        () => Promise.resolve(jsonResponse({
+          rescode: "Q004",
+          resmsg: resmsgSentinel,
+          extra_root_member: { secret: rawValueSentinel },
+        })),
+      ));
+      expect(result).toEqual({ kind: "notReleased", reason: "OUTCOME_UNKNOWN" });
+      expect(warning).toHaveBeenCalledTimes(1);
+      const serialized = logged[0];
+      expect(typeof serialized).toBe("string");
+      if (typeof serialized !== "string") throw new Error("expected structured diagnostic JSON");
+      const record: unknown = JSON.parse(serialized);
+      expect(record).toEqual(expect.objectContaining({
+        event: EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_LOG_EVENT,
+        checkoutSessionId: fixture.sessionId,
+        paymentId: fixture.paymentId,
+        mode: PaymentMode.SANDBOX,
+        failureCode: "UNKNOWN_SHAPE",
+        deadlineAborted: false,
+        httpStatus: 200,
+        responseContentTypeClass: "JSON",
+        observedRescode: "Q004",
+        rootKeys: ["extra_root_member", "rescode", "resmsg"],
+        rootKeysTruncated: false,
+      }));
+      if (typeof record !== "object" || record === null || Array.isArray(record)) {
+        throw new Error("expected structured diagnostic object");
+      }
+      expect(Object.keys(record).sort()).toEqual([
+        "checkoutSessionId",
+        "deadlineAborted",
+        "elapsedMs",
+        "event",
+        "failureCode",
+        "httpStatus",
+        "mode",
+        "observedRescode",
+        "paymentId",
+        "responseByteCount",
+        "responseContentTypeClass",
+        "rootKeys",
+        "rootKeysTruncated",
+      ]);
+      for (const forbidden of [
+        rawValueSentinel,
+        resmsgSentinel,
+        API_KEY,
+        MID,
+        fixture.userId,
+        fixture.providerOrderId,
+        "Authorization",
+        "fgkey",
+      ]) {
+        expect(serialized).not.toContain(forbidden);
+      }
+    } finally {
+      warning.mockRestore();
+    }
+
+    await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+      .resolves.toMatchObject({
+        status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        remediationStatus: PaymentRemediationStatus.NONE,
+        providerPaymentKey: null,
+        financialSucceededAt: null,
+        blockingEndedAt: null,
+        errorCode: null,
+      });
+    await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+    await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+  });
+
+  it("keeps outcome unknown fail closed when diagnostic logging throws", async () => {
+    const transport = vi.fn<EximbayBf4Fetch>(() => Promise.resolve(new Response("{}", {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    })));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {
+      throw new Error("SYNTHETIC_DIAGNOSTIC_SINK_FAILURE");
+    });
+    try {
+      const result = await recoverEximbayCheckout(db, recoveryInput(fixture, transport));
+
+      expect(result).toEqual({ kind: "notReleased", reason: "OUTCOME_UNKNOWN" });
+      expect(transport).toHaveBeenCalledTimes(1);
+      expect(warning).toHaveBeenCalledTimes(1);
+      await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+        .resolves.toMatchObject({
+          status: PaymentAttemptStatus.INITIATED,
+          attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+          remediationStatus: PaymentRemediationStatus.NONE,
+          providerPaymentKey: null,
+          financialSucceededAt: null,
+          blockingEndedAt: null,
+          errorCode: null,
+        });
+      await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+      await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("reclaims the slot and completes a late SALE when no successor exists", async () => {
@@ -544,13 +656,6 @@ function transactionObservedTransport() {
   return vi.fn<EximbayBf4Fetch>(() => Promise.resolve(
     jsonResponse({ rescode: "0000", resmsg: "observed", mid: MID, payment: {} }),
   ));
-}
-
-function ambiguousTransport() {
-  return vi.fn<EximbayBf4Fetch>(() => Promise.resolve(new Response("{}", {
-    status: 503,
-    headers: { "Content-Type": "application/json" },
-  })));
 }
 
 async function processSale(fixture: Fixture, transactionId: string) {

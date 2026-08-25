@@ -13,6 +13,10 @@ import { isRecord, requireExactKeys, requireExactText } from "@/lib/payment/prov
 export const EXIMBAY_BF4_TOTAL_DEADLINE_MS = 15_000;
 export const EXIMBAY_BF4_MAX_RESPONSE_BYTES = 65_536;
 export const EXIMBAY_BF4_MAX_RESPONSE_CHUNKS = 256;
+export const EXIMBAY_BF4_DIAGNOSTIC_MAX_ELAPSED_MS = 60_000;
+export const EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEYS = 16;
+export const EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEY_BYTES = 64;
+export const EXIMBAY_BF4_DIAGNOSTIC_MAX_RESCODE_BYTES = 64;
 
 const ENDPOINTS: Readonly<Record<EximbayPaymentMode, Readonly<{
   verify: string;
@@ -33,6 +37,7 @@ const preparedContactBrand: unique symbol = Symbol("PreparedEximbayBf4Contact");
 const preparedContacts = new WeakMap<object, PreparedContactAuthority>();
 const executedContacts = new WeakSet<object>();
 const UTF8_ENCODER = new TextEncoder();
+const EMPTY_ROOT_KEYS: readonly string[] = Object.freeze([]);
 
 interface EximbayBf4ConfigAuthority {
   readonly mode: EximbayPaymentMode;
@@ -80,6 +85,20 @@ export type EximbayBf4ContactFailureCode =
   | "UNKNOWN_SHAPE"
   | "PROVIDER_NON_SUCCESS";
 
+export type EximbayBf4ResponseContentTypeClass = "JSON" | "NON_JSON" | "MISSING";
+
+export interface EximbayBf4OutcomeUnknownDiagnostic {
+  readonly failureCode: EximbayBf4ContactFailureCode;
+  readonly elapsedMs: number;
+  readonly deadlineAborted: boolean;
+  readonly httpStatus: number | null;
+  readonly responseByteCount: number | null;
+  readonly responseContentTypeClass: EximbayBf4ResponseContentTypeClass | null;
+  readonly observedRescode: string | null;
+  readonly rootKeys: readonly string[];
+  readonly rootKeysTruncated: boolean;
+}
+
 export type EximbayBf4VerifyResult =
   | Readonly<{ kind: "admitted"; rescode: "0000"; resmsg: string }>
   | Readonly<{ kind: "outcomeUnknown"; code: EximbayBf4ContactFailureCode }>;
@@ -116,7 +135,11 @@ export interface EximbayCheckoutRecoveryRetrieveRequest {
 export type EximbayCheckoutRecoveryRetrieveResult =
   | Readonly<{ kind: "q004"; rescode: "Q004"; resmsg: string }>
   | Readonly<{ kind: "transactionObserved"; rescode: string }>
-  | Readonly<{ kind: "outcomeUnknown"; code: EximbayBf4ContactFailureCode }>;
+  | Readonly<{
+      kind: "outcomeUnknown";
+      code: EximbayBf4ContactFailureCode;
+      diagnostic: EximbayBf4OutcomeUnknownDiagnostic;
+    }>;
 
 export type EximbayBf4ConfigErrorCode =
   | "INVALID_MODE"
@@ -215,8 +238,8 @@ export async function retrieveEximbayCheckoutRecoveryStatus(
     },
   }));
   const response = await executePreparedContact(prepared, transport);
-  if (!response.ok) return outcomeUnknown(response.code);
-  return admitCheckoutRecoveryRetrieve(response.text);
+  if (!response.ok) return recoveryOutcomeUnknown(response.diagnostic);
+  return admitCheckoutRecoveryRetrieve(response.text, response.observation);
 }
 
 function prepareContact(
@@ -231,8 +254,36 @@ function prepareContact(
 }
 
 type ContactReadResult =
-  | Readonly<{ ok: true; text: string }>
-  | Readonly<{ ok: false; code: EximbayBf4ContactFailureCode }>;
+  | Readonly<{ ok: true; text: string; observation: ContactObservation }>
+  | Readonly<{
+      ok: false;
+      code: EximbayBf4ContactFailureCode;
+      diagnostic: EximbayBf4OutcomeUnknownDiagnostic;
+    }>;
+
+interface ContactObservation {
+  readonly elapsedMs: number;
+  readonly deadlineAborted: boolean;
+  readonly httpStatus: number | null;
+  readonly responseByteCount: number | null;
+  readonly responseContentTypeClass: EximbayBf4ResponseContentTypeClass | null;
+}
+
+type RawContactReadResult =
+  | Readonly<{
+      ok: true;
+      text: string;
+      httpStatus: number;
+      responseByteCount: number;
+      responseContentTypeClass: EximbayBf4ResponseContentTypeClass;
+    }>
+  | Readonly<{
+      ok: false;
+      code: EximbayBf4ContactFailureCode;
+      httpStatus: number;
+      responseByteCount: number | null;
+      responseContentTypeClass: EximbayBf4ResponseContentTypeClass;
+    }>;
 
 async function executePreparedContact(
   prepared: PreparedEximbayBf4Contact,
@@ -242,6 +293,7 @@ async function executePreparedContact(
   if (!authority) throw new EximbayBf4ConfigError("UNTRUSTED_CONTACT");
   if (executedContacts.has(prepared)) throw new EximbayBf4ConfigError("CONTACT_ALREADY_EXECUTED");
   executedContacts.add(prepared);
+  const startedAt = Date.now();
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), EXIMBAY_BF4_TOTAL_DEADLINE_MS);
   try {
@@ -255,36 +307,49 @@ async function executePreparedContact(
       redirect: "error",
       signal: controller.signal,
     });
-    return await readResponse(response);
+    const read = await readResponse(response);
+    const observation = contactObservation(startedAt, controller.signal.aborted, read);
+    if (!read.ok) return contactFailure(read.code, observation);
+    return Object.freeze({ ok: true, text: read.text, observation });
   } catch {
-    return contactFailure("TRANSPORT_FAILURE");
+    return contactFailure("TRANSPORT_FAILURE", contactObservation(
+      startedAt,
+      controller.signal.aborted,
+      null,
+    ));
   } finally {
     clearTimeout(deadline);
   }
 }
 
-async function readResponse(response: Response): Promise<ContactReadResult> {
+async function readResponse(response: Response): Promise<RawContactReadResult> {
+  const responseContentTypeClass = classifyJsonContentType(response.headers.get("Content-Type"));
   if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
-    return contactFailure("NON_2XX");
+    return rawContactFailure("NON_2XX", response.status, null, responseContentTypeClass);
   }
-  if (!admittedJsonContentType(response.headers.get("Content-Type"))) {
-    return contactFailure("INVALID_CONTENT_TYPE");
+  if (responseContentTypeClass !== "JSON") {
+    return rawContactFailure("INVALID_CONTENT_TYPE", response.status, null, responseContentTypeClass);
   }
   const body = await readBoundedBody(response.body);
-  if (!body.ok) return body;
+  if (!body.ok) {
+    return rawContactFailure(body.code, response.status, body.byteCount, responseContentTypeClass);
+  }
   try {
     return Object.freeze({
       ok: true,
       text: new TextDecoder("utf-8", { fatal: true }).decode(body.bytes),
+      httpStatus: response.status,
+      responseByteCount: body.bytes.byteLength,
+      responseContentTypeClass,
     });
   } catch {
-    return contactFailure("INVALID_UTF8");
+    return rawContactFailure("INVALID_UTF8", response.status, body.bytes.byteLength, responseContentTypeClass);
   }
 }
 
 type BoundedBodyResult =
   | Readonly<{ ok: true; bytes: Uint8Array }>
-  | Readonly<{ ok: false; code: EximbayBf4ContactFailureCode }>;
+  | Readonly<{ ok: false; code: EximbayBf4ContactFailureCode; byteCount: number }>;
 
 async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise<BoundedBodyResult> {
   if (!body) return Object.freeze({ ok: true, bytes: new Uint8Array() });
@@ -297,13 +362,13 @@ async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise
       const next = await reader.read();
       if (next.done) return Object.freeze({ ok: true, bytes: bytes.slice(0, length) });
       count += 1;
-      if (count > EXIMBAY_BF4_MAX_RESPONSE_CHUNKS) return contactFailure("TOO_MANY_RESPONSE_CHUNKS");
-      if (!(next.value instanceof Uint8Array)) return contactFailure("INVALID_RESPONSE_CHUNK");
+      if (count > EXIMBAY_BF4_MAX_RESPONSE_CHUNKS) return bodyFailure("TOO_MANY_RESPONSE_CHUNKS", length);
+      if (!(next.value instanceof Uint8Array)) return bodyFailure("INVALID_RESPONSE_CHUNK", length);
       length = appendChunk(bytes, length, next.value);
     }
   } catch (error) {
-    if (error instanceof EximbayBf4BodyError) return contactFailure(error.code);
-    return contactFailure("TRANSPORT_FAILURE");
+    if (error instanceof EximbayBf4BodyError) return bodyFailure(error.code, error.byteCount);
+    return bodyFailure("TRANSPORT_FAILURE", length);
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
@@ -312,17 +377,23 @@ async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise
 
 function appendChunk(target: Uint8Array, length: number, chunk: Uint8Array): number {
   const nextLength = length + chunk.byteLength;
-  if (nextLength > EXIMBAY_BF4_MAX_RESPONSE_BYTES) return bodyTooLarge();
+  if (nextLength > EXIMBAY_BF4_MAX_RESPONSE_BYTES) return bodyTooLarge(nextLength);
   if (chunk.byteLength > 0) target.set(chunk, length);
   return nextLength;
 }
 
-function bodyTooLarge(): never {
-  throw new EximbayBf4BodyError("BODY_TOO_LARGE");
+function bodyTooLarge(observedByteCount: number): never {
+  throw new EximbayBf4BodyError(
+    "BODY_TOO_LARGE",
+    Math.min(observedByteCount, EXIMBAY_BF4_MAX_RESPONSE_BYTES),
+  );
 }
 
 class EximbayBf4BodyError extends Error {
-  constructor(readonly code: EximbayBf4ContactFailureCode) {
+  constructor(
+    readonly code: EximbayBf4ContactFailureCode,
+    readonly byteCount: number,
+  ) {
     super(code);
   }
 }
@@ -355,12 +426,17 @@ function admitRetrieve(text: string): EximbayBf4RetrieveResult {
   return Object.freeze({ kind: "admitted", rescode: "0000", resmsg: header.resmsg, payment });
 }
 
-function admitCheckoutRecoveryRetrieve(text: string): EximbayCheckoutRecoveryRetrieveResult {
+function admitCheckoutRecoveryRetrieve(
+  text: string,
+  observation: ContactObservation,
+): EximbayCheckoutRecoveryRetrieveResult {
   const parsed = parseClosedJson(text);
-  if (!parsed.ok) return outcomeUnknown(parsed.code);
-  if (!isRecord(parsed.value)) return outcomeUnknown("INVALID_ROOT");
+  if (!parsed.ok) return recoveryOutcomeUnknown(diagnostic(parsed.code, observation));
+  if (!isRecord(parsed.value)) return recoveryOutcomeUnknown(diagnostic("INVALID_ROOT", observation));
   const header = retrieveHeader(parsed.value);
-  if (!header.ok) return outcomeUnknown(header.code);
+  if (!header.ok) {
+    return recoveryOutcomeUnknown(diagnostic(header.code, observation, parsed.value));
+  }
   if (header.rescode === "Q004") {
     return Object.freeze({ kind: "q004", rescode: "Q004", resmsg: boundedResponseText(header.resmsg, 512) });
   }
@@ -485,6 +561,11 @@ function admittedJsonContentType(value: string | null): boolean {
   return /^[\t ]*application\/json(?:[\t ]*;[\t ]*charset[\t ]*=[\t ]*utf-8)?[\t ]*$/iu.test(value);
 }
 
+function classifyJsonContentType(value: string | null): EximbayBf4ResponseContentTypeClass {
+  if (value === null) return "MISSING";
+  return admittedJsonContentType(value) ? "JSON" : "NON_JSON";
+}
+
 function basicAuthorization(apiKey: string): string {
   return `Basic ${Buffer.from(`${apiKey}:`, "utf8").toString("base64")}`;
 }
@@ -496,11 +577,104 @@ function outcomeUnknown(code: EximbayBf4ContactFailureCode): Readonly<{
   return Object.freeze({ kind: "outcomeUnknown", code });
 }
 
-function contactFailure(code: EximbayBf4ContactFailureCode): Readonly<{
+function recoveryOutcomeUnknown(
+  value: EximbayBf4OutcomeUnknownDiagnostic,
+): Extract<EximbayCheckoutRecoveryRetrieveResult, { kind: "outcomeUnknown" }> {
+  return Object.freeze({ kind: "outcomeUnknown", code: value.failureCode, diagnostic: value });
+}
+
+function contactFailure(
+  code: EximbayBf4ContactFailureCode,
+  observation: ContactObservation,
+): Readonly<{
   ok: false;
   code: EximbayBf4ContactFailureCode;
+  diagnostic: EximbayBf4OutcomeUnknownDiagnostic;
 }> {
-  return Object.freeze({ ok: false, code });
+  return Object.freeze({ ok: false, code, diagnostic: diagnostic(code, observation) });
+}
+
+function rawContactFailure(
+  code: EximbayBf4ContactFailureCode,
+  httpStatus: number,
+  responseByteCount: number | null,
+  responseContentTypeClass: EximbayBf4ResponseContentTypeClass,
+): Extract<RawContactReadResult, { ok: false }> {
+  return Object.freeze({
+    ok: false,
+    code,
+    httpStatus,
+    responseByteCount,
+    responseContentTypeClass,
+  });
+}
+
+function bodyFailure(
+  code: EximbayBf4ContactFailureCode,
+  byteCount: number,
+): Extract<BoundedBodyResult, { ok: false }> {
+  return Object.freeze({
+    ok: false,
+    code,
+    byteCount: Math.max(0, Math.min(Math.trunc(byteCount), EXIMBAY_BF4_MAX_RESPONSE_BYTES)),
+  });
+}
+
+function contactObservation(
+  startedAt: number,
+  deadlineAborted: boolean,
+  read: RawContactReadResult | null,
+): ContactObservation {
+  return Object.freeze({
+    elapsedMs: boundedElapsedMs(startedAt, Date.now()),
+    deadlineAborted,
+    httpStatus: read?.httpStatus ?? null,
+    responseByteCount: read?.responseByteCount ?? null,
+    responseContentTypeClass: read?.responseContentTypeClass ?? null,
+  });
+}
+
+function diagnostic(
+  failureCode: EximbayBf4ContactFailureCode,
+  observation: ContactObservation,
+  parsedRoot?: Record<string, unknown>,
+): EximbayBf4OutcomeUnknownDiagnostic {
+  const root = parsedRoot === undefined
+    ? Object.freeze({ observedRescode: null, rootKeys: EMPTY_ROOT_KEYS, truncated: false })
+    : boundedRootObservation(parsedRoot);
+  return Object.freeze({
+    failureCode,
+    ...observation,
+    observedRescode: root.observedRescode,
+    rootKeys: root.rootKeys,
+    rootKeysTruncated: root.truncated,
+  });
+}
+
+function boundedElapsedMs(startedAt: number, finishedAt: number): number {
+  const elapsed = finishedAt - startedAt;
+  if (!Number.isFinite(elapsed) || elapsed <= 0) return 0;
+  return Math.min(Math.trunc(elapsed), EXIMBAY_BF4_DIAGNOSTIC_MAX_ELAPSED_MS);
+}
+
+function boundedRootObservation(root: Record<string, unknown>): Readonly<{
+  observedRescode: string | null;
+  rootKeys: readonly string[];
+  truncated: boolean;
+}> {
+  const sorted = Object.keys(root).sort();
+  const admitted = sorted
+    .filter((key) => UTF8_ENCODER.encode(key).byteLength <= EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEY_BYTES)
+    .slice(0, EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEYS);
+  const observedRescode = typeof root.rescode === "string"
+    && UTF8_ENCODER.encode(root.rescode).byteLength <= EXIMBAY_BF4_DIAGNOSTIC_MAX_RESCODE_BYTES
+    ? root.rescode
+    : null;
+  return Object.freeze({
+    observedRescode,
+    rootKeys: Object.freeze(admitted),
+    truncated: admitted.length !== sorted.length,
+  });
 }
 
 type ObjectState = "keyOrEnd" | "colon" | "value" | "commaOrEnd";
