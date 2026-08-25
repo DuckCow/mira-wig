@@ -433,7 +433,7 @@ function admitCheckoutRecoveryRetrieve(
   const parsed = parseClosedJson(text);
   if (!parsed.ok) return recoveryOutcomeUnknown(diagnostic(parsed.code, observation));
   if (!isRecord(parsed.value)) return recoveryOutcomeUnknown(diagnostic("INVALID_ROOT", observation));
-  const header = retrieveHeader(parsed.value);
+  const header = checkoutRecoveryRetrieveHeader(parsed.value);
   if (!header.ok) {
     return recoveryOutcomeUnknown(diagnostic(header.code, observation, parsed.value));
   }
@@ -446,6 +446,18 @@ function admitCheckoutRecoveryRetrieve(
 type RetrieveHeader =
   | Readonly<{ ok: true; rescode: string; resmsg: string }>
   | Readonly<{ ok: false; code: "UNKNOWN_SHAPE" }>;
+
+function checkoutRecoveryRetrieveHeader(value: Record<string, unknown>): RetrieveHeader {
+  try {
+    requireExactKeys(value, ["rescode", "resmsg"], ["card_info", "mid", "other_param", "payment"]);
+  } catch {
+    return Object.freeze({ ok: false, code: "UNKNOWN_SHAPE" });
+  }
+  if (typeof value.rescode !== "string" || typeof value.resmsg !== "string") {
+    return Object.freeze({ ok: false, code: "UNKNOWN_SHAPE" });
+  }
+  return Object.freeze({ ok: true, rescode: value.rescode, resmsg: value.resmsg });
+}
 
 function retrieveHeader(value: Record<string, unknown>): RetrieveHeader {
   const allowed = value.rescode === "0000"
