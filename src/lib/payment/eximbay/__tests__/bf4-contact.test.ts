@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEY_BYTES,
+  EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEYS,
   EXIMBAY_BF4_MAX_RESPONSE_BYTES,
   EXIMBAY_BF4_MAX_RESPONSE_CHUNKS,
   EXIMBAY_BF4_TOTAL_DEADLINE_MS,
   resolveEximbayBf4Config,
   retrieveEximbayBf4Status,
+  retrieveEximbayCheckoutRecoveryStatus,
   verifyEximbayBf4Status,
   type EximbayBf4Fetch,
   type EximbayBf4RetrieveRequest,
@@ -174,6 +177,116 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
     await expect(pending).resolves.toEqual({ kind: "outcomeUnknown", code: "TRANSPORT_FAILURE" });
     vi.useRealTimers();
   });
+
+  it("retains bounded metadata for a synthetic Q004-like unknown recovery shape", async () => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse({
+        rescode: "Q004",
+        resmsg: "synthetic only; not a provider-authoritative response shape",
+        extra_root_member: { arbitrary_provider_value: "MUST_NOT_ESCAPE" },
+      })),
+    );
+
+    expect(result).toMatchObject({
+      kind: "outcomeUnknown",
+      code: "UNKNOWN_SHAPE",
+      diagnostic: {
+        failureCode: "UNKNOWN_SHAPE",
+        deadlineAborted: false,
+        httpStatus: 200,
+        responseContentTypeClass: "JSON",
+        observedRescode: "Q004",
+        rootKeys: ["extra_root_member", "rescode", "resmsg"],
+        rootKeysTruncated: false,
+      },
+    });
+    if (result.kind !== "outcomeUnknown") throw new Error("expected synthetic unknown shape");
+    expect(result.diagnostic.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(result.diagnostic.responseByteCount).toBeGreaterThan(0);
+    expect(JSON.stringify(result.diagnostic)).not.toContain("MUST_NOT_ESCAPE");
+  });
+
+  it("bounds and sorts recovery root field names without retaining overlong names", async () => {
+    const excess = Object.fromEntries(Array.from(
+      { length: EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEYS + 4 },
+      (_, index) => [`field_${String(index).padStart(2, "0")}`, index],
+    ));
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse({
+        rescode: "Q004",
+        resmsg: "synthetic",
+        ...excess,
+        ["x".repeat(EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEY_BYTES + 1)]: true,
+      })),
+    );
+
+    if (result.kind !== "outcomeUnknown") throw new Error("expected bounded unknown shape");
+    expect(result.diagnostic.rootKeys).toHaveLength(EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEYS);
+    expect(result.diagnostic.rootKeys).toEqual([...result.diagnostic.rootKeys].sort());
+    expect(result.diagnostic.rootKeys.every(
+      (key) => new TextEncoder().encode(key).byteLength <= EXIMBAY_BF4_DIAGNOSTIC_MAX_ROOT_KEY_BYTES,
+    )).toBe(true);
+    expect(result.diagnostic.rootKeysTruncated).toBe(true);
+  });
+
+  it("distinguishes deadline abort from prompt generic rejection without changing the failure code", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = retrieveEximbayCheckoutRecoveryStatus(
+        config(),
+        recoveryRequest(),
+        (_input, init) => new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("synthetic abort")), { once: true });
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(EXIMBAY_BF4_TOTAL_DEADLINE_MS + 1);
+      const deadline = await pending;
+      const prompt = await retrieveEximbayCheckoutRecoveryStatus(
+        config(),
+        recoveryRequest(),
+        () => Promise.reject(new Error("synthetic prompt rejection")),
+      );
+
+      expect(deadline).toMatchObject({
+        kind: "outcomeUnknown",
+        code: "TRANSPORT_FAILURE",
+        diagnostic: { failureCode: "TRANSPORT_FAILURE", deadlineAborted: true },
+      });
+      expect(prompt).toMatchObject({
+        kind: "outcomeUnknown",
+        code: "TRANSPORT_FAILURE",
+        diagnostic: { failureCode: "TRANSPORT_FAILURE", deadlineAborted: false },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["non-2xx", new Response("RAW_NON_2XX_MUST_NOT_ESCAPE", {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    }), { failureCode: "NON_2XX", httpStatus: 503, responseContentTypeClass: "JSON" }],
+    ["invalid content type", new Response("RAW_WRONG_MEDIA_MUST_NOT_ESCAPE", {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    }), { failureCode: "INVALID_CONTENT_TYPE", httpStatus: 200, responseContentTypeClass: "NON_JSON" }],
+  ] as const)("retains safe %s response facts without reading raw content", async (_label, response, expected) => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(response),
+    );
+
+    expect(result).toMatchObject({ kind: "outcomeUnknown", diagnostic: expected });
+    if (result.kind !== "outcomeUnknown") throw new Error("expected response rejection");
+    expect(result.diagnostic.responseByteCount).toBeNull();
+    expect(JSON.stringify(result.diagnostic)).not.toContain("MUST_NOT_ESCAPE");
+  });
 });
 
 function config() {
@@ -191,6 +304,15 @@ function retrieveRequest(): EximbayBf4RetrieveRequest {
     amountWire: "12.34",
     language: "EN",
   };
+}
+
+function recoveryRequest() {
+  return {
+    providerOrderId: "order-1",
+    currency: "USD",
+    amountWire: "12.34",
+    language: "EN",
+  } as const;
 }
 
 function retrieveResponse(status: "SALE" | "AUTH" | "REGISTERED" | "NONE"): Response {
