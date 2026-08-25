@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: { params: PageParams }): Prom
     `/styles/${encodeURIComponent(raw.id)}`,
   );
   const [style, publishedVariants] = await Promise.all([
-    getStyleForRoute(raw.id, variant.marketCode),
+    getStyleForRoute(raw.id, variant.marketCode, variant.locale),
     getPublishedSiteVariants(raw.id),
   ]);
   const messages = messagesFor(variant.locale);
@@ -57,7 +57,7 @@ export default async function PublicStyleDetailPage({ params }: { params: PagePa
     `/styles/${encodeURIComponent(raw.id)}`,
   );
   const [style, context, market] = await Promise.all([
-    getStyleForRoute(raw.id, variant.marketCode),
+    getStyleForRoute(raw.id, variant.marketCode, variant.locale),
     getStorefrontContext(),
     getActiveMarketCommercialFacts(variant.marketCode),
   ]);
@@ -82,7 +82,9 @@ function StyleDetailView({ variant, style, coverUrl, currency, currentMarketCode
             <span className="mb-2 inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{localizedCategoryLabel(style.category, variant.locale)}</span>
             <h1 className="text-2xl font-bold text-gray-900">{style.name}</h1>
           </div>
-          <p className="text-xs text-gray-500">{messages.detail.productLanguageNotice}</p>
+          {style.contentProvenance.kind === "LEGACY_ORIGINAL" ? (
+            <p className="text-xs text-gray-500">{messages.detail.productLanguageNotice}</p>
+          ) : null}
           {style.description ? <p className="text-sm leading-relaxed text-gray-600">{style.description}</p> : null}
           <VariantSelector variants={style.variants} wigStyleId={style.id} marketCode={variant.marketCode} currency={currency} locale={variant.locale} currentMarketCode={currentMarketCode} />
         </div>

@@ -30,6 +30,14 @@ export const CATEGORY_LABELS: Record<WigCategory, string> = {
   [WigCategory.MEDICAL]: "의료용",
 };
 
+export type ProductContentProvenance =
+  | { kind: "PUBLISHED_LOCALIZED"; locale: "ko" | "en" | "ja"; revisionId: string }
+  | {
+      kind: "LEGACY_ORIGINAL";
+      requestedLocale: "ko" | "en" | "ja";
+      sourceLanguage: "UNVERIFIED";
+    };
+
 export interface WigStyleSummary {
   id: string;
   name: string;
@@ -37,6 +45,7 @@ export interface WigStyleSummary {
   tags: string[];
   coverImageKey: string | null;
   basePrice: number | null;
+  contentProvenance: ProductContentProvenance;
 }
 
 export interface GetWigStylesParams {
@@ -65,4 +74,5 @@ export interface WigStyleDetail {
   imageKeys: string[];
   basePrice: number | null;
   variants: WigVariantDetail[];
+  contentProvenance: ProductContentProvenance;
 }

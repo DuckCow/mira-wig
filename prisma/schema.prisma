@@ -33,6 +33,10 @@ model User {
   checkoutSessions      CheckoutSession[]
   orders                Order[]
   customerRefundIntakes CustomerRefundIntake[]
+  localizedRevisions                  WigStyleLocalizedRevision[]          @relation("WigStyleLocalizedRevisionSubmitter")
+  localizedApprovalDecisions          WigStyleLocalizedApprovalDecision[] @relation("WigStyleLocalizedApprovalActor")
+  localizedPublicationPointersChanged WigStyleLocalizedPublication[]      @relation("WigStyleLocalizedPublicationActor")
+  localizedPublicationEvents          WigStyleLocalizedPublicationEvent[] @relation("WigStyleLocalizedPublicationEventActor")
 }
 
 enum UserRole {
@@ -150,6 +154,34 @@ enum WigStyleRelationPurpose {
   COMPARE_WITH
 }
 
+enum WigStyleLocalizedRevisionSourceKind {
+  MANUAL_AUTHORING
+  LEGACY_IMPORT
+  LOCALIZATION
+}
+
+enum WigStyleLocalizedClaimDisposition {
+  NON_MATERIAL
+  MATERIAL_OR_UNRESOLVED
+}
+
+enum WigStyleLocalizedApprovalDecisionType {
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+enum WigStyleLocalizedPublicationAction {
+  PUBLISHED
+  WITHDRAWN
+}
+
+enum WigStyleLocalizedAuthorityBasis {
+  PROJECT_OWNER_EDITORIAL_CONFIG
+  PROJECT_OWNER_PUBLICATION_CONFIG
+  APPROVAL_REVOCATION_ENFORCEMENT
+}
+
 model WigStyle {
   id            String      @id @default(cuid())
   name          String
@@ -170,6 +202,95 @@ model WigStyle {
   availableMarkets WigStyleMarket[]
   sourceRelations  WigStyleRelation[] @relation("WigStyleRelationSource")
   targetRelations  WigStyleRelation[] @relation("WigStyleRelationTarget")
+  localizedRevisions         WigStyleLocalizedRevision[]
+  localizedPublications      WigStyleLocalizedPublication[]
+  localizedPublicationEvents WigStyleLocalizedPublicationEvent[]
+}
+
+model WigStyleLocalizedRevision {
+  id                String                                    @id @default(cuid())
+  wigStyleId        String
+  locale            String                                    @db.VarChar(2)
+  displayName       String                                    @db.VarChar(200)
+  description       String?                                   @db.VarChar(5000)
+  sourceKind        WigStyleLocalizedRevisionSourceKind
+  sourceRevisionId  String?
+  legacySourceUpdatedAt DateTime?                              @db.Timestamp(3)
+  claimDisposition  WigStyleLocalizedClaimDisposition
+  submissionKey     String                                    @unique @db.VarChar(128)
+  submittedByUserId String
+  submittedAt       DateTime                                  @default(now()) @db.Timestamp(3)
+
+  wigStyle          WigStyle                                  @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
+  submittedBy       User                                      @relation("WigStyleLocalizedRevisionSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  sourceRevision    WigStyleLocalizedRevision?                @relation("WigStyleLocalizedRevisionSource", fields: [sourceRevisionId, wigStyleId], references: [id, wigStyleId], onDelete: Restrict, map: "WigStyleLocalizedRevision_source_fkey")
+  derivedRevisions  WigStyleLocalizedRevision[]               @relation("WigStyleLocalizedRevisionSource")
+  approvalDecisions WigStyleLocalizedApprovalDecision[]
+  currentFor        WigStyleLocalizedPublication[]            @relation("WigStyleLocalizedCurrentRevision")
+  publishedFrom     WigStyleLocalizedPublicationEvent[]       @relation("WigStyleLocalizedPublicationFromRevision")
+  publishedTo       WigStyleLocalizedPublicationEvent[]       @relation("WigStyleLocalizedPublicationToRevision")
+
+  @@unique([id, wigStyleId])
+  @@unique([id, wigStyleId, locale])
+  @@index([wigStyleId, locale, submittedAt])
+  @@index([sourceRevisionId, wigStyleId])
+}
+
+model WigStyleLocalizedApprovalDecision {
+  id             String                                      @id @default(cuid())
+  revisionId     String
+  ordinal        Int
+  decision       WigStyleLocalizedApprovalDecisionType
+  rationale      String?                                     @db.VarChar(1000)
+  requestKey     String                                      @unique @db.VarChar(128)
+  actorUserId    String
+  authorityBasis WigStyleLocalizedAuthorityBasis
+  decidedAt      DateTime                                    @default(now()) @db.Timestamp(3)
+
+  revision       WigStyleLocalizedRevision                   @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  actor          User                                        @relation("WigStyleLocalizedApprovalActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([revisionId, ordinal])
+}
+
+model WigStyleLocalizedPublication {
+  wigStyleId         String
+  locale             String                                  @db.VarChar(2)
+  currentRevisionId  String?
+  version            Int
+  lastChangedByUserId String
+  lastChangedAt      DateTime                                @default(now()) @db.Timestamp(3)
+
+  wigStyle           WigStyle                                @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
+  currentRevision    WigStyleLocalizedRevision?              @relation("WigStyleLocalizedCurrentRevision", fields: [currentRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublication_currentRevision_fkey")
+  lastChangedBy      User                                    @relation("WigStyleLocalizedPublicationActor", fields: [lastChangedByUserId], references: [id], onDelete: Restrict, map: "WigStyleLocalizedPublication_actorUserId_fkey")
+  events             WigStyleLocalizedPublicationEvent[]
+
+  @@id([wigStyleId, locale])
+  @@index([currentRevisionId])
+}
+
+model WigStyleLocalizedPublicationEvent {
+  id             String                                    @id @default(cuid())
+  wigStyleId     String
+  locale         String                                    @db.VarChar(2)
+  sequence       Int
+  action         WigStyleLocalizedPublicationAction
+  fromRevisionId String?
+  toRevisionId   String?
+  reason         String?                                   @db.VarChar(1000)
+  requestKey     String                                    @unique @db.VarChar(128)
+  actorUserId    String
+  authorityBasis WigStyleLocalizedAuthorityBasis
+  occurredAt     DateTime                                  @default(now()) @db.Timestamp(3)
+
+  publication    WigStyleLocalizedPublication              @relation(fields: [wigStyleId, locale], references: [wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_publication_fkey")
+  wigStyle       WigStyle                                  @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
+  fromRevision   WigStyleLocalizedRevision?                @relation("WigStyleLocalizedPublicationFromRevision", fields: [fromRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_fromRevision_fkey")
+  toRevision     WigStyleLocalizedRevision?                @relation("WigStyleLocalizedPublicationToRevision", fields: [toRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_toRevision_fkey")
+  actor          User                                      @relation("WigStyleLocalizedPublicationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([wigStyleId, locale, sequence], map: "WigStyleLocalizedPublicationEvent_scope_sequence_key")
 }
 
 model WigStyleRelation {

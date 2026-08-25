@@ -14,6 +14,8 @@ import {
   type ManualRelatedStyleGroups,
 } from "./types";
 import { compareUtf16CodeUnits } from "./validation";
+import type { Locale } from "@/lib/market/locale";
+import { projectWigStyleLocalizedContent } from "@/lib/wig-style-localized-content/projection";
 
 const MAX_PER_PURPOSE = 4;
 
@@ -27,6 +29,7 @@ function emptyGroups(): ManualRelatedStyleGroups {
 export async function getManualRelatedStyles(
   sourceStyleId: string,
   marketCode: string,
+  locale: Locale,
   env?: ManualItemRelationsActivationEnv,
 ): Promise<ManualRelatedStyleGroups> {
   const enabledPurposes = getEnabledManualRelationPurposes(marketCode, env);
@@ -63,6 +66,7 @@ export async function getManualRelatedStyles(
         select: {
           id: true,
           name: true,
+          description: true,
           category: true,
           tags: true,
           coverImageKey: true,
@@ -88,6 +92,15 @@ export async function getManualRelatedStyles(
     || compareUtf16CodeUnits(left.targetStyleId, right.targetStyleId)
   ));
 
+  const projected = await projectWigStyleLocalizedContent(
+    rows.map((row) => ({
+      id: row.targetStyle.id,
+      name: row.targetStyle.name,
+      description: row.targetStyle.description,
+    })),
+    locale,
+  );
+
   const groups = emptyGroups();
   const seenTargetIds = new Set<string>();
   for (const row of rows) {
@@ -101,11 +114,12 @@ export async function getManualRelatedStyles(
     if (basePrice === null) continue;
     const style: ManualRelatedStyle = {
       id: row.targetStyle.id,
-      name: row.targetStyle.name,
+      name: projected.get(row.targetStyle.id)!.name,
       category: row.targetStyle.category,
       tags: row.targetStyle.tags,
       coverImageKey: row.targetStyle.coverImageKey,
       basePrice,
+      contentProvenance: projected.get(row.targetStyle.id)!.contentProvenance,
     };
     group.push(style);
     seenTargetIds.add(row.targetStyleId);

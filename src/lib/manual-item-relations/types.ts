@@ -1,4 +1,4 @@
-import type { WigCategory } from "@/lib/catalog.types";
+import type { ProductContentProvenance, WigCategory } from "@/lib/catalog.types";
 
 export const ManualStyleRelationPurpose = {
   SIMILAR_STYLE: "SIMILAR_STYLE",
@@ -93,6 +93,7 @@ export interface ManualRelatedStyle {
   tags: string[];
   coverImageKey: string | null;
   basePrice: number;
+  contentProvenance: ProductContentProvenance;
 }
 
 export interface ManualRelatedStyleGroups {

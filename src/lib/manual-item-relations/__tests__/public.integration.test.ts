@@ -56,7 +56,7 @@ describe("manual related styles public read", () => {
   });
 
   it("accepts only activation environment injection at the exported boundary", () => {
-    type PublicReadEnvironment = Parameters<typeof getManualRelatedStyles>[2];
+    type PublicReadEnvironment = Parameters<typeof getManualRelatedStyles>[3];
     expectTypeOf<PublicReadEnvironment>().toEqualTypeOf<
       ManualItemRelationsActivationEnv | undefined
     >();
@@ -64,9 +64,9 @@ describe("manual related styles public read", () => {
 
   it("keeps blank KR configuration off and rejects invalid KR configuration", async () => {
     await expect(
-      getManualRelatedStyles(fixture.sourceStyleId, "KR", {}),
+      getManualRelatedStyles(fixture.sourceStyleId, "KR", "ko", {}),
     ).resolves.toEqual(emptyGroups());
-    await expect(getManualRelatedStyles(fixture.sourceStyleId, "KR", {
+    await expect(getManualRelatedStyles(fixture.sourceStyleId, "KR", "ko", {
       MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "invalid",
     })).rejects.toBeInstanceOf(ManualItemRelationsActivationConfigError);
   });
@@ -124,10 +124,16 @@ describe("manual related styles public read", () => {
       tags: [],
       coverImageKey: null,
       basePrice: 85000,
+      contentProvenance: {
+        kind: "LEGACY_ORIGINAL",
+        requestedLocale: "ko",
+        sourceLanguage: "UNVERIFIED",
+      },
     }]);
     expect(Object.keys(groups.SIMILAR_STYLE[0] ?? {}).sort()).toEqual([
       "basePrice",
       "category",
+      "contentProvenance",
       "coverImageKey",
       "id",
       "name",
@@ -170,6 +176,7 @@ describe("manual related styles public read", () => {
     const similarOnly = await getManualRelatedStyles(
       fixture.sourceStyleId,
       "KR",
+      "ko",
       SIMILAR_STYLE_ENABLED_ENV,
     );
     expect(similarOnly.SIMILAR_STYLE).toHaveLength(4);
@@ -178,6 +185,7 @@ describe("manual related styles public read", () => {
     const groups = await getManualRelatedStyles(
       fixture.sourceStyleId,
       "KR",
+      "ko",
       {
         MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "ENABLED",
         MANUAL_ITEM_RELATIONS_KR_COMPARE_WITH_ENABLED: "ENABLED",
@@ -213,6 +221,7 @@ describe("manual related styles public read", () => {
     await expect(getManualRelatedStyles(
       fixture.sourceStyleId,
       "US",
+      "en",
       SIMILAR_STYLE_ENABLED_ENV,
     )).resolves.toEqual(emptyGroups());
   });
@@ -223,7 +232,7 @@ function emptyGroups() {
 }
 
 async function read(sourceStyleId: string) {
-  return getManualRelatedStyles(sourceStyleId, "KR", SIMILAR_STYLE_ENABLED_ENV);
+  return getManualRelatedStyles(sourceStyleId, "KR", "ko", SIMILAR_STYLE_ENABLED_ENV);
 }
 
 async function ensureMarket(code = "KR"): Promise<void> {

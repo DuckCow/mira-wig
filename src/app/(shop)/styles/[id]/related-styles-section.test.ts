@@ -36,6 +36,7 @@ describe("related styles PDP section", () => {
         tags: [],
         imageUrl: null,
         basePrice: 85000,
+        usesLegacyFallback: false,
       }],
       COMPARE_WITH: [],
     };
@@ -50,14 +51,37 @@ describe("related styles PDP section", () => {
     expect(html).toContain('href="/kr/ko/styles/exact-target"');
     expect(html).not.toContain("variant");
     expect(html).not.toContain("internalRationale");
+    expect(html).not.toContain("원문의 언어는 확인되지 않았습니다");
+  });
+
+  it("shows one fallback disclosure when any related card uses legacy content", () => {
+    const groups: RelatedStyleViewGroups = {
+      SIMILAR_STYLE: [{
+        id: "legacy-target",
+        name: "Legacy",
+        category: "FASHION",
+        tags: [],
+        imageUrl: null,
+        basePrice: 85000,
+        usesLegacyFallback: true,
+      }],
+      COMPARE_WITH: [],
+    };
+    const html = renderToStaticMarkup(React.createElement(RelatedStylesSectionView, {
+      groups,
+      marketCode: "KR",
+      currency: CURRENCY_META.KRW,
+      locale: "ko",
+    }));
+    expect(html.match(/원문의 언어는 확인되지 않았습니다/gu)).toHaveLength(1);
   });
 
   it("keeps default-off pages empty and fails closed for invalid configuration", async () => {
-    await expect(loadRelatedStylesForPdp("source", "KR", {})).resolves.toEqual({
+    await expect(loadRelatedStylesForPdp("source", "KR", "ko", {})).resolves.toEqual({
       SIMILAR_STYLE: [],
       COMPARE_WITH: [],
     });
-    await expect(loadRelatedStylesForPdp("source", "KR", {
+    await expect(loadRelatedStylesForPdp("source", "KR", "ko", {
       MANUAL_ITEM_RELATIONS_KR_SIMILAR_STYLE_ENABLED: "invalid",
     })).resolves.toEqual({
       SIMILAR_STYLE: [],

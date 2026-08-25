@@ -19,6 +19,11 @@ import {
   type WigStyleDetail,
   type WigVariantDetail,
 } from "./catalog.types";
+import type { Locale } from "./market/locale";
+import {
+  projectWigStyleLocalizedContent,
+  type ProjectedLocalizedContent,
+} from "./wig-style-localized-content/projection";
 
 export {
   WigCategory,
@@ -78,24 +83,33 @@ async function fetchStyleRows(params: GetWigStylesParams, marketCode: string) {
 
 type StyleRow = Awaited<ReturnType<typeof fetchStyleRows>>[number];
 
-function toSummary(row: StyleRow): WigStyleSummary {
+function toSummary(
+  row: StyleRow,
+  projected: ProjectedLocalizedContent,
+): WigStyleSummary {
   const prices = row.variants.flatMap((v) => v.marketPrices.map((p) => p.amount));
   return {
     id: row.id,
-    name: row.name,
+    name: projected.name,
     category: row.category,
     tags: row.tags,
     coverImageKey: row.coverImageKey,
     basePrice: minPriceOrNull(prices),
+    contentProvenance: projected.contentProvenance,
   };
 }
 
 export async function getWigStyles(
   params: GetWigStylesParams,
   marketCode: string,
+  locale: Locale,
 ): Promise<WigStyleSummary[]> {
   const rows = await fetchStyleRows(params, marketCode);
-  return rows.map(toSummary);
+  const projected = await projectWigStyleLocalizedContent(
+    rows.map((row) => ({ id: row.id, name: row.name, description: null })),
+    locale,
+  );
+  return rows.map((row) => toSummary(row, projected.get(row.id)!));
 }
 
 // ── 상세 쿼리 ────────────────────────────────────────────────
@@ -129,7 +143,10 @@ async function fetchStyleDetailRow(id: string, marketCode: string) {
 
 type StyleDetailRow = NonNullable<Awaited<ReturnType<typeof fetchStyleDetailRow>>>;
 
-function toDetail(row: StyleDetailRow): WigStyleDetail {
+function toDetail(
+  row: StyleDetailRow,
+  projected: ProjectedLocalizedContent,
+): WigStyleDetail {
   const variants: WigVariantDetail[] = row.variants.map((v) => ({
     id: v.id,
     color: v.color,
@@ -143,23 +160,29 @@ function toDetail(row: StyleDetailRow): WigStyleDetail {
   const prices = variants.flatMap((v) => v.price === null ? [] : [v.price]);
   return {
     id: row.id,
-    name: row.name,
-    description: row.description,
+    name: projected.name,
+    description: projected.description,
     category: row.category,
     tags: row.tags,
     coverImageKey: row.coverImageKey,
     imageKeys: row.imageKeys,
     basePrice: minPriceOrNull(prices),
     variants,
+    contentProvenance: projected.contentProvenance,
   };
 }
 
 export async function getWigStyleById(
   id: string,
   marketCode: string,
+  locale: Locale,
 ): Promise<WigStyleDetail | null> {
   const row = await fetchStyleDetailRow(id, marketCode);
-  return row ? toDetail(row) : null;
+  if (!row) return null;
+  const projected = await projectWigStyleLocalizedContent([
+    { id: row.id, name: row.name, description: row.description },
+  ], locale);
+  return toDetail(row, projected.get(row.id)!);
 }
 
 function minPriceOrNull(prices: number[]): number | null {
