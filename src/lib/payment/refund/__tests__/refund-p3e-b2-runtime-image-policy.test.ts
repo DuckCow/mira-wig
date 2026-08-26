@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import currentAuthority from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json";
+import historicalSourceAuthority from
+  "./fixtures/refund-p3e-b2-r2a-historical-source-v1.json";
 import {
   DOCKER_INSPECTION_LIMITS,
   FORBIDDEN_CONTENT_PREFIXES,
@@ -36,6 +38,11 @@ const SUPERVISOR = join(
 const R2A_DOCUMENT = join(
   ROOT,
   "docs/payment_policy/refund_worker_p3e_b2_runtime_image_connection_v1.md",
+);
+const HISTORICAL_SOURCE_AUTHORITY = join(
+  ROOT,
+  "src/lib/payment/refund/__tests__/fixtures/"
+    + "refund-p3e-b2-r2a-historical-source-v1.json",
 );
 
 const EXPECTED_R2A_FILES = Object.freeze([
@@ -1324,11 +1331,42 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
   });
 
   it("keeps the historical schema, migrations, and R2A subinventory byte-authoritative", () => {
-    expect(sha256(baselineFile("prisma/schema.prisma"))).toBe(
-      "a9936e59dfd5f19492112fa120ec889e3feb06bdc09d7c36a1fa63f58f6506ad",
+    expect(sha256(readFileSync(HISTORICAL_SOURCE_AUTHORITY))).toBe(
+      "72bc756a42d5733dbf01a8e06c1478baf1e2e83eec93ce6f8e01621abca1ce32",
     );
-    expect(baselineMigrationRuntimeDigest()).toBe(
-      "fdf53976401e7267090057b98ef6e73acb8d2befc4d13f81639e816c972adb61",
+    expect(historicalSourceAuthority.authorityVersion).toBe(
+      "mira-refund-p3e-b2-r2a-historical-source/v1",
+    );
+    expect(historicalSourceAuthority.baselineCommit).toBe(
+      "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
+    );
+    expect(historicalSourceAuthority.historicalSchema).toEqual({
+      path: "prisma/schema.prisma",
+      sha256:
+        "a9936e59dfd5f19492112fa120ec889e3feb06bdc09d7c36a1fa63f58f6506ad",
+    });
+    expect(sha256(readFileSync(
+      join(ROOT, historicalSourceAuthority.checkedOutSchema.path),
+    ))).toBe(historicalSourceAuthority.checkedOutSchema.sha256);
+
+    const historicalMigrations = historicalSourceAuthority.historicalMigrations;
+    const admittedMigrations =
+      historicalSourceAuthority.admittedPostBaselineMigrations;
+    expect(historicalMigrations).toHaveLength(39);
+    expect(admittedMigrations).toHaveLength(1);
+    const migrationAuthority = [...historicalMigrations, ...admittedMigrations];
+    expect(new Set(migrationAuthority.map(({ path }) => path)).size).toBe(40);
+    const checkedOutMigrations = repositoryRelativeFiles(
+      join(ROOT, "prisma/migrations"),
+    ).filter((path) => path.endsWith("/migration.sql"));
+    expect(checkedOutMigrations).toEqual(
+      migrationAuthority.map(({ path }) => path),
+    );
+    for (const entry of migrationAuthority) {
+      expect(sha256(readFileSync(join(ROOT, entry.path)))).toBe(entry.sha256);
+    }
+    expect(migrationRuntimeDigest(historicalMigrations)).toBe(
+      historicalSourceAuthority.historicalMigrationDigest,
     );
     const terraform = repositoryRelativeFiles(INFRA)
       .filter((path) => !path.startsWith(
@@ -1422,31 +1460,17 @@ function repositoryRelativeFiles(root: string): string[] {
     .sort();
 }
 
-function baselineMigrationRuntimeDigest(): string {
+function migrationRuntimeDigest(
+  migrations: readonly Readonly<{ path: string; sha256: string }>[],
+): string {
   const digest = createHash("sha256");
-  const list = spawnSync("git", [
-    "ls-tree", "-r", "--name-only", "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
-    "prisma/migrations",
-  ], { cwd: ROOT, encoding: "utf8" });
-  if (list.status !== 0) throw new Error("BASELINE_MIGRATION_INVENTORY_UNAVAILABLE");
-  const migrations = list.stdout.split("\n")
-    .filter((path) => path.endsWith("/migration.sql"))
-    .sort();
   for (const migration of migrations) {
-    digest.update(basename(dirname(migration)));
+    digest.update(basename(dirname(migration.path)));
     digest.update("\0");
-    digest.update(baselineFile(migration));
+    digest.update(readFileSync(join(ROOT, migration.path)));
     digest.update("\0");
   }
   return digest.digest("hex");
-}
-
-function baselineFile(path: string): Buffer {
-  const result = spawnSync("git", [
-    "show", `dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939:${path}`,
-  ], { cwd: ROOT, encoding: "buffer" });
-  if (result.status !== 0) throw new Error("BASELINE_FILE_UNAVAILABLE");
-  return result.stdout;
 }
 
 function sha256(value: Buffer): string {
