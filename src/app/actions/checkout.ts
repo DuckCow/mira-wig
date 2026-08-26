@@ -48,7 +48,12 @@ export async function createCheckoutSessionAction(
   if (!shipping) return invalidCountry();
 
   try {
-    const created = await createCheckoutSession(db, { userId: session.user.id, marketCode, shipping });
+    const created = await createCheckoutSession(db, {
+      userId: session.user.id,
+      marketCode,
+      communicationLocale: context.locale,
+      shipping,
+    });
     return { success: true, session: created };
   } catch (e) {
     if (e instanceof SessionException) return sessionError(e);

@@ -1753,6 +1753,7 @@ async function submitSessionForMarket(
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode,
+    communicationLocale: marketCode === MarketCode.JP ? "ja" : marketCode === MarketCode.US ? "en" : "ko",
     shipping: validShipping(marketCode),
     now,
   });

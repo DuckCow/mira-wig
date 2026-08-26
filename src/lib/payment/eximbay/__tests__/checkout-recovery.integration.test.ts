@@ -557,6 +557,7 @@ async function createFixture(): Promise<Fixture> {
   const session = await createCheckoutSession(db, {
     userId,
     marketCode: "US",
+    communicationLocale: "en",
     shipping: {
       recipientName: "R11A Buyer",
       phone: "+1-555-0100",

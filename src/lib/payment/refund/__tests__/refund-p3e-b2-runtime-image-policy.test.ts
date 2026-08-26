@@ -1330,7 +1330,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     });
   });
 
-  it("keeps the historical schema, migrations, and R2A subinventory byte-authoritative", () => {
+  it("keeps historical R2A bytes frozen and admits the exact R13B successor migration", () => {
     expect(sha256(readFileSync(HISTORICAL_SOURCE_AUTHORITY))).toBe(
       "72bc756a42d5733dbf01a8e06c1478baf1e2e83eec93ce6f8e01621abca1ce32",
     );
@@ -1345,9 +1345,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       sha256:
         "a9936e59dfd5f19492112fa120ec889e3feb06bdc09d7c36a1fa63f58f6506ad",
     });
-    expect(sha256(readFileSync(
-      join(ROOT, historicalSourceAuthority.checkedOutSchema.path),
-    ))).toBe(historicalSourceAuthority.checkedOutSchema.sha256);
+    expect(historicalSourceAuthority.checkedOutSchema).toEqual({
+      path: "prisma/schema.prisma",
+      sha256: "404e2c2fa039a002d4255b97468933b9b0ee9b4c4d0eacfc2c2769d1e827c333",
+    });
 
     const historicalMigrations = historicalSourceAuthority.historicalMigrations;
     const admittedMigrations =
@@ -1359,12 +1360,19 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const checkedOutMigrations = repositoryRelativeFiles(
       join(ROOT, "prisma/migrations"),
     ).filter((path) => path.endsWith("/migration.sql"));
-    expect(checkedOutMigrations).toEqual(
-      migrationAuthority.map(({ path }) => path),
-    );
+    const r13bMigration = {
+      path: "prisma/migrations/20260827090000_add_checkout_communication_locale/migration.sql",
+      sha256: "e95285c27440152611e654852a204ed6e126a0cb6a223774432098db0a8e60bb",
+    };
+    expect(checkedOutMigrations).toEqual([
+      ...migrationAuthority.map(({ path }) => path),
+      r13bMigration.path,
+    ]);
     for (const entry of migrationAuthority) {
       expect(sha256(readFileSync(join(ROOT, entry.path)))).toBe(entry.sha256);
     }
+    expect(sha256(readFileSync(join(ROOT, r13bMigration.path))))
+      .toBe(r13bMigration.sha256);
     expect(migrationRuntimeDigest(historicalMigrations)).toBe(
       historicalSourceAuthority.historicalMigrationDigest,
     );

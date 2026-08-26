@@ -19,6 +19,10 @@ import { MarketCode } from "@/lib/market/types";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { initiatePaymentAttempt } from "@/lib/payment/attempt/initiate";
 import { PaymentMethod } from "@/lib/payment/providers/routing";
+import {
+  CUSTOMER_ORDER_PAID_EMAIL_V1,
+  orderPaidEmailDedupKey,
+} from "@/lib/payment/email";
 import { createCheckoutSession, transitionCheckoutSession, type CheckoutShippingInput } from "@/lib/payment/session";
 import {
   completeFromCapture,
@@ -77,6 +81,11 @@ describe("payment completion core", () => {
     expect(order.items[0]?.mr).not.toBeNull();
     await expect(statusOf(session.sessionId)).resolves.toBe(CheckoutSessionStatus.COMPLETED);
     await expect(db.cartItem.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
+    await expect(orderPaidEmailRow(order.id)).resolves.toMatchObject({
+      topic: CUSTOMER_ORDER_PAID_EMAIL_V1,
+      dedupKey: orderPaidEmailDedupKey(order.id),
+      payload: { orderId: order.id },
+    });
   });
 
   it("finalization reasserts exact parent identity before order or MR writes", async () => {
@@ -183,6 +192,7 @@ describe("payment completion core", () => {
     const session = await createCheckoutSession(db, {
       userId: ctx.userId,
       marketCode: MarketCode.KR,
+      communicationLocale: "ko",
       shipping: { ...validShipping(), administrativeArea: "" },
       now: defaultNow(),
     });
@@ -285,6 +295,24 @@ describe("payment completion core", () => {
     await expect(orderCount(ctx.userId)).resolves.toBe(1);
     await expect(mrCount(ctx.userId)).resolves.toBe(1);
     await expect(outboxCount(facts)).resolves.toBe(0);
+    const order = await requireOrder(ctx.userId);
+    await expect(orderPaidEmailCount(order.id)).resolves.toBe(1);
+  });
+
+  it("legacy null communication Locale preserves completion and suppresses email intent", async () => {
+    const variant = await createCatalogVariant(ctx, { amount: 12_000, stock: 5 });
+    await addCart(ctx, variant, 1);
+    const session = await submitSession(ctx);
+    await db.checkoutSession.update({
+      where: { id: session.sessionId },
+      data: { communicationLocale: null },
+    });
+
+    const result = await completeFromCapture(db, captureFacts(ctx, session));
+    const order = await requireOrder(ctx.userId);
+
+    expect(result.kind).toBe("completed");
+    await expect(orderPaidEmailCount(order.id)).resolves.toBe(0);
   });
 
   it("post-submit same-row additions preserve the exact CartItem id and positive residual", async () => {
@@ -1104,6 +1132,10 @@ async function upsertMarket(
 }
 
 async function cleanup(context: TestContext): Promise<void> {
+  const orders = await db.order.findMany({ where: { userId: context.userId }, select: { id: true } });
+  await db.paymentOutbox.deleteMany({
+    where: { dedupKey: { in: orders.map((order) => orderPaidEmailDedupKey(order.id)) } },
+  });
   await db.paymentOutbox.deleteMany({ where: { dedupKey: { in: context.outboxDedupKeys } } });
   await deleteOrders(context.userId);
   await deletePaymentsAndSessions(context.userId);
@@ -1195,6 +1227,7 @@ async function submitSession(context: TestContext, now?: Date) {
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode: MarketCode.KR,
+    communicationLocale: "ko",
     shipping: validShipping(),
     now: now ?? defaultNow(),
   });
@@ -1315,6 +1348,14 @@ async function succeededPaymentCount(facts: CaptureFacts): Promise<number> {
 
 async function outboxCount(facts: CaptureFacts): Promise<number> {
   return db.paymentOutbox.count({ where: { dedupKey: remediationDedupKey(facts) } });
+}
+
+async function orderPaidEmailRow(orderId: string) {
+  return db.paymentOutbox.findUnique({ where: { dedupKey: orderPaidEmailDedupKey(orderId) } });
+}
+
+async function orderPaidEmailCount(orderId: string): Promise<number> {
+  return db.paymentOutbox.count({ where: { dedupKey: orderPaidEmailDedupKey(orderId) } });
 }
 
 async function statusOf(sessionId: string): Promise<CheckoutSessionStatus> {

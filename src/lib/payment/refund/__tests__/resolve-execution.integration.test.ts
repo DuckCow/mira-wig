@@ -18,6 +18,10 @@ import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
+import {
+  CUSTOMER_REFUND_SUCCEEDED_EMAIL_V1,
+  refundSucceededEmailDedupKey,
+} from "@/lib/payment/email";
 import { acquireRefundExecutionLease } from "../acquire-lease";
 import {
   REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED,
@@ -85,7 +89,7 @@ describe("fenced refund execution observation persistence", () => {
   });
 
   it("applies a fresh exact fence, leaves dispatch immutable, and replays with the gate disabled", async () => {
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     const dispatchBefore = await db.refundExecutionDispatchAttempt.findUniqueOrThrow({
       where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
     });
@@ -114,6 +118,11 @@ describe("fenced refund execution observation persistence", () => {
       where: { commandId_ordinal: { commandId: prepared.fixture.commandId, ordinal: 1 } },
     });
     expect(isDeepStrictEqual(dispatchAfter, dispatchBefore)).toBe(true);
+    await expect(refundEmailRow(prepared.fixture.refundAttemptId)).resolves.toMatchObject({
+      topic: CUSTOMER_REFUND_SUCCEEDED_EMAIL_V1,
+      dedupKey: refundSucceededEmailDedupKey(prepared.fixture.refundAttemptId),
+      payload: { refundAttemptId: prepared.fixture.refundAttemptId },
+    });
 
     const replay = await replayRefundExecutionResult(db, replayInput(input));
     expectSuccess(replay, true, RefundExecutionEvidenceApplication.APPLIED);
@@ -124,10 +133,11 @@ describe("fenced refund execution observation persistence", () => {
       {},
     );
     expectSuccess(freshShapedReplay, true, RefundExecutionEvidenceApplication.APPLIED);
+    await expect(refundEmailCount(prepared.fixture.refundAttemptId)).resolves.toBe(1);
   });
 
   it("uses the persisted physical dispatch key instead of RefundAttempt idempotency", async () => {
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     const providerOperationKey = `physical-wire-${crypto.randomUUID()}`;
     const requestFingerprint = fingerprintRefundRequest({
       provider: PaymentProvider.MOCK,
@@ -160,7 +170,7 @@ describe("fenced refund execution observation persistence", () => {
   });
 
   it("gates only absent-evidence fresh writes and fails invalid configuration closed", async () => {
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     const before = await redactedDispatchAuthorizationState(prepared.fixture);
 
     expectFailure(await persistFreshRefundExecutionObservation(db, freshInput(prepared), {}), "FEATURE_DISABLED");
@@ -313,7 +323,7 @@ describe("fenced refund execution observation persistence", () => {
   });
 
   it("accepts an expired but otherwise exact contacted fence", async () => {
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     await db.refundExecutionCommand.update({
       where: { id: prepared.fixture.commandId },
       data: { leaseUntil: new Date("2000-01-01T00:00:00.000Z") },
@@ -372,7 +382,7 @@ describe("fenced refund execution observation persistence", () => {
       order: OrderStatus.REFUND_PENDING,
     },
   ])("preserves the $outcome result mapping", async ({ outcome, attempt, command, order }) => {
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     const result = await persistFreshRefundExecutionObservation(db, freshInput(prepared, {
       outcome,
       observedProviderRefundId: null,
@@ -384,6 +394,7 @@ describe("fenced refund execution observation persistence", () => {
     expect(state.attempt.status).toBe(attempt);
     expect(state.command.status).toBe(command);
     expect(state.order.status).toBe(order);
+    await expect(refundEmailCount(prepared.fixture.refundAttemptId)).resolves.toBe(0);
   });
 
   it("parks incomplete success and conflicting money without changing the result mapping", async () => {
@@ -435,7 +446,7 @@ describe("fenced refund execution observation persistence", () => {
       RefundExecutionEvidenceApplication.APPLIED,
     );
 
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     const siblingProviderRefundId = `sibling-provider-refund-${crypto.randomUUID()}`;
     const siblingId = await addSucceededSibling(
       prepared.fixture,
@@ -620,7 +631,7 @@ describe("fenced refund execution observation persistence", () => {
     { table: "RefundAttemptTransition", constraint: "e4a_test_transition_insert", kind: "transition" },
     { table: "RefundExecutionCommand", constraint: "e4a_test_command_final_cas", kind: "command" },
   ])("rolls every projection back on $kind persistence failure", async ({ table, constraint, kind }) => {
-    const prepared = await prepareContacted(fixtures);
+    const prepared = await prepareContacted(fixtures, { communicationLocale: "en" });
     const before = await redactedDispatchAuthorizationState(prepared.fixture);
     const predicate = faultPredicate(kind, prepared.fixture);
     await addScopedCheck(table, constraint, predicate);
@@ -631,6 +642,7 @@ describe("fenced refund execution observation persistence", () => {
       expect(result.code).toBe("PERSISTENCE_CONFLICT");
       const after = await redactedDispatchAuthorizationState(prepared.fixture);
       expect(isDeepStrictEqual(after, before)).toBe(true);
+      await expect(refundEmailCount(prepared.fixture.refundAttemptId)).resolves.toBe(0);
     } finally {
       await dropScopedCheck(table, constraint);
     }
@@ -978,6 +990,18 @@ function expectFailure(
   if (result.ok) throw new Error("Expected result failure.");
   expect(result.code).toBe(code);
   expect(Object.isFrozen(result)).toBe(true);
+}
+
+async function refundEmailRow(refundAttemptId: string) {
+  return db.paymentOutbox.findUnique({
+    where: { dedupKey: refundSucceededEmailDedupKey(refundAttemptId) },
+  });
+}
+
+async function refundEmailCount(refundAttemptId: string): Promise<number> {
+  return db.paymentOutbox.count({
+    where: { dedupKey: refundSucceededEmailDedupKey(refundAttemptId) },
+  });
 }
 
 function faultPredicate(kind: string, fixture: DispatchFixture): string {

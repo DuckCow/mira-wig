@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { snapshotToJson } from "@/lib/order/snapshot";
 import { normalizeShippingAddress } from "@/lib/order/validation";
 import { isCurrencyCode } from "@/lib/market/types";
+import { isLocale } from "@/lib/market/locale";
 import {
   variantPurchasableInMarketFailure,
   commerceIntegrityMessage,
@@ -18,6 +19,12 @@ export async function createCheckoutSession(
   client: PrismaClient,
   input: CreateCheckoutSessionInput,
 ): Promise<CreateCheckoutSessionResult> {
+  if (!isLocale(input.communicationLocale)) {
+    throw new SessionException(
+      "COMMUNICATION_LOCALE_INVALID",
+      "지원하지 않는 주문 커뮤니케이션 언어입니다.",
+    );
+  }
   const normalizedInput: CreateCheckoutSessionInput = {
     ...input,
     shipping: requireNormalizedShipping(input.shipping),
@@ -215,6 +222,7 @@ async function createSession(
     data: {
       user: { connect: { id: input.userId } },
       market: { connect: { code: input.marketCode } },
+      communicationLocale: input.communicationLocale,
       currency,
       status: CheckoutSessionStatus.SUBMITTED,
       subtotalAmount,

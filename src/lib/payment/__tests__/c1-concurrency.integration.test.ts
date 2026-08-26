@@ -391,6 +391,7 @@ async function submitSession(context: TestContext, now = C1_NOW): Promise<Sessio
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode: MarketCode.KR,
+    communicationLocale: "ko",
     shipping: validShipping(),
     now,
   });

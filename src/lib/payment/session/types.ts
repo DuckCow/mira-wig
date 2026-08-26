@@ -1,5 +1,6 @@
 import type { CheckoutSessionStatus, FulfillmentType, ShippingCountry } from "@prisma/client";
 import type { MarketCode } from "@/lib/market/types";
+import type { Locale } from "@/lib/market/locale";
 import type { SnapshotData } from "@/lib/order/types";
 
 // 30 minutes keeps stale payment intents short-lived while leaving room for address/payment entry.
@@ -16,6 +17,7 @@ export type SessionErrorCode =
   | "VARIANT_PRICE_UNAVAILABLE"
   | "STOCK_INSUFFICIENT"
   | "MARKET_UNAVAILABLE"
+  | "COMMUNICATION_LOCALE_INVALID"
   | "SHIPPING_COUNTRY_INVALID"
   | "SHIPPING_ADDRESS_INVALID"
   | "TOTAL_AMOUNT_TOO_LOW"
@@ -46,6 +48,7 @@ export interface CheckoutShippingInput {
 export interface CreateCheckoutSessionInput {
   userId: string;
   marketCode: MarketCode;
+  communicationLocale: Locale;
   shipping: CheckoutShippingInput;
   now?: Date;
 }
