@@ -1,0 +1,19 @@
+import { pathToFileURL } from "node:url";
+import { runEximbayRefundCanaryOnce } from
+  "../src/lib/payment/refund/run-eximbay-refund-canary-once";
+
+export async function main(): Promise<number> {
+  if (process.argv.length !== 2) return 64;
+  const result = await runEximbayRefundCanaryOnce(process.env);
+  const line = `${JSON.stringify(result)}\n`;
+  const clean = result.cleanupFailures === undefined;
+  (result.ok && clean ? process.stdout : process.stderr).write(line);
+  return result.ok && clean ? 0 : 1;
+}
+
+const entrypoint = process.argv[1];
+if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
+  void main().then((code) => { process.exitCode = code; }).catch(() => {
+    process.exitCode = 1;
+  });
+}

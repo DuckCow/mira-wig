@@ -15,6 +15,8 @@ const ADMISSION = join(REFUND, "refund-provider-contact-admission.ts");
 const HOST = join(REFUND, "run-refund-execution-worker-host.ts");
 const HOST_PROCESS = join(REFUND, "worker-host-process.ts");
 const HOST_SCRIPT = join(ROOT, "scripts/refund-execution-worker.ts");
+const EXIMBAY_CANARY = join(REFUND, "run-eximbay-refund-canary-once.ts");
+const EXIMBAY_CANARY_SCRIPT = join(ROOT, "scripts/eximbay-refund-canary.ts");
 const PREFLIGHT_ADMISSION = join(REFUND, "refund-sandbox-provider-free-preflight-admission.ts");
 const PREFLIGHT_RUNNER = join(REFUND, "run-refund-sandbox-provider-free-preflight.ts");
 const PREFLIGHT_PROCESS = join(REFUND, "refund-sandbox-provider-free-preflight-process.ts");
@@ -25,6 +27,8 @@ describe("P3E-B privileged reachability", () => {
     const files = productionSourceFiles();
     expect(reverseReachableFiles(ADMISSION, files).map(repositoryPath).sort()).toEqual([
       ADMISSION,
+      EXIMBAY_CANARY,
+      EXIMBAY_CANARY_SCRIPT,
       HOST,
       HOST_PROCESS,
       HOST_SCRIPT,

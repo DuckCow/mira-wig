@@ -52,6 +52,7 @@ export type RefundSandboxProviderFreePreflightDependencies<Database> = Readonly<
   readReconciliation: (database: Database) => Promise<unknown>;
   inspectCredential: (env: PreflightEnv) => unknown;
   probeAdmission: (env: PreflightEnv) => Promise<RefundSandboxProviderFreeAdmissionProbeResult>;
+  readUnconsumedEximbayCanaryApprovalCount: (database: Database) => Promise<number>;
 }>;
 
 export const defaultRefundSandboxProviderFreePreflightDependencies:
@@ -71,6 +72,9 @@ RefundSandboxProviderFreePreflightDependencies<PrismaClient> = Object.freeze({
   readReconciliation: readRefundOperationsReconciliationSnapshot,
   inspectCredential: inspectRefundCredentialLifecycle,
   probeAdmission: probeRefundSandboxProviderFreeAdmission,
+  readUnconsumedEximbayCanaryApprovalCount: (database) => (
+    database.eximbayRefundSandboxCanaryApproval.count({ where: { consumedAt: null } })
+  ),
 });
 
 export async function runRefundSandboxProviderFreePreflight<Database>(
@@ -152,6 +156,10 @@ async function providerFreeStateReadiness<Database>(
   if (!absentCredential(dependencies.inspectCredential(inspected.activationEnvironment))) {
     return refundSandboxProviderFreePreflightFailure("CONFIG_INVALID");
   }
+  const approvalCount = await safeDatabaseRead(
+    () => dependencies.readUnconsumedEximbayCanaryApprovalCount(database),
+  );
+  if (approvalCount !== 0) return refundSandboxProviderFreePreflightFailure("PREFLIGHT_NOT_READY");
   const admission = await dependencies.probeAdmission({ DATABASE_URL: inspected.DATABASE_URL });
   return admission === "ONE_WINNER_ONE_BUSY"
     ? refundSandboxProviderFreePreflightComplete()

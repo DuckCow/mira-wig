@@ -1,4 +1,9 @@
-import { PaymentMode, PaymentProvider } from "@prisma/client";
+import {
+  PaymentAdapterExecutionKind,
+  PaymentMode,
+  PaymentProvider,
+  RefundAttemptActorType,
+} from "@prisma/client";
 import { Client } from "pg";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
@@ -10,6 +15,8 @@ import {
   REFUND_EXECUTION_LEASE_RELEASE_ENABLED,
 } from "../../../execution-activation";
 import { releaseRefundExecutionLease } from "../../../release-lease";
+import { sealEximbayRefundCanaryTarget } from
+  "../../../eximbay-refund-canary-target-binding";
 import {
   cleanupDispatchFixtures,
   createDispatchFixture,
@@ -203,6 +210,29 @@ describe("dormant Eximbay first-refund preflight and R1", () => {
     expect((await durableState(leased.fixture)).dispatches).toHaveLength(0);
   });
 
+  it("accepts the canary's exact presealed operation binding and rejects drift without a second binding", async () => {
+    const leased = await trackedFixture(fixtures, 1_234, 1_234, true);
+    expect(await bindingCount(leased.fixture)).toBe(1);
+
+    let driftCalls = 0;
+    const drifted = createEximbayFirstRefundDispatchAuthorizer({
+      config: { ...CONFIG, credentialGenerationBindingId: "generation-test-drift" },
+      retrieve: () => {
+        driftCalls += 1;
+        return Promise.resolve(response(leased, 1_234));
+      },
+    });
+    expect(failureCode(await drifted(db, input(leased.lease)))).toBe("BINDING_MISMATCH");
+    expect(driftCalls).toBe(0);
+    expect(await bindingCount(leased.fixture)).toBe(1);
+
+    const accepted = await authorizer(
+      leased, () => Promise.resolve(response(leased, 1_234)),
+    )(db, input(leased.lease));
+    expect(accepted.ok).toBe(true);
+    expect(await bindingCount(leased.fixture)).toBe(1);
+  });
+
   it("reloads Payment authority after waiting for its canonical lock", async () => {
     const leased = await trackedFixture(fixtures, 1_234, 1_234);
     const blocker = await pgClient();
@@ -294,10 +324,15 @@ async function trackedFixture(
   fixtures: DispatchFixture[],
   totalAmount: number,
   targetAmount: number,
+  presealCanary = false,
 ): Promise<LeasedFixture> {
   const fixture = await createDispatchFixture({
     totalAmount,
     targetAmount,
+    ...(presealCanary ? {
+      refundActorType: RefundAttemptActorType.SYSTEM,
+      refundActorUserId: null,
+    } : {}),
   });
   fixtures.push(fixture);
   await seedEximbayPaymentForTest(fixture);
@@ -305,17 +340,40 @@ async function trackedFixture(
     db.order.update({ where: { id: fixture.orderId }, data: { currency: "USD" } }),
     db.refundAttempt.update({
       where: { id: fixture.refundAttemptId },
-      data: { currency: "USD", provider: PaymentProvider.EXIMBAY, mode: PaymentMode.SANDBOX },
+      data: {
+        currency: "USD",
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      },
     }),
+    ...(presealCanary ? [db.payment.update({
+      where: { id: fixture.paymentId },
+      data: { adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL },
+    })] : []),
   ]);
   const payment = await db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } });
   if (!payment.providerOrderId) throw new Error("Missing Eximbay provider order id fixture.");
+  if (presealCanary) {
+    await sealEximbayRefundCanaryTarget(db, {
+      commandId: fixture.commandId,
+      merchantAccountBindingId: CONFIG.merchantAccountBindingId,
+      credentialGenerationBindingId: CONFIG.credentialGenerationBindingId,
+      syntheticProvenanceDigest: "a".repeat(64),
+      noCustomerPiiAttested: true,
+    });
+  }
   const leased = await acquireRefundExecutionLease(db, {
     commandId: fixture.commandId,
     leaseOwner: "eximbay-preflight-test",
   }, LEASE_ENV);
   if (!leased.ok) throw new Error(leased.code);
   return { fixture, lease: leased.lease, providerOrderId: payment.providerOrderId };
+}
+
+function bindingCount(fixture: DispatchFixture): Promise<number> {
+  return db.refundExecutionProviderOperationBinding.count({
+    where: { refundAttemptId: fixture.refundAttemptId },
+  });
 }
 
 async function seedEximbayPaymentForTest(fixture: DispatchFixture): Promise<void> {

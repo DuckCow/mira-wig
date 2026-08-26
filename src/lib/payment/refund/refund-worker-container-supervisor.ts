@@ -11,6 +11,7 @@ import {
 import {
   parseCanonicalRefundCloudSqlDatabaseUrl,
 } from "./refund-sandbox-provider-free-preflight-environment";
+import { parseEximbayRefundCanaryEnvironment } from "./eximbay-refund-canary-environment";
 import {
   TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
   TOSS_REFUND_SANDBOX_MERCHANT_BINDING,
@@ -36,6 +37,9 @@ const WORKER_BUNDLE = fileURLToPath(new URL("./refund-execution-worker.mjs", imp
 const PREFLIGHT_BUNDLE = fileURLToPath(
   new URL("./refund-sandbox-provider-free-preflight.mjs", import.meta.url),
 );
+const EXIMBAY_CANARY_BUNDLE = fileURLToPath(
+  new URL("./eximbay-refund-canary.mjs", import.meta.url),
+);
 const PROXY_EXECUTABLE = "/usr/local/bin/cloud-sql-proxy";
 const SYSTEMIC_FAILURE_LINE = '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n';
 const DATABASE_UNAVAILABLE_LINE = '{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n';
@@ -48,6 +52,7 @@ export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
   "worker-once",
   "sandbox-preflight",
   "image-self-check",
+  "eximbay-canary-once",
 ] as const);
 
 export type RefundWorkerContainerCommand = typeof REFUND_WORKER_CONTAINER_COMMANDS[number];
@@ -88,6 +93,7 @@ export type RefundWorkerContainerSupervisorDependencies = Readonly<{
   proxyExecutable: string;
   workerBundle: string;
   preflightBundle: string;
+  eximbayCanaryBundle: string;
   inspectSelf: () => Promise<RefundWorkerImageSelfCheck>;
 }>;
 
@@ -100,6 +106,7 @@ export type RefundWorkerImageSelfCheck = Readonly<{
   proxyVersionCompatible: true;
   workerBundlePresent: true;
   preflightBundlePresent: true;
+  eximbayCanaryBundlePresent: true;
   migrationCount: number;
   migrationDigest: string;
   nonRoot: true;
@@ -121,6 +128,7 @@ RefundWorkerContainerSupervisorDependencies = Object.freeze({
   proxyExecutable: PROXY_EXECUTABLE,
   workerBundle: WORKER_BUNDLE,
   preflightBundle: PREFLIGHT_BUNDLE,
+  eximbayCanaryBundle: EXIMBAY_CANARY_BUNDLE,
   inspectSelf: inspectRefundWorkerImage,
 });
 
@@ -139,10 +147,8 @@ export async function runRefundWorkerContainerSupervisor(
 ): Promise<number> {
   const command = exactContainerCommand(args);
   if (!command) return writeStatic(output.stderr, INVALID_HOST_INPUT_LINE, 64);
-  if (command === "image-self-check") return runImageSelfCheck(output, dependencies);
-  if (command === "worker-once") {
-    return runWorkerOnce(env, output, dependencies);
-  }
+  const direct = directCommand(command, env, output, dependencies);
+  if (direct) return direct;
   const binding = validateDatabaseBinding(env);
   if (!binding) return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
   const child = command === "sandbox-preflight"
@@ -152,6 +158,33 @@ export async function runRefundWorkerContainerSupervisor(
       args: Object.freeze([dependencies.workerBundle, command === "worker-check" ? "check" : "health"]),
     });
   return runWithProxy(binding, child, env, output, dependencies);
+}
+
+function directCommand(
+  command: RefundWorkerContainerCommand,
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> | null {
+  if (command === "image-self-check") return runImageSelfCheck(output, dependencies);
+  if (command === "eximbay-canary-once") return runEximbayCanaryOnce(env, output, dependencies);
+  return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+}
+
+async function runEximbayCanaryOnce(
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> {
+  if (!parseEximbayRefundCanaryEnvironment(env)) {
+    return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
+  }
+  const binding = validateDatabaseBinding(env);
+  if (!binding) return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
+  return runWithProxy(binding, Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([dependencies.eximbayCanaryBundle]),
+  }), env, output, dependencies);
 }
 
 async function runWorkerOnce(
@@ -545,6 +578,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     access(PROXY_EXECUTABLE, fsConstants.X_OK),
     access(WORKER_BUNDLE, fsConstants.R_OK),
     access(PREFLIGHT_BUNDLE, fsConstants.R_OK),
+    access(EXIMBAY_CANARY_BUNDLE, fsConstants.R_OK),
   ]);
   const version = spawnSync(PROXY_EXECUTABLE, ["--version"], {
     encoding: "utf8",
@@ -565,6 +599,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     proxyVersionCompatible: true,
     workerBundlePresent: true,
     preflightBundlePresent: true,
+    eximbayCanaryBundlePresent: true,
     migrationCount: migrationProof.migrationCount,
     migrationDigest: migrationProof.migrationDigest,
     nonRoot: true,
