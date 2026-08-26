@@ -15,6 +15,7 @@ import {
   type RefundExecutionResult,
 } from "./execution-result-contract";
 import type { ResolutionAggregate, ResolutionPlan, ResolutionTarget } from "./execution-result-plan";
+import { enqueueRefundSucceededEmailIntent } from "@/lib/payment/email/intent";
 
 type ResolutionTx = Prisma.TransactionClient;
 type PersistenceContext = {
@@ -117,6 +118,12 @@ async function persistResolutionWrites(
     });
   }
   await finalizeCommand(tx, context, input, plan);
+  if (plan.attemptStatus === RefundAttemptStatus.SUCCEEDED) {
+    await enqueueRefundSucceededEmailIntent(tx, {
+      refundAttemptId: context.target.id,
+      checkoutSessionId: context.aggregate.checkoutSessionId,
+    });
+  }
   return resultSuccess(evidence, context.target.id, false);
 }
 

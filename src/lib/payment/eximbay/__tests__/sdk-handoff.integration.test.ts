@@ -445,6 +445,7 @@ async function createSession(ctx: TestContext, market: "US" | "JP", amount: numb
   return createCheckoutSession(db, {
     userId: ctx.userId,
     marketCode: market,
+    communicationLocale: market === "JP" ? "ja" : market === "US" ? "en" : "ko",
     shipping: shipping(market),
   });
 }

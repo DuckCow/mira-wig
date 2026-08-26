@@ -105,7 +105,12 @@ describe("checkout expected market gate", () => {
   it("passes the exact matched server market into the existing session creator", async () => {
     await expect(createCheckoutSessionAction(input)).resolves.toMatchObject({ success: true });
     expect(createSession).toHaveBeenCalledOnce();
-    expect(createSession.mock.calls[0]?.[1]).toMatchObject({ userId: "checkout-user", marketCode: "KR", shipping: { country: "KR" } });
+    expect(createSession.mock.calls[0]?.[1]).toMatchObject({
+      userId: "checkout-user",
+      marketCode: "KR",
+      communicationLocale: "ko",
+      shipping: { country: "KR" },
+    });
   });
 });
 

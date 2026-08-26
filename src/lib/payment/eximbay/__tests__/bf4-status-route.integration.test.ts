@@ -534,6 +534,7 @@ async function createFixture(): Promise<Fixture> {
   const session = await createCheckoutSession(db, {
     userId,
     marketCode: "US",
+    communicationLocale: "en",
     shipping: validShipping(),
     now: NOW,
   });

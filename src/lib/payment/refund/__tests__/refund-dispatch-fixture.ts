@@ -53,6 +53,7 @@ export enum DispatchFixtureCleanupStep {
 interface DispatchFixtureOptions {
   totalAmount?: number;
   targetAmount?: number;
+  communicationLocale?: "ko" | "en" | "ja" | null;
   availableAt?: Date;
   provider?: PaymentProvider;
   mode?: PaymentMode;
@@ -124,6 +125,7 @@ async function constructDispatchFixture(
     data: {
       userId,
       marketCode: MARKET_CODE,
+      communicationLocale: fixtureCommunicationLocale(options),
       currency: "KRW",
       status: CheckoutSessionStatus.COMPLETED,
       subtotalAmount: totalAmount,
@@ -212,6 +214,12 @@ async function constructDispatchFixture(
     providerPaymentKey,
     operationKey: requestedAttempt.operationKey,
   };
+}
+
+function fixtureCommunicationLocale(
+  options: DispatchFixtureOptions,
+): "ko" | "en" | "ja" | null {
+  return options.communicationLocale === undefined ? null : options.communicationLocale;
 }
 
 function refundActor(options: DispatchFixtureOptions): Readonly<{
@@ -564,6 +572,11 @@ async function cleanupDispatchAuthorities(
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.paymentOutbox.deleteMany({
+      where: { dedupKey: { in: attemptIds.map((id) => `customer-refund-succeeded:v1:${id}`) } },
+    })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } })

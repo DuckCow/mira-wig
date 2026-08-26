@@ -1162,6 +1162,7 @@ async function submitSessionWithOneLine(context: TestContext) {
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode: MarketCode.KR,
+    communicationLocale: "ko",
     shipping: validShipping(),
     now: B4_NOW,
   });

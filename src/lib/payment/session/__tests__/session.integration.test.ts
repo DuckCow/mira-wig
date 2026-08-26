@@ -67,6 +67,7 @@ describe("checkout session lifecycle", () => {
     const session = await findSession(result.sessionId);
 
     expect(session.status).toBe(CheckoutSessionStatus.SUBMITTED);
+    expect(session.communicationLocale).toBe("ko");
     expect(session.currency).toBe("KRW");
     expect(session.subtotalAmount).toBe(31_500);
     expect(session.shippingAmount).toBe(0);
@@ -74,6 +75,23 @@ describe("checkout session lifecycle", () => {
     expect(session.shipping?.recipientName).toBe("홍길동");
     expect(session.lines).toHaveLength(2);
   });
+
+  it.each(["ko", "en", "ja"] as const)(
+    "freezes admitted %s communication Locale independently of Market defaults",
+    async (communicationLocale) => {
+      const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
+      await addCart(ctx, variant, 1);
+      const result = await createCheckoutSession(db, baseInput(ctx, { communicationLocale }));
+      await db.market.update({ where: { code: MarketCode.KR }, data: { defaultLocale: "ja" } });
+
+      const session = await db.checkoutSession.findUniqueOrThrow({
+        where: { id: result.sessionId },
+        select: { marketCode: true, communicationLocale: true },
+      });
+
+      expect(session).toEqual({ marketCode: MarketCode.KR, communicationLocale });
+    },
+  );
 
   it("KR administrativeArea 빈 문자열은 canonical 빈 문자열로 저장한다", async () => {
     const variant = await createCartVariant(ctx, { amount: 12_000, stock: 5 });
@@ -921,6 +939,7 @@ function baseInput(
   return {
     userId: context.userId,
     marketCode: MarketCode.KR,
+    communicationLocale: "ko",
     shipping: validShipping(ShippingCountry.KR),
     ...overrides,
   };

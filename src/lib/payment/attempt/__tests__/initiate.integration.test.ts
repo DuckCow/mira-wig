@@ -2448,6 +2448,7 @@ async function submitSessionWithOneLine(context: TestContext) {
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode: MarketCode.KR,
+    communicationLocale: "ko",
     shipping: validShipping(),
   });
 }
@@ -2482,6 +2483,7 @@ async function submitUsSessionWithOneLine(context: TestContext) {
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode: MarketCode.US,
+    communicationLocale: "en",
     shipping: validUsShipping(),
   });
 }
@@ -2516,6 +2518,7 @@ async function submitJpSessionWithOneLine(context: TestContext) {
   return createCheckoutSession(db, {
     userId: context.userId,
     marketCode: MarketCode.JP,
+    communicationLocale: "ja",
     shipping: validJpShipping(),
   });
 }

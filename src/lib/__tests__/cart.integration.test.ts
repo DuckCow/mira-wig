@@ -84,6 +84,7 @@ describe("cart pricing", () => {
     const created = await createCheckoutSession(db, {
       userId: ctx.userId,
       marketCode: MarketCode.US,
+      communicationLocale: "en",
       shipping: validShipping(ShippingCountry.US),
     });
     const session = await checkoutSessionWithLines(created.sessionId);
@@ -360,6 +361,7 @@ describe("cart pricing", () => {
     await expect(createCheckoutSession(db, {
       userId: ctx.userId,
       marketCode: MarketCode.KR,
+      communicationLocale: "ko",
       shipping: validShipping(ShippingCountry.KR),
     })).rejects.toMatchObject({ code: "VARIANT_PARENT_MISMATCH" });
     await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(0);
@@ -382,6 +384,7 @@ describe("cart pricing", () => {
     await expect(createCheckoutSession(db, {
       userId: ctx.userId,
       marketCode: MarketCode.US,
+      communicationLocale: "en",
       shipping: validShipping(ShippingCountry.US),
     })).rejects.toMatchObject({ code: "STYLE_UNPUBLISHED" });
     await expect(db.checkoutSession.count({ where: { userId: ctx.userId } })).resolves.toBe(0);

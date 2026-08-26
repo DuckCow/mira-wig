@@ -9,6 +9,7 @@ import {
 import type { PrismaClient } from "@prisma/client";
 import { parseSnapshotData, snapshotToJson } from "@/lib/order/snapshot";
 import { containsSuspensionCycle } from "@/lib/payment/remediation";
+import { enqueueOrderPaidEmailIntent } from "@/lib/payment/email/intent";
 import { transitionCheckoutSession } from "@/lib/payment/session";
 import type { CheckoutSessionTransition } from "@/lib/payment/session";
 import type {
@@ -63,6 +64,10 @@ async function completeInTransaction(
   await consumePurchasedCartProvenance(tx, session);
   await completeSession(tx, session, facts);
   await finalizePayment(tx, payment, facts);
+  await enqueueOrderPaidEmailIntent(tx, {
+    orderId: order.id,
+    communicationLocale: session.communicationLocale,
+  });
   return { kind: "completed", checkoutSessionId: session.id, paymentId: payment.id, orderId: order.id };
 }
 

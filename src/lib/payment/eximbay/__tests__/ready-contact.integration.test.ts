@@ -492,6 +492,7 @@ async function createUsSession(ctx: TestContext, recipientName = "Synthetic Ship
   return createCheckoutSession(db, {
     userId: ctx.userId,
     marketCode: "US",
+    communicationLocale: "en",
     shipping: shipping(recipientName),
   });
 }
