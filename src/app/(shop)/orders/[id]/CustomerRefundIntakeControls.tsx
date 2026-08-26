@@ -4,6 +4,8 @@ import { CustomerRefundIntakeReasonCode } from "@prisma/client";
 import { useRef, useState, useTransition } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useRouter } from "next/navigation";
+import type { Locale } from "@/lib/market/locale";
+import { messagesFor } from "@/lib/market/messages";
 import {
   submitCustomerRefundIntakeAction,
   withdrawCustomerRefundIntakeAction,
@@ -13,7 +15,7 @@ import { useToast } from "@/components/ui/Toast";
 import {
   buildSubmitCustomerRefundIntakePayload,
   buildWithdrawCustomerRefundIntakePayload,
-  CUSTOMER_REFUND_INTAKE_REASON_OPTIONS,
+  customerRefundIntakeReasonOptions,
   isCustomerRefundIntakeReasonCode,
   presentSubmitCustomerRefundIntakeResult,
   presentWithdrawCustomerRefundIntakeResult,
@@ -25,11 +27,12 @@ import {
 interface Props {
   orderId: string;
   mode: "submit" | "withdraw";
+  locale: Locale;
 }
 
 type FieldErrors = Partial<Record<Exclude<CustomerRefundIntakeResultField, null>, string>>;
 
-export function CustomerRefundIntakeControls({ orderId, mode }: Props) {
+export function CustomerRefundIntakeControls({ orderId, mode, locale }: Props) {
   const [reasonCode, setReasonCode] = useState<CustomerRefundIntakeReasonCode | "">("");
   const [reasonDetail, setReasonDetail] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -48,7 +51,7 @@ export function CustomerRefundIntakeControls({ orderId, mode }: Props) {
   function submitIntake(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (mode !== "submit" || submittingRef.current) return;
-    const validation = validateSubmission(reasonCode, detailCount);
+    const validation = validateSubmission(reasonCode, detailCount, locale);
     if (!validation.valid) {
       setFieldErrors(validation.errors);
       setPanelError(null);
@@ -63,9 +66,9 @@ export function CustomerRefundIntakeControls({ orderId, mode }: Props) {
         const result = await submitCustomerRefundIntakeAction(
           buildSubmitCustomerRefundIntakePayload(orderId, validation.reasonCode, reasonDetail),
         );
-        applyPresentation(presentSubmitCustomerRefundIntakeResult(result));
+        applyPresentation(presentSubmitCustomerRefundIntakeResult(result, locale));
       } catch {
-        applyPresentation(unexpectedCustomerRefundIntakeFailurePresentation());
+        applyPresentation(unexpectedCustomerRefundIntakeFailurePresentation(locale));
       } finally {
         submittingRef.current = false;
       }
@@ -83,10 +86,10 @@ export function CustomerRefundIntakeControls({ orderId, mode }: Props) {
           buildWithdrawCustomerRefundIntakePayload(orderId),
         );
         setWithdrawDialogOpen(false);
-        applyPresentation(presentWithdrawCustomerRefundIntakeResult(result));
+        applyPresentation(presentWithdrawCustomerRefundIntakeResult(result, locale));
       } catch {
         setWithdrawDialogOpen(false);
-        applyPresentation(unexpectedCustomerRefundIntakeFailurePresentation());
+        applyPresentation(unexpectedCustomerRefundIntakeFailurePresentation(locale));
       } finally {
         submittingRef.current = false;
       }
@@ -113,6 +116,7 @@ export function CustomerRefundIntakeControls({ orderId, mode }: Props) {
         closeDialog={closeWithdrawDialog}
         openDialog={() => setWithdrawDialogOpen(true)}
         withdrawIntake={withdrawIntake}
+        locale={locale}
       />
     );
   }
@@ -129,6 +133,7 @@ export function CustomerRefundIntakeControls({ orderId, mode }: Props) {
       setReasonCode={setReasonCode}
       setReasonDetail={setReasonDetail}
       submitIntake={submitIntake}
+      locale={locale}
     />
   );
 }
@@ -140,6 +145,7 @@ interface WithdrawControlsViewProps {
   closeDialog: () => void;
   openDialog: () => void;
   withdrawIntake: (event: FormEvent<HTMLFormElement>) => void;
+  locale: Locale;
 }
 
 function WithdrawControlsView({
@@ -149,7 +155,9 @@ function WithdrawControlsView({
   closeDialog,
   openDialog,
   withdrawIntake,
+  locale,
 }: WithdrawControlsViewProps) {
+  const messages = messagesFor(locale).order.intake;
   return (
     <div className="space-y-3 border-t border-gray-200 pt-4">
       {panelError ? <p role="alert" className="text-sm text-red-700">{panelError}</p> : null}
@@ -160,14 +168,14 @@ function WithdrawControlsView({
           onClick={openDialog}
           className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
         >
-          환불 검토 요청 철회
+          {messages.withdraw}
         </button>
       </div>
-      <Dialog open={dialogOpen} onClose={closeDialog} title="환불 검토 요청 철회">
+      <Dialog open={dialogOpen} onClose={closeDialog} title={messages.withdraw}>
         <form onSubmit={withdrawIntake} className="space-y-5">
           <div className="space-y-2 text-sm text-gray-700">
-            <p>환불 검토 요청을 철회하시겠습니까?</p>
-            <p>주문과 결제는 그대로 유지됩니다.</p>
+            <p>{messages.withdrawQuestion}</p>
+            <p>{messages.orderUnchanged}</p>
           </div>
           <div className="flex justify-end gap-3">
             <button
@@ -176,14 +184,14 @@ function WithdrawControlsView({
               onClick={closeDialog}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 disabled:opacity-40"
             >
-              취소
+              {messages.cancel}
             </button>
             <button
               type="submit"
               disabled={isPending}
               className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-40"
             >
-              {isPending ? "철회 처리 중..." : "요청 철회"}
+              {isPending ? messages.withdrawing : messages.withdrawAction}
             </button>
           </div>
         </form>
@@ -203,6 +211,7 @@ interface SubmitIntakeFormProps {
   setReasonCode: Dispatch<SetStateAction<CustomerRefundIntakeReasonCode | "">>;
   setReasonDetail: Dispatch<SetStateAction<string>>;
   submitIntake: (event: FormEvent<HTMLFormElement>) => void;
+  locale: Locale;
 }
 
 function SubmitIntakeForm({
@@ -216,7 +225,10 @@ function SubmitIntakeForm({
   setReasonCode,
   setReasonDetail,
   submitIntake,
+  locale,
 }: SubmitIntakeFormProps) {
+  const messages = messagesFor(locale).order.intake;
+  const reasonOptions = customerRefundIntakeReasonOptions(locale);
   return (
     <form onSubmit={submitIntake} className="mt-4 space-y-5">
       <fieldset
@@ -225,10 +237,10 @@ function SubmitIntakeForm({
         aria-invalid={Boolean(fieldErrors.reasonCode)}
       >
         <legend className="text-sm font-medium text-gray-700">
-          요청 사유 <span aria-hidden="true">*</span>
+          {messages.reason} <span aria-hidden="true">*</span>
         </legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {CUSTOMER_REFUND_INTAKE_REASON_OPTIONS.map((option) => (
+          {reasonOptions.map((option) => (
             <label key={option.value} className="flex items-center gap-2 text-sm text-gray-700">
               <input
                 type="radio"
@@ -254,11 +266,11 @@ function SubmitIntakeForm({
 
       <div>
         <label htmlFor="customer-intake-reason-detail" className="block text-sm font-medium text-gray-700">
-          요청 내용 <span className="font-normal text-gray-500">(선택)</span>
+          {messages.detail} <span className="font-normal text-gray-500">({messages.optional})</span>
         </label>
         <div id="customer-intake-reason-detail-description" className="mt-1 space-y-1 text-xs text-gray-500">
-          <p>일반 텍스트와 줄바꿈만 입력할 수 있습니다.</p>
-          <p>카드번호·계좌번호·비밀번호 등 결제/인증 정보는 입력하지 마세요.</p>
+          <p>{messages.plainText}</p>
+          <p>{messages.noSecrets}</p>
         </div>
         <textarea
           id="customer-intake-reason-detail"
@@ -290,7 +302,7 @@ function SubmitIntakeForm({
         disabled={isPending}
         className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-40"
       >
-        {isPending ? "요청 접수 중..." : "환불 검토 요청 접수"}
+        {isPending ? messages.submitting : messages.submitAction}
       </button>
     </form>
   );
@@ -299,10 +311,12 @@ function SubmitIntakeForm({
 function validateSubmission(
   reasonCode: CustomerRefundIntakeReasonCode | "",
   detailCount: number,
+  locale: Locale,
 ): { valid: true; reasonCode: CustomerRefundIntakeReasonCode } | { valid: false; errors: FieldErrors } {
-  if (!reasonCode) return { valid: false, errors: { reasonCode: "요청 사유를 선택해주세요." } };
+  const messages = messagesFor(locale).order.intake;
+  if (!reasonCode) return { valid: false, errors: { reasonCode: messages.chooseReason } };
   if (detailCount > 500) {
-    return { valid: false, errors: { reasonDetail: "요청 내용은 500자 이내로 입력해주세요." } };
+    return { valid: false, errors: { reasonDetail: messages.detailTooLong } };
   }
   return { valid: true, reasonCode };
 }

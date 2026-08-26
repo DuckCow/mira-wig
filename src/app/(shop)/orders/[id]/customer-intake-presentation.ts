@@ -7,13 +7,18 @@ import type {
   WithdrawCustomerRefundIntakeActionResult,
 } from "@/app/actions/customer-refund-intake";
 import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
+import type { Locale } from "@/lib/market/locale";
+import { messagesFor } from "@/lib/market/messages";
 
-export const CUSTOMER_REFUND_INTAKE_REASON_OPTIONS = [
-  { value: CustomerRefundIntakeReasonCode.CHANGE_OF_MIND, label: "단순 변심" },
-  { value: CustomerRefundIntakeReasonCode.PRODUCT_DEFECT, label: "상품 하자" },
-  { value: CustomerRefundIntakeReasonCode.DELIVERY_ISSUE, label: "배송 문제·지연" },
-  { value: CustomerRefundIntakeReasonCode.OTHER, label: "기타" },
-] as const;
+export function customerRefundIntakeReasonOptions(locale: Locale = "ko") {
+  const reasons = messagesFor(locale).order.intake.reasons;
+  return [
+    { value: CustomerRefundIntakeReasonCode.CHANGE_OF_MIND, label: reasons.changeOfMind },
+    { value: CustomerRefundIntakeReasonCode.PRODUCT_DEFECT, label: reasons.productDefect },
+    { value: CustomerRefundIntakeReasonCode.DELIVERY_ISSUE, label: reasons.deliveryIssue },
+    { value: CustomerRefundIntakeReasonCode.OTHER, label: reasons.other },
+  ] as const;
+}
 
 export type CustomerRefundIntakeControlMode = "submit" | "withdraw" | null;
 export type CustomerRefundIntakeControlProps = {
@@ -35,59 +40,57 @@ const WITHDRAW_REFRESH_CODES = new Set(["NOT_FOUND", "NOT_WITHDRAWABLE"]);
 
 export function customerRefundIntakeReasonLabel(
   reasonCode: CustomerRefundIntakeReasonCode,
+  locale: Locale = "ko",
 ): string {
-  return CUSTOMER_REFUND_INTAKE_REASON_OPTIONS.find((option) => option.value === reasonCode)?.label
-    ?? "사유 확인 필요";
+  return customerRefundIntakeReasonOptions(locale).find((option) => option.value === reasonCode)?.label
+    ?? messagesFor(locale).order.intake.reasons.unknown;
 }
 
 export function customerRefundIntakeStatusLabel(
   status: CustomerRefundIntakeStatus,
+  locale: Locale = "ko",
 ): string {
-  if (status === CustomerRefundIntakeStatus.SUBMITTED) return "접수됨";
-  if (status === CustomerRefundIntakeStatus.WITHDRAWN) return "철회됨";
-  if (status === CustomerRefundIntakeStatus.REJECTED) return "온라인 진행 불가";
-  if (status === CustomerRefundIntakeStatus.APPROVED) return "승인됨";
-  return "상태 확인 필요";
+  const statuses = messagesFor(locale).order.intake.statuses;
+  if (status === CustomerRefundIntakeStatus.SUBMITTED) return statuses.submitted;
+  if (status === CustomerRefundIntakeStatus.WITHDRAWN) return statuses.withdrawn;
+  if (status === CustomerRefundIntakeStatus.REJECTED) return statuses.rejected;
+  if (status === CustomerRefundIntakeStatus.APPROVED) return statuses.approved;
+  return statuses.unknown;
 }
 
 export function customerRefundIntakeLifecycleCopy(
   status: CustomerRefundIntakeStatus,
+  locale: Locale = "ko",
 ): readonly string[] {
+  const lifecycle = messagesFor(locale).order.intake.lifecycle;
   if (status === CustomerRefundIntakeStatus.SUBMITTED) {
-    return ["환불 검토 요청이 접수되었습니다.", "환불 가능 여부 확인 후 안내드립니다."];
+    return lifecycle.submitted;
   }
   if (status === CustomerRefundIntakeStatus.WITHDRAWN) {
-    return ["환불 검토 요청이 철회되었습니다."];
+    return lifecycle.withdrawn;
   }
   if (status === CustomerRefundIntakeStatus.REJECTED) {
-    return ["온라인 환불 요청을 진행할 수 없습니다.", "자세한 내용은 고객센터로 문의해주세요."];
+    return lifecycle.rejected;
   }
   if (status === CustomerRefundIntakeStatus.APPROVED) {
-    return [
-      "환불 검토 요청이 승인되었습니다.",
-      "진행 상황은 위 주문 상태에서 확인할 수 있습니다.",
-    ];
+    return lifecycle.approved;
   }
-  return ["환불 검토 요청 상태를 확인하고 있습니다."];
+  return lifecycle.unknown;
 }
 
 export function customerRefundIntakeAvailabilityCopy(
   reason: CustomerRefundIntakeReadModel["submissionUnavailableReason"],
+  locale: Locale = "ko",
 ): readonly string[] | null {
+  const messages = messagesFor(locale).order.intake;
   if (reason === "FEATURE_DISABLED") {
-    return ["온라인 환불 검토 요청은 현재 제공되지 않습니다.", "고객센터로 문의해주세요."];
+    return messages.featureDisabled;
   }
   if (reason === "ORDER_STATE_UNAVAILABLE") {
-    return [
-      "현재 주문 상태에서는 환불 검토 요청을 접수할 수 없습니다.",
-      "자세한 내용은 고객센터로 문의해주세요.",
-    ];
+    return messages.orderUnavailable;
   }
   if (reason === "UNAVAILABLE") {
-    return [
-      "현재 이 주문에서는 온라인 환불 검토 요청을 이용할 수 없습니다.",
-      "고객센터로 문의해주세요.",
-    ];
+    return messages.unavailable;
   }
   return null;
 }
@@ -114,7 +117,7 @@ export function customerRefundIntakeControlProps(
 export function isCustomerRefundIntakeReasonCode(
   value: string,
 ): value is CustomerRefundIntakeReasonCode {
-  return CUSTOMER_REFUND_INTAKE_REASON_OPTIONS.some((option) => option.value === value);
+  return Object.values(CustomerRefundIntakeReasonCode).some((option) => option === value);
 }
 
 export function buildSubmitCustomerRefundIntakePayload(
@@ -131,16 +134,17 @@ export function buildWithdrawCustomerRefundIntakePayload(orderId: string) {
 
 export function presentSubmitCustomerRefundIntakeResult(
   result: SubmitCustomerRefundIntakeActionResult,
+  locale: Locale = "ko",
 ): CustomerRefundIntakeResultPresentation {
   if (result.success) {
     if (result.outcome === "CREATED") {
-      return successPresentation("환불 검토 요청이 접수되었습니다.");
+      return successPresentation(messagesFor(locale).order.intake.lifecycle.submitted[0]);
     }
     if (result.outcome === "REPLAYED_SAME_PAYLOAD") {
-      return successPresentation("동일한 환불 검토 요청이 이미 접수되어 있습니다.");
+      return successPresentation(messagesFor(locale).order.intake.replayedSame);
     }
     return {
-      ...successPresentation("이미 접수된 요청이 유지됩니다. 새로 입력한 내용은 저장되지 않았습니다."),
+      ...successPresentation(messagesFor(locale).order.intake.replayedDifferent),
       variant: "warning",
     };
   }
@@ -150,7 +154,7 @@ export function presentSubmitCustomerRefundIntakeResult(
     ? "reasonDetail"
     : null;
   return {
-    message: submitFailureMessage(result.errorCode),
+    message: submitFailureMessage(result.errorCode, locale),
     variant: result.errorCode === "UNAUTHENTICATED" || result.errorCode === "FEATURE_DISABLED"
       ? "warning"
       : "error",
@@ -162,16 +166,17 @@ export function presentSubmitCustomerRefundIntakeResult(
 
 export function presentWithdrawCustomerRefundIntakeResult(
   result: WithdrawCustomerRefundIntakeActionResult,
+  locale: Locale = "ko",
 ): CustomerRefundIntakeResultPresentation {
   if (result.success) {
     return successPresentation(
       result.outcome === "WITHDRAWN"
-        ? "환불 검토 요청이 철회되었습니다."
-        : "이미 철회된 요청입니다.",
+        ? messagesFor(locale).order.intake.lifecycle.withdrawn[0]
+        : messagesFor(locale).order.intake.alreadyWithdrawn,
     );
   }
   return {
-    message: withdrawFailureMessage(result.errorCode),
+    message: withdrawFailureMessage(result.errorCode, locale),
     variant: result.errorCode === "UNAUTHENTICATED" ? "warning" : "error",
     field: null,
     clearInputs: false,
@@ -179,9 +184,9 @@ export function presentWithdrawCustomerRefundIntakeResult(
   };
 }
 
-export function unexpectedCustomerRefundIntakeFailurePresentation(): CustomerRefundIntakeResultPresentation {
+export function unexpectedCustomerRefundIntakeFailurePresentation(locale: Locale = "ko"): CustomerRefundIntakeResultPresentation {
   return {
-    message: "처리 결과를 확인하지 못했습니다. 잠시 후 새로고침된 상태를 확인해 주세요.",
+    message: messagesFor(locale).order.intake.unexpected,
     variant: "error",
     field: null,
     clearInputs: false,
@@ -201,24 +206,28 @@ function successPresentation(message: string): CustomerRefundIntakeResultPresent
 
 function submitFailureMessage(
   errorCode: Exclude<SubmitCustomerRefundIntakeActionResult, { success: true }>["errorCode"],
+  locale: Locale,
 ): string {
-  if (errorCode === "UNAUTHENTICATED") return "로그인이 만료되었습니다. 다시 로그인한 뒤 시도해주세요.";
-  if (errorCode === "FEATURE_DISABLED") return "온라인 환불 검토 요청은 현재 제공되지 않습니다.";
-  if (errorCode === "INVALID_INPUT") return "입력 내용을 확인해주세요.";
+  const messages = messagesFor(locale).order.intake;
+  if (errorCode === "UNAUTHENTICATED") return messages.unauthenticated;
+  if (errorCode === "FEATURE_DISABLED") return messagesFor(locale).order.intake.featureDisabled[0];
+  if (errorCode === "INVALID_INPUT") return messages.invalidInput;
   if (errorCode === "REASON_DETAIL_INVALID") {
-    return "요청 내용에 사용할 수 없는 문자가 포함되어 있습니다. 일반 텍스트와 줄바꿈만 입력해주세요.";
+    return messages.invalidDetail;
   }
-  if (errorCode === "REASON_DETAIL_TOO_LONG") return "요청 내용은 500자 이내로 입력해주세요.";
-  if (errorCode === "NOT_FOUND") return "주문 또는 요청 정보를 확인할 수 없습니다. 최신 상태를 확인해주세요.";
-  if (errorCode === "NOT_AVAILABLE") return "현재 주문 상태에서는 환불 검토 요청을 접수할 수 없습니다.";
-  return "현재 환불 검토 요청을 처리할 수 없습니다. 최신 상태를 확인해주세요.";
+  if (errorCode === "REASON_DETAIL_TOO_LONG") return messages.detailTooLong;
+  if (errorCode === "NOT_FOUND") return messages.notFound;
+  if (errorCode === "NOT_AVAILABLE") return messages.orderUnavailable[0];
+  return messages.submitUnavailable;
 }
 
 function withdrawFailureMessage(
   errorCode: Exclude<WithdrawCustomerRefundIntakeActionResult, { success: true }>["errorCode"],
+  locale: Locale,
 ): string {
-  if (errorCode === "UNAUTHENTICATED") return "로그인이 만료되었습니다. 다시 로그인한 뒤 시도해주세요.";
-  if (errorCode === "INVALID_INPUT") return "요청 정보를 확인해주세요.";
-  if (errorCode === "NOT_FOUND") return "주문 또는 요청 정보를 확인할 수 없습니다. 최신 상태를 확인해주세요.";
-  return "현재 요청은 철회할 수 없습니다. 최신 상태를 확인해주세요.";
+  const messages = messagesFor(locale).order.intake;
+  if (errorCode === "UNAUTHENTICATED") return messages.unauthenticated;
+  if (errorCode === "INVALID_INPUT") return messages.invalidRequest;
+  if (errorCode === "NOT_FOUND") return messages.notFound;
+  return messages.withdrawUnavailable;
 }

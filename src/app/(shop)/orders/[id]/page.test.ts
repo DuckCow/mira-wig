@@ -13,12 +13,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
 import type { CustomerOrderDetailRecord } from "./customer-order-detail-data";
 
+interface OwnedOrderQuery {
+  select: {
+    payment: { select: Record<string, boolean> };
+    refundAttempts: { select: Record<string, boolean> };
+  };
+}
+
 const mocks = vi.hoisted(() => {
-  const orderFindFirst = vi.fn();
+  const orderFindFirst = vi.fn<(query: OwnedOrderQuery) => Promise<unknown>>();
   const db = { order: { findFirst: orderFindFirst } };
   return {
     db,
+    getAuthenticationLocale: vi.fn(),
     getSession: vi.fn(),
+    getStorefrontContext: vi.fn(),
     orderFindFirst,
     loadIntake: vi.fn(),
     submitEnabled: vi.fn(),
@@ -28,6 +37,10 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/session", () => ({ getSession: mocks.getSession }));
+vi.mock("@/lib/market", () => ({
+  getAuthenticationLocale: mocks.getAuthenticationLocale,
+  getStorefrontContext: mocks.getStorefrontContext,
+}));
 vi.mock("@/lib/db", () => ({ db: mocks.db }));
 vi.mock("@/lib/payment/refund/customer-intake-read", () => ({
   loadCustomerRefundIntakeReadModel: mocks.loadIntake,
@@ -42,13 +55,15 @@ vi.mock("./CustomerRefundIntakeSection", () => ({ CustomerRefundIntakeSection: (
 import {
   CustomerRefundIntakeActivationConfigError,
 } from "@/lib/payment/refund/customer-intake-activation";
-import OrderPage, { CustomerOrderDetailView } from "./page";
+import OrderPage, { CustomerOrderDetailView, generateMetadata } from "./page";
 
 describe("customer Order-detail authorization and intake composition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSession.mockResolvedValue(customerSession("customer_1"));
-    mocks.orderFindFirst.mockResolvedValue(orderFixture());
+    mocks.getAuthenticationLocale.mockResolvedValue("ko");
+    mocks.getStorefrontContext.mockResolvedValue({ locale: "ko" });
+    mocks.orderFindFirst.mockResolvedValue(rawOrderFixture());
     mocks.loadIntake.mockResolvedValue(intakeFixture());
     mocks.submitEnabled.mockReturnValue(true);
   });
@@ -101,8 +116,32 @@ describe("customer Order-detail authorization and intake composition", () => {
     expect(viewProps(element)?.intake).toEqual(intakeFixture());
   });
 
+  it("renders an owned historical Order with zero active current Markets", async () => {
+    const { NoActiveMarketException } = await import("@/lib/market/active-market");
+    mocks.getStorefrontContext.mockRejectedValue(new NoActiveMarketException());
+    mocks.getAuthenticationLocale.mockResolvedValue("ja");
+
+    const element = await OrderPage({ params: Promise.resolve({ id: "order_1" }) });
+
+    expect(isValidElement(element) && element.type).toBe(CustomerOrderDetailView);
+    expect(viewProps(element)?.locale).toBe("ja");
+    expect(mocks.getAuthenticationLocale).toHaveBeenCalledOnce();
+    expect(mocks.getStorefrontContext).not.toHaveBeenCalled();
+  });
+
+  it("keeps a foreign customer's Order behind the owned-order predicate", async () => {
+    mocks.getSession.mockResolvedValue(customerSession("customer_foreign"));
+    mocks.orderFindFirst.mockResolvedValue(null);
+
+    await expect(OrderPage({ params: Promise.resolve({ id: "order_1" }) })).rejects.toThrow("NOT_FOUND");
+
+    expect(mocks.orderFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "order_1", userId: "customer_foreign" },
+    }));
+  });
+
   it("starts both reads through Promise.all before either read settles", async () => {
-    const orderDeferred = deferred<ReturnType<typeof orderFixture>>();
+    const orderDeferred = deferred<ReturnType<typeof rawOrderFixture>>();
     const intakeDeferred = deferred<CustomerRefundIntakeReadModel>();
     mocks.orderFindFirst.mockReturnValue(orderDeferred.promise);
     mocks.loadIntake.mockReturnValue(intakeDeferred.promise);
@@ -112,7 +151,7 @@ describe("customer Order-detail authorization and intake composition", () => {
       expect(mocks.orderFindFirst).toHaveBeenCalledOnce();
       expect(mocks.loadIntake).toHaveBeenCalledOnce();
     });
-    orderDeferred.resolve(orderFixture());
+    orderDeferred.resolve(rawOrderFixture());
     intakeDeferred.resolve(intakeFixture());
 
     const element = await pending;
@@ -157,7 +196,7 @@ describe("customer Order-detail authorization and intake composition", () => {
 
   it.each([
     ["owned Order", null, intakeFixture()],
-    ["intake projection", orderFixture(), null],
+    ["intake projection", rawOrderFixture(), null],
   ])("returns notFound when the %s read is missing", async (_label, order, intake) => {
     mocks.orderFindFirst.mockResolvedValue(order);
     mocks.loadIntake.mockResolvedValue(intake);
@@ -182,6 +221,116 @@ describe("customer Order-detail authorization and intake composition", () => {
       "orderStatus",
       "submissionUnavailableReason",
     ]);
+    expect(viewProps(element)?.locale).toBe("ko");
+    const query = mocks.orderFindFirst.mock.calls[0]?.[0];
+    expect(query?.select.payment.select).toMatchObject({ id: true, provider: true, mode: true });
+    expect(query?.select.refundAttempts.select).toMatchObject({
+      orderId: true,
+      paymentId: true,
+      amount: true,
+      currency: true,
+      provider: true,
+      mode: true,
+      status: true,
+      processedAt: true,
+    });
+    const browserProjection = JSON.stringify(viewProps(element));
+    expect(browserProjection).not.toMatch(/providerPaymentKey|providerOrderId|payment_1|mock:order_1/u);
+  });
+
+  it.each([
+    ["ko", "주문 상세"],
+    ["en", "Order details"],
+    ["ja", "注文詳細"],
+  ] as const)("generates route-specific %s metadata", async (locale, title) => {
+    mocks.getAuthenticationLocale.mockResolvedValue(locale);
+
+    await expect(generateMetadata()).resolves.toEqual({ title });
+  });
+
+  it.each([
+    ["ko", "주문 확인", "결제 내역"],
+    ["en", "Order confirmation", "Payment details"],
+    ["ja", "注文確認", "決済内容"],
+  ] as const)("renders the order surface in current %s locale", (locale, heading, paymentHeading) => {
+    const html = renderToStaticMarkup(CustomerOrderDetailView({
+      order: orderFixture(), intake: intakeFixture(), locale,
+    }));
+    expect(html).toContain(heading);
+    expect(html).toContain(paymentHeading);
+    if (locale !== "ko") expect(html).not.toMatch(/[가-힣]/u);
+  });
+
+  it.each([
+    ["ko", "Black / 미디 / 직모"],
+    ["en", "Black / Medium / Straight"],
+    ["ja", "Black / ミディアム / ストレート"],
+  ] as const)("renders persisted item option codes through the %s presentation owner", (locale, label) => {
+    const order = orderFixture();
+    order.items = [orderItem(10_000, "KRW")];
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({
+      order,
+      intake: intakeFixture(),
+      locale,
+    }));
+
+    expect(html).toContain(label);
+    if (locale !== "en") expect(html).not.toContain(">Black / medium / straight<");
+  });
+
+  it("preserves unknown historical option identity without a current-catalog lookup", () => {
+    const order = orderFixture();
+    const item = orderItem(10_000, "KRW");
+    item.snapshotData = {
+      styleName: "Historical item",
+      color: "Black",
+      colorHex: "#000000",
+      length: "heritage-length",
+      curl: "archive-curl",
+      coverImageKey: null,
+      currencyCode: "KRW",
+    };
+    order.items = [item];
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({
+      order,
+      intake: intakeFixture(),
+      locale: "ja",
+    }));
+
+    expect(html).toContain("Black / heritage-length / archive-curl");
+  });
+
+  it.each([
+    [PaymentProvider.TOSS, "Domestic card payment"],
+    [PaymentProvider.EXIMBAY, "International card payment"],
+  ])("renders %s payment details without a provider-receipt surface", (provider, paymentLabel) => {
+    const order = orderFixture();
+    order.payment = {
+      ...order.payment,
+      provider,
+    };
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture(), locale: "en" }));
+    expect(html).toContain(paymentLabel);
+    expect(html).not.toMatch(/receipt|영수증|領収|\/orders\/order_1\/receipt|providerPaymentKey|providerOrderId|MID/iu);
+    expect(html).not.toContain("<form");
+  });
+
+  it("shows completed and pending refund facts without exposing an attempt ledger", () => {
+    const order = orderFixture();
+    order.refundSummary = {
+      completion: "PARTIAL",
+      totalSucceededRefundAmount: 2_000,
+      latestSucceededRefundAt: new Date("2026-08-22T00:00:00.000Z"),
+      hasPendingRefund: true,
+      invariantFailure: false,
+    };
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture(), locale: "en" }));
+    expect(html).toContain("Partial refund complete");
+    expect(html).toContain("Refund processing");
+    expect(html).toContain("₩2,000");
+    expect(html).not.toMatch(/providerRefundId|dispatch|lease|MANUAL_REVIEW/u);
   });
 
   it("uses Order.currency for item money even when snapshot currency differs", () => {
@@ -192,7 +341,7 @@ describe("customer Order-detail authorization and intake composition", () => {
     order.payment = { ...order.payment, amount: 2_999, currency: "USD" };
     order.items = [orderItem(2_999, "JPY")];
 
-    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture() }));
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture(), locale: "ko" }));
 
     expect(html).toContain("$29.99");
     expect(html).not.toContain("¥2,999");
@@ -206,7 +355,7 @@ describe("customer Order-detail authorization and intake composition", () => {
     order.payment = { ...order.payment, amount: 12_345, currency: "XYZ" };
     order.items = [orderItem(12_345, "KRW")];
 
-    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture() }));
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture(), locale: "ko" }));
 
     expect(html).toContain("XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가");
     expect(html).not.toMatch(/KRW|₩|123\.45/);
@@ -257,8 +406,27 @@ function orderFixture(): CustomerOrderDetailRecord {
       amount: 10_000,
       currency: "KRW",
       provider: PaymentProvider.MOCK,
+    },
+    refundSummary: {
+      completion: "NONE",
+      totalSucceededRefundAmount: 0,
+      latestSucceededRefundAt: null,
+      hasPendingRefund: false,
+      invariantFailure: false,
+    },
+  };
+}
+
+function rawOrderFixture() {
+  const { refundSummary: _refundSummary, payment, ...order } = orderFixture();
+  return {
+    ...order,
+    payment: {
+      ...payment,
+      id: "payment_1",
       mode: PaymentMode.SANDBOX,
     },
+    refundAttempts: [],
   };
 }
 
@@ -272,8 +440,8 @@ function orderItem(unitAmount: number, snapshotCurrency: string): CustomerOrderD
       styleName: "Historical item",
       color: "Black",
       colorHex: "#000000",
-      length: "MEDIUM",
-      curl: "STRAIGHT",
+      length: "medium",
+      curl: "straight",
       coverImageKey: null,
       currencyCode: snapshotCurrency,
     },
@@ -297,10 +465,12 @@ function intakeFixture(
 function viewProps(element: unknown): {
   order: ReturnType<typeof orderFixture>;
   intake: CustomerRefundIntakeReadModel;
+  locale: "ko" | "en" | "ja";
 } | null {
   return isValidElement<{
     order: ReturnType<typeof orderFixture>;
     intake: CustomerRefundIntakeReadModel;
+    locale: "ko" | "en" | "ja";
   }>(element) ? element.props : null;
 }
 

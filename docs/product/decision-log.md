@@ -178,3 +178,106 @@ A future semantic change must use the applicable new design version and update
 or supersede the Source Status under repository change control. A future
 deployment or customer/provider activation requires its own evidence and
 authorization; this decision-log entry does not grant it.
+
+## 2026-08-26 — R13A v1 customer post-purchase document and payment-evidence policy
+
+### Decision identity and source boundary
+
+```text
+SCOPE:
+  R13A v1 customer post-purchase document / payment-evidence experience
+
+DECISION OWNER:
+  PROJECT OWNER
+
+STATE:
+  ACCEPTED
+
+SOURCE STATUS:
+  THE CURRENT R13A CANDIDATE IS IMPLEMENTING THIS DECISION
+  REVIEW / MERGE / DEPLOYMENT / CUSTOMER ACTIVATION NOT ESTABLISHED
+```
+
+This human product decision supersedes the earlier R13A v1 candidate assumption
+that contemplated customer access to provider-hosted receipts. It does not
+rewrite that candidate history or claim that the aligned source is already
+installed.
+
+### Universal R13A v1 customer experience
+
+Mira will provide a provider-independent, merchant-owned post-purchase
+experience containing:
+
+- order details / order confirmation;
+- payment details; and
+- customer-safe refund details.
+
+This is the primary customer post-purchase experience. For the current active
+card-provider families, the R13A v1 customer-facing provider receipt disposition
+is:
+
+```text
+TOSS PROVIDER RECEIPT CTA:
+  OFF
+
+EXIMBAY PROVIDER RECEIPT CTA:
+  OFF
+
+CUSTOMER-FACING PROVIDER-HOSTED RECEIPT SURFACE:
+  NOT INSTALLED BY R13A v1
+```
+
+### Rationale
+
+Toss provider receipt support was technically implementable. Eximbay publicly
+documents a customer receipt capability, but the successful response contract
+and permission needed for a strict Mira adapter remain unestablished. One
+authorized Eximbay SANDBOX receipt probe returned HTTP 403 with JSON content and
+no `Location`; it established no receipt URL, redirect contract, successful
+envelope, or receipt host.
+
+That bounded result is not evidence that Eximbay payments, refunds, or the
+general Eximbay integration are defective. The project owner chose not to ship
+an asymmetric Toss-only provider-document experience in R13A v1. R13A v1
+instead closes the common Mira-owned order, payment, and refund experience
+independently of provider receipt capability.
+
+### Long-term optional provider-evidence policy
+
+This v1 parity decision does not mean that every future payment provider must
+support the same receipt artifact or none may ever be shown. Provider-hosted
+payment evidence is an optional secondary capability.
+
+A provider-specific document may be exposed later only after its actual
+provider capability, semantics, customer-access contract, and safety boundary
+are authoritatively established. Different providers' documents do not have to
+be legally or semantically identical. Mira must not describe unlike provider
+artifacts as one identical legal document without authority.
+
+Descriptively, Toss authority may characterize its artifact as a card sales
+slip or provider-owned evidence. Eximbay authority may characterize its artifact
+as a payment receipt if and when its customer-access capability is established.
+These examples do not activate either provider document in R13A v1.
+
+### Mira document non-goals
+
+R13A v1 does not claim that Mira's ordinary order-detail page is:
+
+- a card sales slip;
+- a tax invoice;
+- a cash receipt;
+- a statutory invoice; or
+- a provider receipt.
+
+This decision does not authorize Mira to generate a new statutory financial or
+tax document.
+
+### Change control and authority boundary
+
+A future customer-facing provider-document policy change requires an explicit
+human product decision. Technical availability of a provider API alone does not
+automatically change customer-facing product policy.
+
+This entry records product authority only. It does not authorize provider
+contact, SANDBOX execution, LIVE activation, deployment, email activation, or
+refund execution.

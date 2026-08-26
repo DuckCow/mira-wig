@@ -51,7 +51,10 @@ export interface StorefrontMessages {
   };
   login: { title: string; subtitle: string; consent: string; continueGoogle: string; loading: string; error: string };
   savedFitting: { back: string; title: string; source: string; result: string; pending: string; failed: string; returnToProduct: string };
+  order: OrderMessages;
 }
+
+export type OrderMessages = ReturnType<typeof orderCopy>;
 
 const COMMON_PAYMENT_ERRORS = {
   ko: {
@@ -79,6 +82,7 @@ const MESSAGES: Record<Locale, StorefrontMessages> = {
     checkout: checkoutKo(),
     login: { title: "로그인", subtitle: "가발 가상 피팅 플랫폼", consent: "로그인하면 개인정보 처리방침에 동의하게 됩니다.", continueGoogle: "Google로 계속하기", loading: "로그인 중…", error: "로그인 중 오류가 발생했습니다. 다시 시도해 주세요." },
     savedFitting: { back: "뒤로가기", title: "피팅 결과", source: "원본", result: "피팅", pending: "아직 처리 중입니다. 잠시 후 새로고침하세요.", failed: "피팅에 실패했습니다.", returnToProduct: "상품 페이지로 돌아가기" },
+    order: orderCopy("ko"),
   },
   en: {
     common: { retry: "Try again", cartLoadError: "The cart could not be loaded.", checkoutLoadError: "Checkout could not be loaded." },
@@ -93,6 +97,7 @@ const MESSAGES: Record<Locale, StorefrontMessages> = {
     checkout: checkoutEn(),
     login: { title: "Sign in", subtitle: "Virtual wig fitting platform", consent: "By signing in, you agree to the privacy policy.", continueGoogle: "Continue with Google", loading: "Signing in…", error: "Sign-in failed. Please try again." },
     savedFitting: { back: "Back", title: "Fitting result", source: "Original", result: "Fitting", pending: "Still processing. Refresh shortly.", failed: "Fitting failed.", returnToProduct: "Return to product" },
+    order: orderCopy("en"),
   },
   ja: {
     common: { retry: "もう一度試す", cartLoadError: "カートを読み込めませんでした。", checkoutLoadError: "注文情報を読み込めませんでした。" },
@@ -107,8 +112,130 @@ const MESSAGES: Record<Locale, StorefrontMessages> = {
     checkout: checkoutJa(),
     login: { title: "ログイン", subtitle: "ウィッグのバーチャル試着プラットフォーム", consent: "ログインするとプライバシーポリシーに同意したものとみなされます。", continueGoogle: "Googleで続ける", loading: "ログイン中…", error: "ログインに失敗しました。もう一度お試しください。" },
     savedFitting: { back: "戻る", title: "試着結果", source: "元の写真", result: "試着", pending: "処理中です。しばらくしてから更新してください。", failed: "試着に失敗しました。", returnToProduct: "商品ページに戻る" },
+    order: orderCopy("ja"),
   },
 };
+
+function orderCopy(locale: Locale) {
+  const ko = locale === "ko";
+  const ja = locale === "ja";
+  const pick = (korean: string, english: string, japanese: string) => ko ? korean : ja ? japanese : english;
+  return {
+    metadataTitle: pick("주문 상세", "Order details", "注文詳細"),
+    back: pick("← 내 주문", "← My orders", "← 注文履歴"),
+    title: pick("주문 확인", "Order confirmation", "注文確認"),
+    orderNumber: pick("주문번호", "Order number", "注文番号"),
+    paidAt: pick("결제일", "Paid", "決済日時"),
+    refundPendingReceived: pick("환불 요청이 접수되어 처리 중입니다.", "A refund request is being processed.", "返金リクエストを処理しています。"),
+    refundPendingUnconfirmed: pick("환불 여부와 완료 시점은 아직 확정되지 않았습니다.", "Refund approval and completion timing are not yet confirmed.", "返金の可否と完了時期はまだ確定していません。"),
+    items: pick("주문 상품", "Order items", "注文商品"),
+    shippingInfo: pick("배송 정보", "Shipping information", "配送情報"),
+    shippingPending: pick("배송지 정보 확인 중", "Shipping information is being checked", "配送先情報を確認しています"),
+    paymentDetails: pick("결제 내역", "Payment details", "決済内容"),
+    subtotal: pick("상품 합계", "Product subtotal", "商品小計"),
+    shipping: pick("배송비", "Shipping", "送料"),
+    shippingPolicyPending: pick("배송비 정책 확정 전", "Shipping policy pending", "送料ポリシー未確定"),
+    taxDuty: pick("세금·관세", "Tax and duties", "税金・関税"),
+    taxPending: pick("세금·관세는 정책 확정 전이며, 현재 주문 금액으로 별도 계산하지 않았습니다.", "Tax and duties are pending policy and were not added to this order amount.", "税金・関税はポリシー未確定のため、この注文金額には加算されていません。"),
+    totalPaid: pick("총 결제 금액", "Total paid", "お支払い合計"),
+    paymentStatus: pick("결제 상태", "Payment status", "決済状態"),
+    paymentAmount: pick("결제 금액", "Payment amount", "決済金額"),
+    paymentMethod: pick("결제 수단", "Payment method", "決済方法"),
+    paymentSucceeded: pick("결제 완료", "Payment complete", "決済完了"),
+    paymentChecking: pick("결제 확인 중", "Checking payment", "決済確認中"),
+    paymentFailed: pick("결제 실패", "Payment failed", "決済失敗"),
+    paymentVoided: pick("결제 취소", "Payment canceled", "決済取消"),
+    paymentUnknown: pick("결제 상태 확인 중", "Payment status unavailable", "決済状態を確認しています"),
+    orderStatusPaid: pick("결제 완료", "Paid", "決済完了"),
+    orderStatusCancelled: pick("주문 취소", "Order canceled", "注文取消"),
+    orderStatusRefundPending: pick("환불 요청 처리 중", "Refund request processing", "返金リクエスト処理中"),
+    orderStatusPartiallyRefunded: pick("부분 환불", "Partially refunded", "一部返金済み"),
+    orderStatusRefunded: pick("환불 완료", "Refunded", "返金完了"),
+    orderStatusUnknown: pick("상태 확인 중", "Status unavailable", "状態を確認しています"),
+    tossMethod: pick("국내 카드 결제", "Domestic card payment", "韓国国内カード決済"),
+    eximbayMethod: pick("해외 카드 결제", "International card payment", "海外カード決済"),
+    mockMethod: pick("테스트 결제", "Test payment", "テスト決済"),
+    otherMethod: pick("온라인 결제", "Online payment", "オンライン決済"),
+    refundDetails: pick("환불 내역", "Refund details", "返金内容"),
+    refundPending: pick("환불 처리 중", "Refund processing", "返金処理中"),
+    partialRefund: pick("부분 환불 완료", "Partial refund complete", "一部返金完了"),
+    fullRefund: pick("전액 환불 완료", "Full refund complete", "全額返金完了"),
+    completedRefundAmount: pick("완료된 환불 금액", "Completed refund amount", "返金完了額"),
+    latestRefundDate: pick("최근 환불 완료일", "Latest refund completion", "最新の返金完了日時"),
+    orderList: pick("주문 목록", "Order list", "注文履歴"),
+    browseStyles: pick("스타일 둘러보기", "Browse styles", "スタイルを見る"),
+    postOrderNav: pick("주문 후 이동", "Order navigation", "注文後の移動"),
+    productFallback: pick("상품 정보 확인 중", "Product information unavailable", "商品情報を確認しています"),
+    optionFallback: pick("옵션 정보 확인 중", "Option information unavailable", "オプション情報を確認しています"),
+    mto: pick("주문 제작", "Made to order", "受注製作"),
+    stocked: pick("재고 상품", "Stocked item", "在庫商品"),
+    fulfillmentUnknown: pick("상품 유형 확인 중", "Item type unavailable", "商品種別を確認しています"),
+    countryKR: pick("대한민국", "South Korea", "韓国"),
+    countryUS: pick("미국", "United States", "米国"),
+    countryJP: pick("일본", "Japan", "日本"),
+    shippingMemo: pick("배송 메모", "Delivery note", "配送メモ"),
+    currencyMissing: pick("통화 코드 없음", "Currency code missing", "通貨コードなし"),
+    storedMinorUnit: pick("저장된 최소 단위", "stored minor units", "保存済み最小単位"),
+    decimalUnavailable: pick("소수 자릿수 확인 불가", "decimal digits unavailable", "小数桁不明"),
+    intake: {
+      title: pick("환불 검토 요청", "Refund review request", "返金審査リクエスト"),
+      intro: pick("환불 가능 여부 검토를 요청할 수 있습니다. 요청만으로 환불 가능 여부나 금액은 확정되지 않습니다.", "You can request a refund review. A request does not confirm eligibility or amount.", "返金可否の審査を依頼できます。依頼だけでは返金の可否や金額は確定しません。"),
+      newRequest: pick("새 환불 검토 요청", "New refund review request", "新しい返金審査リクエスト"),
+      submitTitle: pick("환불 검토 요청 접수", "Submit refund review request", "返金審査を依頼"),
+      serverRecheck: pick("접수 가능 여부는 요청 시점에 서버가 다시 확인합니다.", "Eligibility is checked again when you submit.", "送信時に受付可否を再確認します。"),
+      reason: pick("요청 사유", "Reason", "理由"),
+      submittedAt: pick("접수 시각", "Submitted", "受付日時"),
+      withdrawnAt: pick("철회 시각", "Withdrawn", "取下日時"),
+      detail: pick("요청 내용", "Request details", "依頼内容"),
+      optional: pick("선택", "optional", "任意"),
+      plainText: pick("일반 텍스트와 줄바꿈만 입력할 수 있습니다.", "Use plain text and line breaks only.", "通常のテキストと改行のみ入力できます。"),
+      noSecrets: pick("카드번호·계좌번호·비밀번호 등 결제/인증 정보는 입력하지 마세요.", "Do not enter card, bank-account, password, or authentication details.", "カード番号・口座番号・パスワードなどの決済・認証情報は入力しないでください。"),
+      withdraw: pick("환불 검토 요청 철회", "Withdraw refund review request", "返金審査リクエストを取り下げる"),
+      withdrawQuestion: pick("환불 검토 요청을 철회하시겠습니까?", "Withdraw this refund review request?", "この返金審査リクエストを取り下げますか？"),
+      orderUnchanged: pick("주문과 결제는 그대로 유지됩니다.", "The order and payment remain unchanged.", "注文と決済は変更されません。"),
+      cancel: pick("취소", "Cancel", "キャンセル"),
+      withdrawing: pick("철회 처리 중...", "Withdrawing…", "取下げ処理中…"),
+      withdrawAction: pick("요청 철회", "Withdraw request", "リクエストを取り下げる"),
+      submitting: pick("요청 접수 중...", "Submitting…", "送信中…"),
+      submitAction: pick("환불 검토 요청 접수", "Submit refund review request", "返金審査を依頼"),
+      chooseReason: pick("요청 사유를 선택해주세요.", "Choose a reason.", "理由を選択してください。"),
+      detailTooLong: pick("요청 내용은 500자 이내로 입력해주세요.", "Keep request details within 500 characters.", "依頼内容は500文字以内で入力してください。"),
+      reasons: {
+        changeOfMind: pick("단순 변심", "Changed my mind", "お客様都合"),
+        productDefect: pick("상품 하자", "Product defect", "商品不良"),
+        deliveryIssue: pick("배송 문제·지연", "Delivery issue or delay", "配送問題・遅延"),
+        other: pick("기타", "Other", "その他"),
+        unknown: pick("사유 확인 필요", "Reason unavailable", "理由を確認しています"),
+      },
+      statuses: {
+        submitted: pick("접수됨", "Submitted", "受付済み"), withdrawn: pick("철회됨", "Withdrawn", "取下げ済み"),
+        rejected: pick("온라인 진행 불가", "Online request unavailable", "オンライン手続き不可"), approved: pick("승인됨", "Approved", "承認済み"),
+        unknown: pick("상태 확인 필요", "Status unavailable", "状態を確認しています"),
+      },
+      lifecycle: {
+        submitted: [pick("환불 검토 요청이 접수되었습니다.", "Your refund review request was submitted.", "返金審査リクエストを受け付けました。"), pick("환불 가능 여부 확인 후 안내드립니다.", "We will notify you after reviewing eligibility.", "返金可否の確認後にご案内します。")],
+        withdrawn: [pick("환불 검토 요청이 철회되었습니다.", "Your refund review request was withdrawn.", "返金審査リクエストを取り下げました。")],
+        rejected: [pick("온라인 환불 요청을 진행할 수 없습니다.", "This refund request cannot continue online.", "オンラインでは返金手続きを進められません。"), pick("자세한 내용은 고객센터로 문의해주세요.", "Contact customer support for details.", "詳細はカスタマーサポートへお問い合わせください。")],
+        approved: [pick("환불 검토 요청이 승인되었습니다.", "Your refund review request was approved.", "返金審査リクエストが承認されました。"), pick("진행 상황은 위 주문 상태에서 확인할 수 있습니다.", "Check the order status above for progress.", "進捗は上の注文状態で確認できます。")],
+        unknown: [pick("환불 검토 요청 상태를 확인하고 있습니다.", "We are checking the request status.", "返金審査リクエストの状態を確認しています。")],
+      },
+      featureDisabled: [pick("온라인 환불 검토 요청은 현재 제공되지 않습니다.", "Online refund review requests are currently unavailable.", "オンラインでの返金審査リクエストは現在利用できません。"), pick("고객센터로 문의해주세요.", "Contact customer support.", "カスタマーサポートへお問い合わせください。")],
+      orderUnavailable: [pick("현재 주문 상태에서는 환불 검토 요청을 접수할 수 없습니다.", "A refund review request is unavailable for this order status.", "現在の注文状態では返金審査を依頼できません。"), pick("자세한 내용은 고객센터로 문의해주세요.", "Contact customer support for details.", "詳細はカスタマーサポートへお問い合わせください。")],
+      unavailable: [pick("현재 이 주문에서는 온라인 환불 검토 요청을 이용할 수 없습니다.", "Online refund review is unavailable for this order.", "この注文ではオンライン返金審査を利用できません。"), pick("고객센터로 문의해주세요.", "Contact customer support.", "カスタマーサポートへお問い合わせください。")],
+      replayedSame: pick("동일한 환불 검토 요청이 이미 접수되어 있습니다.", "The same refund review request is already submitted.", "同じ返金審査リクエストはすでに受け付けられています。"),
+      replayedDifferent: pick("이미 접수된 요청이 유지됩니다. 새로 입력한 내용은 저장되지 않았습니다.", "The existing request remains; new details were not saved.", "受付済みのリクエストが維持され、新しい内容は保存されませんでした。"),
+      alreadyWithdrawn: pick("이미 철회된 요청입니다.", "This request was already withdrawn.", "このリクエストはすでに取り下げられています。"),
+      unexpected: pick("처리 결과를 확인하지 못했습니다. 잠시 후 새로고침된 상태를 확인해 주세요.", "The result could not be confirmed. Refresh shortly to check the latest state.", "処理結果を確認できませんでした。しばらくしてから更新し、最新の状態をご確認ください。"),
+      unauthenticated: pick("로그인이 만료되었습니다. 다시 로그인한 뒤 시도해주세요.", "Your sign-in expired. Sign in and try again.", "ログインの有効期限が切れました。再度ログインしてお試しください。"),
+      invalidInput: pick("입력 내용을 확인해주세요.", "Check the information entered.", "入力内容をご確認ください。"),
+      invalidDetail: pick("요청 내용에 사용할 수 없는 문자가 포함되어 있습니다. 일반 텍스트와 줄바꿈만 입력해주세요.", "Request details contain unsupported characters. Use plain text and line breaks only.", "依頼内容に使用できない文字があります。通常のテキストと改行のみ入力してください。"),
+      notFound: pick("주문 또는 요청 정보를 확인할 수 없습니다. 최신 상태를 확인해주세요.", "The order or request could not be found. Check the latest state.", "注文またはリクエストを確認できません。最新の状態をご確認ください。"),
+      submitUnavailable: pick("현재 환불 검토 요청을 처리할 수 없습니다. 최신 상태를 확인해주세요.", "The refund review request cannot be processed now. Check the latest state.", "現在、返金審査リクエストを処理できません。最新の状態をご確認ください。"),
+      invalidRequest: pick("요청 정보를 확인해주세요.", "Check the request information.", "リクエスト情報をご確認ください。"),
+      withdrawUnavailable: pick("현재 요청은 철회할 수 없습니다. 최신 상태를 확인해주세요.", "This request cannot be withdrawn now. Check the latest state.", "現在このリクエストは取り下げられません。最新の状態をご確認ください。"),
+    },
+  } as const;
+}
 
 function checkoutKo(): StorefrontMessages["checkout"] { return checkoutCopy("ko"); }
 function checkoutEn(): StorefrontMessages["checkout"] { return checkoutCopy("en"); }

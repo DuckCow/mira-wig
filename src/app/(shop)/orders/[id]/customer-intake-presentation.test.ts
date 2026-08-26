@@ -30,6 +30,19 @@ import {
 } from "./customer-intake-presentation";
 
 describe("customer refund intake lifecycle presentation", () => {
+  it.each(["en", "ja"] as const)("does not fall back to Korean for %s customer copy", (locale) => {
+    const visible = [
+      customerRefundIntakeReasonLabel(CustomerRefundIntakeReasonCode.PRODUCT_DEFECT, locale),
+      customerRefundIntakeStatusLabel(CustomerRefundIntakeStatus.SUBMITTED, locale),
+      ...customerRefundIntakeLifecycleCopy(CustomerRefundIntakeStatus.SUBMITTED, locale),
+      ...(customerRefundIntakeAvailabilityCopy("FEATURE_DISABLED", locale) ?? []),
+      presentSubmitCustomerRefundIntakeResult({ success: false, errorCode: "INVALID_INPUT" }, locale).message,
+      presentWithdrawCustomerRefundIntakeResult({ success: false, errorCode: "INVALID_INPUT" }, locale).message,
+      unexpectedCustomerRefundIntakeFailurePresentation(locale).message,
+    ].join("\n");
+    expect(visible).not.toMatch(/[가-힣]/u);
+  });
+
   it("owns the exact customer reason labels", () => {
     expect(customerRefundIntakeReasonLabel(CustomerRefundIntakeReasonCode.CHANGE_OF_MIND)).toBe("단순 변심");
     expect(customerRefundIntakeReasonLabel(CustomerRefundIntakeReasonCode.PRODUCT_DEFECT)).toBe("상품 하자");
