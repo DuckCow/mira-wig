@@ -5,8 +5,9 @@ import {
   loadCustomerRefundIntakeReadModel,
   type CustomerRefundIntakeReadModel,
 } from "@/lib/payment/refund/customer-intake-read";
+import { deriveCustomerRefundSummary } from "@/lib/payment/refund/customer-summary";
 
-export type CustomerOrderDetailRecord = NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>;
+export type CustomerOrderDetailRecord = ReturnType<typeof projectOwnedOrder>;
 
 export interface CustomerOrderDetailData {
   order: CustomerOrderDetailRecord;
@@ -22,7 +23,7 @@ export async function loadCustomerOrderDetail(
     loadOwnedOrder(orderId, customerUserId),
     loadCustomerRefundIntakeReadModel(db, { orderId, customerUserId, submitEnabled }),
   ]);
-  return order && intake ? { order, intake } : null;
+  return order && intake ? { order: projectOwnedOrder(order), intake } : null;
 }
 
 function loadOwnedOrder(orderId: string, userId: string) {
@@ -60,6 +61,7 @@ function loadOwnedOrder(orderId: string, userId: string) {
       },
       payment: {
         select: {
+          id: true,
           status: true,
           amount: true,
           currency: true,
@@ -67,6 +69,38 @@ function loadOwnedOrder(orderId: string, userId: string) {
           mode: true,
         },
       },
+      refundAttempts: {
+        select: {
+          orderId: true,
+          paymentId: true,
+          amount: true,
+          currency: true,
+          provider: true,
+          mode: true,
+          status: true,
+          processedAt: true,
+        },
+      },
     },
   });
+}
+
+function projectOwnedOrder(raw: NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>) {
+  const { refundAttempts, payment, ...order } = raw;
+  const { id: paymentId, mode: paymentMode, ...customerPayment } = payment;
+  return {
+    ...order,
+    payment: customerPayment,
+    refundSummary: deriveCustomerRefundSummary(
+      { id: order.id, currency: order.currency },
+      {
+        id: paymentId,
+        amount: payment.amount,
+        currency: payment.currency,
+        provider: payment.provider,
+        mode: paymentMode,
+      },
+      refundAttempts,
+    ),
+  };
 }

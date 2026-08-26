@@ -1,4 +1,6 @@
 import { CustomerRefundIntakeStatus } from "@prisma/client";
+import { LOCALE_INTL, type Locale } from "@/lib/market/locale";
+import { messagesFor } from "@/lib/market/messages";
 import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
 import { CustomerRefundIntakeControls } from "./CustomerRefundIntakeControls";
 import {
@@ -9,19 +11,18 @@ import {
   customerRefundIntakeStatusLabel,
 } from "./customer-intake-presentation";
 
-export function CustomerRefundIntakeSection({ model }: { model: CustomerRefundIntakeReadModel }) {
+export function CustomerRefundIntakeSection({ model, locale }: { model: CustomerRefundIntakeReadModel; locale: Locale }) {
   const latest = model.latestIntake;
   const controlProps = customerRefundIntakeControlProps(model);
-  const availabilityCopy = customerRefundIntakeAvailabilityCopy(model.submissionUnavailableReason);
+  const messages = messagesFor(locale).order.intake;
+  const availabilityCopy = customerRefundIntakeAvailabilityCopy(model.submissionUnavailableReason, locale);
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5">
-      <h2 className="text-lg font-semibold text-gray-900">환불 검토 요청</h2>
+      <h2 className="text-lg font-semibold text-gray-900">{messages.title}</h2>
       <div className="mt-4 space-y-5">
-        {latest ? <LatestIntake intake={latest} /> : model.canSubmit ? (
-          <p className="text-sm text-gray-600">
-            환불 가능 여부 검토를 요청할 수 있습니다. 요청만으로 환불 가능 여부나 금액은 확정되지 않습니다.
-          </p>
+        {latest ? <LatestIntake intake={latest} locale={locale} /> : model.canSubmit ? (
+          <p className="text-sm text-gray-600">{messages.intro}</p>
         ) : null}
 
         {availabilityCopy ? <AvailabilityNotice lines={availabilityCopy} /> : null}
@@ -29,42 +30,43 @@ export function CustomerRefundIntakeSection({ model }: { model: CustomerRefundIn
         {controlProps?.mode === "submit" ? (
           <div className={latest ? "border-t border-gray-200 pt-5" : ""}>
             <h3 className="text-sm font-semibold text-gray-900">
-              {latest ? "새 환불 검토 요청" : "환불 검토 요청 접수"}
+              {latest ? messages.newRequest : messages.submitTitle}
             </h3>
             <p className="mt-1 text-xs text-gray-500">
-              접수 가능 여부는 요청 시점에 서버가 다시 확인합니다.
+              {messages.serverRecheck}
             </p>
-            <CustomerRefundIntakeControls {...controlProps} />
+            <CustomerRefundIntakeControls {...controlProps} locale={locale} />
           </div>
         ) : null}
 
         {controlProps?.mode === "withdraw" ? (
-          <CustomerRefundIntakeControls {...controlProps} />
+          <CustomerRefundIntakeControls {...controlProps} locale={locale} />
         ) : null}
       </div>
     </section>
   );
 }
 
-function LatestIntake({ intake }: { intake: NonNullable<CustomerRefundIntakeReadModel["latestIntake"]> }) {
+function LatestIntake({ intake, locale }: { intake: NonNullable<CustomerRefundIntakeReadModel["latestIntake"]>; locale: Locale }) {
+  const messages = messagesFor(locale).order.intake;
   return (
     <article className="space-y-4">
       <div className="space-y-2">
-        <p className="font-medium text-gray-900">{customerRefundIntakeStatusLabel(intake.status)}</p>
+        <p className="font-medium text-gray-900">{customerRefundIntakeStatusLabel(intake.status, locale)}</p>
         <div className="space-y-1 text-sm text-gray-600">
-          {customerRefundIntakeLifecycleCopy(intake.status).map((line) => <p key={line}>{line}</p>)}
+          {customerRefundIntakeLifecycleCopy(intake.status, locale).map((line) => <p key={line}>{line}</p>)}
         </div>
       </div>
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
-        <Info label="요청 사유" value={customerRefundIntakeReasonLabel(intake.reasonCode)} />
-        <Info label="접수 시각" value={formatDateTime(intake.submittedAt)} />
+        <Info label={messages.reason} value={customerRefundIntakeReasonLabel(intake.reasonCode, locale)} />
+        <Info label={messages.submittedAt} value={formatDateTime(intake.submittedAt, locale)} />
         {intake.status === CustomerRefundIntakeStatus.WITHDRAWN && intake.withdrawnAt ? (
-          <Info label="철회 시각" value={formatDateTime(intake.withdrawnAt)} />
+          <Info label={messages.withdrawnAt} value={formatDateTime(intake.withdrawnAt, locale)} />
         ) : null}
       </dl>
       {intake.reasonDetail ? (
         <div>
-          <p className="text-xs text-gray-500">요청 내용</p>
+          <p className="text-xs text-gray-500">{messages.detail}</p>
           <p className="mt-1 whitespace-pre-wrap rounded bg-gray-50 p-3 text-sm text-gray-700">
             {intake.reasonDetail}
           </p>
@@ -91,8 +93,8 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatDateTime(date: Date): string {
-  return new Intl.DateTimeFormat("ko-KR", {
+function formatDateTime(date: Date, locale: Locale): string {
+  return new Intl.DateTimeFormat(LOCALE_INTL[locale], {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
