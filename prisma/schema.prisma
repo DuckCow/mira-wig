@@ -838,9 +838,37 @@ model RefundExecutionCommand {
   evidence         RefundExecutionEvidence[]
   events           RefundExecutionCommandEvent[]
   dispatchAttempts RefundExecutionDispatchAttempt[]
+  eximbaySandboxCanaryApproval EximbayRefundSandboxCanaryApproval?
 
   @@index([status, availableAt, createdAt])
   @@index([status, leaseUntil])
+}
+
+/// Durable, one-use human authority for one exact Eximbay SANDBOX canary command.
+model EximbayRefundSandboxCanaryApproval {
+  id                              String          @id @default(cuid())
+  formatVersion                   String          @db.VarChar(64)
+  provider                        PaymentProvider
+  mode                            PaymentMode
+  approvalEvidenceDigest          String          @db.VarChar(64)
+  releaseBindingDigest            String          @db.VarChar(64)
+  canaryJobBindingDigest          String          @db.VarChar(64)
+  preflightJobBindingDigest       String          @db.VarChar(64)
+  imageBindingDigest              String          @db.VarChar(64)
+  secretGenerationBindingDigest   String          @db.VarChar(64)
+  targetBindingDigest             String          @db.VarChar(64)
+  commandId                       String          @unique
+  approvedAt                      DateTime        @db.Timestamp(3)
+  expiresAt                       DateTime        @db.Timestamp(3)
+  issuedByPrincipalId             String          @db.VarChar(255)
+  consumedAt                      DateTime?       @db.Timestamp(3)
+  consumedExecutionId             String?         @db.VarChar(255)
+  consumedExecutionBindingDigest  String?         @db.VarChar(64)
+  createdAt                       DateTime        @default(now()) @db.Timestamp(3)
+
+  command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+
+  @@index([consumedAt])
 }
 
 model RefundExecutionCommandEvent {

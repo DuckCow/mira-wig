@@ -44,7 +44,7 @@ describe("provider-free sandbox preflight runner", () => {
     expect(fixture.order).toEqual([
       "environment", "createDatabase", "connectivity", "postgresqlMajor",
       "repositoryMigrations", "migrationLedger", "compareMigrations", "health",
-      "manual", "reconciliation", "credential", "admission", "disconnect",
+      "manual", "reconciliation", "credential", "approvalCount", "admission", "disconnect",
     ]);
   });
 
@@ -63,7 +63,7 @@ describe("provider-free sandbox preflight runner", () => {
     expect(fixture.order).toEqual([
       "createDatabase", "connectivity", "postgresqlMajor", "repositoryMigrations",
       "migrationLedger", "compareMigrations", "health", "manual", "reconciliation",
-      "credential", "admission", "disconnect",
+      "credential", "approvalCount", "admission", "disconnect",
     ]);
   });
 
@@ -80,6 +80,8 @@ describe("provider-free sandbox preflight runner", () => {
     ["manual", "PREFLIGHT_NOT_READY"],
     ["reconciliation", "PREFLIGHT_NOT_READY"],
     ["credential", "CONFIG_INVALID"],
+    ["approvalCount", "PREFLIGHT_NOT_READY"],
+    ["unconsumedApproval", "PREFLIGHT_NOT_READY"],
     ["admissionBusy", "PREFLIGHT_NOT_READY"],
     ["disconnect", "SYSTEMIC_FAILURE"],
   ] as const)("bounds %s as %s", async (failure, code) => {
@@ -212,6 +214,10 @@ function preflightFixture(failure?: string) {
     inspectCredential: () => {
       called("credential");
       return credentialResult(failure === "credential" ? "CONFIGURED" : "ABSENT");
+    },
+    readUnconsumedEximbayCanaryApprovalCount: () => {
+      rejectAt("approvalCount");
+      return Promise.resolve(failure === "unconsumedApproval" ? 1 : 0);
     },
     probeAdmission: () => {
       called("admission");

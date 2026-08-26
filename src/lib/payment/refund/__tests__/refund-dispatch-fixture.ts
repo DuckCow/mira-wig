@@ -60,6 +60,8 @@ interface DispatchFixtureOptions {
   useSchemaGeneratedRefundAttemptId?: boolean;
   refundAttemptId?: string;
   fixtureIdentity?: string;
+  refundActorType?: RefundAttemptActorType;
+  refundActorUserId?: string | null;
   afterConstructionStep?: (step: DispatchFixtureConstructionStep) => void;
   beforeCleanupStep?: (step: DispatchFixtureCleanupStep) => void;
 }
@@ -173,6 +175,7 @@ async function constructDispatchFixture(
   journal.orderId = order.id;
   observeConstructionStep(options, DispatchFixtureConstructionStep.ORDER_CREATED);
   const attemptIdentity = refundAttemptFixtureIdentity(options, payment.id, identity);
+  const actor = refundActor(options);
   const requestedAttempt = await createRequestedAttempt({
     requestThroughProduction: options.requestThroughProduction === true,
     refundAttemptId: attemptIdentity.configuredId,
@@ -183,6 +186,8 @@ async function constructDispatchFixture(
     provider,
     mode,
     operationKey: attemptIdentity.operationKey,
+    actorType: actor.type,
+    actorUserId: actor.userId,
   }, journal, options);
   const claim = await claimRefundAttemptForExecution(db, {
     orderId: order.id,
@@ -207,6 +212,18 @@ async function constructDispatchFixture(
     providerPaymentKey,
     operationKey: requestedAttempt.operationKey,
   };
+}
+
+function refundActor(options: DispatchFixtureOptions): Readonly<{
+  type: RefundAttemptActorType;
+  userId: string | null;
+}> {
+  return Object.freeze({
+    type: options.refundActorType ?? RefundAttemptActorType.ADMIN,
+    userId: options.refundActorUserId === undefined
+      ? "dispatch_admin"
+      : options.refundActorUserId,
+  });
 }
 
 function observeConstructionStep(
@@ -249,6 +266,8 @@ async function createRequestedAttempt(input: Readonly<{
   provider: PaymentProvider;
   mode: PaymentMode;
   operationKey: string;
+  actorType: RefundAttemptActorType;
+  actorUserId: string | null;
 }>, journal: DispatchFixtureCleanupJournal, options: DispatchFixtureOptions): Promise<Readonly<{
   id: string;
   operationKey: string;
@@ -260,8 +279,8 @@ async function createRequestedAttempt(input: Readonly<{
       orderId: input.orderId,
       amount: input.targetAmount,
       reason: input.reason,
-      actorType: RefundAttemptActorType.ADMIN,
-      actorUserId: "dispatch_admin",
+      actorType: input.actorType,
+      actorUserId: input.actorUserId,
       now: DISPATCH_NOW,
     });
     if (!requested.ok) throw new Error(`Dispatch fixture request failed: ${requested.code}`);
@@ -282,8 +301,8 @@ async function createRequestedAttempt(input: Readonly<{
         currency: "KRW",
         status: RefundAttemptStatus.REQUESTED,
         reason: input.reason,
-        actorType: RefundAttemptActorType.ADMIN,
-        actorUserId: "dispatch_admin",
+        actorType: input.actorType,
+        actorUserId: input.actorUserId,
         provider: input.provider,
         mode: input.mode,
         idempotencyKey: input.operationKey,
@@ -306,8 +325,8 @@ async function createRequestedAttempt(input: Readonly<{
         toStatus: RefundAttemptStatus.REQUESTED,
         orderStatusBefore: OrderStatus.PAID,
         orderStatusAfter: OrderStatus.REFUND_PENDING,
-        actorType: RefundAttemptActorType.ADMIN,
-        actorUserId: "dispatch_admin",
+        actorType: input.actorType,
+        actorUserId: input.actorUserId,
         reason: input.reason,
         operationKey: `refund-request:${attempt.id}`,
         createdAt: DISPATCH_NOW,
@@ -516,6 +535,11 @@ async function cleanupDispatchAuthorities(
   );
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.eximbayRefundSandboxCanaryApproval.deleteMany({
+      where: { commandId: { in: commandIds } },
+    })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionProviderContactEligibilityProof.deleteMany({

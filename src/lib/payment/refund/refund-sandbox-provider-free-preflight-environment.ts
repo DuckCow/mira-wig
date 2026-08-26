@@ -25,6 +25,9 @@ const FORBIDDEN_PREFIXES = Object.freeze([
   "PAYPAL_",
   "NEXT_PUBLIC_PAYPAL_",
   "MIRA_TOSS_SANDBOX_ACCEPTANCE_",
+  "EXIMBAY_",
+  "NEXT_PUBLIC_EXIMBAY_",
+  "MIRA_REFUND_EXIMBAY_CANARY_",
   "PG",
 ] as const);
 const CLOUD_SQL_SOCKET = /^\/cloudsql\/[a-z][a-z0-9-]{4,28}[a-z0-9]:asia-northeast3:[a-z][a-z0-9-]{0,61}[a-z0-9]$/u;

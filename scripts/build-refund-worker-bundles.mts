@@ -35,6 +35,7 @@ const entryPoints = Object.freeze({
   "refund-sandbox-provider-free-preflight":
     "scripts/refund-sandbox-provider-free-preflight.ts",
   "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
+  "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
 });
 const exactContextAssets = Object.freeze([
   "package.json",

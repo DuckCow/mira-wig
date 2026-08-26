@@ -238,8 +238,8 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(isR1BPath(
       "contracts/trusted-project-bootstrap-readiness-v2.json",
     )).toBe(false);
-    expect(files).toHaveLength(86);
-    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(48);
+    expect(files).toHaveLength(94);
+    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(56);
   });
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {

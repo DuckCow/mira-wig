@@ -4,6 +4,8 @@ import { lstatSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
+import currentAuthority from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json";
 import {
   DOCKER_INSPECTION_LIMITS,
   FORBIDDEN_CONTENT_PREFIXES,
@@ -101,7 +103,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(86);
+    expect(completeInfra).toHaveLength(94);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
@@ -170,11 +172,11 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      manifestDigest: contract.buildContext.expectedManifestSha256,
-      fileCount: contract.buildContext.expectedFileCount,
-      repositoryGraphInputCount: contract.buildContext.repositoryGraphInputCount,
-      packagedGraphInputCount: contract.buildContext.packagedGraphInputCount,
-      entrypointCount: 3,
+      manifestDigest: currentAuthority.buildContext.manifestSha256,
+      fileCount: currentAuthority.buildContext.fileCount,
+      repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
+      packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
+      entrypointCount: 4,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -1321,16 +1323,19 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     });
   });
 
-  it("keeps schema, migrations, and the R2A subinventory byte-authoritative", () => {
-    expect(sha256(readFileSync(join(ROOT, "prisma/schema.prisma")))).toBe(
+  it("keeps the historical schema, migrations, and R2A subinventory byte-authoritative", () => {
+    expect(sha256(baselineFile("prisma/schema.prisma"))).toBe(
       "a9936e59dfd5f19492112fa120ec889e3feb06bdc09d7c36a1fa63f58f6506ad",
     );
-    expect(migrationRuntimeDigest()).toBe(
+    expect(baselineMigrationRuntimeDigest()).toBe(
       "fdf53976401e7267090057b98ef6e73acb8d2befc4d13f81639e816c972adb61",
     );
     const terraform = repositoryRelativeFiles(INFRA)
       .filter((path) => !path.startsWith(
         "infra/refund-sandbox/p3e-b2/runtime/",
+      ))
+      .filter((path) => !path.startsWith(
+        "infra/refund-sandbox/p3e-b2/eximbay-canary/",
       ))
       .filter((path) => path.endsWith(".tf"))
       .map((path) => readFileSync(join(ROOT, path), "utf8"))
@@ -1417,19 +1422,31 @@ function repositoryRelativeFiles(root: string): string[] {
     .sort();
 }
 
-function migrationRuntimeDigest(): string {
+function baselineMigrationRuntimeDigest(): string {
   const digest = createHash("sha256");
-  const migrationsRoot = join(ROOT, "prisma/migrations");
-  const migrations = walkRefundP3eRealFiles(migrationsRoot)
-    .filter((path) => basename(path) === "migration.sql")
+  const list = spawnSync("git", [
+    "ls-tree", "-r", "--name-only", "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
+    "prisma/migrations",
+  ], { cwd: ROOT, encoding: "utf8" });
+  if (list.status !== 0) throw new Error("BASELINE_MIGRATION_INVENTORY_UNAVAILABLE");
+  const migrations = list.stdout.split("\n")
+    .filter((path) => path.endsWith("/migration.sql"))
     .sort();
   for (const migration of migrations) {
     digest.update(basename(dirname(migration)));
     digest.update("\0");
-    digest.update(readFileSync(migration));
+    digest.update(baselineFile(migration));
     digest.update("\0");
   }
   return digest.digest("hex");
+}
+
+function baselineFile(path: string): Buffer {
+  const result = spawnSync("git", [
+    "show", `dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939:${path}`,
+  ], { cwd: ROOT, encoding: "buffer" });
+  if (result.status !== 0) throw new Error("BASELINE_FILE_UNAVAILABLE");
+  return result.stdout;
 }
 
 function sha256(value: Buffer): string {

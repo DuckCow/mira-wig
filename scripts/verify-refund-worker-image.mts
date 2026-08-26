@@ -23,6 +23,19 @@ const CONTRACT_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
 );
+const FROZEN_PARENT_AUTHORITY_SHA256 =
+  "9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a";
+const CURRENT_AUTHORITY_PATH = resolve(
+  import.meta.dirname,
+  "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+);
+const CURRENT_BASELINE_COMMIT = "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939";
+const CURRENT_ENTRYPOINTS = Object.freeze([
+  Object.freeze({ source: "containers/refund-worker/entrypoint.ts", runtimePath: "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs" }),
+  Object.freeze({ source: "scripts/eximbay-refund-canary.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-refund-canary.mjs" }),
+  Object.freeze({ source: "scripts/refund-execution-worker.ts", runtimePath: "/app/src/lib/payment/refund/refund-execution-worker.mjs" }),
+  Object.freeze({ source: "scripts/refund-sandbox-provider-free-preflight.ts", runtimePath: "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs" }),
+]);
 
 export const DOCKER_INSPECTION_LIMITS = Object.freeze({
   inspectionJsonMaxBytes: 262_144,
@@ -160,6 +173,8 @@ export type RootEntry = Readonly<{
   symlinkTarget: string | null;
 }>;
 
+export type RootManifestEntry = Readonly<Omit<RootEntry, "executable">>;
+
 export type ImageNativeInventory = Readonly<{
   authority: typeof IMAGE_NATIVE_AUTHORITY;
   entries: readonly RootEntry[];
@@ -184,6 +199,7 @@ export type FilesystemInspection = Readonly<{
   changedMetadataContentManifestSha256: string;
   reviewedRuntimeAdditionCount: number;
   addedMetadataContentManifestSha256: string;
+  nonApplicationAdditions: readonly RootManifestEntry[];
   applicationClosureCount: number;
   applicationMetadataManifestSha256: string;
   applicationContentManifestSha256: string;
@@ -214,6 +230,22 @@ export type FrozenImageContract = Readonly<{
   }>;
   forbiddenRuntimeExecutables: readonly string[];
   forbiddenRuntimePathPrefixes: readonly string[];
+}>;
+
+export type CurrentEximbayImageAuthority = Readonly<{
+  parentAuthoritySha256: string;
+  baselineCommit: string;
+  buildContext: Readonly<{
+    manifestSha256: string;
+    fileCount: number;
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+  }>;
+  entrypoints: readonly Readonly<{ source: string; runtimePath: string }>[];
+  applicationClosure: FrozenImageContract["applicationClosure"];
+  systemClosure: FrozenImageContract["systemClosure"];
+  nonApplicationAdditionCount: 3;
+  nonApplicationAdditions: readonly RootManifestEntry[];
 }>;
 
 export type ProofImageDockerResult = Readonly<{
@@ -796,7 +828,11 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
         === JSON.stringify(FORBIDDEN_CONTENT_PREFIXES),
       "FORBIDDEN_CONTENT_PREFIX_CONTRACT",
     );
-    if (!captureContract) enforceFrozenClosure(filesystem, contract);
+    if (!captureContract) {
+      const current = await readCurrentEximbayImageAuthority();
+      enforceCurrentSubject(current, context);
+      enforceCurrentClosure(filesystem, current);
+    }
 
     return Object.freeze({
       ok: true,
@@ -836,6 +872,7 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
       reviewedRuntimeAdditionCount: filesystem.reviewedRuntimeAdditionCount,
       addedMetadataContentManifestSha256:
         filesystem.addedMetadataContentManifestSha256,
+      nonApplicationAdditions: filesystem.nonApplicationAdditions,
       applicationClosureCount: filesystem.applicationClosureCount,
       applicationMetadataManifestSha256:
         filesystem.applicationMetadataManifestSha256,
@@ -1102,6 +1139,9 @@ export function inspectImageNativeInventories(
   });
   const application = runtime.entries
     .filter((entry) => entry.path === "/app" || entry.path.startsWith("/app/"));
+  const nonApplicationAdditions = additions
+    .filter((entry) => entry.path !== "/app" && !entry.path.startsWith("/app/"))
+    .map(manifestEntry);
   const forbiddenExecutables = runtime.entries.filter(isForbiddenExecutable);
   const forbiddenContent = runtime.entries.filter(
     (entry) => isForbiddenContent(entry.path),
@@ -1124,6 +1164,7 @@ export function inspectImageNativeInventories(
     reviewedRuntimeAdditionCount: additions.length,
     addedMetadataContentManifestSha256:
       sha256Json(additions.map(manifestEntry)),
+    nonApplicationAdditions: Object.freeze(nonApplicationAdditions),
     applicationClosureCount: application.length,
     applicationMetadataManifestSha256:
       sha256Json(application.map(applicationMetadataEntry)),
@@ -1204,6 +1245,29 @@ export function enforceFrozenClosure(
     filesystem.applicationContentManifestSha256
       === contract.applicationClosure.contentManifestSha256,
     "APPLICATION_CONTENT_MANIFEST",
+  );
+}
+
+export function enforceCurrentClosure(
+  filesystem: FilesystemInspection,
+  authority: CurrentEximbayImageAuthority,
+): void {
+  enforceFrozenClosure(filesystem, {
+    proofImageInspectionBounds: DOCKER_INSPECTION_LIMITS,
+    applicationClosure: authority.applicationClosure,
+    systemClosure: authority.systemClosure,
+    forbiddenRuntimeExecutables: FORBIDDEN_EXECUTABLE_NAMES,
+    forbiddenRuntimePathPrefixes: FORBIDDEN_CONTENT_PREFIXES,
+  });
+  requireCondition(
+    filesystem.reviewedRuntimeAdditionCount
+      === filesystem.applicationClosureCount + authority.nonApplicationAdditionCount,
+    "CURRENT_NON_APPLICATION_ADDITION_ACCOUNTING",
+  );
+  requireCondition(
+    JSON.stringify(filesystem.nonApplicationAdditions)
+      === JSON.stringify(authority.nonApplicationAdditions),
+    "CURRENT_NON_APPLICATION_ADDITION_INVENTORY",
   );
 }
 
@@ -1329,8 +1393,20 @@ function isForbiddenContent(path: string): boolean {
     || lower.includes("/__tests__/");
 }
 
-async function readFrozenImageContract(): Promise<FrozenImageContract> {
-  const raw: unknown = JSON.parse(await readFile(CONTRACT_PATH, "utf8"));
+export async function readFrozenImageContract(): Promise<FrozenImageContract> {
+  return verifyFrozenImageAuthorityBytes(await readFile(CONTRACT_PATH));
+}
+
+export function verifyFrozenImageAuthorityBytes(bytes: Uint8Array): FrozenImageContract {
+  requireCondition(
+    createHash("sha256").update(bytes).digest("hex") === FROZEN_PARENT_AUTHORITY_SHA256,
+    "FROZEN_PARENT_AUTHORITY_SHA256",
+  );
+  const raw: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+  return parseFrozenImageContract(raw);
+}
+
+export function parseFrozenImageContract(raw: unknown): FrozenImageContract {
   requireCondition(isRecord(raw), "IMAGE_CONTRACT_SHAPE");
   const proofImageInspectionBounds = parseDockerInspectionLimits(
     raw.proofImageInspectionBounds,
@@ -1387,6 +1463,182 @@ async function readFrozenImageContract(): Promise<FrozenImageContract> {
     forbiddenRuntimeExecutables: Object.freeze([...raw.forbiddenRuntimeExecutables]),
     forbiddenRuntimePathPrefixes: Object.freeze([...raw.forbiddenRuntimePathPrefixes]),
   });
+}
+
+export async function readCurrentEximbayImageAuthority(
+  path: string = CURRENT_AUTHORITY_PATH,
+): Promise<CurrentEximbayImageAuthority> {
+  const raw: unknown = JSON.parse(await readFile(path, "utf8"));
+  return parseCurrentEximbayImageAuthority(raw);
+}
+
+export function parseCurrentEximbayImageAuthority(
+  raw: unknown,
+): CurrentEximbayImageAuthority {
+  requireCondition(isRecord(raw), "CURRENT_IMAGE_AUTHORITY_SHAPE");
+  requireCondition(hasExactKeys(raw, [
+    "contractVersion", "parentAuthoritySha256", "baselineCommit", "buildContext",
+    "entrypoints", "applicationClosure", "systemClosure",
+    "nonApplicationAdditionCount", "nonApplicationAdditions",
+  ]), "CURRENT_IMAGE_AUTHORITY_SHAPE");
+  requireCondition(raw.contractVersion === "mira-refund-eximbay-canary-image-policy/v1",
+    "CURRENT_IMAGE_AUTHORITY_VERSION");
+  requireCondition(raw.parentAuthoritySha256 === FROZEN_PARENT_AUTHORITY_SHA256,
+    "CURRENT_PARENT_AUTHORITY_BINDING");
+  requireCondition(raw.baselineCommit === CURRENT_BASELINE_COMMIT,
+    "CURRENT_BASELINE_COMMIT_BINDING");
+  requireCondition(isRecord(raw.buildContext), "CURRENT_BUILD_CONTEXT_SHAPE");
+  requireCondition(hasExactKeys(raw.buildContext, [
+    "manifestSha256", "fileCount", "repositoryGraphInputCount", "packagedGraphInputCount",
+  ]), "CURRENT_BUILD_CONTEXT_SHAPE");
+  requireCondition(isSha256(raw.buildContext.manifestSha256), "CURRENT_CONTEXT_DIGEST");
+  requireCondition(isNonnegativeSafeInteger(raw.buildContext.fileCount), "CURRENT_CONTEXT_COUNT");
+  requireCondition(isNonnegativeSafeInteger(raw.buildContext.repositoryGraphInputCount),
+    "CURRENT_REPOSITORY_GRAPH_COUNT");
+  requireCondition(isNonnegativeSafeInteger(raw.buildContext.packagedGraphInputCount),
+    "CURRENT_PACKAGED_GRAPH_COUNT");
+  const entrypoints = parseCurrentEntrypoints(raw.entrypoints);
+  requireCondition(isRecord(raw.applicationClosure), "CURRENT_APPLICATION_SHAPE");
+  requireCondition(isRecord(raw.systemClosure), "CURRENT_SYSTEM_SHAPE");
+  requireCondition(hasExactKeys(raw.applicationClosure, [
+    "entryCount", "metadataManifestSha256", "contentManifestSha256",
+  ]), "CURRENT_APPLICATION_SHAPE");
+  requireCondition(hasExactKeys(raw.systemClosure, [
+    "removedEntryCount", "removedPathManifestSha256", "changedEntryCount",
+    "changedMetadataContentManifestSha256", "addedEntryCount",
+    "addedMetadataContentManifestSha256",
+  ]), "CURRENT_SYSTEM_SHAPE");
+  const application = raw.applicationClosure;
+  const system = raw.systemClosure;
+  requireCondition(isNonnegativeSafeInteger(application.entryCount)
+    && isSha256(application.metadataManifestSha256)
+    && isSha256(application.contentManifestSha256), "CURRENT_APPLICATION_CLOSURE");
+  requireCondition(isNonnegativeSafeInteger(system.removedEntryCount)
+    && isSha256(system.removedPathManifestSha256)
+    && isNonnegativeSafeInteger(system.changedEntryCount)
+    && isSha256(system.changedMetadataContentManifestSha256)
+    && isNonnegativeSafeInteger(system.addedEntryCount)
+    && isSha256(system.addedMetadataContentManifestSha256), "CURRENT_SYSTEM_CLOSURE");
+  requireCondition(raw.nonApplicationAdditionCount === 3,
+    "CURRENT_NON_APPLICATION_ADDITION_COUNT");
+  const nonApplicationAdditions = parseCurrentNonApplicationAdditions(
+    raw.nonApplicationAdditions,
+  );
+  return Object.freeze({
+    parentAuthoritySha256: raw.parentAuthoritySha256,
+    baselineCommit: raw.baselineCommit,
+    buildContext: Object.freeze({
+      manifestSha256: raw.buildContext.manifestSha256,
+      fileCount: raw.buildContext.fileCount,
+      repositoryGraphInputCount: raw.buildContext.repositoryGraphInputCount,
+      packagedGraphInputCount: raw.buildContext.packagedGraphInputCount,
+    }),
+    entrypoints,
+    applicationClosure: Object.freeze({
+      entryCount: application.entryCount,
+      metadataManifestSha256: application.metadataManifestSha256,
+      contentManifestSha256: application.contentManifestSha256,
+    }),
+    systemClosure: Object.freeze({
+      removedEntryCount: system.removedEntryCount,
+      removedPathManifestSha256: system.removedPathManifestSha256,
+      changedEntryCount: system.changedEntryCount,
+      changedMetadataContentManifestSha256: system.changedMetadataContentManifestSha256,
+      addedEntryCount: system.addedEntryCount,
+      addedMetadataContentManifestSha256: system.addedMetadataContentManifestSha256,
+    }),
+    nonApplicationAdditionCount: 3,
+    nonApplicationAdditions,
+  });
+}
+
+function parseCurrentNonApplicationAdditions(value: unknown): readonly RootManifestEntry[] {
+  requireCondition(Array.isArray(value) && value.length === 3,
+    "CURRENT_NON_APPLICATION_ADDITIONS_SHAPE");
+  const entries: RootManifestEntry[] = [];
+  for (const entry of value) {
+    const parsed = parseRootManifestEntry(entry);
+    requireCondition(parsed !== null, "CURRENT_NON_APPLICATION_ADDITIONS_SHAPE");
+    entries.push(parsed);
+  }
+  requireCondition(entries.every((entry) => entry.path !== "/app"
+    && !entry.path.startsWith("/app/")), "CURRENT_NON_APPLICATION_ADDITIONS_SCOPE");
+  return Object.freeze(entries);
+}
+
+function parseRootManifestEntry(value: unknown): RootManifestEntry | null {
+  if (!isRootManifestEntry(value)) return null;
+  return Object.freeze({
+    path: value.path,
+    type: value.type,
+    mode: value.mode,
+    uid: value.uid,
+    gid: value.gid,
+    sha256: value.sha256,
+    symlinkTarget: value.symlinkTarget,
+  });
+}
+
+function isRootManifestEntry(value: unknown): value is RootManifestEntry {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    "path", "type", "mode", "uid", "gid", "sha256", "symlinkTarget",
+  ])) return false;
+  return [
+    typeof value.path === "string",
+    isRootEntryType(value.type),
+    isNonnegativeSafeInteger(value.mode),
+    isNonnegativeSafeInteger(value.uid),
+    isNonnegativeSafeInteger(value.gid),
+    isNullableSha256(value.sha256),
+    isNullableString(value.symlinkTarget),
+  ].every(Boolean);
+}
+
+function hasExactKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
+  return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
+}
+
+function parseCurrentEntrypoints(
+  value: unknown,
+): readonly Readonly<{ source: string; runtimePath: string }>[] {
+  requireCondition(Array.isArray(value) && value.length === 4,
+    "CURRENT_ENTRYPOINTS_SHAPE");
+  const entrypoints: Readonly<{ source: string; runtimePath: string }>[] = [];
+  for (const entry of value) {
+    requireCondition(isRecord(entry) && hasExactKeys(entry, ["source", "runtimePath"]),
+      "CURRENT_ENTRYPOINTS_SHAPE");
+    const source = entry.source;
+    const runtimePath = entry.runtimePath;
+    requireCondition(typeof source === "string" && typeof runtimePath === "string",
+      "CURRENT_ENTRYPOINTS_SHAPE");
+    entrypoints.push(Object.freeze({ source, runtimePath }));
+  }
+  return Object.freeze(entrypoints);
+}
+
+export function enforceCurrentSubject(
+  authority: CurrentEximbayImageAuthority,
+  context: Readonly<{
+    manifestDigest: string;
+    manifestEntries: readonly unknown[];
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+  }>,
+): void {
+  requireCondition(authority.parentAuthoritySha256 === FROZEN_PARENT_AUTHORITY_SHA256,
+    "CURRENT_PARENT_AUTHORITY_BINDING");
+  requireCondition(authority.baselineCommit === CURRENT_BASELINE_COMMIT,
+    "CURRENT_BASELINE_COMMIT_BINDING");
+  requireCondition(authority.buildContext.manifestSha256 === context.manifestDigest,
+    "CURRENT_CONTEXT_MANIFEST_BINDING");
+  requireCondition(authority.buildContext.fileCount === context.manifestEntries.length,
+    "CURRENT_CONTEXT_FILE_COUNT_BINDING");
+  requireCondition(authority.buildContext.repositoryGraphInputCount === context.repositoryGraphInputCount,
+    "CURRENT_REPOSITORY_GRAPH_BINDING");
+  requireCondition(authority.buildContext.packagedGraphInputCount === context.packagedGraphInputCount,
+    "CURRENT_PACKAGED_GRAPH_BINDING");
+  requireCondition(JSON.stringify(authority.entrypoints) === JSON.stringify(CURRENT_ENTRYPOINTS),
+    "CURRENT_ENTRYPOINT_INVENTORY_BINDING");
 }
 
 function parseDockerInspectionLimits(

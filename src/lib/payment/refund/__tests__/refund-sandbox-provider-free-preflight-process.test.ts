@@ -121,6 +121,7 @@ function processFixture() {
       readManualReview: () => Promise.resolve(manualEmpty()),
       readReconciliation: () => Promise.resolve(reconciliationEmpty()),
       inspectCredential: () => credentialAbsent(),
+      readUnconsumedEximbayCanaryApprovalCount: () => Promise.resolve(0),
       probeAdmission,
     });
   return {
