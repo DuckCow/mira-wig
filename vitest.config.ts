@@ -7,6 +7,7 @@ const DATABASE_TEST_PATTERNS = [
   "src/app/actions/__tests__/payment.test.ts",
   "src/app/api/payments/toss/success/__tests__/route.test.ts",
   "src/lib/fitting/__tests__/fitting.test.ts",
+  "src/lib/payment/eximbay/__tests__/ready-http.test.ts",
   "src/lib/payment/providers/toss/__tests__/callback.test.ts",
 ] as const;
 
