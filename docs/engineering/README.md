@@ -150,16 +150,25 @@ commerce, order, or manufacturing behavior.
   `transaction_type=PAYMENT` is required and, when Payment is transition-safe,
   both owners commit in one local transaction. It is paired with Threat / Failure
   Model v0.2. This current design grants no source, schema, provider,
-  credential, routing, or activation authority; BF4 I1 remains preserved,
-  paused, and not implementation-admitted pending a separately authorized I1
-  rebind/correction and implementation correctness closure; E2 remains blocked.
+  credential, routing, or activation authority. Its installation-time source
+  status remains historical; current merged behavior is recorded separately
+  by the BF4 Source Status / As-Built. E2 remains blocked.
+- [Eximbay BF4 `status_url` Verification / Retrieval / Completion Source Status / As-Built v0.1](./eximbay-bf4-status-verification-completion-source-status-v0.1.md)
+  — current installed-source map at merge commit
+  `82d0aa10367d73c68f427522c6486caa259deb17`. It records the wired,
+  default-off BF4 POST route, exact SANDBOX caller ceiling, durable one-contact
+  verification/retrieval flow, canonical `SALE` completion, separately gated
+  Q004 checkout release, fresh successor identity, and late-result branches.
+  The Design/Threat v0.2 pair remains normative in its declared scope. This
+  record does not install the preserved v0.3 workset or grant provider contact,
+  credentials, E2, LIVE, production activation, or deployment authority.
 - [Eximbay BF4 `status_url` Verification / Retrieval / Completion Threat / Failure Model v0.2](./eximbay-bf4-status-verification-completion-threat-model-v0.2.md)
   — current normative companion successor replacing only the v0.1 T-BF4-17
   pre-success remediation claim and closing the mismatch event/Payment crash
   split. The Design/Threat v0.2 pair passed human targeted closure and is
-  ready for documentation installation; both v0.1 files remain immutable
-  historical predecessors. It grants no source, schema, provider, credential,
-  routing, E2, or activation authority.
+  the current installed normative documentation; both v0.1 files remain
+  immutable historical predecessors. It grants no source, schema, provider,
+  credential, routing, E2, or activation authority.
 - [Eximbay BF4 `status_url` Verification / Retrieval / Completion Threat / Failure Model v0.1](./eximbay-bf4-status-verification-completion-threat-model-v0.1.md)
   — immutable historical predecessor to the current v0.2 companion, covering hostile raw input, claim
   poisoning, duplicate/crash contact ceilings, verification/retrieval ambiguity,
