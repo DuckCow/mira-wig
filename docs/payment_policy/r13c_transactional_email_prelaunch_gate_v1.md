@@ -94,20 +94,102 @@ risk. Provider availability is outside the financial database transaction.
 
 ### ORDER-PAID APPLICATION-PATH CANARY
 
-**Current status: `PENDING`**
+**Current status: `PASS`**
 
-Preferred controlled path before transactional-email development is paused:
+**Final disposition:** `R13C_D1_ORDER_PAID_APPLICATION_PATH_CANARY_PASS`
+
+**Evidence classification:** `DEVELOPMENT_APPLICATION_PATH_EVIDENCE`
+
+#### D1 evidence record — 2026-08-27
+
+This human-confirmed, non-production canary used published code commit
+`59880f4a1f20c09110b1ff322e996214b426ef77` (tree
+`f89cb1b754dc343f0424c51fd0562f916a11fa2e`) against the local isolated
+PostgreSQL database `wig_platform_test`.
+
+- Run ID: `r13c_d1_6238c5bd-9f24-49a4-b361-b08a9b846c61`.
+- Payment provider/mode: `MOCK` / `SANDBOX`.
+- Frozen `CheckoutSession.communicationLocale`: `ko`.
+- Canary Order ID: `cmtb95w5i0004n2yiavl93qgo`.
+- Initial completion result: `completed`.
+- Persisted result: Payment `SUCCEEDED`, CheckoutSession `COMPLETED`, one
+  Order with status `PAID`.
+- Order-paid intent: one `customer.order-paid.email.v1` row with dedup key
+  `customer-order-paid:v1:cmtb95w5i0004n2yiavl93qgo` and payload `{ orderId }`
+  only.
+- First dispatcher: `claimed=1`, `succeeded=1`, `retried=0`,
+  `terminalFailed=0`.
+- Final Outbox state before cleanup: `DONE`, `processedAt` present,
+  `nextAttemptAt=null`, `lastError=null`.
+- SES: `ap-northeast-2`, Configuration Set `mira-transactional-v1`, one real
+  `SendEmail` attempt, Korean handler/template, subject
+  `주문이 접수되었습니다`.
+- Human inbox confirmation: `PASS` — the expected email arrived with matching
+  subject, content, Korean language, Order ID, item/money presentation, and
+  Mira order-detail CTA.
+- Rendered body SHA-256:
+  `d28cdf049b5f3a50f24a0c53602f78ad0a4c1b7552c5307efef6d88ba630f99d`.
+- Replay of the same capture returned `alreadyCompleted`; Order count stayed
+  `1`, intent count stayed `1`, the second dispatcher claimed `0`, and the
+  final SES send-call count stayed `1`.
+- Exact canary fixture cleanup passed with `0` residual canary database rows.
+- Eximbay calls: `0`; production DB effects: `0`; production topic-registration
+  mutations: `0`; Git publication during the canary: `0`.
+
+The proved bounded path was:
 
 ```text
-authoritative/sandbox payment success
-  -> CheckoutSession.communicationLocale
-  -> Order/payment completion
-  -> PaymentOutbox order-paid intent
-  -> email handler
-  -> locale-selected template
+MOCK/SANDBOX payment completion
+  -> CheckoutSession.communicationLocale=ko
+  -> Order/Payment/CheckoutSession completion
+  -> one order-paid PaymentOutbox intent
+  -> real Prisma projection
+  -> real Korean template
+  -> generic dispatcher
   -> published SES adapter
-  -> controlled inbox
+  -> SES
+  -> human-confirmed controlled inbox
 ```
+
+This is development application-path evidence only. It does
+not establish Eximbay payment ingress, Eximbay refund closure, refund-success
+email E2E, production sender/domain deliverability, production IAM/runtime,
+customer production activation, final PL-06 production-like evidence, locale
+release smoke, or customer-facing timestamp timezone correctness.
+
+### CUSTOMER-FACING TIMESTAMP TIMEZONE — UNRESOLVED
+
+- **Severity:** `IMPORTANT`
+- **Goal relevance:** `DIRECT`
+- **Status:** `OPEN / PRE-LAUNCH BLOCKING DEPENDENCY`
+- **Defect class:** `CUSTOMER_TIMESTAMP_TIMEZONE_PRESENTATION`
+
+Installed evidence in `src/lib/payment/email/templates.ts` shows that both the
+order-paid and refund-succeeded templates use the shared `formatDate(...)`,
+which currently specifies `timeZone: "UTC"`. The human-confirmed Korean D1
+email visibly rendered `결제 완료일: 2026. 8. 27. 오전 8:20` without an explicit
+UTC label.
+
+R13B freezes the checkout-time communication Locale, but current installed
+authority does not define the intended customer-facing timezone policy. The
+current UTC rendering must therefore not be treated as intended product
+behavior merely because the source currently produces it. An unlabeled UTC
+clock value can be read as the customer's local time. The issue affects both
+order-paid and refund-succeeded email timestamps because they share the same
+formatter.
+
+No timezone policy is selected in this document. In particular, this record does
+not choose UTC with a label, customer-local, shipping-country, Market, browser,
+account, or checkout-frozen IANA timezone, and it does not derive timezone from
+`communicationLocale` or Market. A separate explicit product/architecture
+decision is required, followed only by the implementation and dependent release
+evidence that decision requires.
+
+This finding does not retroactively invalidate
+`R13C_D1_ORDER_PAID_APPLICATION_PATH_CANARY_PASS`: D1 established the
+application/Outbox/handler/SES/inbox path and replay convergence. D1 must not,
+however, be cited as final evidence that customer-facing timestamp presentation
+is release-ready.
 
 This is not equivalent to final production-like release validation.
 
@@ -189,7 +271,11 @@ Outbox → handler → saved locale → correct template → SES → controlled 
 Verify recipient, subject, order identity, item/money presentation, saved
 locale, order-detail CTA, one business intent, and no duplicate intent on replay.
 Use final production-like email configuration for release evidence; a direct
-adapter call is insufficient.  
+adapter call is insufficient. PL-06 cannot become `PASS` until the
+customer-facing timestamp/timezone policy is explicitly decided, implemented if
+required, reviewed/tested, and exercised by the final production-like
+order-paid evidence.
+
 **Owner/approver:** PROJECT OWNER / payments owner  
 **Commit / PR / CI / canary reference:** —
 
@@ -225,7 +311,11 @@ Provider refund truth must not be fabricated to make an email test pass.
 Order refund state → refund-succeeded Outbox → handler → saved locale → correct
 refund template → SES → controlled inbox. Verify order identity, refund amount,
 full/partial result as applicable, locale, one business intent, and no new
-logical intent on replay.  
+logical intent on replay. PL-09 cannot become `PASS` until the same
+customer-facing timestamp/timezone policy is explicitly decided, implemented if
+required, reviewed/tested, and exercised by the final refund-succeeded
+application-path evidence.
+
 **Owner/approver:** PROJECT OWNER / refunds owner  
 **Commit / PR / CI / canary reference:** —
 
@@ -249,7 +339,10 @@ explicit human authority.
 **Environment:** —  
 **Evidence required:** After final sender, domain, credentials, and registration
 are ready but before ordinary customer traffic, send controlled canary email(s)
-through the actual application path and verify receipt and expected content.  
+through the actual application path and verify receipt and expected content,
+including correct timestamp/timezone presentation under the resolved policy.
+PL-11 remains `PENDING` until that content verification is satisfied.
+
 **Owner/approver:** PROJECT OWNER / release owner  
 **Commit / PR / CI / canary reference:** —
 
