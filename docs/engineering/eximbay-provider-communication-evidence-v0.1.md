@@ -454,18 +454,20 @@ that time.
 
 The current installed BF4 source is a separate Mira runtime record. It was
 installed as dormant/default-off source before the later provider replies and
-retains its own evidence-gated behavior. In particular, the route source
-currently admits POST form-body input but uses a `text/plain; charset=utf-8`
-response header, while the recovered provider reply describes a `text/html`
-success response. This is not silently normalized here:
+retains its own evidence-gated behavior. The current route admits bounded POST
+form-body input and returns successful or terminally processed acknowledgements
+as `text/html; charset=utf-8`; empty failure responses use
+`text/plain; charset=utf-8`. This source fact is recorded by the current BF4
+Source Status and does not silently normalize provider wording here:
 
 - the provider reply remains provider-supplied evidence;
 - installed source remains authority for what Mira currently does; and
-- the source/provider difference is a future BF4 implementation-reconciliation
-  concern, not a reason to rewrite provider history or grant activation.
+- source behavior is not evidence of unresolved provider punctuation or retry
+  count, and is not a reason to rewrite provider history or grant activation.
 
 The related current records are the [BF4 design contract](./eximbay-bf4-status-verification-completion-design-contract-v0.2.md),
 the [BF4 threat/failure model](./eximbay-bf4-status-verification-completion-threat-model-v0.2.md),
+the [BF4 Source Status / As-Built](./eximbay-bf4-status-verification-completion-source-status-v0.1.md),
 and the [Eximbay refund/cancel/recovery Source Status](./eximbay-refund-cancel-recovery-source-status-v0.3.md).
 They remain authoritative within their own declared scopes and are not
 rewritten by this ledger.
