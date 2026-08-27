@@ -11,6 +11,7 @@ import {
   type TransactionalEmailSendInput,
 } from "@/lib/payment/email";
 import { dispatchPending, type OutboxRegistry } from "@/lib/payment/outbox";
+import { TransactionalEmailDeliveryError } from "@/lib/payment/email/delivery-error";
 
 const FIRST_NOW = new Date("2026-08-27T05:00:00.000Z");
 const createdIds: string[] = [];
@@ -37,7 +38,10 @@ describe("R13B email handler with generic outbox dispatcher", () => {
         sends.push(input);
         attempts += 1;
         return attempts === 1
-          ? Promise.reject(new Error("temporary email transport failure"))
+          ? Promise.reject(new TransactionalEmailDeliveryError(
+            "TRANSIENT",
+            "SES_SERVICE_UNAVAILABLE",
+          ))
           : Promise.resolve();
       },
     };
@@ -55,6 +59,7 @@ describe("R13B email handler with generic outbox dispatcher", () => {
     const done = await db.paymentOutbox.findUniqueOrThrow({ where: { id: job.id } });
 
     expect(first).toMatchObject({ retried: 1, succeeded: 0 });
+    expect(pending.lastError).toBe("SES_SERVICE_UNAVAILABLE");
     expect(second).toMatchObject({ retried: 0, succeeded: 1 });
     expect(done.status).toBe(OutboxStatus.DONE);
     expect(sends).toHaveLength(2);
