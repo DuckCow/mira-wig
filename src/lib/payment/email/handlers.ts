@@ -1,5 +1,6 @@
 import type { OutboxHandler, OutboxRegistry } from "@/lib/payment/outbox";
-import type { TransactionalEmailPort } from "./port";
+import { TransactionalEmailDeliveryError } from "./delivery-error";
+import type { TransactionalEmailPort, TransactionalEmailSendInput } from "./port";
 import type { TransactionalEmailProjectionSource } from "./projection";
 import { buildOrderPaidEmail, buildRefundSucceededEmail } from "./templates";
 import {
@@ -42,7 +43,7 @@ function orderPaidHandler(
       projection.value,
       orderDetailUrl(origin, projection.value.orderId),
     );
-    await dependencies.port.send({
+    return sendThroughPort(dependencies.port, {
       idempotencyKey,
       to: projection.value.to,
       subject: content.subject,
@@ -66,13 +67,28 @@ function refundSucceededHandler(
       projection.value,
       orderDetailUrl(origin, projection.value.orderId),
     );
-    await dependencies.port.send({
+    return sendThroughPort(dependencies.port, {
       idempotencyKey,
       to: projection.value.to,
       subject: content.subject,
       text: content.text,
     });
   };
+}
+
+async function sendThroughPort(
+  port: TransactionalEmailPort,
+  input: TransactionalEmailSendInput,
+) {
+  try {
+    await port.send(input);
+  } catch (error) {
+    if (error instanceof TransactionalEmailDeliveryError
+      && error.disposition === "PERMANENT") {
+      return terminal(error.safeCode);
+    }
+    throw error;
+  }
 }
 
 function requirePublicOrigin(value: string): string {

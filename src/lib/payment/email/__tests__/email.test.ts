@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { OrderStatus, type Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type { OutboxHandlerContext } from "@/lib/payment/outbox";
+import { TransactionalEmailDeliveryError } from "@/lib/payment/email/delivery-error";
 import {
   CUSTOMER_ORDER_PAID_EMAIL_V1,
   CUSTOMER_REFUND_SUCCEEDED_EMAIL_V1,
@@ -118,7 +119,10 @@ describe("R13B transactional email source", () => {
   });
 
   it("lets transient port failures enter the installed dispatcher retry path", async () => {
-    const transportFailure = new Error("temporary mail transport outage");
+    const transportFailure = new TransactionalEmailDeliveryError(
+      "TRANSIENT",
+      "SES_SERVICE_UNAVAILABLE",
+    );
     const port: TransactionalEmailPort = { send: () => Promise.reject(transportFailure) };
     const registry = createTransactionalEmailHandlers({
       source: successfulSource(),
@@ -130,6 +134,25 @@ describe("R13B transactional email source", () => {
       { orderId: "order_public" },
       context(CUSTOMER_ORDER_PAID_EMAIL_V1, orderPaidEmailDedupKey("order_public")),
     )).rejects.toBe(transportFailure);
+  });
+
+  it("converges permanent delivery failures to terminal_failed with only the safe code", async () => {
+    const port: TransactionalEmailPort = {
+      send: () => Promise.reject(new TransactionalEmailDeliveryError(
+        "PERMANENT",
+        "SES_MESSAGE_REJECTED",
+      )),
+    };
+    const registry = createTransactionalEmailHandlers({
+      source: successfulSource(),
+      port,
+      publicOrigin: "https://mira.test",
+    });
+
+    await expect(registry[CUSTOMER_ORDER_PAID_EMAIL_V1](
+      { orderId: "order_public" },
+      context(CUSTOMER_ORDER_PAID_EMAIL_V1, orderPaidEmailDedupKey("order_public")),
+    )).resolves.toEqual({ outcome: "terminal_failed", reason: "SES_MESSAGE_REJECTED" });
   });
 
   it.each([
