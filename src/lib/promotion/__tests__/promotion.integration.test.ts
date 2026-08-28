@@ -341,6 +341,21 @@ describe("PROMO-C0 durable foundation", () => {
       await expect(issueSignupPromotionGrant(db, issueInput(fixture))).resolves.toEqual(first);
     });
 
+    it("keeps signup grant identity program-scoped before contact consumption", async () => {
+      await verifyUser(fixture.userId);
+      const secondProgram = { ...fixture, programKey: `${fixture.programKey}_second` };
+      await createAndActivatePolicy(fixture, PromotionKind.SIGNUP, 1);
+      await createAndActivatePolicy(secondProgram, PromotionKind.SIGNUP, 1);
+
+      const first = await issueSignupPromotionGrant(db, issueInput(fixture));
+      const second = await issueSignupPromotionGrant(db, issueInput(secondProgram));
+
+      expect(first.id).not.toBe(second.id);
+      expect(first.grantKey).toBe(`signup:${fixture.programKey}:${fixture.userId}`);
+      expect(second.grantKey).toBe(`signup:${secondProgram.programKey}:${fixture.userId}`);
+      await expect(db.promotionGrant.count({ where: { userId: fixture.userId } })).resolves.toBe(2);
+    });
+
     it("rejects missing effective policy and missing requested Market rule", async () => {
       await verifyUser(fixture.userId);
       await expectPromotionCode(issueSignupPromotionGrant(db, issueInput(fixture)), "NO_EFFECTIVE_POLICY");

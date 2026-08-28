@@ -177,7 +177,10 @@ describe("EX2B2-S2 READY contact lifecycle integration", () => {
     ["User.email", async (paymentId: string) => db.user.update({ where: { id: ctx.userId }, data: { email: `changed-${paymentId}@example.test` } }), "ATTEMPT_STATE_CONFLICT"],
     ["CheckoutSession market", async (paymentId: string) => updateSessionForPayment(paymentId, { marketCode: "JP" }), "SESSION_TERMS_STALE"],
     ["CheckoutSession currency", async (paymentId: string) => updateSessionForPayment(paymentId, { currency: "JPY" }), "SESSION_TERMS_STALE"],
-    ["CheckoutSession amount", async (paymentId: string) => updateSessionForPayment(paymentId, { totalAmount: 101 }), "SESSION_TERMS_STALE"],
+    ["CheckoutSession amount", async (paymentId: string) => updateSessionForPayment(paymentId, {
+      subtotalAmount: 101,
+      totalAmount: 101,
+    }), "SESSION_TERMS_STALE"],
     ["Payment mode", async (paymentId: string) => db.payment.update({ where: { id: paymentId }, data: { mode: PaymentMode.LIVE } }), "ATTEMPT_STATE_CONFLICT"],
     ["Payment providerOrderId", async (paymentId: string) => db.payment.update({ where: { id: paymentId }, data: { providerOrderId: syntheticEximbayProviderOrderId() } }), null],
     ["Payment provider", async (paymentId: string) => db.payment.update({ where: { id: paymentId }, data: { provider: PaymentProvider.TOSS } }), null],
@@ -393,7 +396,7 @@ async function createExistingAuthorizedPayment(
 
 async function updateSessionForPayment(
   paymentId: string,
-  data: { totalAmount?: number; marketCode?: string; currency?: string },
+  data: { subtotalAmount?: number; totalAmount?: number; marketCode?: string; currency?: string },
 ) {
   const payment = await db.payment.findUniqueOrThrow({ where: { id: paymentId } });
   return db.checkoutSession.update({ where: { id: payment.checkoutSessionId }, data });

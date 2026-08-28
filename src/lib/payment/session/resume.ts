@@ -44,7 +44,9 @@ export async function readCheckoutSessionResume(
       status: true,
       submittedAt: true,
       expiresAt: true,
+      promotionGrantId: true,
       subtotalAmount: true,
+      discountAmount: true,
       shippingAmount: true,
       totalAmount: true,
       market: { select: { code: true, currency: true, isActive: true } },
@@ -54,6 +56,7 @@ export async function readCheckoutSessionResume(
           id: true,
           quantity: true,
           unitAmount: true,
+          discountAmount: true,
           fulfillmentType: true,
           snapshotData: true,
         },
@@ -129,6 +132,7 @@ export async function readCheckoutSessionResume(
     submittedAt: session.submittedAt,
     expiresAt: session.expiresAt,
     subtotalAmount: session.subtotalAmount,
+    discountAmount: session.discountAmount,
     shippingAmount: session.shippingAmount,
     totalAmount: session.totalAmount,
     lines,
@@ -144,6 +148,7 @@ function projectLines(
     id: string;
     quantity: number;
     unitAmount: number;
+    discountAmount: number;
     fulfillmentType: CheckoutSessionResumeLine["fulfillmentType"];
     snapshotData: unknown;
   }[],
@@ -154,6 +159,7 @@ function projectLines(
       id: line.id,
       quantity: line.quantity,
       unitAmount: line.unitAmount,
+      discountAmount: line.discountAmount,
       fulfillmentType: line.fulfillmentType,
       snapshot: parseSnapshotData(line.snapshotData),
     }));
@@ -163,16 +169,46 @@ function projectLines(
 }
 
 function hasCoherentFrozenAmounts(
-  session: { currency: string; subtotalAmount: number; shippingAmount: number; totalAmount: number },
+  session: {
+    currency: string;
+    promotionGrantId: string | null;
+    subtotalAmount: number;
+    discountAmount: number;
+    shippingAmount: number;
+    totalAmount: number;
+  },
   lines: readonly CheckoutSessionResumeLine[],
 ): boolean {
-  if (![session.subtotalAmount, session.shippingAmount, session.totalAmount].every(isNonNegativeInteger)) return false;
-  if (lines.some((line) => !isNonNegativeInteger(line.unitAmount) || !isPositiveInteger(line.quantity))) return false;
-  if (lines.some((line) => !hasRequiredSnapshotPresentation(line))) return false;
-  if (lines.some((line) => line.snapshot.currencyCode !== session.currency)) return false;
   const subtotal = lines.reduce((sum, line) => sum + line.unitAmount * line.quantity, 0);
-  return subtotal === session.subtotalAmount
-    && subtotal + session.shippingAmount === session.totalAmount;
+  const discount = lines.reduce((sum, line) => sum + line.discountAmount, 0);
+  return [
+    [session.subtotalAmount, session.discountAmount, session.shippingAmount, session.totalAmount]
+      .every(isNonNegativeInteger),
+    lines.every(hasCoherentLineMoney),
+    lines.every(hasRequiredSnapshotPresentation),
+    lines.every((line) => line.snapshot.currencyCode === session.currency),
+    subtotal === session.subtotalAmount,
+    discount === session.discountAmount,
+    hasCoherentPromotionShape(session, discount),
+    subtotal + session.shippingAmount - discount === session.totalAmount,
+  ].every(Boolean);
+}
+
+function hasCoherentLineMoney(line: CheckoutSessionResumeLine): boolean {
+  return [
+    isNonNegativeInteger(line.unitAmount),
+    isPositiveInteger(line.quantity),
+    isNonNegativeInteger(line.discountAmount),
+    line.discountAmount <= line.unitAmount * line.quantity,
+  ].every(Boolean);
+}
+
+function hasCoherentPromotionShape(
+  session: { promotionGrantId: string | null; discountAmount: number },
+  lineDiscountAmount: number,
+): boolean {
+  if (session.promotionGrantId !== null) return session.discountAmount > 0;
+  return session.discountAmount === 0 && lineDiscountAmount === 0;
 }
 
 function hasRequiredSnapshotPresentation(line: CheckoutSessionResumeLine): boolean {

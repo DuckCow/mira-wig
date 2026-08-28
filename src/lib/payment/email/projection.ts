@@ -21,6 +21,7 @@ export interface OrderPaidEmailProjection {
   paidAt: Date;
   status: OrderStatus;
   currency: string;
+  discountAmount: number;
   totalPaidAmount: number;
   items: readonly OrderEmailItem[];
 }
@@ -69,6 +70,9 @@ async function loadOrderPaid(
       paidAt: true,
       status: true,
       currency: true,
+      subtotalAmount: true,
+      discountAmount: true,
+      shippingAmount: true,
       totalAmount: true,
       user: { select: { email: true } },
       session: { select: { communicationLocale: true } },
@@ -81,11 +85,16 @@ async function loadOrderPaid(
   if (!order) return failure("ORDER_NOT_FOUND");
   const authority = recipientAndLocale(order.user.email, order.session.communicationLocale);
   if (!authority.ok) return authority;
-  if (!validMoney(order.totalAmount, order.currency) || order.items.length === 0) {
+  if (!hasCoherentOrderPaidMoney(order)) {
     return failure("ORDER_EMAIL_PROJECTION_INVALID");
   }
   const items = projectItems(order.items, order.currency);
   if (!items) return failure("ORDER_EMAIL_SNAPSHOT_INVALID");
+  const grossItems = items.reduce(
+    (sum, item) => sum + item.unitAmount * item.quantity,
+    0,
+  );
+  if (grossItems !== order.subtotalAmount) return failure("ORDER_EMAIL_PROJECTION_INVALID");
   return success({
     to: authority.value.to,
     locale: authority.value.locale,
@@ -93,9 +102,27 @@ async function loadOrderPaid(
     paidAt: order.paidAt,
     status: order.status,
     currency: order.currency,
+    discountAmount: order.discountAmount,
     totalPaidAmount: order.totalAmount,
     items,
   });
+}
+
+function hasCoherentOrderPaidMoney(order: {
+  subtotalAmount: number;
+  discountAmount: number;
+  shippingAmount: number;
+  totalAmount: number;
+  currency: string;
+  items: readonly unknown[];
+}): boolean {
+  return [
+    [order.subtotalAmount, order.discountAmount, order.shippingAmount, order.totalAmount]
+      .every((amount) => validMoney(amount, order.currency)),
+    order.discountAmount <= order.subtotalAmount,
+    order.subtotalAmount + order.shippingAmount - order.discountAmount === order.totalAmount,
+    order.items.length > 0,
+  ].every(Boolean);
 }
 
 async function loadRefundSucceeded(

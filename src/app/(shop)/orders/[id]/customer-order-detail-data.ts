@@ -35,6 +35,7 @@ function loadOwnedOrder(orderId: string, userId: string) {
       paidAt: true,
       currency: true,
       subtotalAmount: true,
+      discountAmount: true,
       shippingAmount: true,
       totalAmount: true,
       items: {

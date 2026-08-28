@@ -10,6 +10,11 @@ import type { PrismaClient } from "@prisma/client";
 import { parseSnapshotData, snapshotToJson } from "@/lib/order/snapshot";
 import { containsSuspensionCycle } from "@/lib/payment/remediation";
 import { enqueueOrderPaidEmailIntent } from "@/lib/payment/email/intent";
+import {
+  PromotionRedemptionError,
+  redeemPromotionForOrder,
+  requirePromotionReservationForCompletion,
+} from "@/lib/promotion";
 import { transitionCheckoutSession } from "@/lib/payment/session";
 import type { CheckoutSessionTransition } from "@/lib/payment/session";
 import type {
@@ -59,7 +64,10 @@ async function completeInTransaction(
   if (already) return already;
 
   guardCompletion(session, payment, facts);
-  const order = await createOrder(tx, session, payment, effectiveCapturedAt(facts));
+  await guardPromotionReservation(tx, session, payment, facts);
+  const paidAt = effectiveCapturedAt(facts);
+  const order = await createOrder(tx, session, payment, paidAt);
+  await redeemPromotion(tx, session, payment, facts, paidAt);
   await decrementStockedLines(tx, session.lines, payment, facts);
   await consumePurchasedCartProvenance(tx, session);
   await completeSession(tx, session, facts);
@@ -137,7 +145,79 @@ function guardCompletion(
   if (payment.currency !== session.currency) fail("CURRENCY_MISMATCH", "Payment currency mismatch", facts, payment);
   if (!session.shipping) fail("SHIPPING_MISSING", "Checkout session shipping missing", facts, payment);
   if (session.lines.length === 0) fail("LINES_MISSING", "Checkout session lines missing", facts, payment);
+  guardFrozenMoney(session, facts, payment);
   guardCommerceIntegrity(session, facts, payment);
+}
+
+function guardFrozenMoney(
+  session: CompletionSession,
+  facts: CaptureFacts,
+  payment: CapturedPayment,
+): void {
+  const subtotalAmount = session.lines.reduce(
+    (sum, line) => sum + line.unitAmount * line.quantity,
+    0,
+  );
+  const discountAmount = session.lines.reduce(
+    (sum, line) => sum + line.discountAmount,
+    0,
+  );
+  const validLines = session.lines.every((line) => (
+    Number.isSafeInteger(line.discountAmount)
+    && line.discountAmount >= 0
+    && line.discountAmount <= line.unitAmount * line.quantity
+  ));
+  const validPromotionShape = session.promotionGrantId === null
+    ? session.discountAmount === 0 && discountAmount === 0
+    : session.discountAmount > 0;
+  if (validLines
+    && validPromotionShape
+    && subtotalAmount === session.subtotalAmount
+    && discountAmount === session.discountAmount
+    && subtotalAmount + session.shippingAmount - discountAmount === session.totalAmount) return;
+  fail("PROMOTION_REDEMPTION_INVALID", "Frozen checkout discount facts are incoherent", facts, payment);
+}
+
+async function guardPromotionReservation(
+  tx: CompletionTx,
+  session: CompletionSession,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+): Promise<void> {
+  if (session.promotionGrantId === null) return;
+  try {
+    await requirePromotionReservationForCompletion(tx, {
+      promotionGrantId: session.promotionGrantId,
+      checkoutSessionId: session.id,
+    });
+  } catch (error) {
+    if (error instanceof PromotionRedemptionError) {
+      fail("PROMOTION_REDEMPTION_INVALID", error.message, facts, payment);
+    }
+    throw error;
+  }
+}
+
+async function redeemPromotion(
+  tx: CompletionTx,
+  session: CompletionSession,
+  payment: CapturedPayment,
+  facts: CaptureFacts,
+  redeemedAt: Date,
+): Promise<void> {
+  if (session.promotionGrantId === null) return;
+  try {
+    await redeemPromotionForOrder(tx, {
+      promotionGrantId: session.promotionGrantId,
+      checkoutSessionId: session.id,
+      redeemedAt,
+    });
+  } catch (error) {
+    if (error instanceof PromotionRedemptionError) {
+      fail("PROMOTION_REDEMPTION_INVALID", error.message, facts, payment);
+    }
+    throw error;
+  }
 }
 
 function guardPaymentLineage(
@@ -254,8 +334,12 @@ async function createOrder(
       payment: { connect: { id: payment.id } },
       user: { connect: { id: session.userId } },
       market: { connect: { code: session.marketCode } },
+      promotionGrant: session.promotionGrantId
+        ? { connect: { id: session.promotionGrantId } }
+        : undefined,
       currency: session.currency,
       subtotalAmount: session.subtotalAmount,
+      discountAmount: session.discountAmount,
       shippingAmount: session.shippingAmount,
       totalAmount: session.totalAmount,
       paidAt,
@@ -272,6 +356,7 @@ function orderItemCreate(line: CompletionLine): Prisma.OrderItemCreateWithoutOrd
     wigStyleId: line.wigStyleId,
     quantity: line.quantity,
     unitAmount: line.unitAmount,
+    discountAmount: line.discountAmount,
     fulfillmentType: line.fulfillmentType,
     snapshotData: snapshotToJson(parseSnapshotData(line.snapshotData)),
   };

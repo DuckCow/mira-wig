@@ -20,6 +20,8 @@ export type SessionErrorCode =
   | "COMMUNICATION_LOCALE_INVALID"
   | "SHIPPING_COUNTRY_INVALID"
   | "SHIPPING_ADDRESS_INVALID"
+  | "PROMOTION_GRANT_UNAVAILABLE"
+  | "PROMOTION_DISCOUNT_UNAVAILABLE"
   | "TOTAL_AMOUNT_TOO_LOW"
   | "INVALID_AMOUNT";
 
@@ -50,6 +52,7 @@ export interface CreateCheckoutSessionInput {
   marketCode: MarketCode;
   communicationLocale: Locale;
   shipping: CheckoutShippingInput;
+  promotionGrantId?: string;
   now?: Date;
 }
 
@@ -57,6 +60,7 @@ export interface CreateCheckoutSessionResult {
   sessionId: string;
   expiresAt: Date;
   subtotalAmount: number;
+  discountAmount: number;
   shippingAmount: number;
   totalAmount: number;
   currency: string;
@@ -75,6 +79,7 @@ export interface CheckoutSessionResumeLine {
   id: string;
   quantity: number;
   unitAmount: number;
+  discountAmount: number;
   fulfillmentType: FulfillmentType;
   snapshot: SnapshotData;
 }
@@ -99,6 +104,7 @@ export interface CheckoutSessionResumeResult {
   submittedAt: Date | null;
   expiresAt: Date;
   subtotalAmount: number;
+  discountAmount: number;
   shippingAmount: number;
   totalAmount: number;
   lines: readonly CheckoutSessionResumeLine[];

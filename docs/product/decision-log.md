@@ -300,3 +300,36 @@ checkout v1 permits at most one coupon per order and does not stack coupons.
 Checkout redemption, refund/regrant behavior, customer or admin UI, Mira
 Credit, purchase rewards, and review rewards remain future slices requiring
 separate authority.
+
+## 2026-08-28 — Launch-v1 coupon checkout-to-order financial semantics
+
+Coupon application is explicit and optional, with at most one account-bound
+PromotionGrant selected per CheckoutSession and Order. All frozen merchandise
+lines are eligible; shipping, tax, and duty are not. The exact policy version
+that issued the grant owns the rate, cap, and minimum. Redemption uses that
+version's rule for the current CheckoutSession Market and requires the rule,
+CheckoutSession, and Market currencies to match. `originMarketCode` remains
+issuance provenance and does not select redemption economics.
+
+An issued grant may redeem from an ACTIVE or RETIRED issuing policy, but not a
+DRAFT policy. Grant validity, ownership, revocation, redemption, supported kind,
+and signup first-order-only eligibility are revalidated immediately before the
+first provider contact. A durable one-grant-to-one-checkout reservation is
+claimed in that contact-boundary transaction. For `firstOrderOnly` promotions,
+contact authority is additionally user-global while `programKey` remains part
+of grant identity: the CheckoutSession durably claims the user's first-order
+promotion opportunity before provider contact. Safe uncontacted expiry releases
+that claim; contacted, ambiguous, captured, compensated, and completed exposure
+retains it. Successful completion retains the claim permanently, and full
+refund does not regrant it. Refund/compensation regrant policy remains deferred.
+After contact authorization,
+frozen promoted payment terms are not reinterpreted from later policy, grant,
+or storefront state.
+
+CheckoutSession and Order persist gross subtotal, coupon discount, shipping,
+and net total. Each CheckoutSessionLine and OrderItem persists its allocated
+whole-line discount, and completion copies the frozen allocation without
+recalculation while atomically creating the Order and redeeming the grant. A
+selected coupon that yields no monetary benefit or a payable total below one
+minor unit is rejected; no free-order path is introduced. Coupon-aware refunds
+and refund/void regrant policy remain deferred.

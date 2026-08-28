@@ -195,11 +195,16 @@ model PromotionGrant {
   expiresAt        DateTime?
   revokedAt        DateTime?
   redeemedAt       DateTime?
+  reservedCheckoutSessionId String?   @unique
+  reservedAt                DateTime?
   createdAt        DateTime  @default(now())
 
   user          User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   policyVersion PromotionPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
   originMarket  Market?                @relation(fields: [originMarketCode], references: [code], onDelete: Restrict)
+  checkoutSessions        CheckoutSession[]      @relation("CheckoutPromotionGrant")
+  reservedCheckoutSession CheckoutSession?       @relation("PromotionReservation", fields: [reservedCheckoutSessionId], references: [id], onDelete: Restrict)
+  order                   Order?                 @relation("OrderPromotionGrant")
 
   @@index([userId, createdAt])
   @@index([policyVersionId])
@@ -702,9 +707,12 @@ model CheckoutSession {
   /// Frozen checkout-time presentation Locale for customer communications.
   /// Nullable only for pre-R13B historical rows; it does not own Market, currency, or pricing.
   communicationLocale String?               @db.VarChar(2)
+  promotionGrantId String?
+  firstOrderPromotionClaimedAt DateTime?
   currency       String
   status         CheckoutSessionStatus @default(OPEN)
   subtotalAmount Int
+  discountAmount Int                   @default(0)
   shippingAmount Int                   @default(0)
   totalAmount    Int
   expiresAt      DateTime
@@ -717,6 +725,8 @@ model CheckoutSession {
   shipping CheckoutSessionShipping?
   payments Payment[]
   order    Order?
+  promotionGrant         PromotionGrant?          @relation("CheckoutPromotionGrant", fields: [promotionGrantId], references: [id], onDelete: Restrict)
+  reservedPromotionGrant PromotionGrant?          @relation("PromotionReservation")
 
   @@index([userId, status])
   @@index([status, expiresAt])
@@ -735,6 +745,8 @@ model CheckoutSessionLine {
   wigStyleId      String
   quantity        Int
   unitAmount      Int
+  /// Discount allocated to this whole frozen line quantity, not per unit.
+  discountAmount  Int             @default(0)
   fulfillmentType FulfillmentType
   snapshotData    Json
   createdAt       DateTime        @default(now())
@@ -816,8 +828,11 @@ model Order {
   user              User            @relation(fields: [userId], references: [id])
   marketCode        String
   market            Market          @relation(fields: [marketCode], references: [code])
+  promotionGrantId  String?         @unique
+  promotionGrant    PromotionGrant? @relation("OrderPromotionGrant", fields: [promotionGrantId], references: [id], onDelete: Restrict)
   currency          String
   subtotalAmount    Int
+  discountAmount    Int             @default(0)
   shippingAmount    Int
   totalAmount       Int
   status            OrderStatus     @default(PAID)
@@ -1140,6 +1155,8 @@ model OrderItem {
   wigStyleId      String
   quantity        Int
   unitAmount      Int
+  /// Discount allocated to this whole historical line quantity, not per unit.
+  discountAmount  Int                   @default(0)
   fulfillmentType FulfillmentType
   snapshotData    Json
   mr              ManufacturingRequest?

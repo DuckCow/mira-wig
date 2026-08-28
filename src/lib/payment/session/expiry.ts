@@ -4,9 +4,12 @@ import { unresolvedSessionExposureWhere } from "@/lib/payment/remediation";
 import { SESSION_SWEEP_LIMIT_DEFAULT, type ExpireStaleInput } from "./types";
 
 type SessionClient = Pick<PrismaClient, "$transaction" | "checkoutSession">;
-type ExpiryTx = Pick<Prisma.TransactionClient, "$queryRaw" | "checkoutSession" | "payment">;
+type ExpiryTx = Pick<Prisma.TransactionClient, "$queryRaw" | "checkoutSession" | "payment" | "promotionGrant">;
 type UsableSession = Pick<CheckoutSession, "status" | "expiresAt">;
-type LockedSession = Pick<CheckoutSession, "id" | "status" | "expiresAt">;
+type LockedSession = Pick<
+  CheckoutSession,
+  "id" | "status" | "expiresAt" | "promotionGrantId" | "firstOrderPromotionClaimedAt"
+>;
 
 const expiryBlockingPaymentWhere = {
   OR: [
@@ -65,19 +68,42 @@ async function expireCandidate(tx: ExpiryTx, id: string): Promise<number> {
       status: CheckoutSessionStatus.SUBMITTED,
       expiresAt: { lte: freshNow },
     },
-    data: { status: CheckoutSessionStatus.EXPIRED },
+    data: {
+      status: CheckoutSessionStatus.EXPIRED,
+      firstOrderPromotionClaimedAt: null,
+    },
   });
+  if (result.count === 1) await releaseExactPromotionReservation(tx, session);
   return result.count;
 }
 
 async function lockExactCheckoutSession(tx: ExpiryTx, id: string): Promise<LockedSession | null> {
   const rows = await tx.$queryRaw<LockedSession[]>(Prisma.sql`
-    SELECT "id", "status", "expiresAt"
+    SELECT "id", "status", "expiresAt", "promotionGrantId", "firstOrderPromotionClaimedAt"
     FROM "CheckoutSession"
     WHERE "id" = ${id}
     FOR UPDATE
   `);
   return rows[0] ?? null;
+}
+
+async function releaseExactPromotionReservation(
+  tx: ExpiryTx,
+  session: LockedSession,
+): Promise<void> {
+  if (session.promotionGrantId === null) return;
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "PromotionGrant"
+    WHERE "id" = ${session.promotionGrantId}
+    FOR UPDATE
+  `);
+  await tx.promotionGrant.updateMany({
+    where: {
+      id: session.promotionGrantId,
+      reservedCheckoutSessionId: session.id,
+    },
+    data: { reservedCheckoutSessionId: null, reservedAt: null },
+  });
 }
 
 async function captureFreshDatabaseTime(tx: ExpiryTx): Promise<Date> {

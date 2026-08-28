@@ -63,6 +63,12 @@ export function FrozenSessionSnapshot({
       </ul>
       <div className="mt-4 space-y-3">
         <SummaryRow label={messages.subtotal} value={formatPrice(session.subtotalAmount, sessionCurrency, locale)} />
+        {session.discountAmount > 0 ? (
+          <SummaryRow
+            label={messages.couponDiscount}
+            value={`−${formatPrice(session.discountAmount, sessionCurrency, locale)}`}
+          />
+        ) : null}
         <SummaryRow label={messages.shipping} value={shippingLabel(session, sessionCurrency, locale)} />
         <SummaryRow label={messages.taxDuty} value={messages.taxPending} />
         <SummaryRow label={messages.total} value={formatPrice(session.totalAmount, sessionCurrency, locale)} strong />

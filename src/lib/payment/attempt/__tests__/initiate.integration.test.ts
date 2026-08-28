@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   CheckoutSessionStatus,
   FulfillmentType,
+  OrderStatus,
   PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
@@ -10,6 +11,8 @@ import {
   PaymentProvider,
   PaymentRemediationStatus,
   Prisma,
+  PromotionKind,
+  PromotionPolicyStatus,
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
@@ -19,6 +22,7 @@ import { db } from "@/lib/db";
 import { MarketCode } from "@/lib/market/types";
 import { completeFromCapture, recordCapture, type CaptureFacts } from "@/lib/payment/complete";
 import { EXIMBAY_READY_TOTAL_DEADLINE_MS } from "@/lib/payment/eximbay/ready-contact";
+import { createPrismaTransactionalEmailProjectionSource } from "@/lib/payment/email";
 import {
   EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED,
   recoverEximbayCheckout,
@@ -2093,6 +2097,592 @@ describe("payment initiate providerRef persistence", () => {
       });
     },
   );
+
+  it("rejects a SIGNUP coupon at the contact boundary after a prior financial order without provider contact", async () => {
+    const now = new Date("2026-08-28T02:00:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const session = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    await createFinanciallyCompletedPriorOrder(ctx, now);
+    const calls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.first-order.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    })).rejects.toMatchObject({ code: "SESSION_TERMS_STALE" });
+
+    expect(calls).toHaveLength(0);
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: null,
+      redeemedAt: null,
+    });
+    await expect(db.payment.findFirstOrThrow({ where: { checkoutSessionId: session.sessionId } })).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      contactStartedAt: null,
+    });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: null,
+    });
+  });
+
+  it("allows only one cross-program SIGNUP checkout to claim and cross first provider contact", async () => {
+    const now = new Date("2026-08-28T02:10:00.000Z");
+    const grantA = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const grantB = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const sessionA = await submitPromotedSessionWithOneLine(ctx, grantA.id, now);
+    const sessionB = await submitPromotedSessionWithOneLine(ctx, grantB.id, now);
+    const calls: PaymentInitiateInput[] = [];
+
+    const settled = await Promise.allSettled([
+      initiatePaymentAttemptForTest(db, {
+        sessionId: sessionA.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, calls),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: `promo.first-order.program-a.${randomUUID()}`,
+        now,
+        contactBoundaryNow: now,
+      }),
+      initiatePaymentAttemptForTest(db, {
+        sessionId: sessionB.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, calls),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: `promo.first-order.program-b.${randomUUID()}`,
+        now,
+        contactBoundaryNow: now,
+      }),
+    ]);
+
+    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(settled.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "SESSION_TERMS_STALE" },
+    });
+    expect(calls).toHaveLength(1);
+    const sessions = await db.checkoutSession.findMany({
+      where: { id: { in: [sessionA.sessionId, sessionB.sessionId] } },
+      select: { firstOrderPromotionClaimedAt: true },
+    });
+    expect(sessions.filter((session) => session.firstOrderPromotionClaimedAt !== null)).toHaveLength(1);
+    await expect(db.promotionGrant.count({
+      where: { id: { in: [grantA.id, grantB.id] }, reservedCheckoutSessionId: { not: null } },
+    })).resolves.toBe(1);
+    await expect(db.payment.count({
+      where: {
+        checkoutSessionId: { in: [sessionA.sessionId, sessionB.sessionId] },
+        contactStartedAt: { not: null },
+      },
+    })).resolves.toBe(1);
+  });
+
+  it("blocks a contender begun before the winner Order when released only after winner completion", async () => {
+    const now = new Date("2026-08-28T02:20:00.000Z");
+    const grantA = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const grantB = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const sessionA = await submitPromotedSessionWithOneLine(ctx, grantA.id, now);
+    const sessionB = await submitPromotedSessionWithOneLine(ctx, grantB.id, now);
+    const winnerCalls: PaymentInitiateInput[] = [];
+    const loserCalls: PaymentInitiateInput[] = [];
+    const winner = await initiatePaymentAttemptForTest(db, {
+      sessionId: sessionA.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, winnerCalls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.delayed-winner.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    });
+    const winnerClaim = await db.checkoutSession.findUniqueOrThrow({
+      where: { id: sessionA.sessionId },
+      select: { firstOrderPromotionClaimedAt: true },
+    });
+    const delayed = coordinationBarrier();
+    const contender = initiatePaymentAttemptForTest(db, {
+      sessionId: sessionB.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, loserCalls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.delayed-loser.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    }, coordinationAt("AFTER_AUTHORIZATION_COMMIT", delayed));
+    await delayed.reached;
+    expect(await db.order.count({ where: { userId: ctx.userId } })).toBe(0);
+
+    await completeFromCapture(db, {
+      ...captureFacts(sessionA),
+      paymentId: winner.paymentId,
+      capturedAt: now,
+      receivedAt: now,
+    });
+    delayed.release();
+
+    await expect(contender).rejects.toMatchObject({ code: "SESSION_TERMS_STALE" });
+    expect(loserCalls).toHaveLength(0);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: sessionA.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: winnerClaim.firstOrderPromotionClaimedAt,
+    });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: sessionB.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: null,
+    });
+  });
+
+  it("rolls back a first-order claim when exact policy revalidation fails before contact", async () => {
+    const now = new Date("2026-08-28T02:30:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const session = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    await db.promotionGrant.update({
+      where: { id: grant.id },
+      data: { revokedAt: now },
+    });
+    const calls: PaymentInitiateInput[] = [];
+
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.claim-rollback.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    })).rejects.toMatchObject({ code: "SESSION_TERMS_STALE" });
+
+    expect(calls).toHaveLength(0);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: null,
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: null,
+      reservedAt: null,
+    });
+    await expect(onlyPayment(session.sessionId)).resolves.toMatchObject({
+      attemptLifecycle: PaymentAttemptLifecycle.CONTACT_AUTHORIZED,
+      contactStartedAt: null,
+    });
+
+    await db.promotionGrant.update({
+      where: { id: grant.id },
+      data: { revokedAt: null },
+    });
+    const later = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: later.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.claim-rollback-reacquire.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    })).resolves.toMatchObject({ initiateResult: { kind: "ready" } });
+    expect(calls).toHaveLength(1);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: later.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: now,
+    });
+  });
+
+  it("serializes two first-contact attempts for one grant and delegates only for the reservation winner", async () => {
+    const now = new Date("2026-08-28T03:00:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, { kind: PromotionKind.BIRTHDAY, now });
+    const first = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    const second = await createCheckoutSession(db, {
+      userId: ctx.userId,
+      marketCode: MarketCode.KR,
+      communicationLocale: "ko",
+      shipping: validShipping(),
+      promotionGrantId: grant.id,
+      now,
+    });
+    const calls: PaymentInitiateInput[] = [];
+    const routingA = `promo.race.a.${randomUUID()}`;
+    const routingB = `promo.race.b.${randomUUID()}`;
+    const lock = await openPromotionGrantLock(grant.id);
+    try {
+      const attempts = [first, second].map((candidate, index) => initiatePaymentAttemptForTest(db, {
+        sessionId: candidate.sessionId,
+        userId: ctx.userId,
+        provider: fakeProvider({ kind: "ready" }, calls),
+        mode: PaymentMode.SANDBOX,
+        routingRuleId: index === 0 ? routingA : routingB,
+        now,
+        contactBoundaryNow: now,
+      }));
+      await lock.query("COMMIT");
+      const settled = await Promise.allSettled(attempts);
+
+      expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(settled.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(settled.find((result) => result.status === "rejected")).toMatchObject({
+        reason: { code: "SESSION_TERMS_STALE" },
+      });
+      expect(calls).toHaveLength(1);
+      const reserved = await db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } });
+      expect([first.sessionId, second.sessionId]).toContain(reserved.reservedCheckoutSessionId);
+      await expect(db.payment.count({
+        where: { checkoutSessionId: { in: [first.sessionId, second.sessionId] }, contactStartedAt: { not: null } },
+      })).resolves.toBe(1);
+    } finally {
+      await lock.end();
+    }
+  });
+
+  it("expires only a safely uncontacted reservation owner and never clears another session's reservation", async () => {
+    const now = new Date("2026-08-28T04:00:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const owner = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    await db.promotionGrant.update({
+      where: { id: grant.id },
+      data: { reservedCheckoutSessionId: owner.sessionId, reservedAt: now },
+    });
+    await db.checkoutSession.update({
+      where: { id: owner.sessionId },
+      data: {
+        expiresAt: new Date("2026-08-27T00:00:00.000Z"),
+        firstOrderPromotionClaimedAt: now,
+      },
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: owner.sessionId,
+    });
+
+    await expect(expireStale(db, { now: new Date("2026-08-29T00:00:00.000Z") })).resolves.toBeGreaterThanOrEqual(1);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: owner.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.EXPIRED,
+      firstOrderPromotionClaimedAt: null,
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: null,
+      reservedAt: null,
+    });
+
+    const reacquiredGrant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const reacquired = await submitPromotedSessionWithOneLine(ctx, reacquiredGrant.id, now);
+    const reacquiredCalls: PaymentInitiateInput[] = [];
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: reacquired.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, reacquiredCalls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.expiry.reacquire.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    })).resolves.toMatchObject({ initiateResult: { kind: "ready" } });
+    expect(reacquiredCalls).toHaveLength(1);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: reacquired.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: now,
+    });
+
+    const secondGrant = await createTestPromotionGrant(ctx, { kind: PromotionKind.BIRTHDAY, now });
+    const contacted = await submitPromotedSessionWithOneLine(ctx, secondGrant.id, now);
+    const calls: PaymentInitiateInput[] = [];
+    await initiatePaymentAttemptForTest(db, {
+      sessionId: contacted.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.expiry.contacted.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    });
+    await db.checkoutSession.update({
+      where: { id: contacted.sessionId },
+      data: { expiresAt: new Date("2026-08-27T00:00:00.000Z") },
+    });
+    await expireStale(db, { now: new Date("2026-08-29T00:00:00.000Z") });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: contacted.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.SUBMITTED,
+      firstOrderPromotionClaimedAt: null,
+    });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: reacquired.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: now,
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: secondGrant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: contacted.sessionId,
+    });
+
+    const thirdGrant = await createTestPromotionGrant(ctx, { kind: PromotionKind.BIRTHDAY, now });
+    const reservationOwner = await submitPromotedSessionWithOneLine(ctx, thirdGrant.id, now);
+    const staleNonOwner = await createCheckoutSession(db, {
+      userId: ctx.userId,
+      marketCode: MarketCode.KR,
+      communicationLocale: "ko",
+      shipping: validShipping(),
+      promotionGrantId: thirdGrant.id,
+      now,
+    });
+    await db.promotionGrant.update({
+      where: { id: thirdGrant.id },
+      data: { reservedCheckoutSessionId: reservationOwner.sessionId, reservedAt: now },
+    });
+    await db.checkoutSession.update({
+      where: { id: reservationOwner.sessionId },
+      data: { expiresAt: new Date("2026-08-30T00:00:00.000Z") },
+    });
+    await db.checkoutSession.update({
+      where: { id: staleNonOwner.sessionId },
+      data: { expiresAt: new Date("2026-08-27T00:00:00.000Z") },
+    });
+    await expireStale(db, { now: new Date("2026-08-29T00:00:00.000Z") });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: staleNonOwner.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.EXPIRED,
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: thirdGrant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: reservationOwner.sessionId,
+    });
+  });
+
+  it("preserves a first-order claim for same-session replay and CONTACTED expiry exposure", async () => {
+    const now = new Date("2026-08-28T04:10:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const session = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    const calls: PaymentInitiateInput[] = [];
+    const input: TestInitiationInput = {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.same-session.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    };
+
+    const first = await initiatePaymentAttemptForTest(db, input);
+    const claimed = await db.checkoutSession.findUniqueOrThrow({
+      where: { id: session.sessionId },
+      select: { firstOrderPromotionClaimedAt: true },
+    });
+    const replay = await initiatePaymentAttemptForTest(db, input);
+
+    expect(replay.paymentId).toBe(first.paymentId);
+    expect(calls).toHaveLength(1);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: claimed.firstOrderPromotionClaimedAt,
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      reservedCheckoutSessionId: session.sessionId,
+    });
+
+    await db.checkoutSession.update({
+      where: { id: session.sessionId },
+      data: { expiresAt: new Date("2026-08-27T00:00:00.000Z") },
+    });
+    await expireStale(db, { now: new Date("2026-08-29T00:00:00.000Z") });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.SUBMITTED,
+      firstOrderPromotionClaimedAt: claimed.firstOrderPromotionClaimedAt,
+    });
+  });
+
+  it("retains a first-order claim for OUTCOME_UNKNOWN exposure", async () => {
+    const now = new Date("2026-08-28T04:20:00.000Z");
+    const unknownGrant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const unknownSession = await submitPromotedSessionWithOneLine(ctx, unknownGrant.id, now);
+    const unknownCalls: PaymentInitiateInput[] = [];
+    await expect(initiatePaymentAttemptForTest(db, {
+      sessionId: unknownSession.sessionId,
+      userId: ctx.userId,
+      provider: failingProvider(unknownCalls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.outcome-unknown.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    })).rejects.toMatchObject({ code: "ATTEMPT_OUTCOME_UNKNOWN" });
+    expect(unknownCalls).toHaveLength(1);
+    const unknownClaim = await db.checkoutSession.findUniqueOrThrow({
+      where: { id: unknownSession.sessionId },
+      select: { firstOrderPromotionClaimedAt: true },
+    });
+    expect(unknownClaim.firstOrderPromotionClaimedAt).not.toBeNull();
+    await db.checkoutSession.update({
+      where: { id: unknownSession.sessionId },
+      data: { expiresAt: new Date("2026-08-27T00:00:00.000Z") },
+    });
+    await expireStale(db, { now: new Date("2026-08-29T00:00:00.000Z") });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: unknownSession.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.SUBMITTED,
+      firstOrderPromotionClaimedAt: unknownClaim.firstOrderPromotionClaimedAt,
+    });
+  });
+
+  it("retains a first-order claim for captured completion-pending exposure", async () => {
+    const now = new Date("2026-08-28T04:30:00.000Z");
+    const capturedGrant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const capturedSession = await submitPromotedSessionWithOneLine(ctx, capturedGrant.id, now);
+    const initiated = await initiatePaymentAttemptForTest(db, {
+      sessionId: capturedSession.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.capture-pending.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    });
+    await recordCapture(db, {
+      ...captureFacts(capturedSession),
+      paymentId: initiated.paymentId,
+      capturedAt: now,
+      receivedAt: now,
+    });
+    const capturedClaim = await db.checkoutSession.findUniqueOrThrow({
+      where: { id: capturedSession.sessionId },
+      select: { firstOrderPromotionClaimedAt: true },
+    });
+    expect(capturedClaim.firstOrderPromotionClaimedAt).not.toBeNull();
+    await db.checkoutSession.update({
+      where: { id: capturedSession.sessionId },
+      data: { expiresAt: new Date("2026-08-27T00:00:00.000Z") },
+    });
+    await expireStale(db, { now: new Date("2026-08-29T00:00:00.000Z") });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: capturedSession.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.SUBMITTED,
+      firstOrderPromotionClaimedAt: capturedClaim.firstOrderPromotionClaimedAt,
+    });
+  });
+
+  it("completes and replays a promoted capture with exact frozen order and line discounts", async () => {
+    const now = new Date("2026-08-28T05:00:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, {
+      kind: PromotionKind.SIGNUP,
+      now,
+      rateBps: 1_500,
+      expiresAt: new Date("2026-08-28T05:45:00.000Z"),
+    });
+    const session = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    const calls: PaymentInitiateInput[] = [];
+    const initiated = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }, calls),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.complete.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    });
+    const capturedAt = new Date("2026-08-28T05:30:00.000Z");
+    await db.promotionPolicyVersion.update({
+      where: { id: grant.policyVersionId },
+      data: { status: PromotionPolicyStatus.RETIRED },
+    });
+    const facts: CaptureFacts = {
+      checkoutSessionId: session.sessionId,
+      paymentId: initiated.paymentId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      providerPaymentKey: `promo_capture_${randomUUID()}`,
+      amount: session.totalAmount,
+      currency: session.currency,
+      receivedAt: new Date("2026-08-29T00:00:00.000Z"),
+      capturedAt,
+    };
+
+    const completed = await completeFromCapture(db, facts);
+    const claimedAfterCompletion = await db.checkoutSession.findUniqueOrThrow({
+      where: { id: session.sessionId },
+      select: { firstOrderPromotionClaimedAt: true },
+    });
+    const redeemedAfterFirst = await db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } });
+    const replay = await completeFromCapture(db, facts);
+    const order = await db.order.findUniqueOrThrow({
+      where: { checkoutSessionId: session.sessionId },
+      include: { items: true, payment: true },
+    });
+
+    expect(completed).toMatchObject({ kind: "completed", orderId: order.id });
+    expect(replay).toMatchObject({ orderId: order.id });
+    expect(order).toMatchObject({
+      promotionGrantId: grant.id,
+      subtotalAmount: session.subtotalAmount,
+      discountAmount: session.discountAmount,
+      totalAmount: session.totalAmount,
+      payment: { amount: session.totalAmount },
+    });
+    expect(order.items.reduce((sum, item) => sum + item.discountAmount, 0)).toBe(session.discountAmount);
+    await expect(createPrismaTransactionalEmailProjectionSource(db).loadOrderPaid(order.id)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        discountAmount: session.discountAmount,
+        totalPaidAmount: session.totalAmount,
+      },
+    });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.COMPLETED,
+      firstOrderPromotionClaimedAt: claimedAfterCompletion.firstOrderPromotionClaimedAt,
+    });
+    expect(claimedAfterCompletion.firstOrderPromotionClaimedAt).not.toBeNull();
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      redeemedAt: redeemedAfterFirst.redeemedAt,
+      reservedCheckoutSessionId: null,
+      reservedAt: null,
+    });
+    expect(redeemedAfterFirst.redeemedAt).toEqual(capturedAt);
+    await expect(db.order.count({ where: { promotionGrantId: grant.id } })).resolves.toBe(1);
+
+    await db.order.update({ where: { id: order.id }, data: { status: OrderStatus.REFUNDED } });
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      firstOrderPromotionClaimedAt: claimedAfterCompletion.firstOrderPromotionClaimedAt,
+    });
+  });
+
+  it("rolls back Order creation when the exact promotion reservation cannot be consumed", async () => {
+    const now = new Date("2026-08-28T06:00:00.000Z");
+    const grant = await createTestPromotionGrant(ctx, { kind: PromotionKind.SIGNUP, now });
+    const session = await submitPromotedSessionWithOneLine(ctx, grant.id, now);
+    const initiated = await initiatePaymentAttemptForTest(db, {
+      sessionId: session.sessionId,
+      userId: ctx.userId,
+      provider: fakeProvider({ kind: "ready" }),
+      mode: PaymentMode.SANDBOX,
+      routingRuleId: `promo.atomicity.${randomUUID()}`,
+      now,
+      contactBoundaryNow: now,
+    });
+    const conflictingSession = await db.checkoutSession.create({
+      data: {
+        userId: ctx.userId,
+        marketCode: MarketCode.KR,
+        communicationLocale: "ko",
+        currency: "KRW",
+        subtotalAmount: 1,
+        shippingAmount: 0,
+        totalAmount: 1,
+        expiresAt: new Date(now.getTime() + 60_000),
+      },
+    });
+    await db.promotionGrant.update({
+      where: { id: grant.id },
+      data: { reservedCheckoutSessionId: conflictingSession.id, reservedAt: now },
+    });
+
+    const result = await completeFromCapture(db, {
+      checkoutSessionId: session.sessionId,
+      paymentId: initiated.paymentId,
+      provider: PaymentProvider.TOSS,
+      mode: PaymentMode.SANDBOX,
+      providerPaymentKey: `promo_atomicity_capture_${randomUUID()}`,
+      amount: session.totalAmount,
+      currency: session.currency,
+      capturedAt: now,
+      receivedAt: now,
+    });
+
+    expect(result).toMatchObject({
+      kind: "compensationEnqueued",
+      failure: { code: "PROMOTION_REDEMPTION_INVALID" },
+    });
+    await expect(db.order.count({ where: { checkoutSessionId: session.sessionId } })).resolves.toBe(0);
+    await expect(db.checkoutSession.findUniqueOrThrow({ where: { id: session.sessionId } })).resolves.toMatchObject({
+      status: CheckoutSessionStatus.FAILED,
+      firstOrderPromotionClaimedAt: now,
+    });
+    await expect(db.promotionGrant.findUniqueOrThrow({ where: { id: grant.id } })).resolves.toMatchObject({
+      redeemedAt: null,
+      reservedCheckoutSessionId: conflictingSession.id,
+    });
+  });
 });
 
 async function initiatePaymentAttemptForTest(
@@ -2757,6 +3347,147 @@ function captureFacts(
   };
 }
 
+interface TestPromotionOptions {
+  readonly kind: PromotionKind;
+  readonly now: Date;
+  readonly status?: PromotionPolicyStatus;
+  readonly rateBps?: number;
+  readonly maximumDiscountMinor?: bigint;
+  readonly minimumEligibleSubtotalMinor?: bigint | null;
+  readonly validFrom?: Date;
+  readonly expiresAt?: Date | null;
+  readonly originMarketCode?: string;
+}
+
+async function createTestPromotionGrant(context: TestContext, options: TestPromotionOptions) {
+  const policy = await db.promotionPolicyVersion.create({
+    data: testPromotionPolicyData(options),
+  });
+  const status = options.status ?? PromotionPolicyStatus.ACTIVE;
+  if (status !== PromotionPolicyStatus.DRAFT) {
+    await db.promotionPolicyVersion.update({ where: { id: policy.id }, data: { status } });
+  }
+  return db.promotionGrant.create({
+    data: testPromotionGrantData(context.userId, policy.id, options),
+  });
+}
+
+function testPromotionPolicyData(options: TestPromotionOptions) {
+  const birthday = options.kind === PromotionKind.BIRTHDAY;
+  return {
+    programKey: `promo_c1_${randomUUID()}`,
+    version: 1,
+    kind: options.kind,
+    startsAt: new Date(options.now.getTime() - 86_400_000),
+    endsAt: new Date(options.now.getTime() + 86_400_000),
+    firstOrderOnly: options.kind === PromotionKind.SIGNUP,
+    requiresQualifyingPurchase: birthday,
+    birthdayWindowBeforeDays: birthday ? 0 : null,
+    birthdayWindowAfterDays: birthday ? 0 : null,
+    birthdayLeapDayObservation: birthday ? "FEB_28" as const : null,
+    marketRules: {
+      create: {
+        marketCode: MarketCode.KR,
+        currency: "KRW",
+        rateBps: options.rateBps ?? 1_000,
+        maximumDiscountMinor: options.maximumDiscountMinor ?? BigInt(100_000),
+        minimumEligibleSubtotalMinor: options.minimumEligibleSubtotalMinor ?? null,
+        eligibilityTimeZone: birthday ? "Asia/Seoul" : null,
+      },
+    },
+  };
+}
+
+function testPromotionGrantData(userId: string, policyVersionId: string, options: TestPromotionOptions) {
+  return {
+    userId,
+    policyVersionId,
+    grantKey: `promo_c1_grant_${randomUUID()}`,
+    originMarketCode: options.originMarketCode ?? MarketCode.KR,
+    issuedAt: options.now,
+    validFrom: options.validFrom ?? new Date(options.now.getTime() - 1_000),
+    expiresAt: options.expiresAt === undefined
+      ? new Date(options.now.getTime() + 3_600_000)
+      : options.expiresAt,
+  };
+}
+
+async function submitPromotedSessionWithOneLine(
+  context: TestContext,
+  promotionGrantId: string,
+  now: Date,
+) {
+  const variant = await createCatalogVariant(context, { amount: 12_000, stock: 5 });
+  await db.cartItem.create({
+    data: { userId: context.userId, wigStyleId: variant.styleId, variantId: variant.id, quantity: 1 },
+  });
+  return createCheckoutSession(db, {
+    userId: context.userId,
+    marketCode: MarketCode.KR,
+    communicationLocale: "ko",
+    shipping: validShipping(),
+    promotionGrantId,
+    now,
+  });
+}
+
+async function openPromotionGrantLock(promotionGrantId: string): Promise<Client> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required for promotion lock verification");
+  const client = new Client({ connectionString, application_name: "promo_c1_grant_race_barrier" });
+  await client.connect();
+  await client.query("BEGIN");
+  await client.query('SELECT "id" FROM "PromotionGrant" WHERE "id" = $1 FOR UPDATE', [promotionGrantId]);
+  return client;
+}
+
+async function createFinanciallyCompletedPriorOrder(context: TestContext, now: Date): Promise<void> {
+  const label = randomUUID();
+  const session = await db.checkoutSession.create({
+    data: {
+      id: `promo_c1_prior_session_${label}`,
+      userId: context.userId,
+      marketCode: MarketCode.KR,
+      communicationLocale: "ko",
+      currency: "KRW",
+      status: CheckoutSessionStatus.COMPLETED,
+      subtotalAmount: 1_000,
+      shippingAmount: 0,
+      totalAmount: 1_000,
+      expiresAt: new Date(now.getTime() + 60_000),
+      completedAt: now,
+    },
+  });
+  const payment = await db.payment.create({
+    data: {
+      checkoutSessionId: session.id,
+      provider: PaymentProvider.MOCK,
+      mode: PaymentMode.SANDBOX,
+      status: PaymentAttemptStatus.SUCCEEDED,
+      attemptLifecycle: PaymentAttemptLifecycle.FINALIZED,
+      amount: 1_000,
+      currency: "KRW",
+      providerPaymentKey: `promo_c1_prior_payment_${label}`,
+      idempotencyKey: `promo_c1_prior_idempotency_${label}`,
+      financialSucceededAt: now,
+      blockingEndedAt: now,
+    },
+  });
+  await db.order.create({
+    data: {
+      checkoutSessionId: session.id,
+      paymentId: payment.id,
+      userId: context.userId,
+      marketCode: MarketCode.KR,
+      currency: "KRW",
+      subtotalAmount: 1_000,
+      shippingAmount: 0,
+      totalAmount: 1_000,
+      paidAt: now,
+    },
+  });
+}
+
 async function onlyPayment(checkoutSessionId: string) {
   const payment = await db.payment.findFirst({ where: { checkoutSessionId } });
   if (!payment) throw new Error(`Missing payment for ${checkoutSessionId}`);
@@ -2765,8 +3496,23 @@ async function onlyPayment(checkoutSessionId: string) {
 
 async function cleanup(context: TestContext): Promise<void> {
   await deleteOrders(context.userId);
+  await db.promotionGrant.updateMany({
+    where: { userId: context.userId },
+    data: { reservedCheckoutSessionId: null, reservedAt: null },
+  });
   await deletePaymentsAndSessions(context.userId);
   await db.cartItem.deleteMany({ where: { userId: context.userId } });
+  const grants = await db.promotionGrant.findMany({
+    where: { userId: context.userId },
+    select: { policyVersionId: true },
+  });
+  const policyVersionIds = [...new Set(grants.map((grant) => grant.policyVersionId))];
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SET LOCAL session_replication_role = replica`);
+    await tx.promotionGrant.deleteMany({ where: { userId: context.userId } });
+    await tx.promotionMarketRule.deleteMany({ where: { policyVersionId: { in: policyVersionIds } } });
+    await tx.promotionPolicyVersion.deleteMany({ where: { id: { in: policyVersionIds } } });
+  });
   await deleteVariants(context);
   await db.user.deleteMany({ where: { id: context.userId } });
 }
