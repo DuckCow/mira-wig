@@ -28,6 +28,7 @@ import {
   loadRefundExecutionClaimAggregate,
   resolveRefundExecutionClaimArtifacts,
   validateFreshRefundExecutionClaim,
+  hasCancellationAttemptProvenance,
   type ClaimArtifactResolution,
   type RefundExecutionClaimAggregate,
   type RefundExecutionClaimTarget,
@@ -156,6 +157,12 @@ function validateClaimCapability(
   target: RefundExecutionClaimTarget,
   capability: ClaimCapability,
 ): ClaimRefundAttemptForExecutionFailure | null {
+  if (aggregate.cancellation && !hasCancellationAttemptProvenance(aggregate, target)) {
+    return failure(
+      "CLAIM_CAPABILITY_UNSUPPORTED",
+      "Cancellation refund execution provenance is unsupported.",
+    );
+  }
   if (aggregate.payment.provider === PaymentProvider.EXIMBAY) {
     return validateEximbayClaimCapability(aggregate, target, capability);
   }
@@ -182,7 +189,10 @@ function validateEximbayClaimCapability(
     );
   }
   if (!isSupportedEximbaySandboxIdentity(aggregate, target)
-    || !hasApprovedCustomerIntakeProvenance(aggregate, target)) {
+    || !(
+      hasApprovedCustomerIntakeProvenance(aggregate, target)
+      || hasCancellationAttemptProvenance(aggregate, target)
+    )) {
     return failure(
       "CLAIM_CAPABILITY_UNSUPPORTED",
       "Eximbay refund execution claim authority is unsupported.",

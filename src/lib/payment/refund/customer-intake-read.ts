@@ -44,6 +44,7 @@ export class CustomerRefundIntakeReadInvariantError extends Error {
 const CUSTOMER_READ_SELECT = {
   id: true,
   status: true,
+  cancellation: { select: { id: true } },
   customerRefundIntakes: {
     where: { customerUserId: "" },
     orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
@@ -89,6 +90,7 @@ export async function loadCustomerRefundIntakeReadModel(
     order.status,
     hasOwnedOpen,
     hasAnyOpen,
+    order.cancellation !== null,
   );
   return Object.freeze({
     orderId: order.id,
@@ -128,8 +130,10 @@ function submissionUnavailableReason(
   orderStatus: OrderStatus,
   hasOwnedOpen: boolean,
   hasAnyOpen: boolean,
+  hasCancellation: boolean,
 ): CustomerRefundIntakeReadModel["submissionUnavailableReason"] {
   if (!submitEnabled) return "FEATURE_DISABLED";
+  if (hasCancellation) return "ORDER_STATE_UNAVAILABLE";
   if (orderStatus !== OrderStatus.PAID && orderStatus !== OrderStatus.PARTIALLY_REFUNDED) {
     return "ORDER_STATE_UNAVAILABLE";
   }

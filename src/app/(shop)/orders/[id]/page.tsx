@@ -14,7 +14,11 @@ import {
   localizedLengthLabel,
 } from "@/lib/market/catalog-presentation";
 import { LOCALE_INTL, type Locale } from "@/lib/market/locale";
-import { messagesFor, type OrderMessages } from "@/lib/market/messages";
+import {
+  messagesFor,
+  selectOrderCancellationMessages,
+  type OrderMessages,
+} from "@/lib/market/messages";
 import { CURRENCY_META, formatPrice, isCurrencyCode } from "@/lib/market/types";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
@@ -24,7 +28,13 @@ import {
   isCustomerRefundIntakeSubmitEnabled,
 } from "@/lib/payment/refund/customer-intake-activation";
 import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
+import { randomUUID } from "node:crypto";
+import {
+  isCustomerMtoOrderCancellationEnabled,
+  OrderCancellationActivationConfigError,
+} from "@/lib/order-cancellation/activation";
 import { CustomerRefundIntakeSection } from "./CustomerRefundIntakeSection";
+import { OrderCancellationControl } from "./OrderCancellationControl";
 import {
   loadCustomerOrderDetail,
   type CustomerOrderDetailRecord,
@@ -54,7 +64,8 @@ export default async function OrderPage({ params }: { params: PageParams }) {
   const { id } = await params;
   const locale = await getAuthenticationLocale();
   const submitEnabled = resolveCustomerRefundIntakeSubmitEnabled();
-  const detail = await loadCustomerOrderDetail(id, customerUserId, submitEnabled);
+  const cancellationEnabled = resolveCustomerOrderCancellationEnabled();
+  const detail = await loadCustomerOrderDetail(id, customerUserId, submitEnabled, cancellationEnabled);
   if (!detail) notFound();
 
   return <CustomerOrderDetailView order={detail.order} intake={detail.intake} locale={locale} />;
@@ -77,6 +88,13 @@ export function CustomerOrderDetailView({
       </Link>
 
       <OrderHeader order={order} locale={locale} messages={messages} />
+      {order.canCancelAutomatically ? (
+        <OrderCancellationControl
+          orderId={order.id}
+          requestKey={randomUUID()}
+          messages={selectOrderCancellationMessages(messages)}
+        />
+      ) : null}
       <CustomerRefundIntakeSection model={intake} locale={locale} />
       <OrderItems items={order.items} currency={order.currency} locale={locale} messages={messages} />
       <ShippingSection shipping={order.shipping} messages={messages} />
@@ -95,6 +113,15 @@ export function resolveCustomerRefundIntakeSubmitEnabled(): boolean {
   }
 }
 
+export function resolveCustomerOrderCancellationEnabled(): boolean {
+  try {
+    return isCustomerMtoOrderCancellationEnabled();
+  } catch (error) {
+    if (error instanceof OrderCancellationActivationConfigError) return false;
+    throw error;
+  }
+}
+
 function OrderHeader({ order, locale, messages }: { order: OrderDetail; locale: Locale; messages: OrderMessages }) {
   return (
     <header className="space-y-3 rounded-lg border border-gray-200 bg-white p-5">
@@ -104,7 +131,7 @@ function OrderHeader({ order, locale, messages }: { order: OrderDetail; locale: 
           <p className="mt-1 text-xs font-mono text-gray-400">{messages.orderNumber}: {order.id}</p>
         </div>
         <span className="rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white">
-          {orderStatusLabel(order.status, messages)}
+          {order.cancellation ? messages.orderStatusCancelled : orderStatusLabel(order.status, messages)}
         </span>
       </div>
       <p className="text-sm text-gray-500">{messages.paidAt} {formatDateTime(order.paidAt, locale)}</p>
@@ -112,6 +139,19 @@ function OrderHeader({ order, locale, messages }: { order: OrderDetail; locale: 
         <div className="space-y-1 text-sm text-gray-600">
           <p>{messages.refundPendingReceived}</p>
           <p>{messages.refundPendingUnconfirmed}</p>
+        </div>
+      ) : null}
+      {order.cancellation ? (
+        <div className="space-y-1 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p>{messages.cancellationAccepted}: {formatDateTime(order.cancellation.acceptedAt, locale)}</p>
+          {order.cancellation.expectedRefundAmount === null ? null : (
+            <p>{messages.cancellationExpectedRefund}: {formatOrderMoney(order.cancellation.expectedRefundAmount, order.currency, locale, messages)}</p>
+          )}
+          <p>{order.cancellation.obligationState === "INCONSISTENT"
+            ? messages.cancellationRefundChecking
+            : order.cancellation.obligationState === "SATISFIED"
+              ? messages.cancellationRefundComplete
+              : messages.cancellationRefundProcessing}</p>
         </div>
       ) : null}
     </header>

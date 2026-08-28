@@ -3,6 +3,7 @@ import {
   CustomerRefundIntakeStatus,
 } from "@prisma/client";
 import { isValidElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminGuardResult } from "@/lib/admin";
 import type { AdminOrderDetailReadModel } from "./admin-order-detail-data";
@@ -18,6 +19,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/admin", () => ({ requireAdmin: mocks.requireAdmin }));
 vi.mock("./admin-order-detail-data", () => ({ loadAdminOrderDetail: mocks.loadOrder }));
+vi.mock("./CancellationRefundReplacementControl", () => ({ CancellationRefundReplacementControl: () => null }));
+vi.mock("./CustomerRefundIntakeSection", () => ({ CustomerRefundIntakeSection: () => null }));
+vi.mock("./ProductionStartControl", () => ({ ProductionStartControl: () => null }));
+vi.mock("./RefundExecutionClaimControl", () => ({ RefundExecutionClaimControl: () => null }));
+vi.mock("./RefundRequestCloseControl", () => ({ RefundRequestCloseControl: () => null }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 vi.mock("@/lib/payment/refund/customer-intake-activation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payment/refund/customer-intake-activation")>();
@@ -136,6 +142,31 @@ describe("administrator Order-detail page authorization and intake gate", () => 
     await AdminOrderDetailPage({ params: Promise.resolve({ id: "order_1" }) });
 
     expect(mocks.loadOrder).toHaveBeenCalledWith("order_1", "misconfigured");
+  });
+
+  it("renders an inconsistent cancellation as manual ledger review, never refund complete", () => {
+    const html = renderToStaticMarkup(AdminOrderDetailView({
+      order: orderDetail({
+        cancellation: {
+          acceptedAt: "2026. 8. 28.",
+          requestedBy: "Customer",
+          requestedByUserId: "customer_1",
+          initialRefundAttemptId: "attempt_initial",
+          capturedObligation: "금액 확인 필요",
+          succeededAmount: "금액 확인 필요",
+          outstandingAmount: "금액 확인 필요",
+          obligationState: "INCONSISTENT",
+          hasOutstandingAmount: false,
+          canReplaceRefund: false,
+        },
+      }),
+      approveState: "disabled",
+    }));
+
+    expect(html).toContain("환불 원장 확인 필요");
+    expect(html).toContain("수동 검토가 필요합니다.");
+    expect(html).not.toContain("주문 취소와 전체 환불이 완료되었습니다.");
+    expect(html).not.toContain("실패한 전체 환불 다시 요청");
   });
 });
 

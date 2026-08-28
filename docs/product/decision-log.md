@@ -351,3 +351,35 @@ approval decision assigns exact item quantities while approving cash amount
 independently. Coupon-aware partial-refund valuation and coupon regrant/loss
 policy remain deferred to PROMO-C5. This entry activates no provider contact,
 refund execution, deployment, promotion capability, or historical backfill.
+
+## 2026-08-28 — Launch-v1 pre-production MTO whole-Order cancellation
+
+Launch v1 automatic customer cancellation applies only to a whole Order whose
+historical merchandise lines are all MTO and whose every ManufacturingRequest
+is authoritatively still before production. The cutoff is the first actual
+production start; no arbitrary elapsed-time window owns eligibility. Customer
+cancellation and production start serialize on the same Order row, so exactly
+one decision can win.
+
+An accepted cancellation is durable commerce truth in its one-to-one
+`OrderCancellation` record and remains accepted independently of refund
+execution or terminal non-execution. `Order.status` continues to own the
+financial refund lifecycle, and `OrderStatus.CANCELLED` is not new C0
+authority. Customer and administrator commerce presentation gives a coherent
+`OrderCancellation` precedence over that financial label.
+
+Acceptance creates an atomic obligation to reverse the full captured
+`Payment.amount`, attributed to every historical OrderItem at its full original
+quantity. Any prior succeeded refund, open or guarded refund, ambiguous money
+or provider identity, inconsistent refund ledger, or submitted customer intake
+makes the automatic path fail closed. A bounded administrator re-entry may
+create only the exact positive outstanding cancellation obligation with exact
+remaining R0 quantity capacity; generic refund/intake creation cannot compete
+with an accepted cancellation.
+
+STOCKED and mixed Orders are excluded. Coupon recovery, first-order promotion
+regrant, selected-line cancellation, Mira Credit, and Points remain deferred.
+Installing this source authorizes no customer activation, provider contact,
+LIVE authority, deployment, or production manufacturing activation; both
+customer cancellation and production start remain separately fail-closed by
+configuration.

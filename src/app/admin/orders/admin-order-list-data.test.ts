@@ -35,6 +35,7 @@ describe("admin order list data", () => {
         marketCode: true,
         currency: true,
         totalAmount: true,
+        cancellation: { select: { id: true } },
         user: { select: { name: true, email: true } },
         payment: { select: { status: true, provider: true, mode: true } },
         items: {
@@ -56,6 +57,7 @@ describe("admin order list data", () => {
       marketCode: "KR",
       currency: "KRW",
       totalAmount: 85_000,
+      cancellationAccepted: false,
       customer: { name: "고객", email: "customer@example.test" },
       payment: {
         status: PaymentAttemptStatus.SUCCEEDED,
@@ -157,6 +159,7 @@ function record(id: string) {
     marketCode: "KR",
     currency: "KRW",
     totalAmount: 85_000,
+    cancellation: null,
     user: { name: "고객", email: "customer@example.test" },
     payment: {
       status: PaymentAttemptStatus.SUCCEEDED,

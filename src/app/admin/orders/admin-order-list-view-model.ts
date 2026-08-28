@@ -65,7 +65,7 @@ function buildOrderRow(order: AdminOrderListSourceItem): AdminOrderListRowViewMo
     itemLineCount: order.items.length,
     totalQuantity: order.items.reduce((total, item) => total + item.quantity, 0),
     snapshotWarning: snapshotWarning(order.items.length, snapshotNames),
-    orderStatusLabel: orderStatusLabel(order.status),
+    orderStatusLabel: order.cancellationAccepted ? "주문 취소" : orderStatusLabel(order.status),
     paymentStatusLabel: paymentStatusLabel(order.payment.status),
     paymentContextLabel: `${order.payment.provider} · ${order.payment.mode}`,
     paymentAttention: order.payment.status === PaymentAttemptStatus.SUCCEEDED

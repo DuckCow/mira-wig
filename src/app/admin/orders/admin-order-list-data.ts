@@ -19,6 +19,7 @@ const POSTGRES_SAFE_MINIMUM_MS = Date.parse("-004711-01-01T00:00:00.000Z");
 export interface AdminOrderListSourceItem {
   id: string;
   status: OrderStatus;
+  cancellationAccepted?: boolean;
   paidAt: Date;
   createdAt: Date;
   marketCode: string;
@@ -58,6 +59,7 @@ type CursorValue = Readonly<{ v: 1; createdAt: Date; id: string }>;
 const ADMIN_ORDER_LIST_SELECT = {
   id: true,
   status: true,
+  cancellation: { select: { id: true } },
   paidAt: true,
   createdAt: true,
   marketCode: true,
@@ -171,6 +173,7 @@ function toSourceItem(record: AdminOrderListRecord): AdminOrderListSourceItem {
   return {
     id: record.id,
     status: record.status,
+    cancellationAccepted: record.cancellation !== null,
     paidAt: new Date(record.paidAt.getTime()),
     createdAt: new Date(record.createdAt.getTime()),
     marketCode: record.marketCode,

@@ -151,6 +151,13 @@ async function approveInTransaction(
   ) {
     return approveFailure("NOT_APPROVABLE", "Customer refund intake is no longer approvable.");
   }
+  const cancellation = await tx.orderCancellation.findUnique({
+    where: { orderId: input.orderId },
+    select: { id: true },
+  });
+  if (cancellation) {
+    return approveFailure("NOT_APPROVABLE", "Accepted cancellation blocks a competing refund approval.");
+  }
   return persistApproval(tx, intake, input, refundAttemptId, capabilities);
 }
 
