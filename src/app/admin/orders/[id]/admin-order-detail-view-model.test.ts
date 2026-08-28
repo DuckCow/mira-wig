@@ -463,6 +463,7 @@ function attempt(
     hasExecutionCommand: false,
     paymentIdentityMatches: true,
     transitions,
+    lines: [{ orderItemId: "item_123", orderId: "order_123", quantity: 1 }],
   };
 }
 

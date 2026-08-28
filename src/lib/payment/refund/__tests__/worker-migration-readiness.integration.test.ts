@@ -29,8 +29,8 @@ describe("refund worker migration readiness integration", () => {
 
     expect(compareRefundWorkerMigrations(repository, ledger))
       .toEqual({ ok: true, status: "READY" });
-    expect(repository).toHaveLength(43);
-    expect(before).toHaveLength(43);
+    expect(repository).toHaveLength(44);
+    expect(before).toHaveLength(44);
     expect(after).toEqual(before);
   });
 });

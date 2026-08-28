@@ -14,7 +14,11 @@ import type {
   TossRefundCancellationPort,
   TossRefundCancellationTransportResult,
 } from "../../src/lib/payment/refund/providers/toss/refund-cancellation-http";
-import { AcceptanceBootstrap, type AcceptanceBootstrapHandle } from "./bootstrap";
+import {
+  AcceptanceBootstrap,
+  acceptanceBootstrapOrderItemId,
+  type AcceptanceBootstrapHandle,
+} from "./bootstrap";
 import { ProviderCallBudget } from "./call-budget";
 import { assertAcceptanceScenarioExecutable, type H1Scenario } from "./contracts";
 import type { ProviderFixture } from "./fixture-manifest";
@@ -97,6 +101,7 @@ async function prepareLocalAggregate(
     orderId: bootstrapped.handle.orderId,
     amount: input.fixture.amount,
     reason: "H1 manual Toss SANDBOX acceptance",
+    lines: [{ orderItemId: acceptanceBootstrapOrderItemId(bootstrapped.handle), quantity: 1 }],
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: `h1_actor_${identityDigest(input.runId, input.scenarioId)}`,
     now,

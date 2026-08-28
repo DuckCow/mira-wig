@@ -21,6 +21,10 @@ import {
   approveCustomerRefundIntake,
   rejectCustomerRefundIntake,
 } from "@/lib/payment/refund/customer-intake-review";
+import {
+  normalizeRefundLines,
+  type RefundLineInput,
+} from "@/lib/payment/refund/lines";
 
 export type AdminCustomerRefundIntakeActionErrorCode =
   | "UNAUTHENTICATED"
@@ -79,6 +83,7 @@ export type ApproveCustomerRefundIntakeActionResult =
         amount: number;
         currency: string;
         requestedAt: string;
+        lines: readonly RefundLineInput[];
       };
     }
   | ActionFailure;
@@ -94,6 +99,7 @@ type ParsedApproveInput = {
   intakeId: string;
   amount: number;
   merchantRationale: string;
+  lines: readonly RefundLineInput[];
 };
 
 type ParseApproveResult =
@@ -124,6 +130,9 @@ const APPROVE_NORMALIZATION_FAILURES = {
   REFUND_LEDGER_INCONSISTENT: null, DISPUTE_REVIEW_REQUIRED: null, OVER_REFUND: null,
   INVALID_TOTAL_AMOUNT: null, CURRENCY_MISMATCH: null, EXISTING_ATTEMPT_CURRENCY_MISMATCH: null,
   INVALID_EXISTING_ATTEMPT_AMOUNT: null,
+  INVALID_REFUND_LINES: "INVALID_INPUT", REFUND_LINE_ITEM_NOT_FOUND: null,
+  OVER_REFUND_LINE_QUANTITY: null, REFUND_LINE_HISTORY_UNATTRIBUTED: null,
+  REFUND_LINE_LEDGER_INCONSISTENT: null,
 } satisfies Record<ApproveCustomerRefundIntakeFailureCode, AdminCustomerRefundIntakeActionErrorCode | null>;
 
 const APPROVE_CORE_FAILURES = {
@@ -137,6 +146,10 @@ const APPROVE_CORE_FAILURES = {
   INVALID_TOTAL_AMOUNT: "MANUAL_REVIEW_REQUIRED", CURRENCY_MISMATCH: "MANUAL_REVIEW_REQUIRED",
   EXISTING_ATTEMPT_CURRENCY_MISMATCH: "MANUAL_REVIEW_REQUIRED",
   INVALID_EXISTING_ATTEMPT_AMOUNT: "MANUAL_REVIEW_REQUIRED",
+  INVALID_REFUND_LINES: "INVALID_INPUT", REFUND_LINE_ITEM_NOT_FOUND: "INVALID_INPUT",
+  OVER_REFUND_LINE_QUANTITY: "INSUFFICIENT_REFUNDABLE",
+  REFUND_LINE_HISTORY_UNATTRIBUTED: "MANUAL_REVIEW_REQUIRED",
+  REFUND_LINE_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
 } satisfies Record<ApproveCustomerRefundIntakeFailureCode, AdminCustomerRefundIntakeActionErrorCode | null>;
 
 export async function rejectCustomerRefundIntakeAction(
@@ -209,6 +222,7 @@ export async function approveCustomerRefundIntakeAction(
     reviewedByUserId: normalized.input.reviewedByUserId,
     amount: normalized.input.amount,
     merchantRationale: normalized.input.merchantRationale,
+    lines: normalized.input.lines,
     now: normalized.input.reviewedAt,
   }, capabilities);
   if (!result.ok) return failure(mappedFailureOrInvariant(APPROVE_CORE_FAILURES[result.code]));
@@ -232,6 +246,7 @@ export async function approveCustomerRefundIntakeAction(
       amount: result.attempt.amount,
       currency: result.attempt.currency,
       requestedAt: result.attempt.requestedAt.toISOString(),
+      lines: result.attempt.lines,
     },
   };
 }
@@ -268,8 +283,8 @@ function parseRejectInput(value: unknown): ParsedRejectInput | null {
 function parseApproveInput(value: unknown): ParseApproveResult {
   if (!hasExactKeys(
     value,
-    ["orderId", "intakeId", "amountMinor", "merchantRationale"],
-    ["orderId", "intakeId", "amountMinor", "merchantRationale"],
+    ["orderId", "intakeId", "amountMinor", "merchantRationale", "lines"],
+    ["orderId", "intakeId", "amountMinor", "merchantRationale", "lines"],
   )) {
     return { success: false, errorCode: "INVALID_INPUT" };
   }
@@ -278,6 +293,7 @@ function parseApproveInput(value: unknown): ParseApproveResult {
     || typeof value.intakeId !== "string"
     || typeof value.amountMinor !== "string"
     || typeof value.merchantRationale !== "string"
+    || !Array.isArray(value.lines)
   ) {
     return { success: false, errorCode: "INVALID_INPUT" };
   }
@@ -286,6 +302,8 @@ function parseApproveInput(value: unknown): ParseApproveResult {
   }
   const amount = Number(value.amountMinor);
   if (!Number.isSafeInteger(amount)) return { success: false, errorCode: "INVALID_AMOUNT" };
+  const normalizedLines = normalizeRefundLines(value.lines, { allowEmpty: true });
+  if (!normalizedLines.ok) return { success: false, errorCode: "INVALID_INPUT" };
   return {
     success: true,
     input: {
@@ -293,6 +311,7 @@ function parseApproveInput(value: unknown): ParseApproveResult {
       intakeId: value.intakeId,
       amount,
       merchantRationale: value.merchantRationale,
+      lines: normalizedLines.lines,
     },
   };
 }

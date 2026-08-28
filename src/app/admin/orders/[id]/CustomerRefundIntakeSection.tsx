@@ -12,6 +12,13 @@ interface Props {
   approveState: CustomerRefundIntakeApproveState;
   currency: string;
   remainingRequestableAmount: string;
+  items: readonly {
+    id: string;
+    name: string;
+    options: string;
+    quantity: number;
+    remainingAttributableQuantity: number | null;
+  }[];
 }
 
 export function CustomerRefundIntakeSection({
@@ -20,6 +27,7 @@ export function CustomerRefundIntakeSection({
   approveState,
   currency,
   remainingRequestableAmount,
+  items,
 }: Props) {
   const view = buildCustomerRefundIntakeSectionViewModel(intakes);
   return (
@@ -37,6 +45,12 @@ export function CustomerRefundIntakeSection({
                 approveState={approveState}
                 currency={currency}
                 remainingRequestableAmount={remainingRequestableAmount}
+                lineOptions={items.map((item) => ({
+                  orderItemId: item.id,
+                  label: `${item.name} · ${item.options}`,
+                  orderedQuantity: item.quantity,
+                  remainingQuantity: item.remainingAttributableQuantity,
+                }))}
               />
             ) : null}
             <h3 className={`${view.activeIntake ? "mt-8" : ""} text-sm font-semibold text-gray-900`}>

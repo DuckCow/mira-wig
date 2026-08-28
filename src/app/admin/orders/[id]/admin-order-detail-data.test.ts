@@ -66,6 +66,7 @@ describe("admin Order-detail intake history query", () => {
       amount: true,
       currency: true,
       requestedAt: true,
+      lines: { orderBy: { orderItemId: "asc" }, select: { orderItemId: true, orderId: true, quantity: true } },
       executionCommand: { select: { id: true } },
     });
   });
@@ -135,6 +136,7 @@ describe("admin Order-detail intake history query", () => {
       amount: 2_500,
       currency: "KRW",
       requestedAt: NOW,
+      lines: [],
     });
   });
 
@@ -299,6 +301,7 @@ function refundAttempt(
       : options.providerRefundId,
     executionCommand: options.executionCommand ?? null,
     transitions: [],
+    lines: [],
   };
 }
 

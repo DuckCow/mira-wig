@@ -333,3 +333,21 @@ recalculation while atomically creating the Order and redeeming the grant. A
 selected coupon that yields no monetary benefit or a payable total below one
 minor unit is rejected; no free-order path is introduced. Coupon-aware refunds
 and refund/void regrant policy remain deferred.
+
+## 2026-08-28 — Durable refund merchandise attribution R0
+
+`RefundAttempt.amount` remains the aggregate cash-refund authority. Every newly
+created refund request also records a non-empty canonical set of historical
+Order items and positive quantities in `RefundAttemptLine`; this merchandise
+attribution does not price the refund or reinterpret item price or discount
+facts. Succeeded and non-terminal guarded attempts reserve item quantity, while
+cancelled and terminal-failed attempts retain their attribution without
+consuming current capacity. A guarded historical attempt with no line evidence
+fails closed to manual review; terminal historical line-less attempts remain
+eligible for replay and do not consume quantity.
+
+Customer refund intake submission remains order plus reason only. The admin
+approval decision assigns exact item quantities while approving cash amount
+independently. Coupon-aware partial-refund valuation and coupon regrant/loss
+policy remain deferred to PROMO-C5. This entry activates no provider contact,
+refund execution, deployment, promotion capability, or historical backfill.

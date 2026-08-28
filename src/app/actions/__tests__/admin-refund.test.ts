@@ -6,6 +6,7 @@ import {
   RefundAttemptActorType,
   RefundAttemptStatus,
   type RefundAttempt,
+  type RefundAttemptLine,
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,7 +62,12 @@ const NOW = new Date("2026-07-10T08:00:00.000Z");
 const GENERATED_ID = "11111111-1111-4111-8111-111111111111";
 const TRANSITION_ID = "transition_123";
 const ADMIN_ID = "admin_123";
-const VALID_INPUT = { orderId: "order_123", amount: 4_000, reason: "Customer request" };
+const VALID_INPUT = {
+  orderId: "order_123",
+  amount: 4_000,
+  reason: "Customer request",
+  lines: [{ orderItemId: "item_123", quantity: 1 }],
+};
 const VALID_CLOSE_INPUT = {
   orderId: "order_123",
   refundAttemptId: "refund_123",
@@ -135,6 +141,8 @@ describe("requestRefundAttemptAction input boundary", () => {
     ["empty object", {}],
     ["blank order id", { ...VALID_INPUT, orderId: "   " }],
     ["non-string reason", { ...VALID_INPUT, reason: 123 }],
+    ["empty lines", { ...VALID_INPUT, lines: [] }],
+    ["duplicate lines", { ...VALID_INPUT, lines: [VALID_INPUT.lines[0], VALID_INPUT.lines[0]] }],
   ];
 
   it.each(malformedInputs)("rejects malformed %s input", async (_label, input) => {
@@ -187,6 +195,7 @@ describe("requestRefundAttemptAction delegation", () => {
       orderId: "  order_123  ",
       amount: 4_000,
       reason: "  Customer request  ",
+      lines: [{ orderItemId: "  item_123  ", quantity: 1 }],
     });
 
     expect(mockRequestRefundAttempt).toHaveBeenCalledWith(mockDb, {
@@ -194,6 +203,7 @@ describe("requestRefundAttemptAction delegation", () => {
       orderId: "order_123",
       amount: 4_000,
       reason: "Customer request",
+      lines: [{ orderItemId: "item_123", quantity: 1 }],
       actorType: RefundAttemptActorType.ADMIN,
       actorUserId: ADMIN_ID,
       now: NOW,
@@ -284,6 +294,11 @@ describe("requestRefundAttemptAction failure mapping", () => {
     ["INVALID_EXISTING_ATTEMPT_AMOUNT", "MANUAL_REVIEW_REQUIRED"],
     ["PAYMENT_IDENTITY_MISMATCH", "MANUAL_REVIEW_REQUIRED"],
     ["REFUND_LEDGER_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
+    ["INVALID_REFUND_LINES", "INVALID_INPUT"],
+    ["REFUND_LINE_ITEM_NOT_FOUND", "INVALID_INPUT"],
+    ["OVER_REFUND_LINE_QUANTITY", "INSUFFICIENT_REFUNDABLE"],
+    ["REFUND_LINE_HISTORY_UNATTRIBUTED", "MANUAL_REVIEW_REQUIRED"],
+    ["REFUND_LINE_LEDGER_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
     ["DISPUTE_REVIEW_REQUIRED", "MANUAL_REVIEW_REQUIRED"],
     ["IDEMPOTENCY_CONFLICT", "CONFLICT"],
     ["ORDER_STATUS_CONFLICT", "CONFLICT"],
@@ -731,7 +746,7 @@ function claimCoreFailure(
   return { ok: false, code, message: "private claim evidence" };
 }
 
-function refundAttempt(): RefundAttempt {
+function refundAttempt(): RefundAttempt & { lines: RefundAttemptLine[] } {
   return {
     id: GENERATED_ID,
     orderId: VALID_INPUT.orderId,
@@ -753,5 +768,11 @@ function refundAttempt(): RefundAttempt {
     safeFailureMessage: null,
     createdAt: NOW,
     updatedAt: NOW,
+    lines: [{
+      refundAttemptId: GENERATED_ID,
+      orderItemId: VALID_INPUT.lines[0].orderItemId,
+      orderId: VALID_INPUT.orderId,
+      quantity: VALID_INPUT.lines[0].quantity,
+    }],
   };
 }

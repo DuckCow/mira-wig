@@ -6,11 +6,11 @@ export const DATABASE_INVARIANT_POSTGRES_VERSION_UNSUPPORTED = "DATABASE_INVARIA
 export const DATABASE_CHECK_INVARIANTS_INVALID = "DATABASE_CHECK_INVARIANTS_INVALID";
 export const DATABASE_PARTIAL_INDEX_INVARIANT_INVALID = "DATABASE_PARTIAL_INDEX_INVARIANT_INVALID";
 export const DATABASE_INVARIANT_MANIFEST_INVALID = "DATABASE_INVARIANT_MANIFEST_INVALID";
-export const EXPECTED_CHECK_INVARIANT_COUNT = 65;
-export const EXPECTED_CHECK_MANIFEST_SHA256 = "210433cac8820bfbccb57ec21c4cab8f5bb1d4ef628226d20e48c95b9d989f17";
+export const EXPECTED_CHECK_INVARIANT_COUNT = 66;
+export const EXPECTED_CHECK_MANIFEST_SHA256 = "c21fc27f031d5dfe5708e7e8a3f656f6f3a3c2f573346fe5fd5938806c979c3e";
 
 const PINNED_CHECK_TABLES = Object.freeze([
-  "CustomerRefundIntake", "RefundAttemptTransition", "RefundExecutionCommand",
+  "CustomerRefundIntake", "RefundAttemptLine", "RefundAttemptTransition", "RefundExecutionCommand",
   "RefundExecutionCommandEvent", "RefundExecutionDispatchAttempt", "RefundExecutionEvidence",
   "RefundExecutionProviderContactEligibilityProof", "RefundExecutionProviderEligibilityProof",
   "RefundExecutionProviderOperationBinding",
@@ -51,6 +51,7 @@ export type DatabaseInvariantQueryClient = Pick<Prisma.TransactionClient, "$quer
 export const EXPECTED_CHECK_COUNTS_BY_TABLE: Readonly<Record<PinnedCheckTable, number>> =
   Object.freeze({
     CustomerRefundIntake: 8,
+    RefundAttemptLine: 1,
     RefundAttemptTransition: 5,
     RefundExecutionCommand: 7,
     RefundExecutionCommandEvent: 2,
@@ -70,6 +71,7 @@ export const EXPECTED_CHECK_INVARIANTS: readonly CheckInvariant[] = Object.freez
   check("CustomerRefundIntake", "CustomerRefundIntake_reviewer_nonblank_check", `CHECK ("reviewedByUserId" IS NULL OR btrim("reviewedByUserId") <> ''::text)`),
   check("CustomerRefundIntake", "CustomerRefundIntake_reviewer_pair_check", `CHECK (("reviewedAt" IS NULL) = ("reviewedByUserId" IS NULL))`),
   check("CustomerRefundIntake", "CustomerRefundIntake_withdrawal_coherence_check", `CHECK ((status = 'WITHDRAWN'::"CustomerRefundIntakeStatus") = ("withdrawnAt" IS NOT NULL))`),
+  check("RefundAttemptLine", "RefundAttemptLine_quantity_positive_check", `CHECK (quantity > 0)`),
   check("RefundAttemptTransition", "RefundAttemptTransition_actor_user_nonblank_check", `CHECK ("actorUserId" IS NULL OR btrim("actorUserId") <> ''::text)`),
   check("RefundAttemptTransition", "RefundAttemptTransition_admin_actor_check", `CHECK ("actorType" <> 'ADMIN'::"RefundAttemptActorType" OR "actorUserId" IS NOT NULL)`),
   check("RefundAttemptTransition", "RefundAttemptTransition_creation_edge_check", `CHECK (("fromStatus" IS NULL) = ("toStatus" = 'REQUESTED'::"RefundAttemptStatus"))`),

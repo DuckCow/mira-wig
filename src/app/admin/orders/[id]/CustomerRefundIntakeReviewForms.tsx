@@ -1,6 +1,13 @@
 import type { FormEvent } from "react";
 import { Dialog } from "@/components/ui/Dialog";
 
+export interface RefundLineSelectionOption {
+  orderItemId: string;
+  label: string;
+  orderedQuantity: number;
+  remainingQuantity: number | null;
+}
+
 export function ReviewPanelIntroduction() {
   return (
     <div>
@@ -90,9 +97,13 @@ export function ApproveReviewForm({
   rationaleCount,
   amountError,
   rationaleError,
+  lineOptions,
+  lineQuantities,
+  linesError,
   isPending,
   onAmountChange,
   onRationaleChange,
+  onLineQuantityChange,
   onSubmit,
 }: {
   intakeId: string;
@@ -103,9 +114,13 @@ export function ApproveReviewForm({
   rationaleCount: number;
   amountError: string | undefined;
   rationaleError: string | undefined;
+  lineOptions: readonly RefundLineSelectionOption[];
+  lineQuantities: Readonly<Record<string, string>>;
+  linesError: string | undefined;
   isPending: boolean;
   onAmountChange: (value: string) => void;
   onRationaleChange: (value: string) => void;
+  onLineQuantityChange: (orderItemId: string, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
@@ -161,6 +176,36 @@ export function ApproveReviewForm({
           </span>
         </div>
       </div>
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium text-gray-700">
+          환불 상품 수량 귀속 <span aria-hidden="true">*</span>
+        </legend>
+        <p className="text-xs text-gray-500">
+          선택 수량은 이 환불 요청과 연결되는 상품 단위를 기록합니다. 환불 현금 금액은 위에서 별도로 승인되며,
+          아직 상품 수량으로 자동 계산되지 않습니다.
+        </p>
+        {lineOptions.map((option) => (
+          <label key={option.orderItemId} className="grid gap-2 rounded border border-gray-200 p-3 sm:grid-cols-[1fr_7rem] sm:items-center">
+            <span className="text-sm text-gray-700">
+              <span className="block font-medium text-gray-900">{option.label}</span>
+              <span className="mt-1 block text-xs text-gray-500">
+                주문 {option.orderedQuantity} · 현재 귀속 가능 {option.remainingQuantity ?? "확인 필요"}
+              </span>
+            </span>
+            <input
+              aria-label={`${option.label} 환불 귀속 수량`}
+              disabled={isPending || option.remainingQuantity === null || option.remainingQuantity === 0}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={lineQuantities[option.orderItemId] ?? "0"}
+              onChange={(event) => onLineQuantityChange(option.orderItemId, event.target.value)}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+        ))}
+        <p className="text-xs text-red-700">{linesError ?? ""}</p>
+      </fieldset>
       <button
         type="submit"
         disabled={isPending}

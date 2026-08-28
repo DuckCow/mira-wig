@@ -129,6 +129,7 @@ describe("customer intake administrator review contract", () => {
       amount: 500,
       currency: "KRW",
       requestedAt: NOW,
+      lines: [{ orderItemId: "item_2", quantity: 1 }],
     }, false);
 
     expect(Object.keys(rejection.intake).sort()).toEqual([
@@ -151,6 +152,7 @@ describe("customer intake administrator review contract", () => {
       "amount",
       "currency",
       "id",
+      "lines",
       "orderId",
       "requestedAt",
       "status",
@@ -180,6 +182,7 @@ function approveInput(
     reviewedByUserId: "admin_1",
     amount: 500,
     merchantRationale: "Administrator approved a refund request.",
+    lines: [{ orderItemId: "item_1", quantity: 1 }],
     now: new Date(NOW),
     ...override,
   };

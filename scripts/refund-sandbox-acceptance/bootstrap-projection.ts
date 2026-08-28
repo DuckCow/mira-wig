@@ -24,7 +24,7 @@ export async function requireBootstrapProjection(
   return Object.freeze({
     orderStatus: "PAID", paymentStatus: "SUCCEEDED", paymentProvider: "TOSS",
     paymentMode: "SANDBOX", checkoutStatus: "COMPLETED", currency: "KRW",
-    amount: fixture.amount, ...counts, orderItems: 0, orderShipping: 0, checkoutLines: 0,
+    amount: fixture.amount, ...counts, orderItems: 1, orderShipping: 0, checkoutLines: 0,
   });
 }
 
@@ -35,7 +35,7 @@ function matchesOrder(
 ): boolean {
   return order?.status === OrderStatus.PAID && order.totalAmount === fixture.amount
     && order.userId === handle.userId && order.paymentId === handle.paymentId
-    && order._count.items === 0 && order.shipping === null;
+    && order._count.items === 1 && order.shipping === null;
 }
 
 function matchesPayment(

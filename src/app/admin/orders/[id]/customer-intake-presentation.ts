@@ -41,7 +41,7 @@ interface CustomerRefundIntakeHistoryRowViewModel {
   ownershipWarning: string | null;
 }
 
-export type ReviewResultField = "rejectionReason" | "amount" | "merchantRationale" | null;
+export type ReviewResultField = "rejectionReason" | "amount" | "merchantRationale" | "lines" | null;
 
 export interface ReviewResultPresentation {
   message: string;
@@ -145,8 +145,9 @@ export function buildApproveCustomerRefundIntakePayload(
   intakeId: string,
   amountMinor: string,
   merchantRationale: string,
+  lines: readonly { orderItemId: string; quantity: number }[],
 ) {
-  return { orderId, intakeId, amountMinor, merchantRationale };
+  return { orderId, intakeId, amountMinor, merchantRationale, lines };
 }
 
 export function presentRejectCustomerRefundIntakeResult(
@@ -199,6 +200,7 @@ export function presentApproveCustomerRefundIntakeResult(
   if (result.errorCode === "REASON_REQUIRED" || result.errorCode === "REASON_TOO_LONG") {
     field = "merchantRationale";
   }
+  if (result.errorCode === "INVALID_INPUT") field = "lines";
   return {
     message: getAdminCustomerRefundIntakeErrorMessage(result.errorCode),
     variant: result.errorCode === "UNAUTHENTICATED" || result.errorCode === "FORBIDDEN"

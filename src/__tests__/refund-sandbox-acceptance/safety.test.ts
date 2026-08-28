@@ -753,7 +753,7 @@ describe("bounded Prisma verification subprocess", () => {
 });
 
 describe("migration-owned refund database invariants", () => {
-  it("pins 65 unique CHECK identities, table counts, and the independent manifest hash", () => {
+  it("pins 66 unique CHECK identities, table counts, and the independent manifest hash", () => {
     expect(EXPECTED_CHECK_INVARIANTS).toHaveLength(EXPECTED_CHECK_INVARIANT_COUNT);
     const identities = EXPECTED_CHECK_INVARIANTS.map((entry) => (
       `${entry.schemaName}:${entry.tableName}:${entry.constraintName}`

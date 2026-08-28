@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   CheckoutSessionStatus,
+  FulfillmentType,
   OrderStatus,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
+  WigCategory,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -80,7 +82,11 @@ export class AcceptanceBootstrap {
       const order = await tx.order.findUnique({ where: { id: handle.orderId }, select: { userId: true, paymentId: true, checkoutSessionId: true } });
       if (order && (order.userId !== handle.userId || order.paymentId !== handle.paymentId
         || order.checkoutSessionId !== handle.checkoutSessionId)) throw new Error("BOOTSTRAP_OWNERSHIP_MISMATCH");
+      const ids = ownedIds(handle.runId, handle.scenarioId);
+      await tx.orderItem.deleteMany({ where: { id: ids.orderItemId, orderId: handle.orderId } });
       await tx.order.deleteMany({ where: { id: handle.orderId, userId: handle.userId, paymentId: handle.paymentId } });
+      await tx.wigVariant.deleteMany({ where: { id: ids.variantId, wigStyleId: ids.wigStyleId } });
+      await tx.wigStyle.deleteMany({ where: { id: ids.wigStyleId } });
       await tx.payment.deleteMany({ where: { id: handle.paymentId, checkoutSessionId: handle.checkoutSessionId } });
       await tx.checkoutSession.deleteMany({ where: { id: handle.checkoutSessionId, userId: handle.userId } });
       await tx.user.deleteMany({ where: { id: handle.userId } });
@@ -184,6 +190,24 @@ async function createPreRefundRows(
     blockingEndedAt: now,
     idempotencyKey: `h1-payment-${ids.digest}`,
   } });
+  await tx.wigStyle.create({ data: {
+    id: ids.wigStyleId,
+    name: `H1 ${input.scenarioId} refund fixture`,
+    category: WigCategory.FASHION,
+    tags: ["acceptance-refund"],
+    imageKeys: [],
+  } });
+  await tx.wigVariant.create({ data: {
+    id: ids.variantId,
+    wigStyleId: ids.wigStyleId,
+    color: "Fixture",
+    length: "Fixture",
+    curl: "Fixture",
+    price: input.fixture.amount,
+    stock: 0,
+    sku: `H1-${ids.digest}`,
+    fulfillmentType: FulfillmentType.MTO,
+  } });
   await tx.order.create({ data: {
     id: ids.orderId,
     checkoutSessionId: ids.checkoutSessionId,
@@ -196,6 +220,16 @@ async function createPreRefundRows(
     totalAmount: input.fixture.amount,
     status: OrderStatus.PAID,
     paidAt: now,
+  } });
+  await tx.orderItem.create({ data: {
+    id: ids.orderItemId,
+    orderId: ids.orderId,
+    variantId: ids.variantId,
+    wigStyleId: ids.wigStyleId,
+    quantity: 1,
+    unitAmount: input.fixture.amount,
+    fulfillmentType: FulfillmentType.MTO,
+    snapshotData: { source: "H1_REFUND_ACCEPTANCE" },
   } });
 }
 
@@ -224,18 +258,30 @@ function ownedIds(runId: string, scenarioId: H1Scenario) {
     checkoutSessionId: `h1_session_${digest}`,
     paymentId: `h1_payment_${digest}`,
     orderId: `h1_order_${digest}`,
+    wigStyleId: `h1_style_${digest}`,
+    variantId: `h1_variant_${digest}`,
+    orderItemId: `h1_item_${digest}`,
   });
 }
 
+export function acceptanceBootstrapOrderItemId(
+  handle: Pick<AcceptanceBootstrapHandle, "runId" | "scenarioId">,
+): string {
+  return ownedIds(handle.runId, handle.scenarioId).orderItemId;
+}
+
 async function loadExisting(tx: Prisma.TransactionClient, ids: ReturnType<typeof ownedIds>) {
-  const [user, session, payment, order] = await Promise.all([
+  const [user, session, payment, order, style, variant, item] = await Promise.all([
     tx.user.findUnique({ where: { id: ids.userId }, select: { id: true, email: true } }),
     tx.checkoutSession.findUnique({ where: { id: ids.checkoutSessionId }, select: { id: true } }),
     tx.payment.findUnique({ where: { id: ids.paymentId }, select: { id: true } }),
     tx.order.findUnique({ where: { id: ids.orderId }, select: { id: true } }),
+    tx.wigStyle.findUnique({ where: { id: ids.wigStyleId }, select: { id: true } }),
+    tx.wigVariant.findUnique({ where: { id: ids.variantId }, select: { id: true } }),
+    tx.orderItem.findUnique({ where: { id: ids.orderItemId }, select: { id: true } }),
   ]);
-  const count = [user, session, payment, order].filter(Boolean).length;
-  return Object.freeze({ count, complete: count === 4 && user?.email === ids.email });
+  const count = [user, session, payment, order, style, variant, item].filter(Boolean).length;
+  return Object.freeze({ count, complete: count === 7 && user?.email === ids.email });
 }
 
 async function ensureProviderIdentityUnused(tx: Prisma.TransactionClient, paymentKey: string): Promise<void> {

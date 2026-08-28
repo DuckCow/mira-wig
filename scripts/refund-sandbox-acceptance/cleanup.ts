@@ -200,6 +200,7 @@ export async function cleanupRunDatabase(
       await tx.refundExecutionCommandEvent.deleteMany({ where: { commandId: refund.commandId } });
       await tx.refundExecutionCommand.deleteMany({ where: { id: refund.commandId, refundAttemptId: refund.refundAttemptId } });
       await tx.refundAttemptTransition.deleteMany({ where: { refundAttemptId: refund.refundAttemptId } });
+      await tx.refundAttemptLine.deleteMany({ where: { refundAttemptId: refund.refundAttemptId } });
       await tx.refundAttempt.deleteMany({ where: { id: refund.refundAttemptId, orderId: handle.orderId } });
     });
   }
