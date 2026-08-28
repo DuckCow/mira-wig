@@ -36,6 +36,9 @@ export function buildOrderPaidEmail(
       `${words.status}: ${words.statuses[projection.status]}`,
       words.items,
       ...itemLines,
+      ...(projection.discountAmount > 0
+        ? [`${words.couponDiscount}: −${formatPersistedMoney(projection.discountAmount, projection.currency)}`]
+        : []),
       `${words.total}: ${formatPersistedMoney(projection.totalPaidAmount, projection.currency)}`,
       `${words.cta}: ${orderDetailUrl}`,
     ].join("\n"),
@@ -76,7 +79,7 @@ const ORDER_WORDS = {
     subject: "주문이 접수되었습니다",
     greeting: "Mira 주문과 결제가 정상적으로 완료되었습니다.",
     orderId: "주문 번호", paidAt: "결제 완료일", status: "현재 주문 상태",
-    items: "주문 상품", total: "총 결제 금액", cta: "Mira 주문 상세",
+    items: "주문 상품", couponDiscount: "쿠폰 할인", total: "총 결제 금액", cta: "Mira 주문 상세",
     productFallback: "상품",
     statuses: {
       PAID: "결제 완료", CANCELLED: "취소", REFUND_PENDING: "환불 처리 중",
@@ -87,7 +90,7 @@ const ORDER_WORDS = {
     subject: "Your order has been received",
     greeting: "Your Mira order and payment are complete.",
     orderId: "Order ID", paidAt: "Payment completed", status: "Current order status",
-    items: "Items", total: "Total paid", cta: "View your Mira order",
+    items: "Items", couponDiscount: "Coupon discount", total: "Total paid", cta: "View your Mira order",
     productFallback: "Product",
     statuses: {
       PAID: "Paid", CANCELLED: "Cancelled", REFUND_PENDING: "Refund in progress",
@@ -98,7 +101,7 @@ const ORDER_WORDS = {
     subject: "ご注文を承りました",
     greeting: "Miraでのご注文とお支払いが完了しました。",
     orderId: "注文番号", paidAt: "支払完了日時", status: "現在の注文状況",
-    items: "ご注文商品", total: "お支払い合計", cta: "Miraの注文詳細を見る",
+    items: "ご注文商品", couponDiscount: "クーポン割引", total: "お支払い合計", cta: "Miraの注文詳細を見る",
     productFallback: "商品",
     statuses: {
       PAID: "支払完了", CANCELLED: "キャンセル済み", REFUND_PENDING: "返金処理中",
@@ -107,7 +110,7 @@ const ORDER_WORDS = {
   },
 } satisfies Record<Locale, {
   subject: string; greeting: string; orderId: string; paidAt: string; status: string;
-  items: string; total: string; cta: string; productFallback: string;
+  items: string; couponDiscount: string; total: string; cta: string; productFallback: string;
   statuses: Record<OrderStatus, string>;
 }>;
 

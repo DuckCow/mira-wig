@@ -261,6 +261,23 @@ describe("customer Order-detail authorization and intake composition", () => {
     if (locale !== "ko") expect(html).not.toMatch(/[가-힣]/u);
   });
 
+  it("renders the persisted Order coupon discount and net paid total", () => {
+    const order = orderFixture();
+    order.discountAmount = 1_000;
+    order.totalAmount = 9_000;
+    order.payment = { ...order.payment, amount: 9_000 };
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({
+      order,
+      intake: intakeFixture(),
+      locale: "en",
+    }));
+
+    expect(html).toContain("Coupon discount");
+    expect(html).toContain("−₩1,000");
+    expect(html).toContain("₩9,000");
+  });
+
   it.each([
     ["ko", "Black / 미디 / 직모"],
     ["en", "Black / Medium / Straight"],
@@ -397,6 +414,7 @@ function orderFixture(): CustomerOrderDetailRecord {
     paidAt: new Date("2026-07-15T00:00:00.000Z"),
     currency: "KRW",
     subtotalAmount: 10_000,
+    discountAmount: 0,
     shippingAmount: 0,
     totalAmount: 10_000,
     items: [],

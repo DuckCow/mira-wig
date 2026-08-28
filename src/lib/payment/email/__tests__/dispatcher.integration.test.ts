@@ -108,6 +108,7 @@ function source(orderId: string): TransactionalEmailProjectionSource {
         paidAt: FIRST_NOW,
         status: "PAID",
         currency: "KRW",
+        discountAmount: 0,
         totalPaidAmount: 85_000,
         items: [{
           quantity: 1,

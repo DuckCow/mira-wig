@@ -39,6 +39,14 @@ describe("frozen CheckoutSession resume presentation", () => {
     expect(html).not.toContain("<input");
   });
 
+  it("renders a frozen coupon discount without recomputing the session total", () => {
+    const html = renderResume(sessionFixture({ discountAmount: 500, totalAmount: 4_499 }));
+
+    expect(html).toContain("Coupon discount");
+    expect(html).toContain("−$5.00");
+    expect(html).toContain("$44.99");
+  });
+
   it.each(["PAYMENT_EXISTS", "EXPIRED", "COMPLETED", "TERMINAL", "MARKET_UNAVAILABLE"] as const)(
     "does not render a payment surface for %s",
     (disposition) => {
@@ -100,12 +108,14 @@ function sessionFixture(
     submittedAt: new Date("2026-08-23T00:00:00.000Z"),
     expiresAt: new Date("2026-08-23T00:30:00.000Z"),
     subtotalAmount: 4_999,
+    discountAmount: 0,
     shippingAmount: 0,
     totalAmount: 4_999,
     lines: [{
       id: "line-a",
       quantity: 1,
       unitAmount: 4_999,
+      discountAmount: 0,
       fulfillmentType: FulfillmentType.MTO,
       snapshot: {
         styleName: "Frozen style",

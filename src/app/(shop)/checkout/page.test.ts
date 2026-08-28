@@ -194,12 +194,14 @@ function resumeSession(
     submittedAt: new Date("2026-08-23T00:00:00.000Z"),
     expiresAt: new Date("2026-08-23T00:30:00.000Z"),
     subtotalAmount: 4_999,
+    discountAmount: 0,
     shippingAmount: 0,
     totalAmount: 4_999,
     lines: [{
       id: "resume-line",
       quantity: 1,
       unitAmount: 4_999,
+      discountAmount: 0,
       fulfillmentType: FulfillmentType.MTO,
       snapshot: {
         styleName: "Frozen style",

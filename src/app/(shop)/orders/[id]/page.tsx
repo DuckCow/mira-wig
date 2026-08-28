@@ -154,6 +154,12 @@ function PaymentDetails({ order, locale, messages }: { order: OrderDetail; local
     <Section title={messages.paymentDetails}>
       <div className="space-y-3">
         <SummaryRow label={messages.subtotal} value={formatOrderMoney(order.subtotalAmount, order.currency, locale, messages)} />
+        {order.discountAmount > 0 ? (
+          <SummaryRow
+            label={messages.couponDiscount}
+            value={`−${formatOrderMoney(order.discountAmount, order.currency, locale, messages)}`}
+          />
+        ) : null}
         <SummaryRow label={messages.shipping} value={`${formatOrderMoney(order.shippingAmount, order.currency, locale, messages)} · ${messages.shippingPolicyPending}`} />
         <SummaryRow label={messages.taxDuty} value={messages.taxPending} />
         <SummaryRow label={messages.totalPaid} value={formatOrderMoney(order.totalAmount, order.currency, locale, messages)} strong />

@@ -17,6 +17,7 @@ export type CheckoutActionErrorCode = SessionErrorCode | "UNAUTHORIZED" | "MARKE
 
 export interface CheckoutActionInput {
   expectedMarketCode: string;
+  promotionGrantId?: string;
   recipientName: string;
   phone: string;
   country: string;
@@ -52,6 +53,7 @@ export async function createCheckoutSessionAction(
       userId: session.user.id,
       marketCode,
       communicationLocale: context.locale,
+      promotionGrantId: normalizedOptionalId(input.promotionGrantId),
       shipping,
     });
     return { success: true, session: created };
@@ -59,6 +61,12 @@ export async function createCheckoutSessionAction(
     if (e instanceof SessionException) return sessionError(e);
     throw e;
   }
+}
+
+function normalizedOptionalId(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function marketConfirmationRequired(): CheckoutActionResult {

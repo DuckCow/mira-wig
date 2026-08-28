@@ -40,6 +40,11 @@ import type {
   PaymentInitiationProvider,
   PaymentInitiateResult,
 } from "@/lib/payment/providers/types";
+import {
+  PromotionRedemptionError,
+  reserveSelectedPromotionForContact,
+  selectedPromotionFirstOrderOnly,
+} from "@/lib/promotion";
 
 type InitiateTx = Prisma.TransactionClient;
 type InitiateSession = NonNullable<Awaited<ReturnType<typeof loadCommerceSession>>>;
@@ -511,10 +516,82 @@ async function validateCommerceAtContactBoundary(
 
 function validateFrozenTotals(session: InitiateSession): void {
   const subtotal = session.lines.reduce((sum, line) => sum + line.unitAmount * line.quantity, 0);
-  if (session.lines.length > 0
-    && subtotal === session.subtotalAmount
-    && subtotal + session.shippingAmount === session.totalAmount) return;
+  const discount = session.lines.reduce((sum, line) => sum + line.discountAmount, 0);
+  const lineDiscountsValid = session.lines.every((line) => (
+    Number.isSafeInteger(line.discountAmount)
+    && line.discountAmount >= 0
+    && line.discountAmount <= line.unitAmount * line.quantity
+  ));
+  const promotionShapeValid = session.promotionGrantId === null
+    ? session.discountAmount === 0 && discount === 0
+    : session.discountAmount > 0;
+  const checks = [
+    session.lines.length > 0,
+    subtotal === session.subtotalAmount,
+    discount === session.discountAmount,
+    lineDiscountsValid,
+    promotionShapeValid,
+    subtotal + session.shippingAmount - discount === session.totalAmount,
+  ];
+  if (checks.every(Boolean)) return;
   throw staleTerms("Frozen checkout totals are incoherent.");
+}
+
+async function reservePromotionAtContactBoundary(
+  tx: InitiateTx,
+  session: InitiateSession,
+  contactBoundaryNow: Date,
+): Promise<void> {
+  if (session.promotionGrantId === null) return;
+  try {
+    const firstOrderOnly = await selectedPromotionFirstOrderOnly(tx, session.promotionGrantId);
+    if (firstOrderOnly) {
+      await acquireFirstOrderPromotionClaim(tx, session, contactBoundaryNow);
+    }
+    await reserveSelectedPromotionForContact(tx, {
+      promotionGrantId: session.promotionGrantId,
+      reservationOwnerSessionId: session.id,
+      expectedFirstOrderOnly: firstOrderOnly,
+      userId: session.userId,
+      marketCode: session.marketCode,
+      currency: session.currency,
+      now: contactBoundaryNow,
+      frozenDiscountAmount: session.discountAmount,
+      lines: session.lines.map((line) => ({
+        lineId: line.variantId,
+        grossAmount: line.unitAmount * line.quantity,
+        frozenDiscountAmount: line.discountAmount,
+      })),
+    });
+  } catch (error) {
+    if (error instanceof PromotionRedemptionError) {
+      throw staleTerms("Frozen promotion terms are no longer eligible for provider contact.");
+    }
+    throw error;
+  }
+}
+
+async function acquireFirstOrderPromotionClaim(
+  tx: InitiateTx,
+  session: InitiateSession,
+  claimedAt: Date,
+): Promise<void> {
+  if (session.firstOrderPromotionClaimedAt !== null) return;
+  const claimed = await tx.checkoutSession.updateMany({
+    where: {
+      id: session.id,
+      userId: session.userId,
+      firstOrderPromotionClaimedAt: null,
+    },
+    data: { firstOrderPromotionClaimedAt: claimedAt },
+  });
+  if (claimed.count === 1) return;
+  const current = await tx.checkoutSession.findUnique({
+    where: { id: session.id },
+    select: { firstOrderPromotionClaimedAt: true },
+  });
+  if (current?.firstOrderPromotionClaimedAt != null) return;
+  throw staleTerms("First-order promotion contact ownership changed.");
 }
 
 function validateCommerceLine(
@@ -661,36 +738,50 @@ async function markContactStarted(
   input: RuntimeInitiationInput,
   prepared: PreparedEximbayReadyContact | null,
 ): Promise<ContactClaim> {
-  return client.$transaction(async (tx) => {
-    await lockCheckoutSession(tx, payment.checkoutSessionId);
-    const session = await loadCommerceSession(tx, payment.checkoutSessionId);
-    if (!session || session.userId !== input.userId) {
-      throw new PaymentInitiateException("SESSION_UNAVAILABLE", "Checkout session is unavailable.");
-    }
-    if (await hasUnresolvedSessionExposure(tx, payment.checkoutSessionId)
-      || await hasSessionSuspensionCycle(tx, payment.checkoutSessionId)) {
-      throw remediationRequired();
-    }
-    await validateCommerceAtContactBoundary(tx, session);
-    await assertEximbayPreparedFactsStillCurrent(tx, payment.id, session, input, prepared);
-    const contactBoundaryNow = await captureContactBoundaryTime(tx, input.contactBoundaryClock);
-    if (!isUsable(session, contactBoundaryNow)) {
-      const closed = await closeUncontactedPaymentForUnusableSession(tx, payment, contactBoundaryNow);
-      if (closed) return { kind: "sessionNotUsable" };
-      return lostContactClaim(await requirePayment(tx, payment.id));
-    }
-    const result = await tx.payment.updateMany({
-      where: contactClaimWhere(payment, prepared),
-      data: {
-        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
-        contactStartedAt: contactBoundaryNow,
-      },
+  try {
+    return await client.$transaction(async (tx) => {
+      await lockCheckoutSession(tx, payment.checkoutSessionId);
+      const session = await loadCommerceSession(tx, payment.checkoutSessionId);
+      if (!session || session.userId !== input.userId) {
+        throw new PaymentInitiateException("SESSION_UNAVAILABLE", "Checkout session is unavailable.");
+      }
+      if (await hasUnresolvedSessionExposure(tx, payment.checkoutSessionId)
+        || await hasSessionSuspensionCycle(tx, payment.checkoutSessionId)) {
+        throw remediationRequired();
+      }
+      await validateCommerceAtContactBoundary(tx, session);
+      await assertEximbayPreparedFactsStillCurrent(tx, payment.id, session, input, prepared);
+      const contactBoundaryNow = await captureContactBoundaryTime(tx, input.contactBoundaryClock);
+      if (!isUsable(session, contactBoundaryNow)) {
+        const closed = await closeUncontactedPaymentForUnusableSession(tx, payment, contactBoundaryNow);
+        if (closed) return { kind: "sessionNotUsable" };
+        return lostContactClaim(await requirePayment(tx, payment.id));
+      }
+      await reservePromotionAtContactBoundary(tx, session, contactBoundaryNow);
+      const result = await tx.payment.updateMany({
+        where: contactClaimWhere(payment, prepared),
+        data: {
+          attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+          contactStartedAt: contactBoundaryNow,
+        },
+      });
+      if (result.count !== 1) {
+        return lostContactClaim(await requirePayment(tx, payment.id));
+      }
+      return { kind: "claimed", payment: await requirePayment(tx, payment.id) };
     });
-    if (result.count !== 1) {
-      return lostContactClaim(await requirePayment(tx, payment.id));
+  } catch (error) {
+    if (isContactClaimUniqueConflict(error)) {
+      throw staleTerms("Another checkout owns first-order promotion contact authority.");
     }
-    return { kind: "claimed", payment: await requirePayment(tx, payment.id) };
-  });
+    throw error;
+  }
+}
+
+function isContactClaimUniqueConflict(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) return error.code === "P2002";
+  return typeof error === "object" && error !== null
+    && "code" in error && error.code === "P2002";
 }
 
 function contactClaimWhere(
@@ -1058,7 +1149,10 @@ function loadCommerceSession(tx: InitiateTx, sessionId: string) {
       status: true,
       expiresAt: true,
       marketCode: true,
+      promotionGrantId: true,
+      firstOrderPromotionClaimedAt: true,
       subtotalAmount: true,
+      discountAmount: true,
       shippingAmount: true,
       totalAmount: true,
       currency: true,
@@ -1070,6 +1164,7 @@ function loadCommerceSession(tx: InitiateTx, sessionId: string) {
           wigStyleId: true,
           quantity: true,
           unitAmount: true,
+          discountAmount: true,
           fulfillmentType: true,
           variant: {
             select: {

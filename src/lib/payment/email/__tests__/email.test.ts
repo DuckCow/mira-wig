@@ -65,6 +65,19 @@ describe("R13B transactional email source", () => {
     );
   });
 
+  it.each([
+    ["ko", "쿠폰 할인"],
+    ["en", "Coupon discount"],
+    ["ja", "クーポン割引"],
+  ] as const)("renders the persisted coupon discount in the %s order-paid email", (locale, label) => {
+    const projection = { ...orderProjection(locale), discountAmount: 5_000, totalPaidAmount: 80_000 };
+    const email = buildOrderPaidEmail(projection, "https://mira.test/orders/order_public");
+
+    expect(email.text).toContain(label);
+    expect(email.text).toContain("₩5,000");
+    expect(email.text).toContain("₩80,000");
+  });
+
   it("sends through the provider-neutral port only after projection with a stable identity", async () => {
     const sends: TransactionalEmailSendInput[] = [];
     const port: TransactionalEmailPort = { send: (input) => { sends.push(input); return Promise.resolve(); } };
@@ -193,6 +206,7 @@ function orderProjection(locale: "ko" | "en" | "ja"): OrderPaidEmailProjection {
     paidAt: NOW,
     status: OrderStatus.PAID,
     currency: "KRW",
+    discountAmount: 0,
     totalPaidAmount: 85_000,
     items: [{
       quantity: 1,
