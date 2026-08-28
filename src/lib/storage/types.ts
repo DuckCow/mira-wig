@@ -30,7 +30,32 @@ export type UploadPurpose =
   | "review" // 리뷰 첨부 이미지
   | "hair-cad"; // 제작 설계도 (제조 단계)
 
-export interface StorageProvider {
+/** 공급자와 무관한 객체 metadata. 정책 계층에는 SDK 객체를 노출하지 않는다. */
+export interface StoredObjectMetadata {
+  /** 공급자가 관찰한 전체 객체 byte 수 */
+  byteLength: number;
+  /** 객체에 저장된 Content-Type. 없으면 기술 입장에서 검증 불가다. */
+  contentType: string | undefined;
+}
+
+/** 최대 byte 수까지만 읽은 객체 결과. */
+export interface BoundedObjectRead {
+  bytes: Uint8Array;
+  /** read 시점에 공급자가 관찰한 전체 객체 byte 수 */
+  totalByteLength: number;
+  /** read 시점의 저장 Content-Type */
+  contentType: string | undefined;
+}
+
+/** 이미지 등 서버 측 기술 검증에 필요한 최소 객체 검사 capability. */
+export interface ObjectInspectionProvider {
+  /** 객체가 없으면 null, metadata 조회 실패면 reject한다. */
+  statObject(key: string): Promise<StoredObjectMetadata | null>;
+  /** 전체 크기와 관계없이 반환 bytes는 maxBytes를 넘지 않아야 한다. */
+  readObjectBounded(key: string, maxBytes: number): Promise<BoundedObjectRead>;
+}
+
+export interface StorageProvider extends ObjectInspectionProvider {
   /** 공급자 식별자 (예: "s3") */
   readonly name: string;
 

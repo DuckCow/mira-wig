@@ -27,6 +27,9 @@ export const fittingStorage: StorageProvider = new MockStorageProvider();
 
 export type {
   StorageProvider,
+  ObjectInspectionProvider,
+  StoredObjectMetadata,
+  BoundedObjectRead,
   PresignedUploadResult,
   UploadPurpose,
 } from "./types";

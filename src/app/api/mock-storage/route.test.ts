@@ -34,6 +34,15 @@ describe("mock storage upload state", () => {
     }));
     expect(putResponse.status).toBe(200);
     await expect(storage.exists(upload.key)).resolves.toBe(true);
+    await expect(storage.statObject(upload.key)).resolves.toEqual({
+      byteLength: bytes.byteLength,
+      contentType: "image/png",
+    });
+    await expect(storage.readObjectBounded(upload.key, 2)).resolves.toEqual({
+      bytes: bytes.slice(0, 2),
+      totalByteLength: bytes.byteLength,
+      contentType: "image/png",
+    });
 
     const getResponse = GET(requestFor(upload.key));
     expect(getResponse.status).toBe(200);
@@ -42,6 +51,7 @@ describe("mock storage upload state", () => {
 
     await storage.delete(upload.key);
     await expect(storage.exists(upload.key)).resolves.toBe(false);
+    await expect(storage.statObject(upload.key)).resolves.toBeNull();
   });
 
   it("does not count an unknown key or GET fallback as existing", async () => {

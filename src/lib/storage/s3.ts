@@ -11,12 +11,14 @@
 // ============================================================
 
 import { randomUUID } from "crypto";
+import { Readable } from "node:stream";
 import {
   S3Client,
   DeleteObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
+  NotFound,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type {
@@ -27,6 +29,49 @@ import type {
 
 const DEFAULT_VIEW_EXPIRY = 60 * 15; // 15분 — 민감 이미지 기본 만료
 const UPLOAD_EXPIRY = 60 * 5; // 5분 — 업로드 URL 유효기간
+
+function parseContentRangeTotal(contentRange: string | undefined): number {
+  const match = /^bytes 0-\d+\/(\d+)$/.exec(contentRange ?? "");
+  const total = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(total) || total < 0) {
+    throw new Error("S3 bounded read returned invalid Content-Range metadata.");
+  }
+  return total;
+}
+
+async function readNodeBodyBounded(
+  body: Readable,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+
+  try {
+    for await (const streamedChunk of body) {
+      const chunk: unknown = streamedChunk;
+      if (!(chunk instanceof Uint8Array)) {
+        throw new Error("S3 bounded read returned a non-byte stream chunk.");
+      }
+      if (chunk.byteLength > maxBytes - byteLength) {
+        body.destroy();
+        throw new Error("S3 bounded read exceeded its byte limit.");
+      }
+      chunks.push(chunk);
+      byteLength += chunk.byteLength;
+    }
+  } catch (error) {
+    if (!body.destroyed) body.destroy();
+    throw error;
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
 
 /** Content-Type에서 확장자를 유추 (간단 매핑) */
 function extFromContentType(contentType: string): string {
@@ -124,5 +169,48 @@ export class S3StorageProvider implements StorageProvider {
     } catch {
       return false;
     }
+  }
+
+  async statObject(key: string) {
+    try {
+      const output = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+      if (!Number.isSafeInteger(output.ContentLength) || (output.ContentLength ?? -1) < 0) {
+        throw new Error("S3 object returned invalid Content-Length metadata.");
+      }
+      return {
+        byteLength: output.ContentLength ?? -1,
+        contentType: output.ContentType,
+      };
+    } catch (error) {
+      if (error instanceof NotFound) return null;
+      throw error;
+    }
+  }
+
+  async readObjectBounded(key: string, maxBytes: number) {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+      throw new Error("maxBytes must be a positive safe integer.");
+    }
+    const output = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        // HTTP ranges are inclusive. Request one sentinel byte beyond the local
+        // ceiling so a stale/incorrect stat cannot hide an oversized object.
+        Range: `bytes=0-${maxBytes}`,
+      }),
+    );
+    if (!output.Body) throw new Error("S3 bounded read returned no body.");
+    if (!(output.Body instanceof Readable)) {
+      throw new Error("S3 bounded read returned an unsupported runtime body.");
+    }
+    const bytes = await readNodeBodyBounded(output.Body, maxBytes);
+    return {
+      bytes,
+      totalByteLength: parseContentRangeTotal(output.ContentRange),
+      contentType: output.ContentType,
+    };
   }
 }
