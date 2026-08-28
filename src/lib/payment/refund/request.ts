@@ -4,7 +4,6 @@ import {
   PaymentMode,
   PaymentProvider,
   Prisma,
-  RefundAttemptStatus,
   type PrismaClient,
   type RefundAttempt,
   type RefundAttemptActorType,
@@ -33,6 +32,7 @@ import {
   type CanonicalRefundLine,
   type RefundLineInput,
 } from "./lines";
+import { persistRefundRequestAfterOrderLock } from "./request-persistence";
 
 type RefundRequestTx = Prisma.TransactionClient;
 type RefundRequestReader = Pick<PrismaClient, "order">;
@@ -78,7 +78,8 @@ export type RequestRefundAttemptFailureCode =
   | "DISPUTE_REVIEW_REQUIRED"
   | "REASON_TOO_LONG"
   | "IDEMPOTENCY_CONFLICT"
-  | "ORDER_STATUS_CONFLICT";
+  | "ORDER_STATUS_CONFLICT"
+  | "ORDER_CANCELLED";
 
 export interface RequestRefundAttemptFailure {
   ok: false;
@@ -144,15 +145,18 @@ async function requestRefundAttemptWithProviderAdmissionInTransaction(
   return persistNewRequest(tx, order, input, normalizedLines.lines, providerAdmission);
 }
 
-function persistNewRequest(
+async function persistNewRequest(
   tx: RefundRequestTx,
   order: RefundRequestOrder,
   input: RequestRefundAttemptInput,
   lines: readonly CanonicalRefundLine[],
   providerAdmission: RefundRequestProviderAdmission,
-): Promise<RequestRefundAttemptResult> | RequestRefundAttemptResult {
+): Promise<RequestRefundAttemptResult> {
   if (lines.length === 0) {
     return failure("INVALID_REFUND_LINES", "Refund line selection must contain at least one item.");
+  }
+  if (order.cancellation !== null) {
+    return failure("ORDER_CANCELLED", "Accepted cancellation blocks a competing refund request.");
   }
 
   if (!hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)) {
@@ -165,7 +169,14 @@ function persistNewRequest(
 
   const prepared = prepareAgainst(order, input, order.refundAttempts);
   if (!prepared.ok) return prepared;
-  return persistRequest(tx, order, prepared.refundAttempt, lines);
+  const persisted = await persistRefundRequestAfterOrderLock(
+    tx,
+    order,
+    prepared.refundAttempt,
+    lines,
+  );
+  if (!persisted.ok) return persisted;
+  return { ...persisted, replayed: false };
 }
 
 async function lockOrder(tx: RefundRequestTx, orderId: string): Promise<boolean> {
@@ -180,6 +191,7 @@ function loadOrder(client: RefundRequestReader, orderId: string) {
     where: { id: orderId },
     include: {
       payment: true,
+      cancellation: true,
       items: { select: { id: true, quantity: true } },
       refundAttempts: {
         orderBy: { createdAt: "asc" },
@@ -349,52 +361,6 @@ function isRefundablePayment(
 function hasMatchingPaymentIdentity(order: RefundRequestOrder): boolean {
   return order.totalAmount === order.payment.amount
     && order.currency === order.payment.currency;
-}
-
-async function persistRequest(
-  tx: RefundRequestTx,
-  order: RefundRequestOrder,
-  prepared: PreparedRefundAttempt,
-  lines: readonly CanonicalRefundLine[],
-): Promise<RequestRefundAttemptResult> {
-  const transition = await tx.order.updateMany({
-    where: { id: order.id, status: order.status },
-    data: { status: OrderStatus.REFUND_PENDING },
-  });
-  if (transition.count !== 1) {
-    return failure("ORDER_STATUS_CONFLICT", "Order status changed before the refund request was saved.");
-  }
-  const refundAttempt = await tx.refundAttempt.create({
-    data: {
-      ...prepared,
-      lines: {
-        create: lines.map((line) => ({
-          quantity: line.quantity,
-          orderItem: {
-            connect: {
-              id_orderId: { id: line.orderItemId, orderId: order.id },
-            },
-          },
-        })),
-      },
-    },
-    include: { lines: { orderBy: { orderItemId: "asc" } } },
-  });
-  await tx.refundAttemptTransition.create({
-    data: {
-      refundAttemptId: prepared.id,
-      fromStatus: null,
-      toStatus: RefundAttemptStatus.REQUESTED,
-      orderStatusBefore: order.status,
-      orderStatusAfter: OrderStatus.REFUND_PENDING,
-      actorType: prepared.actorType,
-      actorUserId: prepared.actorUserId,
-      reason: prepared.reason,
-      operationKey: buildRefundRequestOperationKey(prepared.id),
-      createdAt: prepared.requestedAt,
-    },
-  });
-  return { ok: true, refundAttempt, orderStatus: OrderStatus.REFUND_PENDING, replayed: false };
 }
 
 async function classifyUniqueConflict(

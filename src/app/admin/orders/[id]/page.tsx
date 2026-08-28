@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { randomUUID } from "node:crypto";
 import { notFound, redirect } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { requireAdmin } from "@/lib/admin";
@@ -19,6 +20,12 @@ import type { CustomerRefundIntakeApproveState } from "./customer-intake-present
 import { RefundExecutionClaimControl } from "./RefundExecutionClaimControl";
 import { RefundRequestCloseControl } from "./RefundRequestCloseControl";
 import type { RefundExecutionClaimActivationState } from "./refund-claim-presentation";
+import {
+  isMtoProductionStartEnabled,
+  OrderCancellationActivationConfigError,
+} from "@/lib/order-cancellation/activation";
+import { ProductionStartControl } from "./ProductionStartControl";
+import { CancellationRefundReplacementControl } from "./CancellationRefundReplacementControl";
 
 type Params = Promise<{ id: string }>;
 type Detail = AdminOrderDetailReadModel;
@@ -36,15 +43,23 @@ export default async function AdminOrderDetailPage({ params }: { params: Params 
     ? resolveApproveState()
     : "disabled";
 
-  return <AdminOrderDetailView order={order} approveState={approveState} />;
+  return (
+    <AdminOrderDetailView
+      order={order}
+      approveState={approveState}
+      productionStartEnabled={resolveProductionStartEnabled()}
+    />
+  );
 }
 
 export function AdminOrderDetailView({
   order,
   approveState,
+  productionStartEnabled = false,
 }: {
   order: Detail;
   approveState: CustomerRefundIntakeApproveState;
+  productionStartEnabled?: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -52,8 +67,9 @@ export function AdminOrderDetailView({
         ← 주문 목록
       </Link>
       <OrderHeader order={order} />
+      <CancellationSummary order={order} />
       <CustomerSummary order={order} />
-      <OrderItems items={order.items} />
+      <OrderItems orderId={order.id} items={order.items} productionStartEnabled={productionStartEnabled} />
       <ShippingSummary shipping={order.shipping} />
       <PaymentSummary order={order} />
       <RefundReview review={order.refundReview} />
@@ -89,6 +105,43 @@ export function resolveClaimState(): RefundExecutionClaimActivationState {
   }
 }
 
+export function resolveProductionStartEnabled(): boolean {
+  try {
+    return isMtoProductionStartEnabled();
+  } catch (error) {
+    if (error instanceof OrderCancellationActivationConfigError) return false;
+    throw error;
+  }
+}
+
+function CancellationSummary({ order }: { order: Detail }) {
+  const cancellation = order.cancellation;
+  if (!cancellation) return null;
+  return (
+    <Card title="주문 취소">
+      <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        {cancellation.obligationState === "INCONSISTENT"
+          ? "환불 원장 확인 필요. 수동 검토가 필요합니다."
+          : cancellation.obligationState === "OUTSTANDING"
+            ? "주문 취소는 확정되었고 환불 의무가 아직 남아 있습니다."
+            : "주문 취소와 전체 환불이 완료되었습니다."}
+      </div>
+      <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+        <Info label="취소 접수" value={cancellation.acceptedAt} />
+        <Info label="요청 고객" value={cancellation.requestedBy} />
+        <Info label="요청 고객 ID" value={cancellation.requestedByUserId} mono />
+        <Info label="초기 환불 요청" value={cancellation.initialRefundAttemptId} mono />
+        <Info label="취소 환불 의무" value={cancellation.capturedObligation} />
+        <Info label="환불 완료 금액" value={cancellation.succeededAmount} />
+        <Info label="미해결 금액" value={cancellation.outstandingAmount} />
+      </dl>
+      {cancellation.canReplaceRefund ? (
+        <CancellationRefundReplacementControl orderId={order.id} requestKey={randomUUID()} />
+      ) : null}
+    </Card>
+  );
+}
+
 function OrderHeader({ order }: { order: Detail }) {
   return (
     <header className="space-y-4">
@@ -122,7 +175,15 @@ function CustomerSummary({ order }: { order: Detail }) {
   );
 }
 
-function OrderItems({ items }: { items: Detail["items"] }) {
+function OrderItems({
+  orderId,
+  items,
+  productionStartEnabled,
+}: {
+  orderId: string;
+  items: Detail["items"];
+  productionStartEnabled: boolean;
+}) {
   return (
     <Card title="주문 상품">
       <ul className="divide-y divide-gray-100">
@@ -135,6 +196,13 @@ function OrderItems({ items }: { items: Detail["items"] }) {
               <p className="text-xs text-gray-400">
                 제작 요청 {item.mrCreatedAt} · 시작 {item.mrStartedAt} · 변경 {item.mrUpdatedAt}
               </p>
+              {productionStartEnabled && item.canStartProduction ? (
+                <ProductionStartControl
+                  orderId={orderId}
+                  orderItemId={item.id}
+                  requestKey={randomUUID()}
+                />
+              ) : null}
             </div>
             <div className="text-left text-sm sm:text-right">
               <p className="font-semibold text-gray-900">{item.lineTotal}</p>

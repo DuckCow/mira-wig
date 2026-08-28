@@ -6,8 +6,28 @@ import {
   type CustomerRefundIntakeReadModel,
 } from "@/lib/payment/refund/customer-intake-read";
 import { deriveCustomerRefundSummary } from "@/lib/payment/refund/customer-summary";
+import { deriveCancellationObligation } from "@/lib/order-cancellation/obligation";
+import {
+  CustomerRefundIntakeStatus,
+  FulfillmentType,
+  MrStatus,
+  OrderStatus,
+  PaymentAttemptStatus,
+  RefundAttemptStatus,
+} from "@prisma/client";
 
-export type CustomerOrderDetailRecord = ReturnType<typeof projectOwnedOrder>;
+type ProjectedCustomerOrderDetailRecord = ReturnType<typeof projectOwnedOrder>;
+export type CustomerOrderDetailRecord = Omit<
+  ProjectedCustomerOrderDetailRecord,
+  "cancellation" | "canCancelAutomatically" | "disputeStatus" | "items"
+> & {
+  cancellation?: ProjectedCustomerOrderDetailRecord["cancellation"];
+  canCancelAutomatically?: boolean;
+  disputeStatus?: string | null;
+  items: Array<Omit<ProjectedCustomerOrderDetailRecord["items"][number], "mr"> & {
+    mr?: ProjectedCustomerOrderDetailRecord["items"][number]["mr"];
+  }>;
+};
 
 export interface CustomerOrderDetailData {
   order: CustomerOrderDetailRecord;
@@ -18,12 +38,13 @@ export async function loadCustomerOrderDetail(
   orderId: string,
   customerUserId: string,
   submitEnabled: boolean,
+  cancellationEnabled = false,
 ): Promise<CustomerOrderDetailData | null> {
   const [order, intake] = await Promise.all([
     loadOwnedOrder(orderId, customerUserId),
     loadCustomerRefundIntakeReadModel(db, { orderId, customerUserId, submitEnabled }),
   ]);
-  return order && intake ? { order: projectOwnedOrder(order), intake } : null;
+  return order && intake ? { order: projectOwnedOrder(order, cancellationEnabled), intake } : null;
 }
 
 function loadOwnedOrder(orderId: string, userId: string) {
@@ -38,6 +59,14 @@ function loadOwnedOrder(orderId: string, userId: string) {
       discountAmount: true,
       shippingAmount: true,
       totalAmount: true,
+      disputeStatus: true,
+      cancellation: {
+        select: { acceptedAt: true },
+      },
+      customerRefundIntakes: {
+        where: { status: CustomerRefundIntakeStatus.SUBMITTED },
+        select: { id: true },
+      },
       items: {
         select: {
           id: true,
@@ -45,6 +74,14 @@ function loadOwnedOrder(orderId: string, userId: string) {
           unitAmount: true,
           fulfillmentType: true,
           snapshotData: true,
+          mr: {
+            select: {
+              status: true,
+              startedAt: true,
+              productionStartRequestKey: true,
+              startedByUserId: true,
+            },
+          },
         },
       },
       shipping: {
@@ -86,12 +123,27 @@ function loadOwnedOrder(orderId: string, userId: string) {
   });
 }
 
-function projectOwnedOrder(raw: NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>) {
-  const { refundAttempts, payment, ...order } = raw;
+function projectOwnedOrder(
+  raw: NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>,
+  cancellationEnabled = false,
+) {
+  const { refundAttempts, payment, customerRefundIntakes: _customerRefundIntakes, ...order } = raw;
   const { id: paymentId, mode: paymentMode, ...customerPayment } = payment;
+  const obligation = raw.cancellation
+    ? deriveCancellationObligation(raw, payment, refundAttempts)
+    : null;
+  const cancellation = raw.cancellation && obligation ? {
+    acceptedAt: raw.cancellation.acceptedAt,
+    expectedRefundAmount: obligation.state === "INCONSISTENT" ? null : payment.amount,
+    succeededRefundAmount: obligation.succeededAmount,
+    outstandingRefundAmount: obligation.outstandingAmount,
+    obligationState: obligation.state,
+  } : null;
   return {
     ...order,
     payment: customerPayment,
+    cancellation,
+    canCancelAutomatically: isAdvisoryCancellationEligible(raw, cancellationEnabled),
     refundSummary: deriveCustomerRefundSummary(
       { id: order.id, currency: order.currency },
       {
@@ -104,4 +156,43 @@ function projectOwnedOrder(raw: NonNullable<Awaited<ReturnType<typeof loadOwnedO
       refundAttempts,
     ),
   };
+}
+
+function isAdvisoryCancellationEligible(
+  raw: NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>,
+  cancellationEnabled: boolean,
+): boolean {
+  const orderFacts = [
+    cancellationEnabled,
+    raw.cancellation === null,
+    raw.status === OrderStatus.PAID,
+    raw.disputeStatus === null,
+    raw.payment.status === PaymentAttemptStatus.SUCCEEDED,
+    raw.payment.amount === raw.totalAmount,
+    raw.payment.currency === raw.currency,
+    raw.items.length > 0,
+  ];
+  return orderFacts.every(Boolean)
+    && raw.customerRefundIntakes.length === 0
+    && raw.items.every(isAdvisoryPreProductionMtoItem)
+    && raw.refundAttempts.every(hasAdvisoryTerminalRefundState);
+}
+
+function isAdvisoryPreProductionMtoItem(
+  item: NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>["items"][number],
+): boolean {
+  return [
+    item.fulfillmentType === FulfillmentType.MTO,
+    item.mr?.status === MrStatus.RECEIVED,
+    item.mr?.startedAt === null,
+    item.mr?.productionStartRequestKey === null,
+    item.mr?.startedByUserId === null,
+  ].every(Boolean);
+}
+
+function hasAdvisoryTerminalRefundState(
+  attempt: NonNullable<Awaited<ReturnType<typeof loadOwnedOrder>>>["refundAttempts"][number],
+): boolean {
+  return attempt.status === RefundAttemptStatus.FAILED_TERMINAL
+    || attempt.status === RefundAttemptStatus.CANCELLED;
 }

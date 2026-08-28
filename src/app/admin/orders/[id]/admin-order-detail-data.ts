@@ -2,11 +2,20 @@ import "server-only";
 
 import {
   Prisma,
+  OrderStatus,
+  MrStatus,
+  PaymentAttemptStatus,
+  RefundAttemptStatus,
   type CustomerRefundIntakeReasonCode,
   type CustomerRefundIntakeStatus,
-  type RefundAttemptStatus,
 } from "@prisma/client";
 import { db } from "@/lib/db";
+import { formatPersistedMoney } from "@/lib/market/persisted-money";
+import {
+  deriveCancellationObligation,
+  type CancellationObligation,
+} from "@/lib/order-cancellation/obligation";
+import { isTerminalRefundAttemptStatus } from "@/lib/payment/refund/invariants";
 import {
   buildAdminOrderDetailViewModel,
 } from "./admin-order-detail-view-model";
@@ -28,6 +37,13 @@ const ORDER_DETAIL_SELECT = {
   subtotalAmount: true,
   shippingAmount: true,
   totalAmount: true,
+  cancellation: {
+    select: {
+      acceptedAt: true,
+      initialRefundAttemptId: true,
+      requestedBy: { select: { id: true, email: true, name: true } },
+    },
+  },
   user: { select: { id: true, email: true, name: true } },
   shipping: {
     select: {
@@ -50,7 +66,17 @@ const ORDER_DETAIL_SELECT = {
       unitAmount: true,
       fulfillmentType: true,
       snapshotData: true,
-      mr: { select: { status: true, startedAt: true, createdAt: true, updatedAt: true } },
+      mr: {
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          productionStartRequestKey: true,
+          startedByUserId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
     },
   },
   payment: {
@@ -70,6 +96,7 @@ const ORDER_DETAIL_SELECT = {
     orderBy: [{ requestedAt: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,
+      orderId: true,
       paymentId: true,
       amount: true,
       currency: true,
@@ -146,7 +173,22 @@ export interface AdminCustomerRefundIntakeDetail {
   };
 }
 
-export type AdminOrderDetailReadModel = AdminOrderDetailViewModel & {
+export type AdminOrderDetailReadModel = Omit<AdminOrderDetailViewModel, "items"> & {
+  items: Array<AdminOrderDetailViewModel["items"][number] & {
+    canStartProduction?: boolean;
+  }>;
+  cancellation?: null | {
+    acceptedAt: string;
+    requestedBy: string;
+    requestedByUserId: string;
+    initialRefundAttemptId: string;
+    capturedObligation: string;
+    succeededAmount: string;
+    outstandingAmount: string;
+    obligationState: CancellationObligation["state"];
+    hasOutstandingAmount: boolean;
+    canReplaceRefund: boolean;
+  };
   customerRefundIntakes: AdminCustomerRefundIntakeDetail[];
 };
 
@@ -156,14 +198,57 @@ export async function loadAdminOrderDetail(
 ): Promise<AdminOrderDetailReadModel | null> {
   const order = await db.order.findUnique({ where: { id: orderId }, select: ORDER_DETAIL_SELECT });
   if (!order) return null;
+  const base = buildAdminOrderDetailViewModel(toSafeSource(order), { claimActivationState });
+  const hasOpenRefund = order.refundAttempts.some((attempt) => !isTerminalRefundAttemptStatus(attempt.status));
+  const hasSubmittedIntake = order.customerRefundIntakes.some((intake) => intake.status === "SUBMITTED");
   return {
-    ...buildAdminOrderDetailViewModel(toSafeSource(order), { claimActivationState }),
+    ...base,
+    statusLabel: order.cancellation ? "주문 취소" : base.statusLabel,
+    items: base.items.map((item, index) => {
+      const source = order.items[index];
+      return {
+        ...item,
+        canStartProduction: isAdvisoryProductionStartEligible(
+          order,
+          source,
+          hasOpenRefund,
+          hasSubmittedIntake,
+        ),
+      };
+    }),
+    cancellation: cancellationProjection(order),
     customerRefundIntakes: toSafeCustomerRefundIntakes(order),
   };
 }
 
+function isAdvisoryProductionStartEligible(
+  order: OrderDetailRecord,
+  source: OrderDetailRecord["items"][number] | undefined,
+  hasOpenRefund: boolean,
+  hasSubmittedIntake: boolean,
+): boolean {
+  return [
+    source?.mr?.status === MrStatus.RECEIVED,
+    source?.mr?.startedAt === null,
+    source?.mr?.productionStartRequestKey === null,
+    source?.mr?.startedByUserId === null,
+    order.cancellation === null,
+    order.status === OrderStatus.PAID,
+    order.disputeStatus === null,
+    !hasOpenRefund,
+    !hasSubmittedIntake,
+    source?.fulfillmentType === "MTO",
+  ].every(Boolean);
+}
+
 function toSafeSource(order: OrderDetailRecord): AdminOrderDetailSource {
-  const { payment, refundAttempts, customerRefundIntakes: _customerRefundIntakes, ...orderFields } = order;
+  const {
+    payment,
+    refundAttempts,
+    customerRefundIntakes: _customerRefundIntakes,
+    cancellation: _cancellation,
+    ...orderFields
+  } = order;
   return {
     ...orderFields,
     payment: {
@@ -184,6 +269,47 @@ function toSafeSource(order: OrderDetailRecord): AdminOrderDetailSource {
       paymentIdentityMatches: paymentId === payment.id,
     })),
   };
+}
+
+function cancellationProjection(order: OrderDetailRecord): AdminOrderDetailReadModel["cancellation"] {
+  if (!order.cancellation) return null;
+  const obligation = deriveCancellationObligation(order, order.payment, order.refundAttempts);
+  const coherent = obligation.state !== "INCONSISTENT";
+  const currency = order.payment.currency;
+  return {
+    acceptedAt: formatAdminDateTime(order.cancellation.acceptedAt),
+    requestedBy: order.cancellation.requestedBy.name?.trim()
+      || order.cancellation.requestedBy.email,
+    requestedByUserId: order.cancellation.requestedBy.id,
+    initialRefundAttemptId: order.cancellation.initialRefundAttemptId,
+    capturedObligation: coherent ? formatPersistedMoney(order.payment.amount, currency) : "금액 확인 필요",
+    succeededAmount: coherent
+      ? formatPersistedMoney(obligation.succeededAmount, currency)
+      : "금액 확인 필요",
+    outstandingAmount: coherent
+      ? formatPersistedMoney(obligation.outstandingAmount, currency)
+      : "금액 확인 필요",
+    obligationState: obligation.state,
+    hasOutstandingAmount: obligation.state === "OUTSTANDING",
+    canReplaceRefund: canReplaceCancellationRefund(order, obligation),
+  };
+}
+
+function canReplaceCancellationRefund(
+  order: OrderDetailRecord,
+  obligation: CancellationObligation,
+): boolean {
+  return [
+    obligation.state === "OUTSTANDING",
+    order.disputeStatus === null,
+    order.payment.status === PaymentAttemptStatus.SUCCEEDED,
+    Boolean(order.payment.providerPaymentKey?.trim()),
+    order.refundAttempts.every((attempt) => isTerminalRefundAttemptStatus(attempt.status)),
+  ].every(Boolean);
+}
+
+function formatAdminDateTime(date: Date): string {
+  return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function toSafeCustomerRefundIntakes(order: OrderDetailRecord): AdminCustomerRefundIntakeDetail[] {

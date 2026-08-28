@@ -61,6 +61,7 @@ describe("admin Order-detail intake history query", () => {
     expect(query.select.customerRefundIntakes.select).not.toHaveProperty("reviewedByUserId");
     expect(query.select.refundAttempts.select).toMatchObject({
       id: true,
+      orderId: true,
       paymentId: true,
       status: true,
       amount: true,
@@ -235,15 +236,78 @@ describe("admin Order-detail intake history query", () => {
     expect(after?.payment).toEqual(before?.payment);
     expect(after?.refundAttempts).toEqual(before?.refundAttempts);
   });
+
+  it.each([
+    ["OUTSTANDING", [2_500], "₩7,500", true],
+    ["SATISFIED", [4_000, 6_000], "₩0", false],
+    ["INCONSISTENT", [6_000, 5_000], "금액 확인 필요", false],
+  ] as const)("projects the strict %s cancellation obligation", async (
+    state,
+    amounts,
+    outstandingAmount,
+    canReplaceRefund,
+  ) => {
+    const record = orderRecord(OrderStatus.PAID, { cancellation: cancellationRecord() });
+    record.refundAttempts = amounts.map((amount, index) => refundAttempt(
+      `attempt_${index}`,
+      RefundAttemptStatus.SUCCEEDED,
+      { amount, processedAt: NOW },
+    ));
+    mockFindUnique.mockResolvedValue(record);
+
+    const result = await loadAdminOrderDetail("order_123");
+
+    expect(result?.cancellation).toMatchObject({
+      obligationState: state,
+      outstandingAmount,
+      canReplaceRefund,
+    });
+    if (state === "INCONSISTENT") {
+      expect(result?.cancellation?.succeededAmount).toBe("금액 확인 필요");
+      expect(result?.cancellation?.hasOutstandingAmount).toBe(false);
+    }
+  });
+
+  it.each([
+    ["dispute", { disputeStatus: "OPEN" }, "private_provider_payment_key"],
+    ["missing payment reference", { disputeStatus: null }, null],
+    ["blank payment reference", { disputeStatus: null }, "  \t "],
+  ] as const)("suppresses replacement advice for %s", async (_label, orderOverride, providerPaymentKey) => {
+    const record = orderRecord(OrderStatus.PAID, {
+      cancellation: cancellationRecord(),
+      disputeStatus: orderOverride.disputeStatus,
+      providerPaymentKey,
+    });
+    record.refundAttempts = [refundAttempt(
+      "attempt_failed",
+      RefundAttemptStatus.FAILED_TERMINAL,
+      { amount: 10_000 },
+    )];
+    mockFindUnique.mockResolvedValue(record);
+
+    const result = await loadAdminOrderDetail("order_123");
+
+    expect(result?.cancellation).toMatchObject({
+      obligationState: "OUTSTANDING",
+      canReplaceRefund: false,
+    });
+  });
 });
 
-function orderRecord(status: OrderStatus = OrderStatus.PAID) {
+function orderRecord(
+  status: OrderStatus = OrderStatus.PAID,
+  options: {
+    cancellation?: ReturnType<typeof cancellationRecord>;
+    disputeStatus?: string | null;
+    providerPaymentKey?: string | null;
+  } = {},
+) {
   const refundAttempts: ReturnType<typeof refundAttempt>[] = [];
   const customerRefundIntakes: ReturnType<typeof intakeRecord>[] = [];
   return {
     id: "order_123",
     status,
-    disputeStatus: null,
+    disputeStatus: options.disputeStatus ?? null,
     paidAt: NOW,
     createdAt: NOW,
     updatedAt: NOW,
@@ -252,6 +316,7 @@ function orderRecord(status: OrderStatus = OrderStatus.PAID) {
     subtotalAmount: 10_000,
     shippingAmount: 0,
     totalAmount: 10_000,
+    cancellation: options.cancellation ?? null,
     user: { id: "current_owner", email: "owner@example.test", name: "Owner" },
     shipping: null,
     items: [],
@@ -264,7 +329,9 @@ function orderRecord(status: OrderStatus = OrderStatus.PAID) {
       mode: PaymentMode.SANDBOX,
       createdAt: NOW,
       updatedAt: NOW,
-      providerPaymentKey: "private_provider_payment_key",
+      providerPaymentKey: options.providerPaymentKey === undefined
+        ? "private_provider_payment_key"
+        : options.providerPaymentKey,
     },
     refundAttempts,
     customerRefundIntakes,
@@ -277,12 +344,15 @@ function refundAttempt(
   options: {
     providerRefundId?: string | null;
     executionCommand?: { id: string } | null;
+    amount?: number;
+    processedAt?: Date | null;
   } = {},
 ) {
   return {
     id,
+    orderId: "order_123",
     paymentId: "payment_123",
-    amount: 2_500,
+    amount: options.amount ?? 2_500,
     currency: "KRW",
     status,
     reason: "Merchant rationale",
@@ -291,7 +361,7 @@ function refundAttempt(
     provider: PaymentProvider.MOCK,
     mode: PaymentMode.SANDBOX,
     requestedAt: NOW,
-    processedAt: null,
+    processedAt: options.processedAt ?? null,
     failedAt: null,
     safeFailureMessage: null,
     createdAt: NOW,
@@ -302,6 +372,14 @@ function refundAttempt(
     executionCommand: options.executionCommand ?? null,
     transitions: [],
     lines: [],
+  };
+}
+
+function cancellationRecord() {
+  return {
+    acceptedAt: NOW,
+    initialRefundAttemptId: "attempt_initial",
+    requestedBy: { id: "current_owner", email: "owner@example.test", name: "Owner" },
   };
 }
 

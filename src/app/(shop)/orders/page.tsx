@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
+import { getAuthenticationLocale } from "@/lib/market";
+import { messagesFor } from "@/lib/market/messages";
 import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import { parseSnapshotData } from "@/lib/order/snapshot";
 import type { SnapshotData } from "@/lib/order/types";
@@ -17,7 +19,9 @@ export default async function OrdersPage() {
   const session = await getSession();
   if (!session?.user.id) redirect("/login?callbackUrl=/orders");
 
+  const locale = await getAuthenticationLocale();
   const orders = await loadOrders(session.user.id);
+  const cancelledStatusLabel = messagesFor(locale).order.orderStatusCancelled;
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -26,7 +30,11 @@ export default async function OrdersPage() {
         <p className="text-sm text-gray-500">최근 주문부터 최대 {ORDER_LIST_LIMIT}건까지 확인할 수 있습니다.</p>
       </header>
 
-      {orders.length === 0 ? <EmptyOrders /> : <OrderList orders={orders} />}
+      {orders.length === 0 ? (
+        <EmptyOrders />
+      ) : (
+        <OrderList orders={orders} cancelledStatusLabel={cancelledStatusLabel} />
+      )}
 
       <Link href="/styles" className="inline-flex text-sm font-medium text-gray-900 underline underline-offset-4">
         스타일 둘러보기
@@ -47,6 +55,7 @@ async function loadOrders(userId: string) {
       createdAt: true,
       currency: true,
       totalAmount: true,
+      cancellation: { select: { id: true } },
       items: {
         take: 1,
         select: { snapshotData: true },
@@ -67,19 +76,25 @@ function EmptyOrders() {
   );
 }
 
-function OrderList({ orders }: { orders: OrderListItem[] }) {
+function OrderList({
+  orders,
+  cancelledStatusLabel,
+}: {
+  orders: OrderListItem[];
+  cancelledStatusLabel: string;
+}) {
   return (
     <ul className="space-y-4" aria-label="주문 목록">
       {orders.map((order) => (
         <li key={order.id}>
-          <OrderCard order={order} />
+          <OrderCard order={order} cancelledStatusLabel={cancelledStatusLabel} />
         </li>
       ))}
     </ul>
   );
 }
 
-function OrderCard({ order }: { order: OrderListItem }) {
+function OrderCard({ order, cancelledStatusLabel }: { order: OrderListItem; cancelledStatusLabel: string }) {
   const itemCount = order._count.items;
   return (
     <article className="rounded-lg border border-gray-200 bg-white p-5">
@@ -92,7 +107,7 @@ function OrderCard({ order }: { order: OrderListItem }) {
         </div>
         <div className="shrink-0 space-y-2 text-right">
           <span className="inline-flex rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white">
-            {orderStatusLabel(order.status)}
+            {order.cancellation ? cancelledStatusLabel : orderStatusLabel(order.status)}
           </span>
           <p className="text-base font-semibold text-gray-900">
             {formatPersistedMoney(order.totalAmount, order.currency)}

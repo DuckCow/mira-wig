@@ -57,7 +57,15 @@ interface ItemSource {
   unitAmount: number;
   fulfillmentType: FulfillmentType;
   snapshotData: unknown;
-  mr: { status: MrStatus; startedAt: NullableDate; createdAt: Date; updatedAt: Date } | null;
+  mr: {
+    id?: string;
+    status: MrStatus;
+    startedAt: NullableDate;
+    productionStartRequestKey?: string | null;
+    startedByUserId?: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null;
 }
 
 interface PaymentSource {

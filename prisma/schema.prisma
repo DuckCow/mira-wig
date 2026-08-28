@@ -33,6 +33,8 @@ model User {
   checkoutSessions      CheckoutSession[]
   orders                Order[]
   customerRefundIntakes CustomerRefundIntake[]
+  requestedOrderCancellations OrderCancellation[]     @relation("OrderCancellationRequester")
+  startedManufacturingRequests ManufacturingRequest[] @relation("ManufacturingRequestStarter")
   benefitProfile        CustomerBenefitProfile?
   promotionGrants       PromotionGrant[]
   localizedRevisions                  WigStyleLocalizedRevision[]          @relation("WigStyleLocalizedRevisionSubmitter")
@@ -845,6 +847,7 @@ model Order {
   shipping              OrderShipping?
   refundAttempts        RefundAttempt[]
   customerRefundIntakes CustomerRefundIntake[]
+  cancellation          OrderCancellation?
 
   @@index([userId, createdAt])
 }
@@ -879,6 +882,25 @@ model CustomerRefundIntake {
   @@index([status, submittedAt])
 }
 
+/// Immutable commerce-cancellation acceptance for one whole Order. The linked
+/// initial RefundAttempt owns the first financial execution obligation; later
+/// bounded replacements remain attributable through this unique Order aggregate.
+model OrderCancellation {
+  id                     String   @id @default(cuid())
+  orderId                String   @unique
+  requestKey             String   @unique @db.VarChar(128)
+  requestedByUserId      String
+  initialRefundAttemptId String   @unique
+  acceptedAt             DateTime @default(now()) @db.Timestamp(3)
+
+  order                Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  requestedBy          User          @relation("OrderCancellationRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  initialRefundAttempt RefundAttempt @relation("OrderCancellationInitialRefund", fields: [initialRefundAttemptId, orderId], references: [id, orderId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([requestedByUserId, acceptedAt])
+  @@unique([initialRefundAttemptId, orderId])
+}
+
 model RefundAttempt {
   id                           String                                   @id @default(cuid())
   orderId                      String
@@ -906,6 +928,7 @@ model RefundAttempt {
   executionCommand             RefundExecutionCommand?
   providerOperationBinding     RefundExecutionProviderOperationBinding?
   approvedCustomerRefundIntake CustomerRefundIntake?
+  initialOrderCancellation     OrderCancellation?                      @relation("OrderCancellationInitialRefund")
   lines                        RefundAttemptLine[]
 
   @@unique([provider, providerRefundId])
@@ -1200,13 +1223,18 @@ model OrderShipping {
 }
 
 model ManufacturingRequest {
-  id          String    @id @default(cuid())
-  orderItemId String    @unique
-  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
-  status      MrStatus  @default(RECEIVED)
-  startedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                        String    @id @default(cuid())
+  orderItemId               String    @unique
+  orderItem                 OrderItem @relation(fields: [orderItemId], references: [id])
+  status                    MrStatus  @default(RECEIVED)
+  startedAt                 DateTime? @db.Timestamp(3)
+  productionStartRequestKey String?   @unique @db.VarChar(128)
+  startedByUserId           String?
+  startedBy                 User?     @relation("ManufacturingRequestStarter", fields: [startedByUserId], references: [id], onDelete: Restrict)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@index([startedByUserId])
 }
 
 model PaymentOutbox {

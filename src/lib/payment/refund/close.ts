@@ -108,6 +108,7 @@ function loadAggregate(tx: CloseRefundTx, orderId: string) {
     where: { id: orderId },
     include: {
       payment: true,
+      cancellation: true,
       refundAttempts: {
         orderBy: { createdAt: "asc" },
         include: { executionCommand: { select: { id: true } } },
@@ -120,6 +121,12 @@ function validateAggregate(
   aggregate: CloseRefundAggregate,
   target: CloseRefundTarget,
 ): CloseRefundRequestFailure | null {
+  if (aggregate.cancellation !== null) {
+    return failure(
+      "CANCELLATION_OBLIGATION_REQUIRED",
+      "Accepted cancellation refund obligations cannot be closed generically.",
+    );
+  }
   if (aggregate.status !== OrderStatus.REFUND_PENDING) {
     return failure("ORDER_STATUS_CONFLICT", "Order is not awaiting a refund decision.");
   }

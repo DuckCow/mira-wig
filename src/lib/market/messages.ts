@@ -55,6 +55,41 @@ export interface StorefrontMessages {
 }
 
 export type OrderMessages = ReturnType<typeof orderCopy>;
+export type OrderCancellationMessages = Pick<OrderMessages,
+  | "cancellationAccepted"
+  | "cancellationExpectedRefund"
+  | "cancellationRefundProcessing"
+  | "cancellationRefundComplete"
+  | "cancellationRefundChecking"
+  | "cancellationAction"
+  | "cancellationActionPending"
+  | "cancellationGuidance"
+  | "cancellationActionSuccess"
+  | "cancellationFeatureDisabled"
+  | "cancellationNotFound"
+  | "cancellationManualReview"
+  | "cancellationConflict"
+  | "cancellationUnavailable"
+>;
+
+export function selectOrderCancellationMessages(messages: OrderMessages): OrderCancellationMessages {
+  return {
+    cancellationAccepted: messages.cancellationAccepted,
+    cancellationExpectedRefund: messages.cancellationExpectedRefund,
+    cancellationRefundProcessing: messages.cancellationRefundProcessing,
+    cancellationRefundComplete: messages.cancellationRefundComplete,
+    cancellationRefundChecking: messages.cancellationRefundChecking,
+    cancellationAction: messages.cancellationAction,
+    cancellationActionPending: messages.cancellationActionPending,
+    cancellationGuidance: messages.cancellationGuidance,
+    cancellationActionSuccess: messages.cancellationActionSuccess,
+    cancellationFeatureDisabled: messages.cancellationFeatureDisabled,
+    cancellationNotFound: messages.cancellationNotFound,
+    cancellationManualReview: messages.cancellationManualReview,
+    cancellationConflict: messages.cancellationConflict,
+    cancellationUnavailable: messages.cancellationUnavailable,
+  };
+}
 
 const COMMON_PAYMENT_ERRORS = {
   ko: {
@@ -149,6 +184,44 @@ function orderCopy(locale: Locale) {
     paymentUnknown: pick("결제 상태 확인 중", "Payment status unavailable", "決済状態を確認しています"),
     orderStatusPaid: pick("결제 완료", "Paid", "決済完了"),
     orderStatusCancelled: pick("주문 취소", "Order canceled", "注文取消"),
+    cancellationAccepted: pick("취소 접수", "Cancellation accepted", "キャンセル受付"),
+    cancellationExpectedRefund: pick("예상 환불 금액", "Expected refund amount", "返金予定額"),
+    cancellationRefundProcessing: pick("환불 처리 중", "Refund processing", "返金処理中"),
+    cancellationRefundComplete: pick("환불 완료", "Refund complete", "返金完了"),
+    cancellationRefundChecking: pick("환불 상태 확인 중", "Checking refund status", "返金状態を確認中"),
+    cancellationAction: pick("주문 취소", "Cancel order", "注文をキャンセル"),
+    cancellationActionPending: pick("처리 중…", "Processing…", "処理中…"),
+    cancellationGuidance: pick(
+      "제작이 시작되기 전의 전체 주문만 자동 취소할 수 있습니다.",
+      "Only an entire order can be canceled automatically before production starts.",
+      "製作開始前の注文全体のみ自動キャンセルできます。",
+    ),
+    cancellationActionSuccess: pick(
+      "주문 취소가 접수되었습니다. 환불 상태는 이 화면에서 확인할 수 있습니다.",
+      "Your order cancellation was accepted. You can check the refund status on this page.",
+      "注文キャンセルを受け付けました。返金状態はこの画面で確認できます。",
+    ),
+    cancellationFeatureDisabled: pick(
+      "온라인 주문 취소는 현재 이용할 수 없습니다.",
+      "Online order cancellation is currently unavailable.",
+      "オンライン注文キャンセルは現在利用できません。",
+    ),
+    cancellationNotFound: pick("주문을 찾을 수 없습니다.", "Order not found.", "注文が見つかりません。"),
+    cancellationManualReview: pick(
+      "자동 취소가 어려워 고객센터 확인이 필요합니다.",
+      "Customer support needs to review this cancellation.",
+      "このキャンセルはカスタマーサポートでの確認が必要です。",
+    ),
+    cancellationConflict: pick(
+      "주문 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요.",
+      "The order status changed. Refresh and try again.",
+      "注文状態が変更されました。更新してもう一度お試しください。",
+    ),
+    cancellationUnavailable: pick(
+      "현재는 자동으로 취소할 수 없습니다. 기존 환불 문의 경로를 이용해 주세요.",
+      "This order cannot be canceled automatically. Use the existing refund support channel.",
+      "現在、この注文は自動キャンセルできません。既存の返金お問い合わせ窓口をご利用ください。",
+    ),
     orderStatusRefundPending: pick("환불 요청 처리 중", "Refund request processing", "返金リクエスト処理中"),
     orderStatusPartiallyRefunded: pick("부분 환불", "Partially refunded", "一部返金済み"),
     orderStatusRefunded: pick("환불 완료", "Refunded", "返金完了"),

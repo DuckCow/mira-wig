@@ -174,6 +174,7 @@ const APPROVAL_REQUEST_FAILURES = {
   REFUND_LINE_LEDGER_INCONSISTENT: { kind: "expected", code: "REFUND_LINE_LEDGER_INCONSISTENT" },
   ORDER_NOT_FOUND: { kind: "invariant", code: "ORDER_NOT_FOUND" },
   ORDER_STATUS_CONFLICT: { kind: "invariant", code: "ORDER_STATUS_CONFLICT" },
+  ORDER_CANCELLED: { kind: "expected", code: "NOT_APPROVABLE" },
   IDEMPOTENCY_CONFLICT: { kind: "invariant", code: "IDEMPOTENCY_CONFLICT" },
   INVALID_REQUEST_AMOUNT: { kind: "invariant", code: "INVALID_REQUEST_AMOUNT" },
   INVALID_REASON: { kind: "invariant", code: "INVALID_REASON" },

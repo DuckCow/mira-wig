@@ -29,7 +29,8 @@ export type CloseRefundRequestFailureCode =
   | "PROVIDER_CONTACT_ALREADY_STARTED"
   | "ORDER_STATUS_CONFLICT"
   | "IDEMPOTENCY_CONFLICT"
-  | "REFUND_LEDGER_INCONSISTENT";
+  | "REFUND_LEDGER_INCONSISTENT"
+  | "CANCELLATION_OBLIGATION_REQUIRED";
 
 export interface CloseRefundRequestFailure {
   ok: false;

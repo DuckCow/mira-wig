@@ -79,6 +79,14 @@ async function submitInTransaction(
     return submitFailure("ORDER_NOT_FOUND_OR_NOT_OWNED", "Order was not found for the customer.");
   }
 
+  const cancellation = await tx.orderCancellation.findUnique({
+    where: { orderId: input.orderId },
+    select: { id: true },
+  });
+  if (cancellation) {
+    return submitFailure("ORDER_NOT_ELIGIBLE", "Cancelled Orders cannot create another refund intake.");
+  }
+
   const open = await findOpenIntake(tx, input.orderId);
   if (open) return resolveSubmitReplay(open, input.customerUserId);
   if (!isSubmitEligible(order.status)) {

@@ -6,11 +6,16 @@ import {
   PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
+  RefundAttemptStatus,
 } from "@prisma/client";
 import { isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CustomerRefundIntakeReadModel } from "@/lib/payment/refund/customer-intake-read";
+import {
+  messagesFor,
+  selectOrderCancellationMessages,
+} from "@/lib/market/messages";
 import type { CustomerOrderDetailRecord } from "./customer-order-detail-data";
 
 interface OwnedOrderQuery {
@@ -55,6 +60,7 @@ vi.mock("./CustomerRefundIntakeSection", () => ({ CustomerRefundIntakeSection: (
 import {
   CustomerRefundIntakeActivationConfigError,
 } from "@/lib/payment/refund/customer-intake-activation";
+import { cancellationResultMessage } from "./OrderCancellationControl";
 import OrderPage, { CustomerOrderDetailView, generateMetadata } from "./page";
 
 describe("customer Order-detail authorization and intake composition", () => {
@@ -377,6 +383,89 @@ describe("customer Order-detail authorization and intake composition", () => {
     expect(html).toContain("XYZ · 저장된 최소 단위 12345 · 소수 자릿수 확인 불가");
     expect(html).not.toMatch(/KRW|₩|123\.45/);
   });
+
+  it("projects over-refund history as cancellation verification, never completion", async () => {
+    const raw = rawOrderFixture();
+    raw.cancellation = { acceptedAt: new Date("2026-08-28T00:00:00.000Z") };
+    raw.refundAttempts = [rawRefundAttempt(6_000), rawRefundAttempt(5_000)];
+    mocks.orderFindFirst.mockResolvedValue(raw);
+
+    const element = await OrderPage({ params: Promise.resolve({ id: "order_1" }) });
+    const projected = viewProps(element)?.order.cancellation;
+
+    expect(projected).toMatchObject({
+      obligationState: "INCONSISTENT",
+      expectedRefundAmount: null,
+      succeededRefundAmount: null,
+      outstandingRefundAmount: null,
+    });
+    const html = renderToStaticMarkup(CustomerOrderDetailView({
+      order: viewProps(element)?.order ?? orderFixture(),
+      intake: intakeFixture(),
+      locale: "en",
+    }));
+    expect(html).toContain("Order canceled");
+    expect(html).toContain("Checking refund status");
+    expect(html).not.toContain("Refund complete");
+  });
+
+  it.each([
+    ["ko", "OUTSTANDING", "주문 취소", "환불 처리 중"],
+    ["ko", "SATISFIED", "주문 취소", "환불 완료"],
+    ["ko", "INCONSISTENT", "주문 취소", "환불 상태 확인 중"],
+    ["en", "OUTSTANDING", "Order canceled", "Refund processing"],
+    ["en", "SATISFIED", "Order canceled", "Refund complete"],
+    ["en", "INCONSISTENT", "Order canceled", "Checking refund status"],
+    ["ja", "OUTSTANDING", "注文取消", "返金処理中"],
+    ["ja", "SATISFIED", "注文取消", "返金完了"],
+    ["ja", "INCONSISTENT", "注文取消", "返金状態を確認中"],
+  ] as const)("renders %s cancellation %s copy from locale authority", (locale, state, badge, substate) => {
+    const order = orderFixture();
+    order.cancellation = cancellationFixture(state);
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture(), locale }));
+
+    expect(html).toContain(badge);
+    expect(html).toContain(substate);
+    if (locale !== "ko") expect(html).not.toMatch(/[가-힣]/u);
+  });
+
+  it.each([
+    ["ko", "주문 취소", "제작이 시작되기 전의 전체 주문만 자동 취소할 수 있습니다."],
+    ["en", "Cancel order", "Only an entire order can be canceled automatically before production starts."],
+    ["ja", "注文をキャンセル", "製作開始前の注文全体のみ自動キャンセルできます。"],
+  ] as const)("renders the available cancellation action in %s", (locale, action, guidance) => {
+    const order = orderFixture();
+    order.canCancelAutomatically = true;
+
+    const html = renderToStaticMarkup(CustomerOrderDetailView({ order, intake: intakeFixture(), locale }));
+
+    expect(html).toContain(action);
+    expect(html).toContain(guidance);
+    if (locale !== "ko") expect(html).not.toMatch(/[가-힣]/u);
+  });
+
+  it.each(["ko", "en", "ja"] as const)("resolves every cancellation action result in %s", (locale) => {
+    const messages = selectOrderCancellationMessages(messagesFor(locale).order);
+    expect(cancellationResultMessage({
+      success: true,
+      outcome: "ACCEPTED",
+      orderId: "order_1",
+      acceptedAt: "2026-08-28T00:00:00.000Z",
+      expectedRefundAmount: 10_000,
+      currency: "KRW",
+    }, messages)).toBe(messages.cancellationActionSuccess);
+    for (const [errorCode, expected] of [
+      ["FEATURE_DISABLED", messages.cancellationFeatureDisabled],
+      ["NOT_FOUND", messages.cancellationNotFound],
+      ["MANUAL_REVIEW_REQUIRED", messages.cancellationManualReview],
+      ["CONFLICT", messages.cancellationConflict],
+      ["NOT_AVAILABLE", messages.cancellationUnavailable],
+    ] as const) {
+      expect(cancellationResultMessage({ success: false, errorCode }, messages)).toBe(expected);
+    }
+    if (locale !== "ko") expect(Object.values(messages).join(" ")).not.toMatch(/[가-힣]/u);
+  });
 });
 
 class TrackedParams extends Promise<{ id: string }> {
@@ -435,16 +524,59 @@ function orderFixture(): CustomerOrderDetailRecord {
   };
 }
 
-function rawOrderFixture() {
+type RawOrderFixture = Omit<
+  ReturnType<typeof orderFixture>,
+  "cancellation" | "disputeStatus" | "payment" | "refundSummary"
+> & {
+  disputeStatus: string | null;
+  cancellation: { acceptedAt: Date } | null;
+  customerRefundIntakes: Array<{ id: string }>;
+  payment: CustomerOrderDetailRecord["payment"] & { id: string; mode: PaymentMode };
+  refundAttempts: ReturnType<typeof rawRefundAttempt>[];
+};
+
+function rawOrderFixture(): RawOrderFixture {
   const { refundSummary: _refundSummary, payment, ...order } = orderFixture();
+  const disputeStatus: string | null = null;
+  const cancellation: { acceptedAt: Date } | null = null;
+  const customerRefundIntakes: Array<{ id: string }> = [];
+  const refundAttempts: ReturnType<typeof rawRefundAttempt>[] = [];
   return {
     ...order,
+    disputeStatus,
+    cancellation,
+    customerRefundIntakes,
     payment: {
       ...payment,
       id: "payment_1",
       mode: PaymentMode.SANDBOX,
     },
-    refundAttempts: [],
+    refundAttempts,
+  };
+}
+
+function rawRefundAttempt(amount: number) {
+  return {
+    orderId: "order_1",
+    paymentId: "payment_1",
+    amount,
+    currency: "KRW",
+    provider: PaymentProvider.MOCK,
+    mode: PaymentMode.SANDBOX,
+    status: RefundAttemptStatus.SUCCEEDED,
+    processedAt: new Date("2026-08-28T00:00:00.000Z"),
+  };
+}
+
+function cancellationFixture(
+  state: "OUTSTANDING" | "SATISFIED" | "INCONSISTENT",
+): NonNullable<CustomerOrderDetailRecord["cancellation"]> {
+  return {
+    acceptedAt: new Date("2026-08-28T00:00:00.000Z"),
+    expectedRefundAmount: state === "INCONSISTENT" ? null : 10_000,
+    succeededRefundAmount: state === "OUTSTANDING" ? 0 : state === "SATISFIED" ? 10_000 : null,
+    outstandingRefundAmount: state === "OUTSTANDING" ? 10_000 : state === "SATISFIED" ? 0 : null,
+    obligationState: state,
   };
 }
 
