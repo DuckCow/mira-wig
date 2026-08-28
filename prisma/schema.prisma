@@ -33,6 +33,8 @@ model User {
   checkoutSessions      CheckoutSession[]
   orders                Order[]
   customerRefundIntakes CustomerRefundIntake[]
+  benefitProfile        CustomerBenefitProfile?
+  promotionGrants       PromotionGrant[]
   localizedRevisions                  WigStyleLocalizedRevision[]          @relation("WigStyleLocalizedRevisionSubmitter")
   localizedApprovalDecisions          WigStyleLocalizedApprovalDecision[] @relation("WigStyleLocalizedApprovalActor")
   localizedPublicationPointersChanged WigStyleLocalizedPublication[]      @relation("WigStyleLocalizedPublicationActor")
@@ -102,6 +104,105 @@ model Market {
   wigStyleRelations WigStyleRelation[]
   checkoutSessions  CheckoutSession[]
   orders            Order[]
+  promotionRules    PromotionMarketRule[]
+  promotionGrants   PromotionGrant[]
+}
+
+// ============================================================
+// 프로모션 기반 — 정책 버전·마켓 규칙·계정 귀속 grant
+// ============================================================
+
+enum PromotionKind {
+  SIGNUP
+  BIRTHDAY
+  CAMPAIGN
+}
+
+enum PromotionPolicyStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum BirthdayLeapDayObservation {
+  FEB_28
+  MAR_01
+}
+
+model PromotionPolicyVersion {
+  id                         String                      @id @default(cuid())
+  programKey                 String                      @db.VarChar(128)
+  version                    Int
+  kind                       PromotionKind
+  status                     PromotionPolicyStatus       @default(DRAFT)
+  startsAt                   DateTime
+  endsAt                     DateTime?
+  firstOrderOnly             Boolean                     @default(false)
+  requiresQualifyingPurchase Boolean                     @default(false)
+  grantValidityDays          Int?
+  birthdayWindowBeforeDays   Int?
+  birthdayWindowAfterDays    Int?
+  birthdayLeapDayObservation BirthdayLeapDayObservation?
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+
+  marketRules PromotionMarketRule[]
+  grants      PromotionGrant[]
+
+  @@unique([programKey, version])
+  @@index([kind, status, startsAt, endsAt])
+}
+
+model PromotionMarketRule {
+  id                           String   @id @default(cuid())
+  policyVersionId              String
+  marketCode                   String
+  currency                     String   @db.VarChar(3)
+  rateBps                      Int
+  maximumDiscountMinor         BigInt
+  minimumEligibleSubtotalMinor BigInt?
+  eligibilityTimeZone          String?  @db.VarChar(255)
+  createdAt                    DateTime @default(now())
+
+  policyVersion PromotionPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  market        Market                 @relation(fields: [marketCode], references: [code], onDelete: Restrict)
+
+  @@unique([policyVersionId, marketCode])
+  @@index([marketCode])
+}
+
+model CustomerBenefitProfile {
+  userId            String    @id
+  birthdayMonth     Int?
+  birthdayDay       Int?
+  birthdaySetAt     DateTime?
+  birthdayUpdatedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PromotionGrant {
+  id               String    @id @default(cuid())
+  userId           String
+  policyVersionId  String
+  grantKey         String    @unique @db.VarChar(500)
+  benefitYear      Int?
+  originMarketCode String?
+  issuedAt         DateTime  @default(now())
+  validFrom        DateTime
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  redeemedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  policyVersion PromotionPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  originMarket  Market?                @relation(fields: [originMarketCode], references: [code], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([policyVersionId])
 }
 
 /// 변형(Variant) × 마켓 별 가격.

@@ -281,3 +281,22 @@ automatically change customer-facing product policy.
 This entry records product authority only. It does not authorize provider
 contact, SANDBOX execution, LIVE activation, deployment, email activation, or
 refund execution.
+
+## 2026-08-28 — Launch-v1 coupon and birthday-benefit foundation
+
+Launch v1 separates promotional Coupons from future earned Mira Credit; Global
+Points are not part of v1. The signup benefit is an account-bound percentage
+coupon for a verified user's first qualifying order. The birthday benefit is an
+account-bound percentage coupon for qualifying existing customers. Birthday
+month/day is optional, stores no birth year, and is never required during signup
+or checkout.
+
+Every percentage-coupon rule requires a Market-specific maximum discount in the
+Market's exact currency. Coupon caps are not converted through live FX. Actual
+rates, caps, minimums, birthday windows, and expiration periods remain
+undecided, and installing this foundation activates no promotion. Future
+checkout v1 permits at most one coupon per order and does not stack coupons.
+
+Checkout redemption, refund/regrant behavior, customer or admin UI, Mira
+Credit, purchase rewards, and review rewards remain future slices requiring
+separate authority.

@@ -3,8 +3,8 @@
   "parentAuthoritySha256": "9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a",
   "baselineCommit": "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
   "buildContext": {
-    "manifestSha256": "00591418f2a5bb073e70cff114868520e22d71a49d170d5ea2302c07249fc10e",
-    "fileCount": 198,
+    "manifestSha256": "977c0bcf5dade847a8c122a62f76635cedcdbc1f5e81ac1c0870f893ea49e0b3",
+    "fileCount": 199,
     "repositoryGraphInputCount": 149,
     "packagedGraphInputCount": 373
   },
@@ -27,17 +27,17 @@
     }
   ],
   "applicationClosure": {
-    "entryCount": 181,
-    "metadataManifestSha256": "4bec8a7d93a9babab226860eef9495e9a2a56d0a8fb612d1dadf40e895b58e03",
-    "contentManifestSha256": "42729f653a5d2b1da75e721d7b61d55e0aae2bd9ce187471d4c58fc0ace0d30f"
+    "entryCount": 183,
+    "metadataManifestSha256": "0f2d5052ca9c510e687683f8f7a57b6cac4841d1f846d7752dcae36ecac0a4ea",
+    "contentManifestSha256": "04bc73914eafde28b9052b6b69325eda87bd8b94be593fad17ffff059a437599"
   },
   "systemClosure": {
     "removedEntryCount": 2620,
     "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
     "changedEntryCount": 3,
     "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
-    "addedEntryCount": 184,
-    "addedMetadataContentManifestSha256": "db122c3d556370d4971d82d1deedaaa6e10525ca660eaeea95f04dd9713c533d"
+    "addedEntryCount": 186,
+    "addedMetadataContentManifestSha256": "f97e75c4a3d41c0efd62facf9c5bbdde893b4d608b993532212aab46ecd53639"
   },
   "nonApplicationAdditionCount": 3,
   "nonApplicationAdditions": [
