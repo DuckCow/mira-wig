@@ -22,11 +22,13 @@ import {
   requestRefundAttempt,
   type RequestRefundAttemptFailureCode,
 } from "@/lib/payment/refund/request";
+import { normalizeRefundLines, type RefundLineInput } from "@/lib/payment/refund/lines";
 
 export interface AdminRequestRefundAttemptInput {
   orderId: string;
   amount: number;
   reason: string;
+  lines: readonly RefundLineInput[];
 }
 
 export interface AdminCloseRefundRequestInput {
@@ -113,6 +115,11 @@ const REQUEST_FAILURE_CODE_MAP: Record<RequestRefundAttemptFailureCode, AdminRef
   INVALID_EXISTING_ATTEMPT_AMOUNT: "MANUAL_REVIEW_REQUIRED",
   PAYMENT_IDENTITY_MISMATCH: "MANUAL_REVIEW_REQUIRED",
   REFUND_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
+  INVALID_REFUND_LINES: "INVALID_INPUT",
+  REFUND_LINE_ITEM_NOT_FOUND: "INVALID_INPUT",
+  OVER_REFUND_LINE_QUANTITY: "INSUFFICIENT_REFUNDABLE",
+  REFUND_LINE_HISTORY_UNATTRIBUTED: "MANUAL_REVIEW_REQUIRED",
+  REFUND_LINE_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
   DISPUTE_REVIEW_REQUIRED: "MANUAL_REVIEW_REQUIRED",
   INVALID_ORDER_ID: "INVALID_INPUT",
   INVALID_REFUND_ATTEMPT_ID: "CONFLICT",
@@ -249,13 +256,24 @@ function validateInput(input: unknown): InputValidationResult {
   const orderId = input.orderId;
   const amount = input.amount;
   const reason = input.reason;
+  const lines = input.lines;
   if (typeof orderId !== "string" || !orderId.trim()) return failure("INVALID_INPUT");
   if (typeof reason !== "string") return failure("INVALID_INPUT");
   if (!reason.trim()) return failure("REASON_REQUIRED");
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) {
     return failure("INVALID_AMOUNT");
   }
-  return { success: true, input: { orderId: orderId.trim(), amount, reason: reason.trim() } };
+  const normalizedLines = normalizeRefundLines(lines);
+  if (!normalizedLines.ok) return failure("INVALID_INPUT");
+  return {
+    success: true,
+    input: {
+      orderId: orderId.trim(),
+      amount,
+      reason: reason.trim(),
+      lines: normalizedLines.lines,
+    },
+  };
 }
 
 function validateCloseInput(input: unknown): CloseInputValidationResult {

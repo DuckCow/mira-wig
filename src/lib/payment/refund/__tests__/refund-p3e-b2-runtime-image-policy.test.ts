@@ -1372,11 +1372,16 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       path: "prisma/migrations/20260828130000_promo_c1_checkout_order/migration.sql",
       sha256: "66af9ad0dbf9e41cdf63b7ccc80138408d29294bfa99e4bf0897a8af5743c808",
     };
+    const refundLineR0Migration = {
+      path: "prisma/migrations/20260828170000_refund_line_r0/migration.sql",
+      sha256: "c8d32a72885ab0e7f4a7d22ae37b5704e2c1da2fc556bca0f736a63c81975e5b",
+    };
     expect(checkedOutMigrations).toEqual([
       ...migrationAuthority.map(({ path }) => path),
       r13bMigration.path,
       promoC0Migration.path,
       promoC1Migration.path,
+      refundLineR0Migration.path,
     ]);
     for (const entry of migrationAuthority) {
       expect(sha256(readFileSync(join(ROOT, entry.path)))).toBe(entry.sha256);
@@ -1387,6 +1392,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       .toBe(promoC0Migration.sha256);
     expect(sha256(readFileSync(join(ROOT, promoC1Migration.path))))
       .toBe(promoC1Migration.sha256);
+    expect(sha256(readFileSync(join(ROOT, refundLineR0Migration.path))))
+      .toBe(refundLineR0Migration.sha256);
     expect(migrationRuntimeDigest(historicalMigrations)).toBe(
       historicalSourceAuthority.historicalMigrationDigest,
     );

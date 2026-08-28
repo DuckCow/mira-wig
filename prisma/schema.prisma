@@ -906,11 +906,29 @@ model RefundAttempt {
   executionCommand             RefundExecutionCommand?
   providerOperationBinding     RefundExecutionProviderOperationBinding?
   approvedCustomerRefundIntake CustomerRefundIntake?
+  lines                        RefundAttemptLine[]
 
   @@unique([provider, providerRefundId])
+  @@unique([id, orderId])
   @@index([orderId, status])
   @@index([paymentId, status])
   @@index([orderId, requestedAt])
+}
+
+/// Immutable merchandise attribution for one refund request. RefundAttempt.amount remains the
+/// independent aggregate cash authority; this row deliberately stores no monetary allocation.
+model RefundAttemptLine {
+  refundAttemptId String
+  orderItemId     String
+  orderId         String
+  quantity        Int
+
+  refundAttempt RefundAttempt @relation(fields: [refundAttemptId, orderId], references: [id, orderId], onDelete: Restrict)
+  orderItem     OrderItem     @relation(fields: [orderItemId, orderId], references: [id, orderId], onDelete: Restrict)
+
+  @@id([refundAttemptId, orderItemId])
+  @@index([orderItemId])
+  @@index([orderId])
 }
 
 model RefundAttemptTransition {
@@ -1160,7 +1178,9 @@ model OrderItem {
   fulfillmentType FulfillmentType
   snapshotData    Json
   mr              ManufacturingRequest?
+  refundAttemptLines RefundAttemptLine[]
 
+  @@unique([id, orderId])
   @@unique([orderId, variantId])
 }
 

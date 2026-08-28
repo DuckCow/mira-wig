@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
+  FulfillmentType,
   OrderStatus,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
@@ -10,6 +11,7 @@ import {
   RefundAttemptActorType,
   RefundAttemptStatus,
   ShippingCountry,
+  WigCategory,
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
@@ -35,6 +37,8 @@ interface TestContext {
   orderIds: string[];
   paymentIds: string[];
   sessionIds: string[];
+  styleIds: string[];
+  variantIds: string[];
 }
 
 interface OrderFixtureOptions {
@@ -48,6 +52,7 @@ interface OrderFixtureOptions {
   mode?: PaymentMode;
   providerPaymentKey?: string | null;
   disputeStatus?: string | null;
+  itemQuantity?: number;
 }
 
 interface OrderFixture {
@@ -58,6 +63,7 @@ interface OrderFixture {
   paymentCurrency: string;
   provider: PaymentProvider;
   mode: PaymentMode;
+  orderItemId: string;
 }
 
 interface AttemptSeedOptions {
@@ -67,13 +73,21 @@ interface AttemptSeedOptions {
   provider?: PaymentProvider;
   mode?: PaymentMode;
   reason?: string;
+  lineQuantity?: number | null;
 }
 
 describe("requestRefundAttempt", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
-    ctx = { userId: `refund_request_${randomUUID()}`, orderIds: [], paymentIds: [], sessionIds: [] };
+    ctx = {
+      userId: `refund_request_${randomUUID()}`,
+      orderIds: [],
+      paymentIds: [],
+      sessionIds: [],
+      styleIds: [],
+      variantIds: [],
+    };
     await ensureMarket();
     await db.user.create({ data: { id: ctx.userId, email: `${ctx.userId}@example.test` } });
   });
@@ -92,7 +106,10 @@ describe("requestRefundAttempt", () => {
     });
 
     const result = success(await requestRefundAttempt(db, request));
-    const persisted = await db.refundAttempt.findUniqueOrThrow({ where: { id: result.refundAttempt.id } });
+    const persisted = await db.refundAttempt.findUniqueOrThrow({
+      where: { id: result.refundAttempt.id },
+      include: { lines: true },
+    });
     const transitions = await creationTransitions(result.refundAttempt.id);
 
     expect(result).toMatchObject({ orderStatus: OrderStatus.REFUND_PENDING, replayed: false });
@@ -108,6 +125,12 @@ describe("requestRefundAttempt", () => {
       providerRefundId: null,
       processedAt: null,
       failedAt: null,
+      lines: [{
+        refundAttemptId: refundAttemptId,
+        orderItemId: fixture.orderItemId,
+        orderId: fixture.orderId,
+        quantity: 1,
+      }],
     });
     expect(transitions).toEqual([
       expect.objectContaining({
@@ -399,6 +422,140 @@ describe("requestRefundAttempt", () => {
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUNDED);
   });
 
+  it("canonicalizes multi-item line order and treats it as immutable replay identity", async () => {
+    const fixture = await createOrder(ctx);
+    const secondItemId = await createOrderItem(ctx, fixture.orderId, 250, `item_second_${randomUUID()}`, 2);
+    const request = input(fixture.orderId, {
+      refundAttemptId: `refund_${randomUUID()}`,
+      lines: [
+        { orderItemId: secondItemId, quantity: 2 },
+        { orderItemId: ` ${fixture.orderItemId} `, quantity: 1 },
+      ],
+    });
+
+    const first = success(await requestRefundAttempt(db, request));
+    const replay = success(await requestRefundAttempt(db, {
+      ...request,
+      lines: [...request.lines].reverse(),
+    }));
+    const conflict = await requestRefundAttempt(db, {
+      ...request,
+      lines: [{ orderItemId: fixture.orderItemId, quantity: 2 }],
+    });
+
+    expect(first.refundAttempt.lines.map(({ orderItemId, quantity }) => ({ orderItemId, quantity })))
+      .toEqual([
+        { orderItemId: fixture.orderItemId, quantity: 1 },
+        { orderItemId: secondItemId, quantity: 2 },
+      ].sort((left, right) => left.orderItemId < right.orderItemId ? -1 : 1));
+    expect(replay.replayed).toBe(true);
+    expect(conflict).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+    await expect(db.refundAttemptLine.count({ where: { refundAttemptId: first.refundAttempt.id } }))
+      .resolves.toBe(2);
+  });
+
+  it("enforces per-item remaining quantity while terminal non-success lines remain historical", async () => {
+    const fixture = await createOrder(ctx, { orderStatus: OrderStatus.PARTIALLY_REFUNDED });
+    await seedAttemptWithIdentity(fixture, RefundAttemptStatus.SUCCEEDED, 100, { lineQuantity: 2 });
+    await seedAttemptWithIdentity(fixture, RefundAttemptStatus.CANCELLED, 100, { lineQuantity: 3 });
+
+    await expect(requestRefundAttempt(db, input(fixture.orderId, {
+      lines: [{ orderItemId: fixture.orderItemId, quantity: 2 }],
+    }))).resolves.toMatchObject({ ok: false, code: "OVER_REFUND_LINE_QUANTITY" });
+
+    const accepted = success(await requestRefundAttempt(db, input(fixture.orderId, {
+      lines: [{ orderItemId: fixture.orderItemId, quantity: 1 }],
+    })));
+    expect(accepted.refundAttempt.lines).toMatchObject([{ orderItemId: fixture.orderItemId, quantity: 1 }]);
+  });
+
+  it("supports qty 1 then qty 2 after success and rejects a third unit", async () => {
+    const fixture = await createOrder(ctx, {
+      orderStatus: OrderStatus.PAID,
+      itemQuantity: 3,
+    });
+    const first = success(await requestRefundAttempt(db, input(fixture.orderId, {
+      amount: 100,
+      lines: [{ orderItemId: fixture.orderItemId, quantity: 1 }],
+    })));
+    await db.refundAttempt.update({
+      where: { id: first.refundAttempt.id },
+      data: { status: RefundAttemptStatus.SUCCEEDED, processedAt: NOW },
+    });
+    await db.order.update({
+      where: { id: fixture.orderId },
+      data: { status: OrderStatus.PARTIALLY_REFUNDED },
+    });
+
+    const second = success(await requestRefundAttempt(db, input(fixture.orderId, {
+      amount: 100,
+      lines: [{ orderItemId: fixture.orderItemId, quantity: 2 }],
+    })));
+    await db.refundAttempt.update({
+      where: { id: second.refundAttempt.id },
+      data: { status: RefundAttemptStatus.SUCCEEDED, processedAt: NOW },
+    });
+    await db.order.update({
+      where: { id: fixture.orderId },
+      data: { status: OrderStatus.PARTIALLY_REFUNDED },
+    });
+
+    await expect(requestRefundAttempt(db, input(fixture.orderId, {
+      amount: 100,
+      lines: [{ orderItemId: fixture.orderItemId, quantity: 1 }],
+    }))).resolves.toMatchObject({ ok: false, code: "OVER_REFUND_LINE_QUANTITY" });
+  });
+
+  it("fails closed for guarded historical line-less attempts but ignores terminal line-less attempts", async () => {
+    const guardedFixture = await createOrder(ctx, { orderStatus: OrderStatus.PARTIALLY_REFUNDED });
+    await seedAttemptWithIdentity(guardedFixture, RefundAttemptStatus.SUCCEEDED, 100, { lineQuantity: null });
+    await expect(requestRefundAttempt(db, input(guardedFixture.orderId)))
+      .resolves.toMatchObject({ ok: false, code: "REFUND_LINE_HISTORY_UNATTRIBUTED" });
+
+    const terminalFixture = await createOrder(ctx);
+    await seedAttemptWithIdentity(terminalFixture, RefundAttemptStatus.FAILED_TERMINAL, 100, {
+      lineQuantity: null,
+    });
+    await expect(requestRefundAttempt(db, input(terminalFixture.orderId)))
+      .resolves.toMatchObject({ ok: true, replayed: false });
+  });
+
+  it("rejects cross-order item attribution at the database constraint", async () => {
+    const first = await createOrder(ctx);
+    const second = await createOrder(ctx);
+    const attemptId = await seedAttemptWithIdentity(first, RefundAttemptStatus.FAILED_TERMINAL, 100, {
+      lineQuantity: null,
+    });
+
+    await expect(db.refundAttemptLine.create({ data: {
+      refundAttemptId: attemptId,
+      orderItemId: second.orderItemId,
+      orderId: first.orderId,
+      quantity: 1,
+    } })).rejects.toMatchObject({ code: "P2003" });
+  });
+
+  it("enforces positive quantity and unique item-per-attempt in PostgreSQL", async () => {
+    const fixture = await createOrder(ctx);
+    const attemptId = await seedAttemptWithIdentity(fixture, RefundAttemptStatus.FAILED_TERMINAL, 100, {
+      lineQuantity: 1,
+    });
+
+    await expect(db.refundAttemptLine.create({ data: {
+      refundAttemptId: attemptId,
+      orderItemId: fixture.orderItemId,
+      orderId: fixture.orderId,
+      quantity: 1,
+    } })).rejects.toMatchObject({ code: "P2002" });
+    const secondItemId = await createOrderItem(ctx, fixture.orderId, 100, `item_constraint_${randomUUID()}`);
+    await expect(db.refundAttemptLine.create({ data: {
+      refundAttemptId: attemptId,
+      orderItemId: secondItemId,
+      orderId: fixture.orderId,
+      quantity: 0,
+    } })).rejects.toThrow("RefundAttemptLine_quantity_positive_check");
+  });
+
   it("replays historical overlength reason evidence without rewriting it", async () => {
     const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
     const reason = "😀".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1);
@@ -406,7 +563,7 @@ describe("requestRefundAttempt", () => {
       fixture,
       RefundAttemptStatus.REQUESTED,
       400,
-      { reason },
+      { reason, lineQuantity: null },
     );
     await seedCreationTransition(refundAttemptId, { reason });
     const before = await requestPersistenceState(fixture);
@@ -416,6 +573,7 @@ describe("requestRefundAttempt", () => {
       reason: ` ${reason} `,
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
+      lines: [],
     })));
     const persisted = await db.refundAttempt.findUniqueOrThrow({
       where: { id: refundAttemptId },
@@ -434,7 +592,7 @@ describe("requestRefundAttempt", () => {
       fixture,
       RefundAttemptStatus.REQUESTED,
       400,
-      { reason: historicalReason },
+      { reason: historicalReason, lineQuantity: null },
     );
     await seedCreationTransition(refundAttemptId, { reason: historicalReason });
     const before = await requestPersistenceState(fixture);
@@ -444,6 +602,7 @@ describe("requestRefundAttempt", () => {
       reason: "🧠".repeat(REFUND_REQUEST_REASON_MAX_CODE_POINTS + 1),
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
+      lines: [],
     }));
 
     expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
@@ -482,13 +641,19 @@ describe("requestRefundAttempt", () => {
 
   it("replays an exact legacy attempt without fabricating creation evidence", async () => {
     const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
-    const refundAttemptId = await seedAttempt(fixture, RefundAttemptStatus.REQUESTED, 400);
+    const refundAttemptId = await seedAttemptWithIdentity(
+      fixture,
+      RefundAttemptStatus.REQUESTED,
+      400,
+      { lineQuantity: null },
+    );
 
     const replay = success(await requestRefundAttempt(db, input(fixture.orderId, {
       refundAttemptId,
       reason: "Seed refund attempt",
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
+      lines: [],
     })));
 
     expect(replay).toMatchObject({ replayed: true, orderStatus: OrderStatus.REFUND_PENDING });
@@ -498,7 +663,12 @@ describe("requestRefundAttempt", () => {
 
   it("rejects contradictory creation evidence for an otherwise exact replay", async () => {
     const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
-    const refundAttemptId = await seedAttempt(fixture, RefundAttemptStatus.REQUESTED, 400);
+    const refundAttemptId = await seedAttemptWithIdentity(
+      fixture,
+      RefundAttemptStatus.REQUESTED,
+      400,
+      { lineQuantity: null },
+    );
     await seedCreationTransition(refundAttemptId, {
       reason: "Contradictory audit reason",
       operationKey: `refund-request:${refundAttemptId}`,
@@ -509,6 +679,7 @@ describe("requestRefundAttempt", () => {
       reason: "Seed refund attempt",
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
+      lines: [],
     }));
 
     expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
@@ -518,7 +689,12 @@ describe("requestRefundAttempt", () => {
 
   it("rejects multiple creation transitions for an otherwise exact replay", async () => {
     const fixture = await createOrder(ctx, { orderStatus: OrderStatus.REFUND_PENDING });
-    const refundAttemptId = await seedAttempt(fixture, RefundAttemptStatus.REQUESTED, 400);
+    const refundAttemptId = await seedAttemptWithIdentity(
+      fixture,
+      RefundAttemptStatus.REQUESTED,
+      400,
+      { lineQuantity: null },
+    );
     await seedCreationTransition(refundAttemptId);
     await seedCreationTransition(refundAttemptId, {
       operationKey: `refund-request-duplicate:${refundAttemptId}`,
@@ -529,6 +705,7 @@ describe("requestRefundAttempt", () => {
       reason: "Seed refund attempt",
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
+      lines: [],
     }));
 
     expect(result).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
@@ -681,7 +858,7 @@ describe("requestRefundAttempt", () => {
   });
 
   it("serializes concurrent contenders and creates exactly one open attempt", async () => {
-    const fixture = await createOrder(ctx);
+    const fixture = await createOrder(ctx, { itemQuantity: 1 });
     const contenders: Promise<RequestRefundAttemptResult>[] = [];
 
     await db.$transaction(async (tx) => {
@@ -698,13 +875,17 @@ describe("requestRefundAttempt", () => {
     const results = await Promise.all(contenders);
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(results.filter((result) => !result.ok)).toEqual([
-      expect.objectContaining({ code: "REFUND_IN_PROGRESS" }),
+      expect.objectContaining({ code: "OVER_REFUND_LINE_QUANTITY" }),
     ]);
     await expect(refundCount(fixture.orderId)).resolves.toBe(1);
     await expect(db.refundAttemptTransition.count({
       where: { refundAttempt: { orderId: fixture.orderId } },
     })).resolves.toBe(1);
     await expect(orderStatus(fixture.orderId)).resolves.toBe(OrderStatus.REFUND_PENDING);
+    await expect(db.refundAttemptLine.aggregate({
+      where: { orderId: fixture.orderId },
+      _sum: { quantity: true },
+    })).resolves.toMatchObject({ _sum: { quantity: 1 } });
   });
 });
 
@@ -720,6 +901,7 @@ function input(
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: "admin_123",
     now: NOW,
+    lines: [{ orderItemId: `item_for_${orderId}`, quantity: 1 }],
     ...overrides,
   };
 }
@@ -738,7 +920,14 @@ async function createOrder(
   const sessionId = await createCheckoutSession(context, orderAmount, orderCurrency);
   const payment = await createPayment(context, sessionId, options);
   const orderId = await createOrderRow(context, sessionId, payment.id, orderAmount, orderCurrency, options);
-  return { orderId, paymentId: payment.id, sessionId, ...payment.context };
+  const orderItemId = await createOrderItem(
+    context,
+    orderId,
+    orderAmount,
+    `item_for_${orderId}`,
+    options.itemQuantity ?? 3,
+  );
+  return { orderId, paymentId: payment.id, sessionId, orderItemId, ...payment.context };
 }
 
 async function createCheckoutSession(
@@ -868,26 +1057,101 @@ async function seedAttemptWithIdentity(
 ): Promise<string> {
   const id = options.id ?? `refund_seed_${randomUUID()}`;
   const paymentId = options.paymentId ?? fixture.paymentId;
+  const timestamps = seededAttemptTimestamps(status);
   await db.refundAttempt.create({
     data: {
       id,
       orderId: fixture.orderId,
       paymentId,
       amount,
-      currency: options.currency ?? fixture.paymentCurrency,
+      ...seededAttemptIdentity(fixture, options),
       status,
-      reason: options.reason ?? "Seed refund attempt",
       actorType: RefundAttemptActorType.SYSTEM,
       actorUserId: null,
-      provider: options.provider ?? fixture.provider,
-      mode: options.mode ?? fixture.mode,
       idempotencyKey: `refund:${paymentId}:${id}`,
       requestedAt: NOW,
-      processedAt: status === RefundAttemptStatus.SUCCEEDED ? NOW : null,
-      failedAt: status === RefundAttemptStatus.FAILED_TERMINAL ? NOW : null,
+      ...timestamps,
     },
   });
+  await seedOptionalAttemptLine(fixture, id, options.lineQuantity);
   return id;
+}
+
+function seededAttemptIdentity(fixture: OrderFixture, options: AttemptSeedOptions) {
+  return {
+    currency: options.currency ?? fixture.paymentCurrency,
+    reason: options.reason ?? "Seed refund attempt",
+    provider: options.provider ?? fixture.provider,
+    mode: options.mode ?? fixture.mode,
+  };
+}
+
+function seededAttemptTimestamps(status: RefundAttemptStatus) {
+  return {
+    processedAt: status === RefundAttemptStatus.SUCCEEDED ? NOW : null,
+    failedAt: status === RefundAttemptStatus.FAILED_TERMINAL ? NOW : null,
+  };
+}
+
+async function seedOptionalAttemptLine(
+  fixture: OrderFixture,
+  refundAttemptId: string,
+  quantity: number | null | undefined,
+): Promise<void> {
+  if (quantity === null) return;
+  await db.refundAttemptLine.create({
+    data: {
+      refundAttemptId,
+      orderItemId: fixture.orderItemId,
+      orderId: fixture.orderId,
+      quantity: quantity ?? 1,
+    },
+  });
+}
+
+async function createOrderItem(
+  context: TestContext,
+  orderId: string,
+  unitAmount: number,
+  itemId = `item_for_${orderId}`,
+  quantity = 3,
+): Promise<string> {
+  const style = await db.wigStyle.create({
+    data: {
+      name: `Refund line style ${randomUUID()}`,
+      category: WigCategory.FASHION,
+      tags: [],
+      imageKeys: [],
+    },
+  });
+  context.styleIds.push(style.id);
+  const variant = await db.wigVariant.create({
+    data: {
+      wigStyleId: style.id,
+      color: "Black",
+      length: "Medium",
+      curl: "Straight",
+      price: unitAmount,
+      stock: 10,
+      sku: `refund-line-${randomUUID()}`,
+      fulfillmentType: FulfillmentType.STOCKED,
+    },
+  });
+  context.variantIds.push(variant.id);
+  await db.orderItem.create({
+    data: {
+      id: itemId,
+      orderId,
+      variantId: variant.id,
+      wigStyleId: style.id,
+      quantity,
+      unitAmount,
+      discountAmount: 0,
+      fulfillmentType: FulfillmentType.STOCKED,
+      snapshotData: { styleName: style.name },
+    },
+  });
+  return itemId;
 }
 
 async function expectLedgerIdentityFailure(fixture: OrderFixture): Promise<void> {
@@ -1006,9 +1270,13 @@ async function cleanup(context: TestContext): Promise<void> {
   await db.refundAttemptTransition.deleteMany({
     where: { refundAttemptId: { in: attempts.map((attempt) => attempt.id) } },
   });
+  await db.refundAttemptLine.deleteMany({ where: { refundAttemptId: { in: attempts.map((attempt) => attempt.id) } } });
   await db.refundAttempt.deleteMany({ where: { orderId: { in: context.orderIds } } });
+  await db.orderItem.deleteMany({ where: { orderId: { in: context.orderIds } } });
   await db.order.deleteMany({ where: { id: { in: context.orderIds } } });
   await db.payment.deleteMany({ where: { id: { in: context.paymentIds } } });
   await db.checkoutSession.deleteMany({ where: { id: { in: context.sessionIds } } });
   await db.user.deleteMany({ where: { id: context.userId } });
+  await db.wigVariant.deleteMany({ where: { id: { in: context.variantIds } } });
+  await db.wigStyle.deleteMany({ where: { id: { in: context.styleIds } } });
 }

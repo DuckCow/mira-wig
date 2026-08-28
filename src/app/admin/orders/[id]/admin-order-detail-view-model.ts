@@ -19,6 +19,7 @@ import {
   sumSucceededRefundAmount,
 } from "@/lib/payment/refund/invariants";
 import { refundAttemptStatusLabel } from "@/app/admin/refunds/intake-labels";
+import { deriveRefundLineCapacity } from "@/lib/payment/refund/lines";
 import { getCurlLabel, getLengthLabel } from "@/lib/wig-option-labels";
 import type {
   AdminOrderDetailSource,
@@ -35,6 +36,7 @@ export function buildAdminOrderDetailViewModel(
   options: BuildAdminOrderDetailViewModelOptions = { claimActivationState: "disabled" },
 ): AdminOrderDetailViewModel {
   const refundAmounts = buildRefundAmounts(order);
+  const remainingByItemId = remainingLineCapacity(order);
   const openAttempts = order.refundAttempts.filter((attempt) => !isTerminalRefundAttemptStatus(attempt.status));
   return {
     id: order.id,
@@ -55,7 +57,11 @@ export function buildAdminOrderDetailViewModel(
       total: formatPersistedMoney(order.totalAmount, order.currency),
     },
     shipping: buildShipping(order.shipping),
-    items: order.items.map((item) => buildItem(item, order.currency)),
+    items: order.items.map((item) => buildItem(
+      item,
+      order.currency,
+      remainingByItemId?.get(item.id) ?? null,
+    )),
     payment: buildPayment(order.payment),
     refundReview: buildRefundReview(order, refundAmounts),
     refundAttempts: order.refundAttempts.map((attempt) => buildRefundAttempt(
@@ -79,6 +85,7 @@ function buildShipping(shipping: AdminOrderDetailSource["shipping"]): AdminOrder
 function buildItem(
   item: AdminOrderDetailSource["items"][number],
   currency: string,
+  remainingAttributableQuantity: number | null,
 ): AdminOrderDetailViewModel["items"][number] {
   const snapshot = safeParseSnapshotData(item.snapshotData);
   return {
@@ -87,6 +94,7 @@ function buildItem(
     options: itemOptions(snapshot),
     fulfillment: fulfillmentLabel(item.fulfillmentType),
     quantity: item.quantity,
+    remainingAttributableQuantity,
     unitAmount: formatPersistedMoney(item.unitAmount, currency),
     lineTotal: formatPersistedMoney(item.unitAmount * item.quantity, currency),
     mrStatus: item.mr ? mrStatusLabel(item.mr.status) : "제작 요청 없음",
@@ -204,6 +212,33 @@ function buildRefundAttempt(
       formattedAmount: formatPersistedMoney(attempt.amount, attempt.currency),
     }),
     transitionHistory: buildRefundTransitionHistory(attempt.transitions),
+    lineAttribution: buildRefundLineAttribution(attempt.lines, order),
+  };
+}
+
+function remainingLineCapacity(order: AdminOrderDetailSource): ReadonlyMap<string, number> | null {
+  const capacity = deriveRefundLineCapacity(order.id, order.items, order.refundAttempts);
+  return capacity.ok ? capacity.remainingByOrderItemId : null;
+}
+
+function buildRefundLineAttribution(
+  lines: AdminOrderDetailSource["refundAttempts"][number]["lines"],
+  order: AdminOrderDetailSource,
+): AdminOrderDetailViewModel["refundAttempts"][number]["lineAttribution"] {
+  if (lines.length === 0) {
+    return { entries: [], emptyState: "상품 수량 귀속이 없는 이전 환불 요청입니다." };
+  }
+  const itemNames = new Map(order.items.map((item) => [
+    item.id,
+    itemName(safeParseSnapshotData(item.snapshotData)),
+  ]));
+  return {
+    entries: lines.map((line) => ({
+      orderItemId: line.orderItemId,
+      itemName: itemNames.get(line.orderItemId) ?? "주문 상품 확인 필요",
+      quantity: line.quantity,
+    })),
+    emptyState: null,
   };
 }
 

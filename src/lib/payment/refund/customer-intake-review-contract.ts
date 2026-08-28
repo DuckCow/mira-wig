@@ -4,6 +4,11 @@ import {
   type RefundAttempt,
 } from "@prisma/client";
 import { isRefundRequestReasonWithinCodePointLimit } from "./invariants";
+import {
+  normalizeRefundLines,
+  type CanonicalRefundLine,
+  type RefundLineInput,
+} from "./lines";
 import type { RequestRefundAttemptFailure, RequestRefundAttemptFailureCode } from "./request";
 
 export interface RejectCustomerRefundIntakeInput {
@@ -20,6 +25,7 @@ export interface ApproveCustomerRefundIntakeInput {
   reviewedByUserId: string;
   amount: number;
   merchantRationale: string;
+  lines: readonly RefundLineInput[];
   now: Date;
 }
 
@@ -41,6 +47,7 @@ export type RejectCustomerRefundIntakeFailureCode =
 export type ApproveCustomerRefundIntakeFailureCode =
   | SharedCustomerIntakeReviewFailureCode
   | "INVALID_REQUEST_AMOUNT"
+  | "INVALID_REFUND_LINES"
   | "INVALID_REASON"
   | "REASON_TOO_LONG"
   | "INTAKE_INCONSISTENT"
@@ -55,7 +62,11 @@ export type ApproveCustomerRefundIntakeFailureCode =
   | "INVALID_TOTAL_AMOUNT"
   | "CURRENCY_MISMATCH"
   | "EXISTING_ATTEMPT_CURRENCY_MISMATCH"
-  | "INVALID_EXISTING_ATTEMPT_AMOUNT";
+  | "INVALID_EXISTING_ATTEMPT_AMOUNT"
+  | "REFUND_LINE_ITEM_NOT_FOUND"
+  | "OVER_REFUND_LINE_QUANTITY"
+  | "REFUND_LINE_HISTORY_UNATTRIBUTED"
+  | "REFUND_LINE_LEDGER_INCONSISTENT";
 
 export interface RejectCustomerRefundIntakeFailure {
   ok: false;
@@ -94,6 +105,7 @@ export interface ApprovedRefundAttemptProjection {
   amount: number;
   currency: string;
   requestedAt: Date;
+  lines: readonly CanonicalRefundLine[];
 }
 
 export type RejectCustomerRefundIntakeResult =
@@ -127,6 +139,7 @@ export interface NormalizedApproveCustomerRefundIntakeInput {
   reviewedByUserId: string;
   amount: number;
   merchantRationale: string;
+  lines: readonly CanonicalRefundLine[];
   reviewedAt: Date;
 }
 
@@ -154,6 +167,11 @@ const APPROVAL_REQUEST_FAILURES = {
   CURRENCY_MISMATCH: { kind: "expected", code: "CURRENCY_MISMATCH" },
   EXISTING_ATTEMPT_CURRENCY_MISMATCH: { kind: "expected", code: "EXISTING_ATTEMPT_CURRENCY_MISMATCH" },
   INVALID_EXISTING_ATTEMPT_AMOUNT: { kind: "expected", code: "INVALID_EXISTING_ATTEMPT_AMOUNT" },
+  INVALID_REFUND_LINES: { kind: "expected", code: "INVALID_REFUND_LINES" },
+  REFUND_LINE_ITEM_NOT_FOUND: { kind: "expected", code: "REFUND_LINE_ITEM_NOT_FOUND" },
+  OVER_REFUND_LINE_QUANTITY: { kind: "expected", code: "OVER_REFUND_LINE_QUANTITY" },
+  REFUND_LINE_HISTORY_UNATTRIBUTED: { kind: "expected", code: "REFUND_LINE_HISTORY_UNATTRIBUTED" },
+  REFUND_LINE_LEDGER_INCONSISTENT: { kind: "expected", code: "REFUND_LINE_LEDGER_INCONSISTENT" },
   ORDER_NOT_FOUND: { kind: "invariant", code: "ORDER_NOT_FOUND" },
   ORDER_STATUS_CONFLICT: { kind: "invariant", code: "ORDER_STATUS_CONFLICT" },
   IDEMPOTENCY_CONFLICT: { kind: "invariant", code: "IDEMPOTENCY_CONFLICT" },
@@ -229,7 +247,14 @@ export function normalizeApproveCustomerRefundIntakeInput(
       "Refund reason exceeds the 500-code-point limit.",
     );
   }
-  return { ok: true, input: { ...shared.input, amount: input.amount, merchantRationale } };
+  const normalizedLines = normalizeRefundLines(input.lines, { allowEmpty: true });
+  if (!normalizedLines.ok) {
+    return approveCustomerIntakeReviewFailure(normalizedLines.code, normalizedLines.message);
+  }
+  return {
+    ok: true,
+    input: { ...shared.input, amount: input.amount, merchantRationale, lines: normalizedLines.lines },
+  };
 }
 
 export function rejectCustomerIntakeReviewSuccess(
@@ -248,7 +273,9 @@ export function approveCustomerIntakeReviewSuccess(
 }
 
 export function toApprovedRefundAttemptProjection(
-  attempt: Pick<RefundAttempt, "id" | "orderId" | "status" | "amount" | "currency" | "requestedAt">,
+  attempt: Pick<RefundAttempt, "id" | "orderId" | "status" | "amount" | "currency" | "requestedAt"> & {
+    lines: readonly CanonicalRefundLine[];
+  },
 ): ApprovedRefundAttemptProjection {
   return {
     id: attempt.id,
@@ -257,6 +284,7 @@ export function toApprovedRefundAttemptProjection(
     amount: attempt.amount,
     currency: attempt.currency,
     requestedAt: attempt.requestedAt,
+    lines: attempt.lines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })),
   };
 }
 

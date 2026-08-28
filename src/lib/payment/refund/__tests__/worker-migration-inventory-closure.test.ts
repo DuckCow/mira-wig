@@ -19,9 +19,9 @@ describe("refund worker migration inventory closure", () => {
       const authoritative = repository.entries.map(({ path, sha256 }) => ({ path, sha256 }));
       const selfCheck = refundWorkerMigrationSelfCheckProof(repository);
 
-      expect(repository.migrationCount).toBe(43);
+      expect(repository.migrationCount).toBe(44);
       expect(repository.migrationDigest).toBe(
-        "3a13046f7ae173eda011e9539fd4d1123bfccf3a2755e2e0697edba5942965c6",
+        "ddf1a3da5d92fdf9be79b9ba581bd6e6a00ec616fb8f69acc6b0563ebc97a164",
       );
       expect(context.migrationInventory.entries).toEqual(repository.entries);
       expect(packaged).toEqual(authoritative);

@@ -87,6 +87,10 @@ const ORDER_DETAIL_SELECT = {
       updatedAt: true,
       providerRefundId: true,
       executionCommand: { select: { id: true } },
+      lines: {
+        orderBy: { orderItemId: "asc" },
+        select: { orderItemId: true, orderId: true, quantity: true },
+      },
       transitions: {
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
@@ -138,6 +142,7 @@ export interface AdminCustomerRefundIntakeDetail {
     amount: number;
     currency: string;
     requestedAt: Date;
+    lines: readonly { orderItemId: string; quantity: number }[];
   };
 }
 
@@ -204,6 +209,7 @@ function toSafeCustomerRefundIntakes(order: OrderDetailRecord): AdminCustomerRef
         amount: attempt.amount,
         currency: attempt.currency,
         requestedAt: attempt.requestedAt,
+        lines: attempt.lines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })),
       } : null,
     };
   });

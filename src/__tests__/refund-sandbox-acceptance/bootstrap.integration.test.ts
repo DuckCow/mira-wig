@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CheckoutSessionStatus,
+  FulfillmentType,
   OrderStatus,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
@@ -11,11 +12,13 @@ import {
   PaymentProvider,
   Prisma,
   RefundAttemptActorType,
+  WigCategory,
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../lib/db";
 import {
   AcceptanceBootstrap,
+  acceptanceBootstrapOrderItemId,
   type AcceptanceBootstrapHandle,
 } from "../../../scripts/refund-sandbox-acceptance/bootstrap";
 import {
@@ -165,7 +168,7 @@ describe("acceptance-only pre-refund bootstrap", () => {
       eligibilityProofs: 0,
       contactProofs: 0,
       evidence: 0,
-      orderItems: 0,
+      orderItems: 1,
       orderShipping: 0,
       checkoutLines: 0,
     });
@@ -181,6 +184,7 @@ describe("acceptance-only pre-refund bootstrap", () => {
       orderId: created.handle.orderId,
       amount: input.fixture.amount,
       reason: "H1 test refund request",
+      lines: [{ orderItemId: acceptanceBootstrapOrderItemId(created.handle), quantity: 1 }],
       actorType: RefundAttemptActorType.ADMIN,
       actorUserId: "h1_test_actor",
       now: new Date("2026-07-18T02:00:00.000Z"),
@@ -634,6 +638,23 @@ async function createHistoricalOwnership(
       blockingEndedAt: now,
       idempotencyKey: `h1-payment-${digest}`,
     } });
+    await tx.wigStyle.create({ data: {
+      id: `h1_style_${digest}`,
+      name: `H1 ${scenarioId} historical fixture`,
+      category: WigCategory.FASHION,
+      tags: ["acceptance-refund"],
+      imageKeys: [],
+    } });
+    await tx.wigVariant.create({ data: {
+      id: `h1_variant_${digest}`,
+      wigStyleId: `h1_style_${digest}`,
+      color: "Fixture",
+      length: "Fixture",
+      curl: "Fixture",
+      price: amount,
+      sku: `H1-${digest}`,
+      fulfillmentType: FulfillmentType.MTO,
+    } });
     await tx.order.create({ data: {
       id: handle.orderId,
       checkoutSessionId: handle.checkoutSessionId,
@@ -647,6 +668,16 @@ async function createHistoricalOwnership(
       status: OrderStatus.PAID,
       paidAt: now,
     } });
+    await tx.orderItem.create({ data: {
+      id: `h1_item_${digest}`,
+      orderId: handle.orderId,
+      variantId: `h1_variant_${digest}`,
+      wigStyleId: `h1_style_${digest}`,
+      quantity: 1,
+      unitAmount: amount,
+      fulfillmentType: FulfillmentType.MTO,
+      snapshotData: { source: "H1_HISTORICAL_ACCEPTANCE" },
+    } });
   });
   const refundAttemptId = `h1_refund_${digest}`;
   const requested = await requestRefundAttempt(db, {
@@ -654,6 +685,7 @@ async function createHistoricalOwnership(
     orderId: handle.orderId,
     amount,
     reason: `Historical synthetic ${scenarioId} cleanup fixture`,
+    lines: [{ orderItemId: `h1_item_${digest}`, quantity: 1 }],
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: `h1_actor_${digest}`,
     now,

@@ -63,6 +63,7 @@ export function AdminOrderDetailView({
         approveState={approveState}
         currency={order.currency}
         remainingRequestableAmount={order.refundReview.remainingRequestableAmount}
+        items={order.items}
       />
       <RefundLedger orderId={order.id} attempts={order.refundAttempts} />
       <FulfillmentPolicyNote />
@@ -138,6 +139,9 @@ function OrderItems({ items }: { items: Detail["items"] }) {
             <div className="text-left text-sm sm:text-right">
               <p className="font-semibold text-gray-900">{item.lineTotal}</p>
               <p className="mt-1 text-xs text-gray-500">{item.unitAmount} × {item.quantity}</p>
+              <p className="mt-1 text-xs text-gray-500">
+                환불 수량 귀속 가능: {item.remainingAttributableQuantity ?? "확인 필요"}
+              </p>
             </div>
           </li>
         ))}
@@ -237,6 +241,7 @@ function RefundLedger({ orderId, attempts }: { orderId: string; attempts: Detail
                   {attempt.safeFailureMessage}
                 </p>
               ) : null}
+              <RefundLineAttribution attribution={attempt.lineAttribution} />
               {attempt.closeWarning ? (
                 <p className="border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   {attempt.closeWarning}
@@ -259,6 +264,25 @@ function RefundLedger({ orderId, attempts }: { orderId: string; attempts: Detail
         </ol>
       )}
     </Card>
+  );
+}
+
+function RefundLineAttribution({
+  attribution,
+}: {
+  attribution: Detail["refundAttempts"][number]["lineAttribution"];
+}) {
+  return (
+    <div className="rounded border border-gray-200 bg-gray-50 p-3 text-sm">
+      <p className="font-medium text-gray-800">상품 수량 귀속</p>
+      {attribution.emptyState ? <p className="mt-1 text-gray-600">{attribution.emptyState}</p> : (
+        <ul className="mt-2 space-y-1 text-gray-700">
+          {attribution.entries.map((line) => (
+            <li key={line.orderItemId}>{line.itemName} · 수량 {line.quantity}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -89,6 +89,13 @@ interface RefundAttemptSource extends RefundAmountStateInput {
   hasExecutionCommand: boolean;
   paymentIdentityMatches: boolean;
   transitions: RefundAttemptTransitionSource[];
+  lines: RefundAttemptLineSource[];
+}
+
+interface RefundAttemptLineSource {
+  orderItemId: string;
+  orderId: string;
+  quantity: number;
 }
 
 interface RefundAttemptTransitionSource {
@@ -130,6 +137,7 @@ interface ItemViewModel {
   options: string;
   fulfillment: string;
   quantity: number;
+  remainingAttributableQuantity: number | null;
   unitAmount: string;
   lineTotal: string;
   mrStatus: string;
@@ -179,6 +187,10 @@ interface RefundAttemptViewModel {
   closeWarning: string | null;
   claim: RefundExecutionClaimPresentation;
   transitionHistory: RefundTransitionHistoryViewModel;
+  lineAttribution: {
+    entries: { orderItemId: string; itemName: string; quantity: number }[];
+    emptyState: string | null;
+  };
 }
 
 export interface BuildAdminOrderDetailViewModelOptions {

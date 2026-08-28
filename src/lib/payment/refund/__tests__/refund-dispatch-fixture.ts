@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
+  FulfillmentType,
   OrderStatus,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
@@ -10,6 +11,7 @@ import {
   RefundAttemptStatus,
   RefundExecutionDispatchAttemptState,
   ShippingCountry,
+  WigCategory,
 } from "@prisma/client";
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
@@ -176,6 +178,41 @@ async function constructDispatchFixture(
   });
   journal.orderId = order.id;
   observeConstructionStep(options, DispatchFixtureConstructionStep.ORDER_CREATED);
+  const wigStyleId = `dispatch_style_${identity}`;
+  const variantId = `dispatch_variant_${identity}`;
+  const orderItemId = `dispatch_item_${identity}`;
+  await db.wigStyle.create({
+    data: {
+      id: wigStyleId,
+      name: "Dispatch refund fixture",
+      category: WigCategory.FASHION,
+      tags: ["refund-dispatch"],
+      imageKeys: [],
+      variants: {
+        create: {
+          id: variantId,
+          color: "Fixture",
+          length: "Fixture",
+          curl: "Fixture",
+          price: totalAmount,
+          sku: `DISPATCH-${identity}`,
+          fulfillmentType: FulfillmentType.MTO,
+        },
+      },
+    },
+  });
+  await db.orderItem.create({
+    data: {
+      id: orderItemId,
+      orderId: order.id,
+      variantId,
+      wigStyleId,
+      quantity: 1,
+      unitAmount: totalAmount,
+      fulfillmentType: FulfillmentType.MTO,
+      snapshotData: { source: "REFUND_DISPATCH_FIXTURE" },
+    },
+  });
   const attemptIdentity = refundAttemptFixtureIdentity(options, payment.id, identity);
   const actor = refundActor(options);
   const requestedAttempt = await createRequestedAttempt({
@@ -190,6 +227,7 @@ async function constructDispatchFixture(
     operationKey: attemptIdentity.operationKey,
     actorType: actor.type,
     actorUserId: actor.userId,
+    orderItemId,
   }, journal, options);
   const claim = await claimRefundAttemptForExecution(db, {
     orderId: order.id,
@@ -276,6 +314,7 @@ async function createRequestedAttempt(input: Readonly<{
   operationKey: string;
   actorType: RefundAttemptActorType;
   actorUserId: string | null;
+  orderItemId: string;
 }>, journal: DispatchFixtureCleanupJournal, options: DispatchFixtureOptions): Promise<Readonly<{
   id: string;
   operationKey: string;
@@ -287,6 +326,7 @@ async function createRequestedAttempt(input: Readonly<{
       orderId: input.orderId,
       amount: input.targetAmount,
       reason: input.reason,
+      lines: [{ orderItemId: input.orderItemId, quantity: 1 }],
       actorType: input.actorType,
       actorUserId: input.actorUserId,
       now: DISPATCH_NOW,
@@ -541,6 +581,13 @@ async function cleanupDispatchAuthorities(
       select: { id: true },
     }),
   );
+  const orderItems = await collectCleanupQuery(
+    cleanupErrors,
+    () => db.orderItem.findMany({
+      where: { orderId: { in: authority.orderIds } },
+      select: { id: true, variantId: true, wigStyleId: true },
+    }),
+  );
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } })
   ));
@@ -582,13 +629,25 @@ async function cleanupDispatchAuthorities(
     db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
+    db.refundAttemptLine.deleteMany({ where: { refundAttemptId: { in: attemptIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
     db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.orderItem.deleteMany({ where: { id: { in: orderItems.map((item) => item.id) } } })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.order.deleteMany({ where: { id: { in: authority.orderIds } } })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.payment.deleteMany({ where: { id: { in: authority.paymentIds } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.wigVariant.deleteMany({ where: { id: { in: orderItems.map((item) => item.variantId) } } })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    db.wigStyle.deleteMany({ where: { id: { in: orderItems.map((item) => item.wigStyleId) } } })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.checkoutSession.deleteMany({ where: { id: { in: authority.sessionIds } } })

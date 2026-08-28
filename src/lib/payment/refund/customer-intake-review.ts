@@ -5,6 +5,7 @@ import {
   RefundAttemptActorType,
   type CustomerRefundIntake,
   type RefundAttempt,
+  type RefundAttemptLine,
   type RefundAttemptTransition,
 } from "@prisma/client";
 import {
@@ -24,6 +25,7 @@ import {
   type RejectCustomerRefundIntakeResult,
 } from "./customer-intake-review-contract";
 import { buildRefundAttemptIdempotencyKey } from "./invariants";
+import { sameCanonicalRefundLines, type CanonicalRefundLine } from "./lines";
 import { requestRefundAttemptInTransaction } from "./request";
 import {
   buildRefundRequestOperationKey,
@@ -42,7 +44,10 @@ type LockedIntake = Pick<CustomerRefundIntake,
   | "id" | "orderId" | "customerUserId" | "status"
   | "reviewedAt" | "reviewedByUserId" | "adminRejectionReason" | "approvedRefundAttemptId">;
 
-type AuditedRefundAttempt = RefundAttempt & { transitions: RefundAttemptTransition[] };
+type AuditedRefundAttempt = RefundAttempt & {
+  transitions: RefundAttemptTransition[];
+  lines: RefundAttemptLine[];
+};
 
 export class CustomerIntakeReviewInvariantError extends Error {}
 
@@ -137,7 +142,9 @@ async function approveInTransaction(
     return approveFailure("INTAKE_INCONSISTENT", "Customer refund intake ownership is inconsistent.");
   }
 
-  if (intake.status === CustomerRefundIntakeStatus.APPROVED) return resolveApprovalReplay(tx, intake);
+  if (intake.status === CustomerRefundIntakeStatus.APPROVED) {
+    return resolveApprovalReplay(tx, intake, input.lines);
+  }
   if (
     intake.status === CustomerRefundIntakeStatus.REJECTED
     || intake.status === CustomerRefundIntakeStatus.WITHDRAWN
@@ -162,6 +169,7 @@ async function persistApproval(
     actorType: RefundAttemptActorType.ADMIN,
     actorUserId: input.reviewedByUserId,
     now: input.reviewedAt,
+    lines: input.lines,
   }, {
     allowEximbaySandboxCustomerApproval: capabilities.allowEximbaySandboxCustomerApproval,
   });
@@ -262,19 +270,26 @@ function resolveRejectReplay(intake: LockedIntake): RejectCustomerRefundIntakeRe
 async function resolveApprovalReplay(
   tx: CustomerIntakeReviewTx,
   intake: LockedIntake,
+  requestedLines: readonly CanonicalRefundLine[],
 ): Promise<ApproveCustomerRefundIntakeResult> {
   if (!intake.reviewedAt || !intake.reviewedByUserId?.trim() || !intake.approvedRefundAttemptId) {
     throw invariant(`Approved intake decision evidence is incomplete: intakeId=${intake.id}, orderId=${intake.orderId}`);
   }
   const attempt = await tx.refundAttempt.findUnique({
     where: { id: intake.approvedRefundAttemptId },
-    include: { transitions: { orderBy: { createdAt: "asc" } } },
+    include: {
+      transitions: { orderBy: { createdAt: "asc" } },
+      lines: { orderBy: { orderItemId: "asc" } },
+    },
   });
   if (!attempt) {
     throw invariant(`Approved intake linked Attempt is missing: intakeId=${intake.id}, orderId=${intake.orderId}`);
   }
   assertApprovalAttemptIdentity(intake, attempt);
   assertApprovalCreationEvidence(intake, attempt);
+  if (attempt.lines.length > 0 && !sameCanonicalRefundLines(attempt.lines, requestedLines)) {
+    throw invariant(`Approved intake line decision mismatch: intakeId=${intake.id}, orderId=${intake.orderId}`);
+  }
   return approveCustomerIntakeReviewSuccess({
     id: intake.id,
     orderId: intake.orderId,

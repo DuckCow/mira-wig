@@ -50,6 +50,7 @@ describe("customer refund intake labels and history presentation", () => {
         amount: 4000,
         currency: "KRW",
         requestedAt: new Date("2026-07-15T01:00:00.000Z"),
+        lines: [{ orderItemId: "item_1", quantity: 1 }],
       },
     });
     const submitted = intake({ id: "submitted", ownershipConsistent: false });
@@ -88,6 +89,7 @@ describe("customer refund intake labels and history presentation", () => {
         amount: 12_345,
         currency: "XYZ",
         requestedAt: new Date("2026-07-15T01:00:00.000Z"),
+        lines: [{ orderItemId: "item_1", quantity: 1 }],
       },
     })]);
 
@@ -121,12 +123,13 @@ describe("customer refund intake review controls presentation", () => {
 
   it("builds exact browser payloads without actor, currency, provider, Payment, or operation keys", () => {
     const reject = buildRejectCustomerRefundIntakePayload("order_1", "intake_1", "reason");
-    const approve = buildApproveCustomerRefundIntakePayload("order_1", "intake_1", "4000", "rationale");
+    const lines = [{ orderItemId: "item_1", quantity: 1 }];
+    const approve = buildApproveCustomerRefundIntakePayload("order_1", "intake_1", "4000", "rationale", lines);
 
     expect(reject).toEqual({ orderId: "order_1", intakeId: "intake_1", adminRejectionReason: "reason" });
-    expect(approve).toEqual({ orderId: "order_1", intakeId: "intake_1", amountMinor: "4000", merchantRationale: "rationale" });
+    expect(approve).toEqual({ orderId: "order_1", intakeId: "intake_1", amountMinor: "4000", merchantRationale: "rationale", lines });
     expect(Object.keys(reject).sort()).toEqual(["adminRejectionReason", "intakeId", "orderId"]);
-    expect(Object.keys(approve).sort()).toEqual(["amountMinor", "intakeId", "merchantRationale", "orderId"]);
+    expect(Object.keys(approve).sort()).toEqual(["amountMinor", "intakeId", "lines", "merchantRationale", "orderId"]);
   });
 
   it.each([
@@ -147,7 +150,7 @@ describe("customer refund intake review controls presentation", () => {
   });
 
   it.each([
-    ["INVALID_INPUT", null, false],
+    ["INVALID_INPUT", "lines", false],
     ["INVALID_AMOUNT", "amount", false],
     ["REASON_REQUIRED", "merchantRationale", false],
     ["REASON_TOO_LONG", "merchantRationale", false],
@@ -231,6 +234,7 @@ function approvedResult(outcome: "APPROVED" | "ALREADY_APPROVED") {
       amount: 4000,
       currency: "KRW",
       requestedAt: "2026-07-15T01:00:00.000Z",
+      lines: [{ orderItemId: "item_1", quantity: 1 }],
     },
   } as const;
 }

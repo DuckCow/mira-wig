@@ -3,6 +3,7 @@ import {
   CheckoutSessionStatus,
   CustomerRefundIntakeReasonCode,
   CustomerRefundIntakeStatus,
+  FulfillmentType,
   OrderStatus,
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
@@ -12,6 +13,7 @@ import {
   RefundAttemptActorType,
   RefundAttemptStatus,
   ShippingCountry,
+  WigCategory,
   type RefundAttempt,
 } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +52,8 @@ interface TestContext {
   orderIds: string[];
   paymentIds: string[];
   sessionIds: string[];
+  styleIds: string[];
+  variantIds: string[];
 }
 
 interface OrderOptions {
@@ -76,6 +80,7 @@ interface ReviewFixture {
   currency: string;
   provider: PaymentProvider;
   mode: PaymentMode;
+  orderItemId: string;
 }
 
 interface AttemptOptions {
@@ -91,6 +96,7 @@ interface AttemptOptions {
   createTransition?: boolean;
   provider?: PaymentProvider;
   mode?: PaymentMode;
+  lineQuantity?: number | null;
 }
 
 class ApprovalRollbackProbe extends Error {}
@@ -100,7 +106,15 @@ describe("CustomerRefundIntake administrator review core", () => {
 
   beforeEach(async () => {
     const ownerUserId = `intake_review_owner_${randomUUID()}`;
-    ctx = { ownerUserId, userIds: [ownerUserId], orderIds: [], paymentIds: [], sessionIds: [] };
+    ctx = {
+      ownerUserId,
+      userIds: [ownerUserId],
+      orderIds: [],
+      paymentIds: [],
+      sessionIds: [],
+      styleIds: [],
+      variantIds: [],
+    };
     await ensureMarket();
     await db.user.create({ data: { id: ownerUserId, email: `${ownerUserId}@example.test` } });
   });
@@ -231,8 +245,9 @@ describe("CustomerRefundIntake administrator review core", () => {
         "approvedRefundAttemptId", "id", "orderId", "reviewedAt", "reviewedByUserId", "status",
       ]);
       expect(Object.keys(result.attempt).sort()).toEqual([
-        "amount", "currency", "id", "orderId", "requestedAt", "status",
+        "amount", "currency", "id", "lines", "orderId", "requestedAt", "status",
       ]);
+      expect(result.attempt.lines).toEqual([{ orderItemId: fixture.orderItemId, quantity: 1 }]);
       expect(intake).toMatchObject({
         status: CustomerRefundIntakeStatus.APPROVED,
         reviewedAt: NOW,
@@ -591,6 +606,25 @@ describe("CustomerRefundIntake administrator review core", () => {
       await expect(reviewState(fixture)).resolves.toEqual(before);
     });
 
+    it("rejects a changed line decision on approval replay", async () => {
+      const fixture = await createFixture(ctx);
+      await approveCustomerRefundIntake(db, approveInput(fixture));
+
+      await expect(approveCustomerRefundIntake(db, approveInput(fixture, {
+        lines: [{ orderItemId: fixture.orderItemId, quantity: 2 }],
+      }))).rejects.toThrow(CustomerIntakeReviewInvariantError);
+    });
+
+    it("preserves replay for a historical approved line-less Attempt", async () => {
+      const fixture = await createFixture(ctx);
+      const approved = approveSuccess(await approveCustomerRefundIntake(db, approveInput(fixture)));
+      await db.refundAttemptLine.deleteMany({ where: { refundAttemptId: approved.attempt.id } });
+
+      const replay = approveSuccess(await approveCustomerRefundIntake(db, approveInput(fixture, { lines: [] })));
+
+      expect(replay).toMatchObject({ replayed: true, attempt: { id: approved.attempt.id, lines: [] } });
+    });
+
     it.each(Object.values(RefundAttemptStatus))("replays linked Attempt in current status %s", async (status) => {
       const fixture = await createFixture(ctx);
       const approved = approveSuccess(await approveCustomerRefundIntake(db, approveInput(fixture)));
@@ -900,6 +934,7 @@ function approveInput(
     reviewedByUserId: "admin_reviewer",
     amount: 400,
     merchantRationale: "Merchant approved this refund request.",
+    lines: [{ orderItemId: fixture.orderItemId, quantity: 1 }],
     now: new Date(NOW),
     ...override,
   };
@@ -978,6 +1013,7 @@ async function createOrder(context: TestContext, options: OrderOptions) {
     },
   });
   context.orderIds.push(order.id);
+  const orderItemId = await createOrderItem(context, order.id, amount);
   return {
     orderId: order.id,
     paymentId: payment.id,
@@ -986,6 +1022,7 @@ async function createOrder(context: TestContext, options: OrderOptions) {
     currency,
     provider,
     mode,
+    orderItemId,
   };
 }
 
@@ -1024,41 +1061,112 @@ function paymentLifecycleFields(status: PaymentAttemptStatus) {
 async function seedAttempt(fixture: ReviewFixture, options: AttemptOptions = {}): Promise<string> {
   const id = `refund_seed_${randomUUID()}`;
   const identity = seedAttemptIdentity(fixture, options, id);
-  const reason = options.reason ?? "Seed direct-admin refund request";
   const attempt = await db.refundAttempt.create({
     data: {
       id,
       orderId: identity.orderId,
       paymentId: identity.paymentId,
-      amount: options.amount ?? 100,
       currency: identity.currency,
-      status: options.status ?? RefundAttemptStatus.REQUESTED,
-      reason,
-      actorType: options.actorType ?? RefundAttemptActorType.ADMIN,
-      actorUserId: options.actorUserId === undefined ? "direct_admin" : options.actorUserId,
-      provider: options.provider ?? fixture.provider,
-      mode: options.mode ?? fixture.mode,
       idempotencyKey: identity.idempotencyKey,
       requestedAt: NOW,
+      ...seededReviewAttemptFields(fixture, options),
     },
   });
-  if (options.createTransition !== false) {
-    await db.refundAttemptTransition.create({
-      data: {
-        refundAttemptId: attempt.id,
-        fromStatus: null,
-        toStatus: RefundAttemptStatus.REQUESTED,
-        orderStatusBefore: OrderStatus.PAID,
-        orderStatusAfter: OrderStatus.REFUND_PENDING,
-        actorType: attempt.actorType,
-        actorUserId: attempt.actorUserId,
-        reason: attempt.reason,
-        operationKey: `refund-request:${attempt.id}`,
-        createdAt: attempt.requestedAt,
-      },
-    });
-  }
+  await seedReviewAttemptTransition(attempt, options.createTransition);
+  await seedReviewAttemptLine(fixture, identity.orderId, attempt.id, options.lineQuantity);
   return attempt.id;
+}
+
+function seededReviewAttemptFields(fixture: ReviewFixture, options: AttemptOptions) {
+  return {
+    amount: options.amount ?? 100,
+    status: options.status ?? RefundAttemptStatus.REQUESTED,
+    reason: options.reason ?? "Seed direct-admin refund request",
+    actorType: options.actorType ?? RefundAttemptActorType.ADMIN,
+    actorUserId: options.actorUserId === undefined ? "direct_admin" : options.actorUserId,
+    provider: options.provider ?? fixture.provider,
+    mode: options.mode ?? fixture.mode,
+  };
+}
+
+async function seedReviewAttemptTransition(
+  attempt: RefundAttempt,
+  createTransition: boolean | undefined,
+): Promise<void> {
+  if (createTransition === false) return;
+  await db.refundAttemptTransition.create({
+    data: {
+      refundAttemptId: attempt.id,
+      fromStatus: null,
+      toStatus: RefundAttemptStatus.REQUESTED,
+      orderStatusBefore: OrderStatus.PAID,
+      orderStatusAfter: OrderStatus.REFUND_PENDING,
+      actorType: attempt.actorType,
+      actorUserId: attempt.actorUserId,
+      reason: attempt.reason,
+      operationKey: `refund-request:${attempt.id}`,
+      createdAt: attempt.requestedAt,
+    },
+  });
+}
+
+async function seedReviewAttemptLine(
+  fixture: ReviewFixture,
+  orderId: string,
+  refundAttemptId: string,
+  quantity: number | null | undefined,
+): Promise<void> {
+  if (quantity === null) return;
+  await db.refundAttemptLine.create({
+    data: {
+      refundAttemptId,
+      orderItemId: fixture.orderItemId,
+      orderId,
+      quantity: quantity ?? 1,
+    },
+  });
+}
+
+async function createOrderItem(
+  context: TestContext,
+  orderId: string,
+  unitAmount: number,
+): Promise<string> {
+  const style = await db.wigStyle.create({
+    data: {
+      name: `Intake refund line style ${randomUUID()}`,
+      category: WigCategory.FASHION,
+      tags: [],
+      imageKeys: [],
+    },
+  });
+  context.styleIds.push(style.id);
+  const variant = await db.wigVariant.create({
+    data: {
+      wigStyleId: style.id,
+      color: "Black",
+      length: "Medium",
+      curl: "Straight",
+      price: unitAmount,
+      stock: 10,
+      sku: `intake-refund-line-${randomUUID()}`,
+      fulfillmentType: FulfillmentType.STOCKED,
+    },
+  });
+  context.variantIds.push(variant.id);
+  const item = await db.orderItem.create({
+    data: {
+      orderId,
+      variantId: variant.id,
+      wigStyleId: style.id,
+      quantity: 3,
+      unitAmount,
+      discountAmount: 0,
+      fulfillmentType: FulfillmentType.STOCKED,
+      snapshotData: { styleName: style.name },
+    },
+  });
+  return item.id;
 }
 
 function seedAttemptIdentity(fixture: ReviewFixture, options: AttemptOptions, id: string) {
@@ -1201,9 +1309,13 @@ async function cleanup(context: TestContext): Promise<void> {
   await db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } });
   await db.refundExecutionCommand.deleteMany({ where: { id: { in: commandIds } } });
   await db.refundAttemptTransition.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });
+  await db.refundAttemptLine.deleteMany({ where: { refundAttemptId: { in: attemptIds } } });
   await db.refundAttempt.deleteMany({ where: { id: { in: attemptIds } } });
+  await db.orderItem.deleteMany({ where: { orderId: { in: context.orderIds } } });
   await db.order.deleteMany({ where: { id: { in: context.orderIds } } });
   await db.payment.deleteMany({ where: { id: { in: context.paymentIds } } });
   await db.checkoutSession.deleteMany({ where: { id: { in: context.sessionIds } } });
   await db.user.deleteMany({ where: { id: { in: context.userIds } } });
+  await db.wigVariant.deleteMany({ where: { id: { in: context.variantIds } } });
+  await db.wigStyle.deleteMany({ where: { id: { in: context.styleIds } } });
 }

@@ -63,6 +63,7 @@ const VALID_APPROVE = {
   intakeId: "intake_123",
   amountMinor: "4000",
   merchantRationale: "Approved customer request",
+  lines: [{ orderItemId: "item_123", quantity: 1 }],
 };
 
 const mockRequireAdmin = vi.mocked(requireAdmin);
@@ -365,6 +366,7 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
       intakeId: "  intake_123  ",
       amountMinor: "4000",
       merchantRationale: "  retry rationale  ",
+      lines: VALID_APPROVE.lines,
     });
 
     expect(mockApprove).toHaveBeenCalledWith(
@@ -375,6 +377,7 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
         reviewedByUserId: ADMIN_ID,
         amount: 4000,
         merchantRationale: "retry rationale",
+        lines: VALID_APPROVE.lines,
         now: NOW,
       },
       { allowEximbaySandboxCustomerApproval: false },
@@ -396,6 +399,7 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
         amount: 3500,
         currency: "KRW",
         requestedAt: "2026-07-14T07:00:00.000Z",
+        lines: [{ orderItemId: "item_123", quantity: 1 }],
       },
     });
     expect(mockRevalidatePath.mock.calls).toEqual([
@@ -440,6 +444,11 @@ describe("administrator approve mapping, serialization, and revalidation", () =>
     ["CURRENCY_MISMATCH", "MANUAL_REVIEW_REQUIRED"],
     ["EXISTING_ATTEMPT_CURRENCY_MISMATCH", "MANUAL_REVIEW_REQUIRED"],
     ["INVALID_EXISTING_ATTEMPT_AMOUNT", "MANUAL_REVIEW_REQUIRED"],
+    ["INVALID_REFUND_LINES", "INVALID_INPUT"],
+    ["REFUND_LINE_ITEM_NOT_FOUND", "INVALID_INPUT"],
+    ["OVER_REFUND_LINE_QUANTITY", "INSUFFICIENT_REFUNDABLE"],
+    ["REFUND_LINE_HISTORY_UNATTRIBUTED", "MANUAL_REVIEW_REQUIRED"],
+    ["REFUND_LINE_LEDGER_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
   ] as const)("maps approve core %s to %s", async (code, errorCode) => {
     mockApprove.mockResolvedValue(approveFailure(code));
 
@@ -539,6 +548,7 @@ function approveSuccess(overrides: {
       amount: 3500,
       currency: "KRW",
       requestedAt: new Date("2026-07-14T07:00:00.000Z"),
+      lines: [{ orderItemId: "item_123", quantity: 1 }],
     },
   };
 }

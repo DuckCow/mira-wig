@@ -8,6 +8,7 @@ import {
   type PrismaClient,
   type RefundAttempt,
   type RefundAttemptActorType,
+  type RefundAttemptLine,
   type RefundAttemptTransition,
 } from "@prisma/client";
 import {
@@ -25,11 +26,22 @@ import {
   resolveRefundRequestCreationEvidence,
   sameImmutableRefundRequest,
 } from "./request-evidence";
+import {
+  deriveRefundLineCapacity,
+  normalizeRefundLines,
+  sameCanonicalRefundLines,
+  type CanonicalRefundLine,
+  type RefundLineInput,
+} from "./lines";
 
 type RefundRequestTx = Prisma.TransactionClient;
 type RefundRequestReader = Pick<PrismaClient, "order">;
 type RefundRequestOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
-type AuditedRefundAttempt = RefundAttempt & { transitions: RefundAttemptTransition[] };
+type AuditedRefundAttempt = RefundAttempt & {
+  transitions: RefundAttemptTransition[];
+  lines: RefundAttemptLine[];
+};
+type RefundAttemptWithLines = RefundAttempt & { lines: RefundAttemptLine[] };
 
 export interface RequestRefundAttemptInput {
   refundAttemptId: string;
@@ -39,6 +51,7 @@ export interface RequestRefundAttemptInput {
   actorType: RefundAttemptActorType;
   actorUserId?: string | null;
   now: Date;
+  lines: readonly RefundLineInput[];
 }
 
 export interface RefundRequestProviderAdmission {
@@ -57,6 +70,11 @@ export type RequestRefundAttemptFailureCode =
   | "PAYMENT_NOT_REFUNDABLE"
   | "PAYMENT_IDENTITY_MISMATCH"
   | "REFUND_LEDGER_INCONSISTENT"
+  | "INVALID_REFUND_LINES"
+  | "REFUND_LINE_ITEM_NOT_FOUND"
+  | "OVER_REFUND_LINE_QUANTITY"
+  | "REFUND_LINE_HISTORY_UNATTRIBUTED"
+  | "REFUND_LINE_LEDGER_INCONSISTENT"
   | "DISPUTE_REVIEW_REQUIRED"
   | "REASON_TOO_LONG"
   | "IDEMPOTENCY_CONFLICT"
@@ -71,7 +89,7 @@ export interface RequestRefundAttemptFailure {
 export type RequestRefundAttemptResult =
   | {
       ok: true;
-      refundAttempt: RefundAttempt;
+      refundAttempt: RefundAttemptWithLines;
       orderStatus: OrderStatus;
       replayed: boolean;
     }
@@ -105,6 +123,8 @@ async function requestRefundAttemptWithProviderAdmissionInTransaction(
   input: RequestRefundAttemptInput,
   providerAdmission: RefundRequestProviderAdmission,
 ): Promise<RequestRefundAttemptResult> {
+  const normalizedLines = normalizeRefundLines(input.lines, { allowEmpty: true });
+  if (!normalizedLines.ok) return normalizedLines;
   if (!(await lockOrder(tx, input.orderId))) {
     return failure("ORDER_NOT_FOUND", "Order was not found.");
   }
@@ -117,18 +137,35 @@ async function requestRefundAttemptWithProviderAdmissionInTransaction(
     tx,
     order,
     candidate.refundAttempt,
+    normalizedLines.lines,
   );
   if (replayOrReasonFailure) return replayOrReasonFailure;
+
+  return persistNewRequest(tx, order, input, normalizedLines.lines, providerAdmission);
+}
+
+function persistNewRequest(
+  tx: RefundRequestTx,
+  order: RefundRequestOrder,
+  input: RequestRefundAttemptInput,
+  lines: readonly CanonicalRefundLine[],
+  providerAdmission: RefundRequestProviderAdmission,
+): Promise<RequestRefundAttemptResult> | RequestRefundAttemptResult {
+  if (lines.length === 0) {
+    return failure("INVALID_REFUND_LINES", "Refund line selection must contain at least one item.");
+  }
 
   if (!hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)) {
     return failure("REFUND_LEDGER_INCONSISTENT", "Historical refund ledger identity is inconsistent.");
   }
+  const lineFailure = validateLineCapacity(order, lines);
+  if (lineFailure) return lineFailure;
   const eligibilityFailure = validateEligibility(order, providerAdmission);
   if (eligibilityFailure) return eligibilityFailure;
 
   const prepared = prepareAgainst(order, input, order.refundAttempts);
   if (!prepared.ok) return prepared;
-  return persistRequest(tx, order, prepared.refundAttempt);
+  return persistRequest(tx, order, prepared.refundAttempt, lines);
 }
 
 async function lockOrder(tx: RefundRequestTx, orderId: string): Promise<boolean> {
@@ -143,9 +180,13 @@ function loadOrder(client: RefundRequestReader, orderId: string) {
     where: { id: orderId },
     include: {
       payment: true,
+      items: { select: { id: true, quantity: true } },
       refundAttempts: {
         orderBy: { createdAt: "asc" },
-        include: { transitions: { orderBy: { createdAt: "asc" } } },
+        include: {
+          transitions: { orderBy: { createdAt: "asc" } },
+          lines: { orderBy: { orderItemId: "asc" } },
+        },
       },
     },
   });
@@ -177,20 +218,22 @@ function prepareAgainst(
 function resolveReplay(
   order: RefundRequestOrder,
   candidate: PreparedRefundAttempt,
+  lines: readonly CanonicalRefundLine[],
 ): RequestRefundAttemptResult | null {
   const existing = order.refundAttempts.find((attempt) => (
     attempt.id === candidate.id || attempt.idempotencyKey === candidate.idempotencyKey
   ));
   if (!existing) return null;
-  return resolveExistingReplay(existing, candidate);
+  return resolveExistingReplay(existing, candidate, lines);
 }
 
 async function resolveReplayBeforeNewWriteReasonValidation(
   tx: RefundRequestTx,
   order: RefundRequestOrder,
   candidate: PreparedRefundAttempt,
+  lines: readonly CanonicalRefundLine[],
 ): Promise<RequestRefundAttemptResult | null> {
-  const replay = resolveReplay(order, candidate);
+  const replay = resolveReplay(order, candidate, lines);
   if (replay) return replay;
   if (isRefundRequestReasonWithinCodePointLimit(candidate.reason)) return null;
   if (await hasExistingRequestIdentity(tx, candidate)) {
@@ -217,8 +260,12 @@ async function hasExistingRequestIdentity(
 function resolveExistingReplay(
   existing: AuditedRefundAttempt,
   candidate: PreparedRefundAttempt,
+  lines: readonly CanonicalRefundLine[],
 ): RequestRefundAttemptResult {
-  if (!sameImmutableRefundRequest(existing, candidate)) {
+  if (
+    !sameImmutableRefundRequest(existing, candidate)
+    || !sameCanonicalRefundLines(existing.lines, lines)
+  ) {
     return failure("IDEMPOTENCY_CONFLICT", "Refund attempt identity conflicts with an existing request.");
   }
   const evidence = resolveRefundRequestCreationEvidence(existing.transitions, candidate);
@@ -230,6 +277,28 @@ function resolveExistingReplay(
     : OrderStatus.REFUND_PENDING;
   const { transitions: _transitions, ...refundAttempt } = existing;
   return { ok: true, refundAttempt, orderStatus, replayed: true };
+}
+
+function validateLineCapacity(
+  order: RefundRequestOrder,
+  requestedLines: readonly CanonicalRefundLine[],
+): RequestRefundAttemptFailure | null {
+  const capacity = deriveRefundLineCapacity(order.id, order.items, order.refundAttempts);
+  if (!capacity.ok) {
+    return capacity.code === "REFUND_LINE_HISTORY_UNATTRIBUTED"
+      ? failure(capacity.code, "Historical guarded refunds have no merchandise attribution; manual review is required.")
+      : failure(capacity.code, "Historical refund line attribution is inconsistent; manual review is required.");
+  }
+  for (const line of requestedLines) {
+    const remaining = capacity.remainingByOrderItemId.get(line.orderItemId);
+    if (remaining === undefined) {
+      return failure("REFUND_LINE_ITEM_NOT_FOUND", "Selected refund item does not belong to the Order.");
+    }
+    if (line.quantity > remaining) {
+      return failure("OVER_REFUND_LINE_QUANTITY", "Requested refund quantity exceeds remaining item capacity.");
+    }
+  }
+  return null;
 }
 
 function validateEligibility(
@@ -286,6 +355,7 @@ async function persistRequest(
   tx: RefundRequestTx,
   order: RefundRequestOrder,
   prepared: PreparedRefundAttempt,
+  lines: readonly CanonicalRefundLine[],
 ): Promise<RequestRefundAttemptResult> {
   const transition = await tx.order.updateMany({
     where: { id: order.id, status: order.status },
@@ -294,7 +364,22 @@ async function persistRequest(
   if (transition.count !== 1) {
     return failure("ORDER_STATUS_CONFLICT", "Order status changed before the refund request was saved.");
   }
-  const refundAttempt = await tx.refundAttempt.create({ data: prepared });
+  const refundAttempt = await tx.refundAttempt.create({
+    data: {
+      ...prepared,
+      lines: {
+        create: lines.map((line) => ({
+          quantity: line.quantity,
+          orderItem: {
+            connect: {
+              id_orderId: { id: line.orderItemId, orderId: order.id },
+            },
+          },
+        })),
+      },
+    },
+    include: { lines: { orderBy: { orderItemId: "asc" } } },
+  });
   await tx.refundAttemptTransition.create({
     data: {
       refundAttemptId: prepared.id,
@@ -327,19 +412,34 @@ async function classifyUniqueConflict(
   const [attempts, transition] = await Promise.all([
     client.refundAttempt.findMany({
       where: { OR: [{ id: candidate.id }, { idempotencyKey: candidate.idempotencyKey }] },
-      include: { transitions: { orderBy: { createdAt: "asc" } } },
+      include: {
+        transitions: { orderBy: { createdAt: "asc" } },
+        lines: { orderBy: { orderItemId: "asc" } },
+      },
       take: 2,
     }),
     client.refundAttemptTransition.findUnique({ where: { operationKey } }),
   ]);
   if (attempts.length === 0 && !transition) throw originalError;
+  const normalizedLines = normalizeRefundLines(input.lines, { allowEmpty: true });
+  if (!normalizedLines.ok) return normalizedLines;
+  return resolveUniqueConflictEvidence(attempts, transition, candidate, normalizedLines.lines);
+}
+
+function resolveUniqueConflictEvidence(
+  attempts: readonly AuditedRefundAttempt[],
+  transition: RefundAttemptTransition | null,
+  candidate: PreparedRefundAttempt,
+  lines: readonly CanonicalRefundLine[],
+): RequestRefundAttemptResult {
   if (attempts.length !== 1) {
     return failure("IDEMPOTENCY_CONFLICT", "Refund request identity or creation evidence is already in use.");
   }
-  if (transition && transition.refundAttemptId !== attempts[0].id) {
+  const attempt = attempts[0];
+  if (!attempt || (transition && transition.refundAttemptId !== attempt.id)) {
     return failure("IDEMPOTENCY_CONFLICT", "Refund request identity or creation evidence is already in use.");
   }
-  return resolveExistingReplay(attempts[0], candidate);
+  return resolveExistingReplay(attempt, candidate, lines);
 }
 
 function isUniqueConflict(error: unknown): boolean {
