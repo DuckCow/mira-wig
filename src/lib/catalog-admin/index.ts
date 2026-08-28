@@ -12,6 +12,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { WIG_CATEGORIES } from "@/lib/catalog.types";
 import type { StorageProvider } from "@/lib/storage/types";
+import { admitCatalogCoverImage, isCatalogCoverKey } from "./cover-image-policy";
 import {
   CatalogAdminException,
   type CreateStyleInput,
@@ -25,9 +26,8 @@ export * from "./types";
 // ── 내부 헬퍼 ────────────────────────────────────────────────
 
 const VALID_CATEGORIES: ReadonlySet<string> = new Set(WIG_CATEGORIES);
-const CATALOG_COVER_KEY_RE = /^wig-style\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.(?:jpg|png|webp)$/;
 
-type CatalogCoverStorage = Pick<StorageProvider, "exists">;
+type CatalogCoverStorage = Pick<StorageProvider, "statObject" | "readObjectBounded">;
 
 function assertNonEmpty(value: string | undefined, field: string): void {
   if (!value || !value.trim()) {
@@ -83,10 +83,11 @@ function buildStyleUpdateData(
   };
 }
 
-function invalidCoverImage(): never {
+function invalidCoverImage(cause?: unknown): never {
   throw new CatalogAdminException(
     "INVALID_COVER_IMAGE",
     "커버 이미지 키 또는 업로드 객체를 확인할 수 없습니다.",
+    cause === undefined ? undefined : { cause },
   );
 }
 
@@ -101,8 +102,13 @@ async function admitCoverImageMutation(
 
   // 기존 demo/legacy 키의 정확한 재전송은 새 공개 객체 identity 입장이 아니다.
   if (submitted === existing) return undefined;
-  if (!CATALOG_COVER_KEY_RE.test(submitted)) invalidCoverImage();
-  if (!await storage.exists(submitted)) invalidCoverImage();
+  if (!isCatalogCoverKey(submitted)) invalidCoverImage();
+  try {
+    await admitCatalogCoverImage(submitted, storage);
+  } catch (error) {
+    if (error instanceof CatalogAdminException) throw error;
+    invalidCoverImage(error);
+  }
   return submitted;
 }
 

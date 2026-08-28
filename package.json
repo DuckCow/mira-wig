@@ -31,11 +31,11 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@google-cloud/secret-manager": "7.0.0",
     "@auth/prisma-adapter": "^2.11.2",
     "@aws-sdk/client-s3": "^3.1064.0",
     "@aws-sdk/client-sesv2": "^3.1064.0",
     "@aws-sdk/s3-request-presigner": "^3.1064.0",
+    "@google-cloud/secret-manager": "7.0.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@tosspayments/tosspayments-sdk": "^2.7.1",
@@ -46,6 +46,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
+    "sharp": "0.34.5",
     "three": "0.185.1"
   },
   "devDependencies": {

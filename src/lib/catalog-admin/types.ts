@@ -24,8 +24,9 @@ export class CatalogAdminException extends Error {
   constructor(
     public readonly code: CatalogAdminErrorCode,
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "CatalogAdminException";
   }
 }

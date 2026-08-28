@@ -11,7 +11,11 @@
 
 import { randomUUID } from "crypto";
 import type { PresignedUploadResult, StorageProvider, UploadPurpose } from "./types";
-import { deleteMockStorageObject, hasMockStorageObject } from "./mock-store";
+import {
+  deleteMockStorageObject,
+  hasMockStorageObject,
+  readMockStorageObject,
+} from "./mock-store";
 
 function extFromContentType(contentType: string): string {
   const map: Record<string, string> = {
@@ -68,5 +72,28 @@ export class MockStorageProvider implements StorageProvider {
 
   exists(key: string): Promise<boolean> {
     return Promise.resolve(hasMockStorageObject(key));
+  }
+
+  statObject(key: string) {
+    const stored = readMockStorageObject(key);
+    if (!stored) return Promise.resolve(null);
+    return Promise.resolve({
+      byteLength: stored.buffer.byteLength,
+      contentType: stored.contentType,
+    });
+  }
+
+  readObjectBounded(key: string, maxBytes: number) {
+    const stored = readMockStorageObject(key);
+    if (!stored) return Promise.reject(new Error("Mock storage object does not exist."));
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+      return Promise.reject(new Error("maxBytes must be a positive safe integer."));
+    }
+    const bytes = new Uint8Array(stored.buffer);
+    return Promise.resolve({
+      bytes: bytes.slice(0, maxBytes),
+      totalByteLength: bytes.byteLength,
+      contentType: stored.contentType,
+    });
   }
 }

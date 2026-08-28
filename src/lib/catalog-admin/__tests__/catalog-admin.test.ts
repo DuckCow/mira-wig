@@ -3,7 +3,8 @@
 // 검증 실패·SKU 충돌·부모 미존재·성공 경로를 행동으로 검증한다.
 // ============================================================
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { CatalogAdminException, type UpdateStyleInput } from "../types";
 
@@ -14,7 +15,8 @@ import { CatalogAdminException, type UpdateStyleInput } from "../types";
 const mockStyleCreate = vi.fn();
 const mockStyleUpdate = vi.fn();
 const mockStyleFindUnique = vi.fn();
-const mockStorageExists = vi.fn();
+const mockStorageStat = vi.fn();
+const mockStorageRead = vi.fn();
 const mockVariantCreate = vi.fn();
 const mockVariantUpdate = vi.fn();
 const mockVariantFindUnique = vi.fn();
@@ -51,11 +53,82 @@ function makeP2002(): Prisma.PrismaClientKnownRequestError {
   });
 }
 
-const mockCoverStorage = { exists: mockStorageExists };
+const validCoverBytes = new Map<string, Uint8Array>();
+let corruptWebpBytes = new Uint8Array();
+let validGifBytes = new Uint8Array();
+
+function coverImageSource() {
+  return sharp({
+    create: {
+      width: 2,
+      height: 2,
+      channels: 3,
+      background: { r: 10, g: 20, b: 30 },
+    },
+  });
+}
+
+function contentTypeForKey(key: string): string {
+  if (key.endsWith(".jpg")) return "image/jpeg";
+  if (key.endsWith(".png")) return "image/png";
+  return "image/webp";
+}
+
+function bytesForKey(key: string): Uint8Array {
+  return validCoverBytes.get(contentTypeForKey(key)) ?? new Uint8Array();
+}
+
+const mockCoverStorage = {
+  statObject: mockStorageStat,
+  readObjectBounded: mockStorageRead,
+};
+
+function expectNoCoverStorageCalls(): void {
+  expect(mockStorageStat).not.toHaveBeenCalled();
+  expect(mockStorageRead).not.toHaveBeenCalled();
+}
+
+beforeAll(async () => {
+  validCoverBytes.set("image/jpeg", await coverImageSource().jpeg().toBuffer());
+  validCoverBytes.set("image/png", await coverImageSource().png().toBuffer());
+  validCoverBytes.set("image/webp", await coverImageSource().webp().toBuffer());
+
+  const raw = Buffer.alloc(128 * 128 * 4);
+  let state = 123_456_789;
+  for (let index = 0; index < raw.byteLength; index += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    raw[index] = state & 0xff;
+  }
+  const validLosslessWebp = await sharp(raw, {
+    raw: { width: 128, height: 128, channels: 4 },
+  }).webp({ lossless: true }).toBuffer();
+  corruptWebpBytes = new Uint8Array(validLosslessWebp);
+  corruptWebpBytes.fill(0xff, 30, 100);
+
+  validGifBytes = new Uint8Array(
+    await coverImageSource().gif().toBuffer(),
+  );
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockStorageExists.mockResolvedValue(true);
+  mockStorageStat.mockImplementation((key: string) => {
+    const bytes = bytesForKey(key);
+    return Promise.resolve({
+      byteLength: bytes.byteLength,
+      contentType: contentTypeForKey(key),
+    });
+  });
+  mockStorageRead.mockImplementation((key: string) => {
+    const bytes = bytesForKey(key);
+    return Promise.resolve({
+      bytes,
+      totalByteLength: bytes.byteLength,
+      contentType: contentTypeForKey(key),
+    });
+  });
 });
 
 // ── createWigStyle ────────────────────────────────────────────
@@ -95,7 +168,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     await expect(updateWigStyle("nonexistent", { name: "새이름" }, mockCoverStorage)).rejects.toMatchObject({
       code: "STYLE_NOT_FOUND",
     });
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
     expect(mockStyleUpdate).not.toHaveBeenCalled();
   });
 
@@ -104,7 +177,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     mockStyleUpdate.mockResolvedValue({});
     await updateWigStyle("style-1", { name: "새이름" }, mockCoverStorage);
     expect(mockStyleUpdate).toHaveBeenCalledOnce();
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
   });
 
   it.each([
@@ -115,8 +188,8 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
     mockStyleUpdate.mockResolvedValue({});
     await updateWigStyle("style-1", { coverImageKey }, mockCoverStorage);
-    expect(mockStorageExists).toHaveBeenCalledOnce();
-    expect(mockStorageExists).toHaveBeenCalledWith(coverImageKey);
+    expect(mockStorageStat).toHaveBeenCalledWith(coverImageKey);
+    expect(mockStorageRead).toHaveBeenCalledWith(coverImageKey, 12 * 1024 * 1024);
     expect(mockStyleUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { coverImageKey } }),
     );
@@ -129,7 +202,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     expect(mockStyleUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: { coverImageKey: null } }),
     );
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
   });
 
   it.each([
@@ -158,27 +231,101 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     await expect(
       updateWigStyle("style-1", { coverImageKey }, mockCoverStorage),
     ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
     expect(mockStyleUpdate).not.toHaveBeenCalled();
   });
 
   it("유효한 변경 키의 객체가 없으면 DB를 수정하지 않는다", async () => {
     mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
-    mockStorageExists.mockResolvedValue(false);
+    mockStorageStat.mockResolvedValue(null);
     await expect(
       updateWigStyle("style-1", { coverImageKey: "wig-style/missing.jpg" }, mockCoverStorage),
     ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
-    expect(mockStorageExists).toHaveBeenCalledWith("wig-style/missing.jpg");
+    expect(mockStorageStat).toHaveBeenCalledWith("wig-style/missing.jpg");
+    expect(mockStorageRead).not.toHaveBeenCalled();
     expect(mockStyleUpdate).not.toHaveBeenCalled();
   });
 
-  it("storage 존재 확인 실패를 그대로 전파하고 DB를 수정하지 않는다", async () => {
+  it("storage metadata 확인 실패를 INVALID_COVER_IMAGE로 닫고 DB를 수정하지 않는다", async () => {
     const storageFailure = new Error("storage unavailable");
     mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
-    mockStorageExists.mockRejectedValue(storageFailure);
+    mockStorageStat.mockRejectedValue(storageFailure);
     await expect(
       updateWigStyle("style-1", { coverImageKey: "wig-style/new.jpg" }, mockCoverStorage),
-    ).rejects.toBe(storageFailure);
+    ).rejects.toMatchObject({
+      code: "INVALID_COVER_IMAGE",
+      cause: { code: "INVALID_OBJECT_METADATA", cause: storageFailure },
+    });
+    expect(mockStorageRead).not.toHaveBeenCalled();
+    expect(mockStyleUpdate).not.toHaveBeenCalled();
+  });
+
+  it("decode에 실패한 객체를 저장하지 않는다", async () => {
+    const corruptBytes = new Uint8Array([1, 2, 3, 4]);
+    mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
+    mockStorageStat.mockResolvedValue({
+      byteLength: corruptBytes.byteLength,
+      contentType: "image/png",
+    });
+    mockStorageRead.mockResolvedValue({
+      bytes: corruptBytes,
+      totalByteLength: corruptBytes.byteLength,
+      contentType: "image/png",
+    });
+    await expect(
+      updateWigStyle("style-1", { coverImageKey: "wig-style/corrupt.png" }, mockCoverStorage),
+    ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
+    expect(mockStyleUpdate).not.toHaveBeenCalled();
+  });
+
+  it("전체 길이를 유지한 손상 WebP를 decode 거부하고 DB를 수정하지 않는다", async () => {
+    mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
+    mockStorageStat.mockResolvedValue({
+      byteLength: corruptWebpBytes.byteLength,
+      contentType: "image/webp",
+    });
+    mockStorageRead.mockResolvedValue({
+      bytes: corruptWebpBytes,
+      totalByteLength: corruptWebpBytes.byteLength,
+      contentType: "image/webp",
+    });
+    await expect(
+      updateWigStyle("style-1", { coverImageKey: "wig-style/corrupt.webp" }, mockCoverStorage),
+    ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
+    expect(mockStorageStat).toHaveBeenCalledOnce();
+    expect(mockStorageRead).toHaveBeenCalledOnce();
+    expect(mockStyleUpdate).not.toHaveBeenCalled();
+  });
+
+  it("유효한 GIF 실제 형식을 거부하고 DB를 수정하지 않는다", async () => {
+    mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
+    mockStorageStat.mockResolvedValue({
+      byteLength: validGifBytes.byteLength,
+      contentType: "image/png",
+    });
+    mockStorageRead.mockResolvedValue({
+      bytes: validGifBytes,
+      totalByteLength: validGifBytes.byteLength,
+      contentType: "image/png",
+    });
+    await expect(
+      updateWigStyle("style-1", { coverImageKey: "wig-style/unsupported.png" }, mockCoverStorage),
+    ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
+    expect(mockStorageStat).toHaveBeenCalledOnce();
+    expect(mockStorageRead).toHaveBeenCalledOnce();
+    expect(mockStyleUpdate).not.toHaveBeenCalled();
+  });
+
+  it("0-byte metadata를 body read 전에 거부하고 DB를 수정하지 않는다", async () => {
+    mockStyleFindUnique.mockResolvedValue({ id: "style-1", coverImageKey: null });
+    mockStorageStat.mockResolvedValue({
+      byteLength: 0,
+      contentType: "image/png",
+    });
+    await expect(
+      updateWigStyle("style-1", { coverImageKey: "wig-style/empty.png" }, mockCoverStorage),
+    ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
+    expect(mockStorageRead).not.toHaveBeenCalled();
     expect(mockStyleUpdate).not.toHaveBeenCalled();
   });
 
@@ -193,7 +340,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
       { name: " 새 이름 ", coverImageKey },
       mockCoverStorage,
     );
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
     expect(mockStyleUpdate).toHaveBeenCalledWith({
       where: { id: "style-1" },
       data: { name: "새 이름" },
@@ -212,7 +359,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
         mockCoverStorage,
       ),
     ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
     expect(mockStyleUpdate).not.toHaveBeenCalled();
   });
 
@@ -223,7 +370,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     });
     mockStyleUpdate.mockResolvedValue({});
     await updateWigStyle("style-1", { name: "새이름" }, mockCoverStorage);
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
     expect(mockStyleUpdate).toHaveBeenCalledWith({
       where: { id: "style-1" },
       data: { name: "새이름" },
@@ -239,7 +386,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
       await expect(
         updateWigStyle("style-1", hostileInput, mockCoverStorage),
       ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
-      expect(mockStorageExists).not.toHaveBeenCalled();
+      expectNoCoverStorageCalls();
       expect(mockStyleUpdate).not.toHaveBeenCalled();
     },
   );
@@ -253,7 +400,7 @@ describe("updateWigStyle — STYLE_NOT_FOUND", () => {
     await expect(
       updateWigStyle("style-1", { coverImageKey }, mockCoverStorage),
     ).rejects.toMatchObject({ code: "INVALID_COVER_IMAGE" });
-    expect(mockStorageExists).not.toHaveBeenCalled();
+    expectNoCoverStorageCalls();
     expect(mockStyleUpdate).not.toHaveBeenCalled();
   });
 });

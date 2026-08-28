@@ -343,7 +343,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     expect(sha256(readFileSync(join(ROOT, "containers/refund-worker/Dockerfile"))))
       .toBe("7f337fb07c6fea4fde1dca685772f596a1924e3b5d26c3e8d50bffa3e964327b");
     expect(sha256(readFileSync(join(ROOT, "package-lock.json"))))
-      .toBe("c350acf0f8957efffdf809a420bd302d7ade35cf00bc2d7877d12a982d8ea401");
+      .toBe("c45bd86701bae2fb55b8954739d5f3d29c58b72281139155cc9f74f0c9ca828f");
     expect(sha256(readFileSync(join(
       INFRA,
       "contracts/runtime-image-connection-v1.json",
