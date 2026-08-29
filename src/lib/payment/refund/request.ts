@@ -8,6 +8,7 @@ import {
   type RefundAttempt,
   type RefundAttemptActorType,
   type RefundAttemptLine,
+  type RefundAttemptLineEconomicAllocation,
   type RefundAttemptTransition,
 } from "@prisma/client";
 import {
@@ -33,13 +34,20 @@ import {
   type RefundLineInput,
 } from "./lines";
 import { persistRefundRequestAfterOrderLock } from "./request-persistence";
+import {
+  validateRefundEconomicAllocation,
+  type RefundEconomicFailureCode,
+} from "./economic-validation";
 
 type RefundRequestTx = Prisma.TransactionClient;
 type RefundRequestReader = Pick<PrismaClient, "order">;
 type RefundRequestOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
+type RefundAttemptLineWithAllocation = RefundAttemptLine & {
+  economicAllocation: RefundAttemptLineEconomicAllocation | null;
+};
 type AuditedRefundAttempt = RefundAttempt & {
   transitions: RefundAttemptTransition[];
-  lines: RefundAttemptLine[];
+  lines: RefundAttemptLineWithAllocation[];
 };
 type RefundAttemptWithLines = RefundAttempt & { lines: RefundAttemptLine[] };
 
@@ -75,6 +83,7 @@ export type RequestRefundAttemptFailureCode =
   | "OVER_REFUND_LINE_QUANTITY"
   | "REFUND_LINE_HISTORY_UNATTRIBUTED"
   | "REFUND_LINE_LEDGER_INCONSISTENT"
+  | RefundEconomicFailureCode
   | "DISPUTE_REVIEW_REQUIRED"
   | "REASON_TOO_LONG"
   | "IDEMPOTENCY_CONFLICT"
@@ -155,15 +164,12 @@ async function persistNewRequest(
   if (lines.length === 0) {
     return failure("INVALID_REFUND_LINES", "Refund line selection must contain at least one item.");
   }
-  if (order.cancellation !== null) {
-    return failure("ORDER_CANCELLED", "Accepted cancellation blocks a competing refund request.");
-  }
-
-  if (!hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)) {
-    return failure("REFUND_LEDGER_INCONSISTENT", "Historical refund ledger identity is inconsistent.");
-  }
+  const aggregateFailure = validateNewRefundAggregate(order);
+  if (aggregateFailure) return aggregateFailure;
   const lineFailure = validateLineCapacity(order, lines);
   if (lineFailure) return lineFailure;
+  const economicFailure = validateRefundEconomicAllocation(order, input.amount, lines);
+  if (!economicFailure.ok) return economicFailure;
   const eligibilityFailure = validateEligibility(order, providerAdmission);
   if (eligibilityFailure) return eligibilityFailure;
 
@@ -179,6 +185,15 @@ async function persistNewRequest(
   return { ...persisted, replayed: false };
 }
 
+function validateNewRefundAggregate(order: RefundRequestOrder): RequestRefundAttemptFailure | null {
+  if (order.cancellation !== null) {
+    return failure("ORDER_CANCELLED", "Accepted cancellation blocks a competing refund request.");
+  }
+  return hasConsistentRefundAttemptLedgerIdentity(order.payment, order.refundAttempts)
+    ? null
+    : failure("REFUND_LEDGER_INCONSISTENT", "Historical refund ledger identity is inconsistent.");
+}
+
 async function lockOrder(tx: RefundRequestTx, orderId: string): Promise<boolean> {
   const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
     SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE
@@ -192,12 +207,15 @@ function loadOrder(client: RefundRequestReader, orderId: string) {
     include: {
       payment: true,
       cancellation: true,
-      items: { select: { id: true, quantity: true } },
+      items: { select: { id: true, quantity: true, unitAmount: true, discountAmount: true } },
       refundAttempts: {
         orderBy: { createdAt: "asc" },
         include: {
           transitions: { orderBy: { createdAt: "asc" } },
-          lines: { orderBy: { orderItemId: "asc" } },
+          lines: {
+            orderBy: { orderItemId: "asc" },
+            include: { economicAllocation: true },
+          },
         },
       },
     },
@@ -276,7 +294,7 @@ function resolveExistingReplay(
 ): RequestRefundAttemptResult {
   if (
     !sameImmutableRefundRequest(existing, candidate)
-    || !sameCanonicalRefundLines(existing.lines, lines)
+    || !sameCanonicalRefundLines(existing.lines.map(refundLineReplayInput), lines)
   ) {
     return failure("IDEMPOTENCY_CONFLICT", "Refund attempt identity conflicts with an existing request.");
   }
@@ -380,7 +398,10 @@ async function classifyUniqueConflict(
       where: { OR: [{ id: candidate.id }, { idempotencyKey: candidate.idempotencyKey }] },
       include: {
         transitions: { orderBy: { createdAt: "asc" } },
-        lines: { orderBy: { orderItemId: "asc" } },
+        lines: {
+          orderBy: { orderItemId: "asc" },
+          include: { economicAllocation: true },
+        },
       },
       take: 2,
     }),
@@ -412,6 +433,13 @@ function isUniqueConflict(error: unknown): boolean {
   if (error instanceof Prisma.PrismaClientKnownRequestError) return error.code === "P2002";
   if (typeof error !== "object" || error === null || !("code" in error)) return false;
   return error.code === "P2002";
+}
+
+function refundLineReplayInput(line: RefundAttemptLineWithAllocation): RefundLineInput {
+  const merchandiseRefundAmount = line.economicAllocation?.merchandiseRefundAmount;
+  return merchandiseRefundAmount === undefined
+    ? { orderItemId: line.orderItemId, quantity: line.quantity }
+    : { orderItemId: line.orderItemId, quantity: line.quantity, merchandiseRefundAmount };
 }
 
 function failure(

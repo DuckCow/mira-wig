@@ -6,6 +6,7 @@ export interface RefundLineSelectionOption {
   label: string;
   orderedQuantity: number;
   remainingQuantity: number | null;
+  requiresEconomicAllocation: boolean;
 }
 
 export function ReviewPanelIntroduction() {
@@ -99,11 +100,13 @@ export function ApproveReviewForm({
   rationaleError,
   lineOptions,
   lineQuantities,
+  lineEconomicAmounts,
   linesError,
   isPending,
   onAmountChange,
   onRationaleChange,
   onLineQuantityChange,
+  onLineEconomicAmountChange,
   onSubmit,
 }: {
   intakeId: string;
@@ -116,11 +119,13 @@ export function ApproveReviewForm({
   rationaleError: string | undefined;
   lineOptions: readonly RefundLineSelectionOption[];
   lineQuantities: Readonly<Record<string, string>>;
+  lineEconomicAmounts: Readonly<Record<string, string>>;
   linesError: string | undefined;
   isPending: boolean;
   onAmountChange: (value: string) => void;
   onRationaleChange: (value: string) => void;
   onLineQuantityChange: (orderItemId: string, value: string) => void;
+  onLineEconomicAmountChange: (orderItemId: string, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
@@ -185,24 +190,42 @@ export function ApproveReviewForm({
           아직 상품 수량으로 자동 계산되지 않습니다.
         </p>
         {lineOptions.map((option) => (
-          <label key={option.orderItemId} className="grid gap-2 rounded border border-gray-200 p-3 sm:grid-cols-[1fr_7rem] sm:items-center">
+          <div key={option.orderItemId} className="grid gap-2 rounded border border-gray-200 p-3 sm:grid-cols-[1fr_7rem_9rem] sm:items-end">
             <span className="text-sm text-gray-700">
               <span className="block font-medium text-gray-900">{option.label}</span>
               <span className="mt-1 block text-xs text-gray-500">
                 주문 {option.orderedQuantity} · 현재 귀속 가능 {option.remainingQuantity ?? "확인 필요"}
               </span>
             </span>
-            <input
-              aria-label={`${option.label} 환불 귀속 수량`}
-              disabled={isPending || option.remainingQuantity === null || option.remainingQuantity === 0}
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={lineQuantities[option.orderItemId] ?? "0"}
-              onChange={(event) => onLineQuantityChange(option.orderItemId, event.target.value)}
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-            />
-          </label>
+            <label className="text-xs text-gray-600">
+              환불 수량
+              <input
+                aria-label={`${option.label} 환불 귀속 수량`}
+                disabled={isPending || option.remainingQuantity === null || option.remainingQuantity === 0}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={lineQuantities[option.orderItemId] ?? "0"}
+                onChange={(event) => onLineQuantityChange(option.orderItemId, event.target.value)}
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+              />
+            </label>
+            {option.requiresEconomicAllocation ? (
+              <label className="text-xs text-gray-600">
+                상품 환불액(최소 단위)
+                <input
+                  aria-label={`${option.label} 상품 환불액`}
+                  disabled={isPending || option.remainingQuantity === null || option.remainingQuantity === 0}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={lineEconomicAmounts[option.orderItemId] ?? ""}
+                  onChange={(event) => onLineEconomicAmountChange(option.orderItemId, event.target.value)}
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+            ) : <span />}
+          </div>
         ))}
         <p className="text-xs text-red-700">{linesError ?? ""}</p>
       </fieldset>

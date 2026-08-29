@@ -136,11 +136,11 @@ describe("refund worker fixed migration filesystem authority", () => {
     process.chdir(alternateCwd);
     try {
       const migrations = await loadRefundWorkerRepositoryMigrations();
-      expect(migrations).toHaveLength(45);
+      expect(migrations).toHaveLength(47);
       expect(migrations[0]?.name).toBe("20260609111830_init");
       expect(migrations.at(-1)).toEqual({
-        name: "20260828190000_order_cancel_c0",
-        checksum: "86ae323f41cac3d192290e1892e6079cb785be732a6cf3c69368a9c13e82a2e9",
+        name: "20260829140000_promo_c5_recovery_checkpoint",
+        checksum: "152840be2fda354ac75c0c4432461a5196d0a110fd44a6715d47895fc5b9bc71",
       });
     } finally {
       process.chdir(originalCwd);

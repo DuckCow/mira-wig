@@ -31,6 +31,7 @@ export interface ActivationPolicy {
   readonly birthdayWindowBeforeDays: number | null;
   readonly birthdayWindowAfterDays: number | null;
   readonly birthdayLeapDayObservation: BirthdayLeapDayObservation | null;
+  readonly recoveryGraceDays?: number | null;
   readonly marketRules: readonly ActivationMarketRule[];
 }
 
@@ -69,6 +70,12 @@ export async function activatePromotionPolicyVersion(
 }
 
 export function validatePromotionPolicyActivation(policy: ActivationPolicy): void {
+  validatePromotionPolicyBasics(policy);
+  validatePromotionRecoveryPolicy(policy);
+  if (policy.kind === PromotionKind.BIRTHDAY) validateBirthdayPolicy(policy);
+}
+
+function validatePromotionPolicyBasics(policy: ActivationPolicy): void {
   if (policy.status !== PromotionPolicyStatus.DRAFT) invalid("Promotion policy is not a draft.");
   if (policy.marketRules.length === 0) invalid("Promotion policy requires at least one Market rule.");
   if (policy.endsAt !== null && policy.startsAt >= policy.endsAt) {
@@ -78,7 +85,14 @@ export function validatePromotionPolicyActivation(policy: ActivationPolicy): voi
   if (policy.kind === PromotionKind.SIGNUP && !policy.firstOrderOnly) {
     invalid("Signup promotion must be first-order-only.");
   }
-  if (policy.kind === PromotionKind.BIRTHDAY) validateBirthdayPolicy(policy);
+}
+
+function validatePromotionRecoveryPolicy(policy: ActivationPolicy): void {
+  if (policy.recoveryGraceDays !== undefined
+    && policy.recoveryGraceDays !== null
+    && (!Number.isInteger(policy.recoveryGraceDays) || policy.recoveryGraceDays <= 0)) {
+    invalid("Promotion recovery grace days must be a positive integer when configured.");
+  }
 }
 
 async function loadPolicy(tx: Prisma.TransactionClient, id: string) {

@@ -1380,6 +1380,14 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       path: "prisma/migrations/20260828190000_order_cancel_c0/migration.sql",
       sha256: "86ae323f41cac3d192290e1892e6079cb785be732a6cf3c69368a9c13e82a2e9",
     };
+    const promoC5Migration = {
+      path: "prisma/migrations/20260829100000_promo_c5_refund_recovery/migration.sql",
+      sha256: "d9578049534c5bd6af17f0158f058ba1a14b72515a01ab4caa71c7e03e803563",
+    };
+    const promoC5CheckpointMigration = {
+      path: "prisma/migrations/20260829140000_promo_c5_recovery_checkpoint/migration.sql",
+      sha256: "152840be2fda354ac75c0c4432461a5196d0a110fd44a6715d47895fc5b9bc71",
+    };
     expect(checkedOutMigrations).toEqual([
       ...migrationAuthority.map(({ path }) => path),
       r13bMigration.path,
@@ -1387,6 +1395,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       promoC1Migration.path,
       refundLineR0Migration.path,
       orderCancelC0Migration.path,
+      promoC5Migration.path,
+      promoC5CheckpointMigration.path,
     ]);
     for (const entry of migrationAuthority) {
       expect(sha256(readFileSync(join(ROOT, entry.path)))).toBe(entry.sha256);
@@ -1401,6 +1411,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       .toBe(refundLineR0Migration.sha256);
     expect(sha256(readFileSync(join(ROOT, orderCancelC0Migration.path))))
       .toBe(orderCancelC0Migration.sha256);
+    expect(sha256(readFileSync(join(ROOT, promoC5Migration.path))))
+      .toBe(promoC5Migration.sha256);
+    expect(sha256(readFileSync(join(ROOT, promoC5CheckpointMigration.path))))
+      .toBe(promoC5CheckpointMigration.sha256);
     expect(migrationRuntimeDigest(historicalMigrations)).toBe(
       historicalSourceAuthority.historicalMigrationDigest,
     );

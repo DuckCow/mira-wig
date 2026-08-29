@@ -7,6 +7,7 @@ import {
   PromotionPolicyStatus,
 } from "@prisma/client";
 import { calculatePercentageDiscount } from "./discount";
+import { hasValidPromotionRecoveryLineage } from "./recovery-lineage";
 
 export type PromotionRedemptionErrorCode =
   | "PROMOTION_GRANT_UNAVAILABLE"
@@ -46,6 +47,7 @@ export interface PriceSelectedPromotionInput {
 export interface SelectedPromotionTerms {
   readonly promotionGrantId: string;
   readonly firstOrderOnly: boolean;
+  readonly requiresFirstOrderClaim: boolean;
   readonly discountAmount: number;
   readonly lineDiscounts: readonly Readonly<{
     lineId: string;
@@ -58,17 +60,32 @@ type PromotionTx = Prisma.TransactionClient;
 type PromotionReader = Pick<PromotionTx, "promotionGrant" | "order">;
 type PromotionDiscriminatorReader = Pick<PromotionTx, "promotionGrant">;
 
-export async function selectedPromotionFirstOrderOnly(
+export interface SelectedPromotionFirstOrderClassification {
+  readonly firstOrderOnly: boolean;
+  readonly requiresFirstOrderClaim: boolean;
+}
+
+export async function selectedPromotionFirstOrderClassification(
   client: PromotionDiscriminatorReader,
   promotionGrantId: string,
-): Promise<boolean> {
+): Promise<SelectedPromotionFirstOrderClassification> {
   if (!promotionGrantId.trim()) unavailable("Selected promotion grant is unavailable.");
   const grant = await client.promotionGrant.findUnique({
     where: { id: promotionGrantId },
-    select: { policyVersion: { select: { firstOrderOnly: true } } },
+    select: {
+      recoveredFromGrantId: true,
+      policyVersion: { select: { firstOrderOnly: true } },
+    },
   });
   if (!grant) unavailable("Selected promotion grant is unavailable.");
-  return grant.policyVersion.firstOrderOnly;
+  if (!await hasValidPromotionRecoveryLineage(client, promotionGrantId)) {
+    unavailable("Selected promotion grant recovery provenance is unavailable.");
+  }
+  return Object.freeze({
+    firstOrderOnly: grant.policyVersion.firstOrderOnly,
+    requiresFirstOrderClaim: grant.policyVersion.firstOrderOnly
+      && grant.recoveredFromGrantId === null,
+  });
 }
 
 export async function priceSelectedPromotion(
@@ -78,8 +95,13 @@ export async function priceSelectedPromotion(
   requirePromotionInput(input);
   const grant = await loadGrant(client, input.promotionGrantId, input.marketCode);
   if (!grant) unavailable("Selected promotion grant is unavailable.");
+  if (!await hasValidPromotionRecoveryLineage(client, grant.id)) {
+    unavailable("Selected promotion grant recovery provenance is unavailable.");
+  }
   validateGrant(grant, input);
-  if (grant.policyVersion.firstOrderOnly
+  const requiresFirstOrderClaim = grant.policyVersion.firstOrderOnly
+    && grant.recoveredFromGrantId === null;
+  if (requiresFirstOrderClaim
     && await financiallyCompletedOrderExists(client, input.userId)) {
     throw new PromotionRedemptionError(
       "PROMOTION_FIRST_ORDER_REQUIRED",
@@ -113,6 +135,7 @@ export async function priceSelectedPromotion(
   return Object.freeze({
     promotionGrantId: grant.id,
     firstOrderOnly: grant.policyVersion.firstOrderOnly,
+    requiresFirstOrderClaim,
     discountAmount,
     lineDiscounts: Object.freeze(lineDiscounts),
     expiresAt: grant.expiresAt,
@@ -124,11 +147,13 @@ export async function reserveSelectedPromotionForContact(
   input: PriceSelectedPromotionInput & {
     readonly reservationOwnerSessionId: string;
     readonly expectedFirstOrderOnly: boolean;
+    readonly expectedRequiresFirstOrderClaim: boolean;
   },
 ): Promise<SelectedPromotionTerms> {
   await lockPromotionGrant(tx, input.promotionGrantId);
   const terms = await priceSelectedPromotion(tx, input);
   if (terms.firstOrderOnly !== input.expectedFirstOrderOnly) stale();
+  if (terms.requiresFirstOrderClaim !== input.expectedRequiresFirstOrderClaim) stale();
   const grant = await tx.promotionGrant.findUnique({
     where: { id: input.promotionGrantId },
     select: { reservedCheckoutSessionId: true },

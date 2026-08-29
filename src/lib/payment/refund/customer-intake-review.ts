@@ -6,6 +6,7 @@ import {
   type CustomerRefundIntake,
   type RefundAttempt,
   type RefundAttemptLine,
+  type RefundAttemptLineEconomicAllocation,
   type RefundAttemptTransition,
 } from "@prisma/client";
 import {
@@ -46,7 +47,10 @@ type LockedIntake = Pick<CustomerRefundIntake,
 
 type AuditedRefundAttempt = RefundAttempt & {
   transitions: RefundAttemptTransition[];
-  lines: RefundAttemptLine[];
+  lines: Array<RefundAttemptLine & {
+    economicAllocation: RefundAttemptLineEconomicAllocation | null;
+  }>;
+  order: { promotionGrantId: string | null };
 };
 
 export class CustomerIntakeReviewInvariantError extends Error {}
@@ -198,7 +202,10 @@ async function persistApproval(
     reviewedAt: input.reviewedAt,
     reviewedByUserId: input.reviewedByUserId,
     approvedRefundAttemptId: request.refundAttempt.id,
-  }, toApprovedRefundAttemptProjection(request.refundAttempt), false);
+  }, toApprovedRefundAttemptProjection({
+    ...request.refundAttempt,
+    lines: input.lines,
+  }), false);
 }
 
 function updateApprovedIntake(
@@ -285,8 +292,12 @@ async function resolveApprovalReplay(
   const attempt = await tx.refundAttempt.findUnique({
     where: { id: intake.approvedRefundAttemptId },
     include: {
+      order: { select: { promotionGrantId: true } },
       transitions: { orderBy: { createdAt: "asc" } },
-      lines: { orderBy: { orderItemId: "asc" } },
+      lines: {
+        orderBy: { orderItemId: "asc" },
+        include: { economicAllocation: true },
+      },
     },
   });
   if (!attempt) {
@@ -294,7 +305,8 @@ async function resolveApprovalReplay(
   }
   assertApprovalAttemptIdentity(intake, attempt);
   assertApprovalCreationEvidence(intake, attempt);
-  if (attempt.lines.length > 0 && !sameCanonicalRefundLines(attempt.lines, requestedLines)) {
+  const persistedLines = canonicalApprovalReplayLines(intake, attempt);
+  if (persistedLines.length > 0 && !sameCanonicalRefundLines(persistedLines, requestedLines)) {
     throw invariant(`Approved intake line decision mismatch: intakeId=${intake.id}, orderId=${intake.orderId}`);
   }
   return approveCustomerIntakeReviewSuccess({
@@ -304,7 +316,29 @@ async function resolveApprovalReplay(
     reviewedAt: intake.reviewedAt,
     reviewedByUserId: intake.reviewedByUserId,
     approvedRefundAttemptId: intake.approvedRefundAttemptId,
-  }, toApprovedRefundAttemptProjection(attempt), true);
+  }, toApprovedRefundAttemptProjection({ ...attempt, lines: persistedLines }), true);
+}
+
+function canonicalApprovalReplayLines(
+  intake: LockedIntake,
+  attempt: AuditedRefundAttempt,
+): readonly CanonicalRefundLine[] {
+  if (
+    attempt.order.promotionGrantId !== null
+    && (attempt.lines.length === 0 || attempt.lines.some((line) => line.economicAllocation === null))
+  ) {
+    throw invariant(`Approved coupon intake economic evidence is incomplete: intakeId=${intake.id}, orderId=${intake.orderId}`);
+  }
+  return attempt.lines.map(storedEconomicLine);
+}
+
+function storedEconomicLine(
+  line: AuditedRefundAttempt["lines"][number],
+): CanonicalRefundLine {
+  const merchandiseRefundAmount = line.economicAllocation?.merchandiseRefundAmount;
+  return merchandiseRefundAmount === undefined
+    ? { orderItemId: line.orderItemId, quantity: line.quantity }
+    : { orderItemId: line.orderItemId, quantity: line.quantity, merchandiseRefundAmount };
 }
 
 function assertApprovalAttemptIdentity(intake: LockedIntake, attempt: AuditedRefundAttempt): void {

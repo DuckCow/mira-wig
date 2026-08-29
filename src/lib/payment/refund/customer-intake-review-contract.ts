@@ -66,7 +66,12 @@ export type ApproveCustomerRefundIntakeFailureCode =
   | "REFUND_LINE_ITEM_NOT_FOUND"
   | "OVER_REFUND_LINE_QUANTITY"
   | "REFUND_LINE_HISTORY_UNATTRIBUTED"
-  | "REFUND_LINE_LEDGER_INCONSISTENT";
+  | "REFUND_LINE_LEDGER_INCONSISTENT"
+  | "REFUND_ECONOMIC_ALLOCATION_REQUIRED"
+  | "REFUND_ECONOMIC_ALLOCATION_UNEXPECTED"
+  | "REFUND_ECONOMIC_ALLOCATION_MISMATCH"
+  | "REFUND_PROMOTION_SNAPSHOT_INCONSISTENT"
+  | "REFUND_ECONOMIC_HISTORY_INCONSISTENT";
 
 export interface RejectCustomerRefundIntakeFailure {
   ok: false;
@@ -172,6 +177,11 @@ const APPROVAL_REQUEST_FAILURES = {
   OVER_REFUND_LINE_QUANTITY: { kind: "expected", code: "OVER_REFUND_LINE_QUANTITY" },
   REFUND_LINE_HISTORY_UNATTRIBUTED: { kind: "expected", code: "REFUND_LINE_HISTORY_UNATTRIBUTED" },
   REFUND_LINE_LEDGER_INCONSISTENT: { kind: "expected", code: "REFUND_LINE_LEDGER_INCONSISTENT" },
+  REFUND_ECONOMIC_ALLOCATION_REQUIRED: { kind: "expected", code: "REFUND_ECONOMIC_ALLOCATION_REQUIRED" },
+  REFUND_ECONOMIC_ALLOCATION_UNEXPECTED: { kind: "expected", code: "REFUND_ECONOMIC_ALLOCATION_UNEXPECTED" },
+  REFUND_ECONOMIC_ALLOCATION_MISMATCH: { kind: "expected", code: "REFUND_ECONOMIC_ALLOCATION_MISMATCH" },
+  REFUND_PROMOTION_SNAPSHOT_INCONSISTENT: { kind: "expected", code: "REFUND_PROMOTION_SNAPSHOT_INCONSISTENT" },
+  REFUND_ECONOMIC_HISTORY_INCONSISTENT: { kind: "expected", code: "REFUND_ECONOMIC_HISTORY_INCONSISTENT" },
   ORDER_NOT_FOUND: { kind: "invariant", code: "ORDER_NOT_FOUND" },
   ORDER_STATUS_CONFLICT: { kind: "invariant", code: "ORDER_STATUS_CONFLICT" },
   ORDER_CANCELLED: { kind: "expected", code: "NOT_APPROVABLE" },
@@ -285,7 +295,13 @@ export function toApprovedRefundAttemptProjection(
     amount: attempt.amount,
     currency: attempt.currency,
     requestedAt: attempt.requestedAt,
-    lines: attempt.lines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })),
+    lines: attempt.lines.map((line) => line.merchandiseRefundAmount === undefined
+      ? { orderItemId: line.orderItemId, quantity: line.quantity }
+      : {
+          orderItemId: line.orderItemId,
+          quantity: line.quantity,
+          merchandiseRefundAmount: line.merchandiseRefundAmount,
+        }),
   };
 }
 

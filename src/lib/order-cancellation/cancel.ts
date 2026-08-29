@@ -22,6 +22,7 @@ import {
 } from "@/lib/payment/refund/lines";
 import { prepareRefundAttempt } from "@/lib/payment/refund/prepare";
 import { persistRefundRequestAfterOrderLock } from "@/lib/payment/refund/request-persistence";
+import { deriveRefundEconomicLines } from "@/lib/payment/refund/economic-validation";
 import { resolveRefundRequestCreationEvidence } from "@/lib/payment/refund/request-evidence";
 import {
   normalizeCustomerCancellationInput,
@@ -86,10 +87,14 @@ async function persistAcceptedCancellation(
   input: AuthenticatedCustomerCancellationInput,
   initialRefundAttemptId: string,
 ): Promise<CancellationResult> {
-  const lines = fullOrderLines(aggregate);
+  const baseLines = fullOrderLines(aggregate);
   const capacity = deriveRefundLineCapacity(aggregate.id, aggregate.items, aggregate.refundAttempts);
-  if (!capacity.ok || !hasFullRemainingLineCapacity(lines, capacity.remainingByOrderItemId)) {
+  if (!capacity.ok || !hasFullRemainingLineCapacity(baseLines, capacity.remainingByOrderItemId)) {
     return failure("REFUND_HISTORY_CONFLICT", "Refund line history requires manual review.");
+  }
+  const economicLines = deriveRefundEconomicLines(aggregate, aggregate.payment.amount, baseLines);
+  if (!economicLines.ok) {
+    return failure("REFUND_HISTORY_CONFLICT", "Coupon refund economics require manual review.");
   }
 
   const acceptedAt = await captureOperationTime(tx);
@@ -117,7 +122,7 @@ async function persistAcceptedCancellation(
     tx,
     aggregate,
     prepared.refundAttempt,
-    lines,
+    economicLines.lines,
   );
   if (!persisted.ok) throw new CancellationRollbackError(persisted.code);
 
@@ -192,7 +197,10 @@ function loadCancellationAggregate(reader: Pick<PrismaClient, "order">, orderId:
       refundAttempts: {
         orderBy: { createdAt: "asc" },
         include: {
-          lines: { orderBy: { orderItemId: "asc" } },
+          lines: {
+            orderBy: { orderItemId: "asc" },
+            include: { economicAllocation: true },
+          },
           transitions: { orderBy: { createdAt: "asc" } },
           executionCommand: {
             include: { evidence: { orderBy: { createdAt: "asc" } } },
@@ -349,6 +357,17 @@ function hasCoherentInitialCancellationAttempt(
   cancellation: NonNullable<CancellationAggregate["cancellation"]>,
   initial: CancellationAttempt,
 ): boolean {
+  const expectedLines = deriveRefundEconomicLines(
+    {
+      ...aggregate,
+      // Initial C0 acceptance owns the full captured-payment/full-quantity decision.
+      // Later financial outcomes change the current obligation, never this creation identity.
+      refundAttempts: [],
+    },
+    aggregate.payment.amount,
+    fullOrderLines(aggregate),
+  );
+  if (!expectedLines.ok) return false;
   return [
     initial.orderId === aggregate.id,
     initial.paymentId === aggregate.payment.id,
@@ -359,9 +378,18 @@ function hasCoherentInitialCancellationAttempt(
     initial.reason === CUSTOMER_CANCELLATION_REFUND_REASON,
     initial.requestedAt.getTime() === cancellation.acceptedAt.getTime(),
     resolveRefundRequestCreationEvidence(initial.transitions, initial).kind === "matched",
-    sameCanonicalRefundLines(initial.lines, fullOrderLines(aggregate)),
+    sameCanonicalRefundLines(initial.lines.map(storedEconomicLine), expectedLines.lines),
     aggregate.items.every(hasCoherentCancelledManufacturingRequest),
   ].every(Boolean);
+}
+
+function storedEconomicLine(
+  line: CancellationAttempt["lines"][number],
+): CanonicalRefundLine {
+  const merchandiseRefundAmount = line.economicAllocation?.merchandiseRefundAmount;
+  return merchandiseRefundAmount === undefined
+    ? { orderItemId: line.orderItemId, quantity: line.quantity }
+    : { orderItemId: line.orderItemId, quantity: line.quantity, merchandiseRefundAmount };
 }
 
 function hasCoherentCancelledManufacturingRequest(

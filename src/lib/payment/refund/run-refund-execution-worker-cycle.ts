@@ -34,6 +34,10 @@ import {
   type RefundExecutionWorkerOutcomeKind,
 } from "./worker-result-classification";
 import { selectRefundExecutionWorkerCandidates } from "./worker-selector";
+import {
+  attemptPromotionRecoveryAfterRefundCommand,
+  reconcilePromotionRecoveries,
+} from "@/lib/promotion/recovery-reentry";
 
 type ActivationEnv = Readonly<Record<string, string | undefined>>;
 type MutableCounters = { -readonly [Key in keyof RefundExecutionWorkerCycleCounters]: number };
@@ -75,7 +79,18 @@ export async function runRefundExecutionWorkerCycle(
     client, prepared, allocation, route, normalized.input.workerOwner, env, counters, control,
   );
   if (!processed.ok) return processed;
-  return processed.stopped ? workerCycleStopped(counters) : workerCycleSuccess(counters);
+  return finishProcessedCycle(client, env, counters, processed.stopped);
+}
+
+async function finishProcessedCycle(
+  client: PrismaClient,
+  env: ActivationEnv,
+  counters: MutableCounters,
+  stopped: boolean,
+): Promise<RefundExecutionWorkerCycleResult> {
+  if (stopped) return workerCycleStopped(counters);
+  await runPromotionRecoveryReentry(client, env, counters);
+  return workerCycleSuccess(counters);
 }
 
 async function prepareControlledCycle(
@@ -219,6 +234,14 @@ async function routeOneCandidate(
   counters.attemptedCount += 1;
   try {
     const outcome = await route(client, candidate, workerOwner, env);
+    const recoveryOutcome = await attemptPromotionRecoveryAfterRefundCommand(
+      client,
+      candidate.commandId,
+      env,
+    );
+    if (recoveryOutcome === "INCONSISTENT"
+      || recoveryOutcome === "CONFIG_INVALID"
+      || recoveryOutcome === "FAILED") counters.inconsistentCount += 1;
     if (stopsRefundExecutionWorkerCycle(outcome)) {
       counters.failedCount += 1;
       return workerFailure(outcome.kind === "CONFIG_INVALID"
@@ -231,6 +254,16 @@ async function routeOneCandidate(
     counters.failedCount += 1;
     return workerFailure("SYSTEMIC_FAILURE", counters);
   }
+}
+
+async function runPromotionRecoveryReentry(
+  client: PrismaClient,
+  env: ActivationEnv,
+  counters: MutableCounters,
+): Promise<void> {
+  const outcome = await reconcilePromotionRecoveries(client, env);
+  counters.inconsistentCount += outcome.inconsistentCount + outcome.failedCount;
+  if (outcome.kind === "CONFIG_INVALID") counters.inconsistentCount += 1;
 }
 
 function completedOutcomeKind(

@@ -37,6 +37,7 @@ const ORDER_DETAIL_SELECT = {
   subtotalAmount: true,
   shippingAmount: true,
   totalAmount: true,
+  promotionGrantId: true,
   cancellation: {
     select: {
       acceptedAt: true,
@@ -190,6 +191,7 @@ export type AdminOrderDetailReadModel = Omit<AdminOrderDetailViewModel, "items">
     canReplaceRefund: boolean;
   };
   customerRefundIntakes: AdminCustomerRefundIntakeDetail[];
+  requiresRefundEconomicAllocation?: boolean;
 };
 
 export async function loadAdminOrderDetail(
@@ -218,6 +220,7 @@ export async function loadAdminOrderDetail(
     }),
     cancellation: cancellationProjection(order),
     customerRefundIntakes: toSafeCustomerRefundIntakes(order),
+    requiresRefundEconomicAllocation: order.promotionGrantId !== null,
   };
 }
 

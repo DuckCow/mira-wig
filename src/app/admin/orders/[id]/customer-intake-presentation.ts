@@ -10,6 +10,7 @@ import {
 import { getAdminCustomerRefundIntakeErrorMessage } from "@/lib/admin-messages";
 import { formatPersistedMoney } from "@/lib/market/persisted-money";
 import type { AdminCustomerRefundIntakeDetail } from "./admin-order-detail-data";
+import type { RefundLineInput } from "@/lib/payment/refund/lines";
 
 export type CustomerRefundIntakeApproveState = "enabled" | "disabled" | "misconfigured";
 
@@ -145,7 +146,7 @@ export function buildApproveCustomerRefundIntakePayload(
   intakeId: string,
   amountMinor: string,
   merchantRationale: string,
-  lines: readonly { orderItemId: string; quantity: number }[],
+  lines: readonly RefundLineInput[],
 ) {
   return { orderId, intakeId, amountMinor, merchantRationale, lines };
 }
