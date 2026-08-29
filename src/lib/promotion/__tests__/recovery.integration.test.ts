@@ -306,8 +306,12 @@ describe("promotion recovery entitlement", () => {
         expect(firstClaim.kind).toBe("CLAIMED");
         expect(secondClaim.kind).toBe("CLAIMED");
         const orderIds = [...firstClaim.orderIds, ...secondClaim.orderIds];
-        expect(firstClaim.orderIds).toHaveLength(25);
-        expect(secondClaim.orderIds.length).toBeLessThanOrEqual(25);
+        const firstClaimCount = firstClaim.orderIds.length;
+        const secondClaimCount = secondClaim.orderIds.length;
+        expect(firstClaimCount).toBeLessThanOrEqual(25);
+        expect(secondClaimCount).toBeLessThanOrEqual(25);
+        expect(Math.min(firstClaimCount, secondClaimCount)).toBe(6);
+        expect(Math.max(firstClaimCount, secondClaimCount)).toBe(25);
         expect(orderIds).toHaveLength(31);
         expect(new Set(orderIds).size).toBe(31);
         expect(orderIds).toContain(eligible.orderId);
