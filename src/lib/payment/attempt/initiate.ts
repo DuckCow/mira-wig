@@ -43,7 +43,7 @@ import type {
 import {
   PromotionRedemptionError,
   reserveSelectedPromotionForContact,
-  selectedPromotionFirstOrderOnly,
+  selectedPromotionFirstOrderClassification,
 } from "@/lib/promotion";
 
 type InitiateTx = Prisma.TransactionClient;
@@ -544,14 +544,15 @@ async function reservePromotionAtContactBoundary(
 ): Promise<void> {
   if (session.promotionGrantId === null) return;
   try {
-    const firstOrderOnly = await selectedPromotionFirstOrderOnly(tx, session.promotionGrantId);
-    if (firstOrderOnly) {
+    const classification = await selectedPromotionFirstOrderClassification(tx, session.promotionGrantId);
+    if (classification.requiresFirstOrderClaim) {
       await acquireFirstOrderPromotionClaim(tx, session, contactBoundaryNow);
     }
     await reserveSelectedPromotionForContact(tx, {
       promotionGrantId: session.promotionGrantId,
       reservationOwnerSessionId: session.id,
-      expectedFirstOrderOnly: firstOrderOnly,
+      expectedFirstOrderOnly: classification.firstOrderOnly,
+      expectedRequiresFirstOrderClaim: classification.requiresFirstOrderClaim,
       userId: session.userId,
       marketCode: session.marketCode,
       currency: session.currency,

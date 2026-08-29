@@ -79,6 +79,7 @@ export function AdminOrderDetailView({
         approveState={approveState}
         currency={order.currency}
         remainingRequestableAmount={order.refundReview.remainingRequestableAmount}
+        requiresEconomicAllocation={order.requiresRefundEconomicAllocation === true}
         items={order.items}
       />
       <RefundLedger orderId={order.id} attempts={order.refundAttempts} />

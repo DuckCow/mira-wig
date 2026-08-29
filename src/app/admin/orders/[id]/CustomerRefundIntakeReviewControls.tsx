@@ -27,6 +27,7 @@ import {
   type ReviewResultField,
   type ReviewResultPresentation,
 } from "./customer-intake-presentation";
+import type { RefundLineInput } from "@/lib/payment/refund/lines";
 
 interface Props {
   orderId: string;
@@ -55,6 +56,9 @@ export function CustomerRefundIntakeReviewControls({
   const [merchantRationale, setMerchantRationale] = useState("");
   const [lineQuantities, setLineQuantities] = useState<Record<string, string>>(() => (
     Object.fromEntries(lineOptions.map((option) => [option.orderItemId, "0"]))
+  ));
+  const [lineEconomicAmounts, setLineEconomicAmounts] = useState<Record<string, string>>(() => (
+    Object.fromEntries(lineOptions.map((option) => [option.orderItemId, ""]))
   ));
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
@@ -89,7 +93,7 @@ export function CustomerRefundIntakeReviewControls({
       return;
     }
     if (kind === "approve") {
-      const selectedLines = buildSelectedLines(lineOptions, lineQuantities);
+      const selectedLines = buildSelectedLines(lineOptions, lineQuantities, lineEconomicAmounts);
       if (!selectedLines.ok) {
         setFieldErrors({ lines: selectedLines.message });
         return;
@@ -132,7 +136,7 @@ export function CustomerRefundIntakeReviewControls({
             intakeId,
             amountMinor,
             merchantRationale,
-            requireSelectedLines(lineOptions, lineQuantities),
+            requireSelectedLines(lineOptions, lineQuantities, lineEconomicAmounts),
           ),
         );
         applyPresentation(presentApproveCustomerRefundIntakeResult(result), "approve");
@@ -157,6 +161,7 @@ export function CustomerRefundIntakeReviewControls({
         setAmountMinor("");
         setMerchantRationale("");
         setLineQuantities(Object.fromEntries(lineOptions.map((option) => [option.orderItemId, "0"])));
+        setLineEconomicAmounts(Object.fromEntries(lineOptions.map((option) => [option.orderItemId, ""])));
       }
     }
     showToast({ message: presentation.message, variant: presentation.variant });
@@ -194,11 +199,16 @@ export function CustomerRefundIntakeReviewControls({
           rationaleError={fieldErrors.merchantRationale}
           lineOptions={lineOptions}
           lineQuantities={lineQuantities}
+          lineEconomicAmounts={lineEconomicAmounts}
           linesError={fieldErrors.lines}
           isPending={isPending}
           onAmountChange={setAmountMinor}
           onRationaleChange={setMerchantRationale}
           onLineQuantityChange={(orderItemId, value) => setLineQuantities((current) => ({
+            ...current,
+            [orderItemId]: value,
+          }))}
+          onLineEconomicAmountChange={(orderItemId, value) => setLineEconomicAmounts((current) => ({
             ...current,
             [orderItemId]: value,
           }))}
@@ -221,38 +231,69 @@ export function CustomerRefundIntakeReviewControls({
 }
 
 type SelectedLinesResult =
-  | { ok: true; lines: readonly { orderItemId: string; quantity: number }[] }
+  | { ok: true; lines: readonly RefundLineInput[] }
   | { ok: false; message: string };
 
 function buildSelectedLines(
   options: readonly RefundLineSelectionOption[],
   quantities: Readonly<Record<string, string>>,
+  economicAmounts: Readonly<Record<string, string>>,
 ): SelectedLinesResult {
-  const lines: { orderItemId: string; quantity: number }[] = [];
+  const lines: RefundLineInput[] = [];
   for (const option of options) {
-    const raw = quantities[option.orderItemId] ?? "0";
-    if (!/^(0|[1-9][0-9]*)$/.test(raw)) {
-      return { ok: false, message: "상품별 수량은 0 이상의 정수로 입력해 주세요." };
-    }
-    const quantity = Number(raw);
-    if (!Number.isSafeInteger(quantity) || quantity < 0) {
-      return { ok: false, message: "상품별 수량을 확인해 주세요." };
-    }
-    if (quantity === 0) continue;
-    if (option.remainingQuantity === null || quantity > option.remainingQuantity) {
-      return { ok: false, message: "현재 귀속 가능한 상품 수량을 초과했습니다." };
-    }
-    lines.push({ orderItemId: option.orderItemId, quantity });
+    const selected = buildSelectedLine(
+      option,
+      quantities[option.orderItemId] ?? "0",
+      economicAmounts[option.orderItemId] ?? "",
+    );
+    if (selected.kind === "invalid") return { ok: false, message: selected.message };
+    if (selected.kind === "selected") lines.push(selected.line);
   }
   return lines.length > 0
     ? { ok: true, lines }
     : { ok: false, message: "한 개 이상의 상품 수량을 선택해 주세요." };
 }
 
+type SelectedLineResult =
+  | { kind: "skipped" }
+  | { kind: "selected"; line: RefundLineInput }
+  | { kind: "invalid"; message: string };
+
+function buildSelectedLine(
+  option: RefundLineSelectionOption,
+  rawQuantity: string,
+  rawEconomicAmount: string,
+): SelectedLineResult {
+  const quantity = parseUnsignedInteger(rawQuantity);
+  if (quantity === null) return { kind: "invalid", message: "상품별 수량은 0 이상의 정수로 입력해 주세요." };
+  if (quantity === 0) return { kind: "skipped" };
+  if (option.remainingQuantity === null || quantity > option.remainingQuantity) {
+    return { kind: "invalid", message: "현재 귀속 가능한 상품 수량을 초과했습니다." };
+  }
+  if (!option.requiresEconomicAllocation) {
+    return { kind: "selected", line: { orderItemId: option.orderItemId, quantity } };
+  }
+  const merchandiseRefundAmount = parseUnsignedInteger(rawEconomicAmount);
+  if (merchandiseRefundAmount === null) {
+    return { kind: "invalid", message: "쿠폰 주문의 선택 상품마다 상품 환불액을 입력해 주세요." };
+  }
+  return {
+    kind: "selected",
+    line: { orderItemId: option.orderItemId, quantity, merchandiseRefundAmount },
+  };
+}
+
+function parseUnsignedInteger(value: string): number | null {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function requireSelectedLines(
   options: readonly RefundLineSelectionOption[],
   quantities: Readonly<Record<string, string>>,
-): readonly { orderItemId: string; quantity: number }[] {
-  const result = buildSelectedLines(options, quantities);
+  economicAmounts: Readonly<Record<string, string>>,
+): readonly RefundLineInput[] {
+  const result = buildSelectedLines(options, quantities, economicAmounts);
   return result.ok ? result.lines : [];
 }

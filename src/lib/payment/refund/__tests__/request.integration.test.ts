@@ -454,6 +454,66 @@ describe("requestRefundAttempt", () => {
       .resolves.toBe(2);
   });
 
+  it("requires, persists, and replays exact coupon economic allocation as immutable identity", async () => {
+    const fixture = await createOrder(ctx);
+    await expect(db.$transaction(async (tx) => {
+      await installCouponEconomics(tx, fixture, ctx.userId);
+      const refundAttemptId = `refund_coupon_${randomUUID()}`;
+      const base = input(fixture.orderId, {
+        refundAttemptId,
+        amount: 400,
+        lines: [{
+          orderItemId: fixture.orderItemId,
+          quantity: 1,
+          merchandiseRefundAmount: 334,
+        }],
+      });
+
+      await expect(requestRefundAttemptInTransaction(tx, {
+        ...base,
+        refundAttemptId: `refund_coupon_missing_${randomUUID()}`,
+        lines: [{ orderItemId: fixture.orderItemId, quantity: 1 }],
+      })).resolves.toMatchObject({ ok: false, code: "REFUND_ECONOMIC_ALLOCATION_REQUIRED" });
+      await expect(requestRefundAttemptInTransaction(tx, {
+        ...base,
+        refundAttemptId: `refund_coupon_wrong_${randomUUID()}`,
+        lines: [{
+          orderItemId: fixture.orderItemId,
+          quantity: 1,
+          merchandiseRefundAmount: 335,
+        }],
+      })).resolves.toMatchObject({ ok: false, code: "REFUND_ECONOMIC_ALLOCATION_MISMATCH" });
+
+      const first = success(await requestRefundAttemptInTransaction(tx, base));
+      const replay = success(await requestRefundAttemptInTransaction(tx, {
+        ...base,
+        now: new Date(NOW.getTime() + 1_000),
+      }));
+      const conflict = await requestRefundAttemptInTransaction(tx, {
+        ...base,
+        lines: [{
+          orderItemId: fixture.orderItemId,
+          quantity: 1,
+          merchandiseRefundAmount: 333,
+        }],
+      });
+      const allocation = await tx.refundAttemptLineEconomicAllocation.findUniqueOrThrow({
+        where: {
+          refundAttemptId_orderItemId: {
+            refundAttemptId,
+            orderItemId: fixture.orderItemId,
+          },
+        },
+      });
+
+      expect(first.replayed).toBe(false);
+      expect(replay.replayed).toBe(true);
+      expect(conflict).toMatchObject({ ok: false, code: "IDEMPOTENCY_CONFLICT" });
+      expect(allocation.merchandiseRefundAmount).toBe(334);
+      throw new CallerOwnedTransactionRollbackProbe();
+    })).rejects.toBeInstanceOf(CallerOwnedTransactionRollbackProbe);
+  });
+
   it("enforces per-item remaining quantity while terminal non-success lines remain historical", async () => {
     const fixture = await createOrder(ctx, { orderStatus: OrderStatus.PARTIALLY_REFUNDED });
     await seedAttemptWithIdentity(fixture, RefundAttemptStatus.SUCCEEDED, 100, { lineQuantity: 2 });
@@ -1152,6 +1212,42 @@ async function createOrderItem(
     },
   });
   return itemId;
+}
+
+async function installCouponEconomics(
+  tx: Prisma.TransactionClient,
+  fixture: OrderFixture,
+  userId: string,
+): Promise<void> {
+  const policy = await tx.promotionPolicyVersion.create({
+    data: {
+      programKey: `refund_coupon_${randomUUID()}`,
+      version: 1,
+      kind: "SIGNUP",
+      startsAt: new Date(NOW.getTime() - 1_000),
+      firstOrderOnly: true,
+      recoveryGraceDays: 30,
+    },
+  });
+  const grant = await tx.promotionGrant.create({
+    data: {
+      userId,
+      policyVersionId: policy.id,
+      grantKey: `refund_coupon_grant_${randomUUID()}`,
+      originMarketCode: MARKET_CODE,
+      issuedAt: new Date(NOW.getTime() - 2_000),
+      validFrom: new Date(NOW.getTime() - 2_000),
+      redeemedAt: NOW,
+    },
+  });
+  await tx.orderItem.update({
+    where: { id: fixture.orderItemId },
+    data: { unitAmount: 400, discountAmount: 200 },
+  });
+  await tx.order.update({
+    where: { id: fixture.orderId },
+    data: { promotionGrantId: grant.id, subtotalAmount: 1_200, discountAmount: 200 },
+  });
 }
 
 async function expectLedgerIdentityFailure(fixture: OrderFixture): Promise<void> {

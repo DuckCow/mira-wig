@@ -23,6 +23,11 @@ import {
   type RequestRefundAttemptFailureCode,
 } from "@/lib/payment/refund/request";
 import { normalizeRefundLines, type RefundLineInput } from "@/lib/payment/refund/lines";
+import {
+  ensurePromotionRecoveryForOrder,
+  PromotionRecoveryActivationConfigError,
+  type PromotionRecoveryClassification,
+} from "@/lib/promotion";
 
 export interface AdminRequestRefundAttemptInput {
   orderId: string;
@@ -88,6 +93,17 @@ export type AdminClaimRefundExecutionResult =
   | { success: true; outcome: "CLAIMED" | "REPLAYED" | "ALREADY_CLAIMED" }
   | { success: false; errorCode: AdminClaimRefundExecutionErrorCode };
 
+export type AdminRetryPromotionRecoveryResult =
+  | {
+      success: true;
+      issuedNow: boolean;
+      classification: PromotionRecoveryClassification;
+    }
+  | {
+      success: false;
+      errorCode: "UNAUTHENTICATED" | "FORBIDDEN" | "INVALID_INPUT" | "FEATURE_DISABLED" | "NOT_FOUND";
+    };
+
 type InputValidationResult =
   | { success: true; input: AdminRequestRefundAttemptInput }
   | ActionFailure;
@@ -120,6 +136,11 @@ const REQUEST_FAILURE_CODE_MAP: Record<RequestRefundAttemptFailureCode, AdminRef
   OVER_REFUND_LINE_QUANTITY: "INSUFFICIENT_REFUNDABLE",
   REFUND_LINE_HISTORY_UNATTRIBUTED: "MANUAL_REVIEW_REQUIRED",
   REFUND_LINE_LEDGER_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
+  REFUND_ECONOMIC_ALLOCATION_REQUIRED: "INVALID_INPUT",
+  REFUND_ECONOMIC_ALLOCATION_UNEXPECTED: "INVALID_INPUT",
+  REFUND_ECONOMIC_ALLOCATION_MISMATCH: "INVALID_INPUT",
+  REFUND_PROMOTION_SNAPSHOT_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
+  REFUND_ECONOMIC_HISTORY_INCONSISTENT: "MANUAL_REVIEW_REQUIRED",
   DISPUTE_REVIEW_REQUIRED: "MANUAL_REVIEW_REQUIRED",
   INVALID_ORDER_ID: "INVALID_INPUT",
   INVALID_REFUND_ATTEMPT_ID: "CONFLICT",
@@ -251,6 +272,44 @@ export async function claimRefundExecutionAction(
   revalidatePath(`/admin/orders/${validated.input.orderId}`);
   revalidatePath("/admin/refunds/execution");
   return { success: true, outcome: result.replayed ? "REPLAYED" : "CLAIMED" };
+}
+
+export async function retryPromotionRecoveryAction(
+  input: unknown,
+): Promise<AdminRetryPromotionRecoveryResult> {
+  const guard = await requireAdmin();
+  if (!guard.success) return guard;
+  const orderId = normalizePromotionRecoveryRetryOrderId(input);
+  if (orderId === null) return { success: false, errorCode: "INVALID_INPUT" };
+  try {
+    const result = await ensurePromotionRecoveryForOrder(db, orderId);
+    if (!result.ok) return promotionRecoveryRetryFailure(result.code);
+    revalidatePath(`/admin/orders/${orderId}`);
+    return {
+      success: true,
+      issuedNow: result.issuedNow,
+      classification: result.snapshot.classification,
+    };
+  } catch (error) {
+    if (error instanceof PromotionRecoveryActivationConfigError) {
+      return { success: false, errorCode: "FEATURE_DISABLED" };
+    }
+    throw error;
+  }
+}
+
+function normalizePromotionRecoveryRetryOrderId(input: unknown): string | null {
+  if (!isPlainRecord(input) || Reflect.ownKeys(input).length !== 1) return null;
+  const orderId = input.orderId;
+  return typeof orderId === "string" && orderId.trim() ? orderId.trim() : null;
+}
+
+function promotionRecoveryRetryFailure(
+  code: "FEATURE_DISABLED" | "INVALID_ORDER_ID" | "ORDER_NOT_FOUND",
+): Extract<AdminRetryPromotionRecoveryResult, { success: false }> {
+  if (code === "ORDER_NOT_FOUND") return { success: false, errorCode: "NOT_FOUND" };
+  if (code === "INVALID_ORDER_ID") return { success: false, errorCode: "INVALID_INPUT" };
+  return { success: false, errorCode: "FEATURE_DISABLED" };
 }
 
 function validateInput(input: unknown): InputValidationResult {

@@ -6,11 +6,13 @@ export const POSTGRES_INT_MAX = 2_147_483_647;
 export interface RefundLineInput {
   readonly orderItemId: string;
   readonly quantity: number;
+  readonly merchandiseRefundAmount?: number;
 }
 
 export interface CanonicalRefundLine {
   readonly orderItemId: string;
   readonly quantity: number;
+  readonly merchandiseRefundAmount?: number;
 }
 
 export type NormalizeRefundLinesResult =
@@ -46,11 +48,11 @@ export function sameCanonicalRefundLines(
   right: readonly RefundLineInput[],
 ): boolean {
   const canonicalLeft = normalizeRefundLines(
-    left.map(({ orderItemId, quantity }) => ({ orderItemId, quantity })),
+    left.map(canonicalComparableLine),
     { allowEmpty: true },
   );
   const canonicalRight = normalizeRefundLines(
-    right.map(({ orderItemId, quantity }) => ({ orderItemId, quantity })),
+    right.map(canonicalComparableLine),
     { allowEmpty: true },
   );
   if (!canonicalLeft.ok || !canonicalRight.ok || canonicalLeft.lines.length !== canonicalRight.lines.length) {
@@ -59,6 +61,8 @@ export function sameCanonicalRefundLines(
   return canonicalLeft.lines.every((line, index) => (
     line.orderItemId === canonicalRight.lines[index]?.orderItemId
       && line.quantity === canonicalRight.lines[index]?.quantity
+      && line.merchandiseRefundAmount
+        === canonicalRight.lines[index]?.merchandiseRefundAmount
   ));
 }
 
@@ -107,7 +111,16 @@ function normalizeRefundLine(
   if (!orderItemId || !isPositivePostgresInteger(value.quantity)) {
     return invalidLines("Refund line item and quantity must be valid.");
   }
-  return { ok: true, line: Object.freeze({ orderItemId, quantity: value.quantity }) };
+  if (
+    "merchandiseRefundAmount" in value
+    && !isNonnegativePostgresInteger(value.merchandiseRefundAmount)
+  ) {
+    return invalidLines("Refund line economic allocation must be a nonnegative integer.");
+  }
+  const line = "merchandiseRefundAmount" in value
+    ? { orderItemId, quantity: value.quantity, merchandiseRefundAmount: value.merchandiseRefundAmount }
+    : { orderItemId, quantity: value.quantity };
+  return { ok: true, line: Object.freeze(line) };
 }
 
 type QuantityMapResult =
@@ -164,12 +177,33 @@ function isPositivePostgresInteger(value: number): boolean {
   return Number.isInteger(value) && value >= 1 && value <= POSTGRES_INT_MAX;
 }
 
+function isNonnegativePostgresInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value)
+    && value >= 0 && value <= POSTGRES_INT_MAX;
+}
+
 function isPlainRefundLine(value: unknown): value is RefundLineInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Reflect.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return false;
   const keys = Reflect.ownKeys(value);
-  return keys.length === 2 && keys.includes("orderItemId") && keys.includes("quantity");
+  const allowed = new Set(["orderItemId", "quantity", "merchandiseRefundAmount"]);
+  return [
+    keys.length === 2 || keys.length === 3,
+    keys.includes("orderItemId"),
+    keys.includes("quantity"),
+    keys.every((key) => typeof key === "string" && allowed.has(key)),
+  ].every(Boolean);
+}
+
+function canonicalComparableLine(line: RefundLineInput): RefundLineInput {
+  return line.merchandiseRefundAmount === undefined
+    ? { orderItemId: line.orderItemId, quantity: line.quantity }
+    : {
+        orderItemId: line.orderItemId,
+        quantity: line.quantity,
+        merchandiseRefundAmount: line.merchandiseRefundAmount,
+      };
 }
 
 function invalidLines(message: string): Extract<NormalizeRefundLinesResult, { ok: false }> {

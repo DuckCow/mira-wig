@@ -13,10 +13,18 @@ import {
   hasConsistentRefundAttemptLedgerIdentity,
   isTerminalRefundAttemptStatus,
 } from "@/lib/payment/refund/invariants";
-import { deriveRefundLineCapacity, sameCanonicalRefundLines } from "@/lib/payment/refund/lines";
+import {
+  deriveRefundLineCapacity,
+  sameCanonicalRefundLines,
+  type CanonicalRefundLine,
+} from "@/lib/payment/refund/lines";
+import { deriveRefundEconomicLines } from "@/lib/payment/refund/economic-validation";
 import { prepareRefundAttempt } from "@/lib/payment/refund/prepare";
 import { persistRefundRequestAfterOrderLock } from "@/lib/payment/refund/request-persistence";
-import { resolveRefundRequestCreationEvidence } from "@/lib/payment/refund/request-evidence";
+import {
+  buildRefundRequestOperationKey,
+  resolveRefundRequestCreationEvidence,
+} from "@/lib/payment/refund/request-evidence";
 import {
   normalizeReplacementInput,
   type CancellationRefundReplacementResult,
@@ -144,12 +152,16 @@ async function persistReplacement(
   if (!capacity.ok) {
     return failure("REFUND_LINE_LEDGER_INCONSISTENT", "Refund line capacity is inconsistent.");
   }
-  const lines = aggregate.items.flatMap((item) => {
+  const baseLines = aggregate.items.flatMap((item) => {
     const quantity = capacity.remainingByOrderItemId.get(item.id);
     return quantity && quantity > 0 ? [{ orderItemId: item.id, quantity }] : [];
   });
-  if (lines.length === 0) {
+  if (baseLines.length === 0) {
     return failure("REFUND_LINE_LEDGER_INCONSISTENT", "Outstanding refund has no remaining merchandise capacity.");
+  }
+  const economicLines = deriveRefundEconomicLines(aggregate, outstanding, baseLines);
+  if (!economicLines.ok) {
+    return failure("REFUND_LINE_LEDGER_INCONSISTENT", "Coupon refund economics are inconsistent.");
   }
 
   const requestedAt = await captureOperationTime(tx);
@@ -172,7 +184,12 @@ async function persistReplacement(
   if (!prepared.ok) {
     return failure("REFUND_LEDGER_INCONSISTENT", "Outstanding cancellation amount is inconsistent.");
   }
-  const persisted = await persistRefundRequestAfterOrderLock(tx, aggregate, prepared.refundAttempt, lines);
+  const persisted = await persistRefundRequestAfterOrderLock(
+    tx,
+    aggregate,
+    prepared.refundAttempt,
+    economicLines.lines,
+  );
   if (!persisted.ok) return failure("PERSISTENCE_CONFLICT", persisted.message);
   return {
     ok: true,
@@ -209,7 +226,10 @@ function loadReplacementAggregate(reader: Pick<PrismaClient, "order">, orderId: 
       refundAttempts: {
         orderBy: { createdAt: "asc" },
         include: {
-          lines: { orderBy: { orderItemId: "asc" } },
+          lines: {
+            orderBy: { orderItemId: "asc" },
+            include: { economicAllocation: true },
+          },
           transitions: { orderBy: { createdAt: "asc" } },
           executionCommand: {
             include: { evidence: { orderBy: { createdAt: "asc" } } },
@@ -225,6 +245,17 @@ function hasCoherentCancellationAggregate(aggregate: ReplacementAggregate): bool
   if (!cancellation || !hasCoherentCancellationOrderFacts(aggregate)) return false;
   const initial = aggregate.refundAttempts.find((attempt) => attempt.id === cancellation.initialRefundAttemptId);
   if (!initial) return false;
+  const expectedLines = deriveRefundEconomicLines(
+    {
+      ...aggregate,
+      // The initial request was the full immutable C0 decision. Current successes
+      // belong to current obligation classification, not its creation identity.
+      refundAttempts: [],
+    },
+    aggregate.payment.amount,
+    aggregate.items.map((item) => ({ orderItemId: item.id, quantity: item.quantity })),
+  );
+  if (!expectedLines.ok) return false;
   return [
     initial.requestedAt.getTime() === cancellation.acceptedAt.getTime(),
     initial.actorType === RefundAttemptActorType.SYSTEM,
@@ -233,8 +264,8 @@ function hasCoherentCancellationAggregate(aggregate: ReplacementAggregate): bool
     initial.amount === aggregate.payment.amount,
     initial.currency === aggregate.payment.currency,
     sameCanonicalRefundLines(
-      initial.lines,
-      aggregate.items.map((item) => ({ orderItemId: item.id, quantity: item.quantity })),
+      initial.lines.map(storedEconomicLine),
+      expectedLines.lines,
     ),
     resolveRefundRequestCreationEvidence(initial.transitions, initial).kind === "matched",
   ].every(Boolean);
@@ -305,27 +336,25 @@ function resolveReplacementReplay(
   attempt: ReplacementAttempt,
 ): CancellationRefundReplacementResult {
   const cancellation = aggregate.cancellation;
-  const capacityBeforeTarget = deriveRefundLineCapacity(
-    aggregate.id,
-    aggregate.items,
-    aggregate.refundAttempts.filter((candidate) => candidate.id !== attempt.id),
+  // C0 admits cancellation only with no prior success, and every cancellation-owned
+  // request is the whole then-outstanding obligation. A success therefore satisfies
+  // that obligation; later requests cannot be validly created after it. Validate the
+  // persisted creation decision from frozen full-order economics instead of inventing
+  // chronology from millisecond timestamps. Current admission above still uses the
+  // complete durable success ledger.
+  const expectedLines = deriveRefundEconomicLines(
+    { ...aggregate, refundAttempts: [] },
+    aggregate.payment.amount,
+    aggregate.items.map((item) => ({ orderItemId: item.id, quantity: item.quantity })),
   );
-  const obligationBeforeTarget = deriveCancellationObligation(
-    aggregate,
-    aggregate.payment,
-    aggregate.refundAttempts.filter((candidate) => candidate.id !== attempt.id),
-  );
-  const expectedAmount = obligationBeforeTarget.state === "OUTSTANDING"
-    ? obligationBeforeTarget.outstandingAmount
-    : null;
-  const expectedLines = capacityBeforeTarget.ok
-    ? aggregate.items.flatMap((item) => {
-      const quantity = capacityBeforeTarget.remainingByOrderItemId.get(item.id);
-      return quantity && quantity > 0 ? [{ orderItemId: item.id, quantity }] : [];
-    })
-    : [];
-  if (!cancellation || expectedAmount === null
-    || !hasCoherentReplacementReplay(cancellation, attempt, expectedAmount, expectedLines)) {
+  if (!cancellation
+    || !expectedLines.ok
+    || !hasCoherentReplacementReplay(
+      cancellation,
+      attempt,
+      aggregate.payment.amount,
+      expectedLines.lines,
+    )) {
     return failure("REQUEST_KEY_CONFLICT", "Replacement request identity conflicts with stored evidence.");
   }
   return {
@@ -353,9 +382,25 @@ function hasCoherentReplacementReplay(
     attempt.reason === CANCELLATION_REFUND_REPLACEMENT_REASON,
     attempt.amount === expectedAmount,
     expectedAmount > 0,
-    resolveRefundRequestCreationEvidence(attempt.transitions, attempt).kind === "matched",
-    sameCanonicalRefundLines(attempt.lines, expectedLines),
+    hasExactReplacementCreationEvidence(attempt),
+    sameCanonicalRefundLines(attempt.lines.map(storedEconomicLine), expectedLines),
   ].every(Boolean);
+}
+
+function hasExactReplacementCreationEvidence(attempt: ReplacementAttempt): boolean {
+  const operationKey = buildRefundRequestOperationKey(attempt.id);
+  const creation = attempt.transitions.find((transition) => transition.operationKey === operationKey);
+  return resolveRefundRequestCreationEvidence(attempt.transitions, attempt).kind === "matched"
+    && creation?.createdAt.getTime() === attempt.requestedAt.getTime();
+}
+
+function storedEconomicLine(
+  line: ReplacementAttempt["lines"][number],
+): CanonicalRefundLine {
+  const merchandiseRefundAmount = line.economicAllocation?.merchandiseRefundAmount;
+  return merchandiseRefundAmount === undefined
+    ? { orderItemId: line.orderItemId, quantity: line.quantity }
+    : { orderItemId: line.orderItemId, quantity: line.quantity, merchandiseRefundAmount };
 }
 
 async function captureOperationTime(tx: ReplacementTx): Promise<Date> {

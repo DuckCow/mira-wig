@@ -24,20 +24,20 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts              Account[]
-  sessions              Session[]
-  fittings              Fitting[]
-  reviews               Review[]
-  wishlistItems         WishlistItem[]
-  cartItems             CartItem[]
-  checkoutSessions      CheckoutSession[]
-  orders                Order[]
-  customerRefundIntakes CustomerRefundIntake[]
-  requestedOrderCancellations OrderCancellation[]     @relation("OrderCancellationRequester")
-  startedManufacturingRequests ManufacturingRequest[] @relation("ManufacturingRequestStarter")
-  benefitProfile        CustomerBenefitProfile?
-  promotionGrants       PromotionGrant[]
-  localizedRevisions                  WigStyleLocalizedRevision[]          @relation("WigStyleLocalizedRevisionSubmitter")
+  accounts                            Account[]
+  sessions                            Session[]
+  fittings                            Fitting[]
+  reviews                             Review[]
+  wishlistItems                       WishlistItem[]
+  cartItems                           CartItem[]
+  checkoutSessions                    CheckoutSession[]
+  orders                              Order[]
+  customerRefundIntakes               CustomerRefundIntake[]
+  requestedOrderCancellations         OrderCancellation[]                 @relation("OrderCancellationRequester")
+  startedManufacturingRequests        ManufacturingRequest[]              @relation("ManufacturingRequestStarter")
+  benefitProfile                      CustomerBenefitProfile?
+  promotionGrants                     PromotionGrant[]
+  localizedRevisions                  WigStyleLocalizedRevision[]         @relation("WigStyleLocalizedRevisionSubmitter")
   localizedApprovalDecisions          WigStyleLocalizedApprovalDecision[] @relation("WigStyleLocalizedApprovalActor")
   localizedPublicationPointersChanged WigStyleLocalizedPublication[]      @relation("WigStyleLocalizedPublicationActor")
   localizedPublicationEvents          WigStyleLocalizedPublicationEvent[] @relation("WigStyleLocalizedPublicationEventActor")
@@ -142,6 +142,7 @@ model PromotionPolicyVersion {
   firstOrderOnly             Boolean                     @default(false)
   requiresQualifyingPurchase Boolean                     @default(false)
   grantValidityDays          Int?
+  recoveryGraceDays          Int?
   birthdayWindowBeforeDays   Int?
   birthdayWindowAfterDays    Int?
   birthdayLeapDayObservation BirthdayLeapDayObservation?
@@ -186,30 +187,42 @@ model CustomerBenefitProfile {
 }
 
 model PromotionGrant {
-  id               String    @id @default(cuid())
-  userId           String
-  policyVersionId  String
-  grantKey         String    @unique @db.VarChar(500)
-  benefitYear      Int?
-  originMarketCode String?
-  issuedAt         DateTime  @default(now())
-  validFrom        DateTime
-  expiresAt        DateTime?
-  revokedAt        DateTime?
-  redeemedAt       DateTime?
+  id                        String    @id @default(cuid())
+  userId                    String
+  policyVersionId           String
+  grantKey                  String    @unique @db.VarChar(500)
+  benefitYear               Int?
+  originMarketCode          String?
+  issuedAt                  DateTime  @default(now())
+  validFrom                 DateTime
+  expiresAt                 DateTime?
+  revokedAt                 DateTime?
+  redeemedAt                DateTime?
+  recoveredFromGrantId      String?   @unique
+  recoveryEligibleAt        DateTime?
   reservedCheckoutSessionId String?   @unique
   reservedAt                DateTime?
-  createdAt        DateTime  @default(now())
+  createdAt                 DateTime  @default(now())
 
-  user          User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
-  policyVersion PromotionPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
-  originMarket  Market?                @relation(fields: [originMarketCode], references: [code], onDelete: Restrict)
+  user                    User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  policyVersion           PromotionPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  originMarket            Market?                @relation(fields: [originMarketCode], references: [code], onDelete: Restrict)
   checkoutSessions        CheckoutSession[]      @relation("CheckoutPromotionGrant")
   reservedCheckoutSession CheckoutSession?       @relation("PromotionReservation", fields: [reservedCheckoutSessionId], references: [id], onDelete: Restrict)
   order                   Order?                 @relation("OrderPromotionGrant")
+  recoveredFromGrant      PromotionGrant?        @relation("PromotionGrantRecovery", fields: [recoveredFromGrantId], references: [id], onDelete: Restrict)
+  recoveryGrant           PromotionGrant?        @relation("PromotionGrantRecovery")
 
   @@index([userId, createdAt])
   @@index([policyVersionId])
+}
+
+/// Mutable scheduler traversal metadata for bounded promotion-refund-recovery reconciliation.
+/// This cursor is not recovery entitlement, refund/economic evidence, or successor authority.
+model PromotionRecoveryReconciliationCheckpoint {
+  scopeKey    String   @id @db.VarChar(64)
+  lastOrderId String?
+  updatedAt   DateTime @default(now()) @db.Timestamp(3)
 }
 
 /// 변형(Variant) × 마켓 별 가격.
@@ -303,40 +316,40 @@ model WigStyle {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  variants         WigVariant[]
-  reviews          Review[]
-  wishlistItems    WishlistItem[]
-  cartItems        CartItem[]
-  availableMarkets WigStyleMarket[]
-  sourceRelations  WigStyleRelation[] @relation("WigStyleRelationSource")
-  targetRelations  WigStyleRelation[] @relation("WigStyleRelationTarget")
+  variants                   WigVariant[]
+  reviews                    Review[]
+  wishlistItems              WishlistItem[]
+  cartItems                  CartItem[]
+  availableMarkets           WigStyleMarket[]
+  sourceRelations            WigStyleRelation[]                  @relation("WigStyleRelationSource")
+  targetRelations            WigStyleRelation[]                  @relation("WigStyleRelationTarget")
   localizedRevisions         WigStyleLocalizedRevision[]
   localizedPublications      WigStyleLocalizedPublication[]
   localizedPublicationEvents WigStyleLocalizedPublicationEvent[]
 }
 
 model WigStyleLocalizedRevision {
-  id                String                                    @id @default(cuid())
-  wigStyleId        String
-  locale            String                                    @db.VarChar(2)
-  displayName       String                                    @db.VarChar(200)
-  description       String?                                   @db.VarChar(5000)
-  sourceKind        WigStyleLocalizedRevisionSourceKind
-  sourceRevisionId  String?
-  legacySourceUpdatedAt DateTime?                              @db.Timestamp(3)
-  claimDisposition  WigStyleLocalizedClaimDisposition
-  submissionKey     String                                    @unique @db.VarChar(128)
-  submittedByUserId String
-  submittedAt       DateTime                                  @default(now()) @db.Timestamp(3)
+  id                    String                              @id @default(cuid())
+  wigStyleId            String
+  locale                String                              @db.VarChar(2)
+  displayName           String                              @db.VarChar(200)
+  description           String?                             @db.VarChar(5000)
+  sourceKind            WigStyleLocalizedRevisionSourceKind
+  sourceRevisionId      String?
+  legacySourceUpdatedAt DateTime?                           @db.Timestamp(3)
+  claimDisposition      WigStyleLocalizedClaimDisposition
+  submissionKey         String                              @unique @db.VarChar(128)
+  submittedByUserId     String
+  submittedAt           DateTime                            @default(now()) @db.Timestamp(3)
 
-  wigStyle          WigStyle                                  @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
-  submittedBy       User                                      @relation("WigStyleLocalizedRevisionSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
-  sourceRevision    WigStyleLocalizedRevision?                @relation("WigStyleLocalizedRevisionSource", fields: [sourceRevisionId, wigStyleId], references: [id, wigStyleId], onDelete: Restrict, map: "WigStyleLocalizedRevision_source_fkey")
-  derivedRevisions  WigStyleLocalizedRevision[]               @relation("WigStyleLocalizedRevisionSource")
+  wigStyle          WigStyle                            @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
+  submittedBy       User                                @relation("WigStyleLocalizedRevisionSubmitter", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  sourceRevision    WigStyleLocalizedRevision?          @relation("WigStyleLocalizedRevisionSource", fields: [sourceRevisionId, wigStyleId], references: [id, wigStyleId], onDelete: Restrict, map: "WigStyleLocalizedRevision_source_fkey")
+  derivedRevisions  WigStyleLocalizedRevision[]         @relation("WigStyleLocalizedRevisionSource")
   approvalDecisions WigStyleLocalizedApprovalDecision[]
-  currentFor        WigStyleLocalizedPublication[]            @relation("WigStyleLocalizedCurrentRevision")
-  publishedFrom     WigStyleLocalizedPublicationEvent[]       @relation("WigStyleLocalizedPublicationFromRevision")
-  publishedTo       WigStyleLocalizedPublicationEvent[]       @relation("WigStyleLocalizedPublicationToRevision")
+  currentFor        WigStyleLocalizedPublication[]      @relation("WigStyleLocalizedCurrentRevision")
+  publishedFrom     WigStyleLocalizedPublicationEvent[] @relation("WigStyleLocalizedPublicationFromRevision")
+  publishedTo       WigStyleLocalizedPublicationEvent[] @relation("WigStyleLocalizedPublicationToRevision")
 
   @@unique([id, wigStyleId])
   @@unique([id, wigStyleId, locale])
@@ -345,58 +358,58 @@ model WigStyleLocalizedRevision {
 }
 
 model WigStyleLocalizedApprovalDecision {
-  id             String                                      @id @default(cuid())
+  id             String                                @id @default(cuid())
   revisionId     String
   ordinal        Int
   decision       WigStyleLocalizedApprovalDecisionType
-  rationale      String?                                     @db.VarChar(1000)
-  requestKey     String                                      @unique @db.VarChar(128)
+  rationale      String?                               @db.VarChar(1000)
+  requestKey     String                                @unique @db.VarChar(128)
   actorUserId    String
   authorityBasis WigStyleLocalizedAuthorityBasis
-  decidedAt      DateTime                                    @default(now()) @db.Timestamp(3)
+  decidedAt      DateTime                              @default(now()) @db.Timestamp(3)
 
-  revision       WigStyleLocalizedRevision                   @relation(fields: [revisionId], references: [id], onDelete: Restrict)
-  actor          User                                        @relation("WigStyleLocalizedApprovalActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  revision WigStyleLocalizedRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  actor    User                      @relation("WigStyleLocalizedApprovalActor", fields: [actorUserId], references: [id], onDelete: Restrict)
 
   @@unique([revisionId, ordinal])
 }
 
 model WigStyleLocalizedPublication {
-  wigStyleId         String
-  locale             String                                  @db.VarChar(2)
-  currentRevisionId  String?
-  version            Int
+  wigStyleId          String
+  locale              String   @db.VarChar(2)
+  currentRevisionId   String?
+  version             Int
   lastChangedByUserId String
-  lastChangedAt      DateTime                                @default(now()) @db.Timestamp(3)
+  lastChangedAt       DateTime @default(now()) @db.Timestamp(3)
 
-  wigStyle           WigStyle                                @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
-  currentRevision    WigStyleLocalizedRevision?              @relation("WigStyleLocalizedCurrentRevision", fields: [currentRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublication_currentRevision_fkey")
-  lastChangedBy      User                                    @relation("WigStyleLocalizedPublicationActor", fields: [lastChangedByUserId], references: [id], onDelete: Restrict, map: "WigStyleLocalizedPublication_actorUserId_fkey")
-  events             WigStyleLocalizedPublicationEvent[]
+  wigStyle        WigStyle                            @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
+  currentRevision WigStyleLocalizedRevision?          @relation("WigStyleLocalizedCurrentRevision", fields: [currentRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublication_currentRevision_fkey")
+  lastChangedBy   User                                @relation("WigStyleLocalizedPublicationActor", fields: [lastChangedByUserId], references: [id], onDelete: Restrict, map: "WigStyleLocalizedPublication_actorUserId_fkey")
+  events          WigStyleLocalizedPublicationEvent[]
 
   @@id([wigStyleId, locale])
   @@index([currentRevisionId])
 }
 
 model WigStyleLocalizedPublicationEvent {
-  id             String                                    @id @default(cuid())
+  id             String                             @id @default(cuid())
   wigStyleId     String
-  locale         String                                    @db.VarChar(2)
+  locale         String                             @db.VarChar(2)
   sequence       Int
   action         WigStyleLocalizedPublicationAction
   fromRevisionId String?
   toRevisionId   String?
-  reason         String?                                   @db.VarChar(1000)
-  requestKey     String                                    @unique @db.VarChar(128)
+  reason         String?                            @db.VarChar(1000)
+  requestKey     String                             @unique @db.VarChar(128)
   actorUserId    String
   authorityBasis WigStyleLocalizedAuthorityBasis
-  occurredAt     DateTime                                  @default(now()) @db.Timestamp(3)
+  occurredAt     DateTime                           @default(now()) @db.Timestamp(3)
 
-  publication    WigStyleLocalizedPublication              @relation(fields: [wigStyleId, locale], references: [wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_publication_fkey")
-  wigStyle       WigStyle                                  @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
-  fromRevision   WigStyleLocalizedRevision?                @relation("WigStyleLocalizedPublicationFromRevision", fields: [fromRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_fromRevision_fkey")
-  toRevision     WigStyleLocalizedRevision?                @relation("WigStyleLocalizedPublicationToRevision", fields: [toRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_toRevision_fkey")
-  actor          User                                      @relation("WigStyleLocalizedPublicationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  publication  WigStyleLocalizedPublication @relation(fields: [wigStyleId, locale], references: [wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_publication_fkey")
+  wigStyle     WigStyle                     @relation(fields: [wigStyleId], references: [id], onDelete: Restrict)
+  fromRevision WigStyleLocalizedRevision?   @relation("WigStyleLocalizedPublicationFromRevision", fields: [fromRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_fromRevision_fkey")
+  toRevision   WigStyleLocalizedRevision?   @relation("WigStyleLocalizedPublicationToRevision", fields: [toRevisionId, wigStyleId, locale], references: [id, wigStyleId, locale], onDelete: Restrict, map: "WigStyleLocalizedPublicationEvent_toRevision_fkey")
+  actor        User                         @relation("WigStyleLocalizedPublicationEventActor", fields: [actorUserId], references: [id], onDelete: Restrict)
 
   @@unique([wigStyleId, locale, sequence], map: "WigStyleLocalizedPublicationEvent_scope_sequence_key")
 }
@@ -701,32 +714,32 @@ enum ShippingCountry {
 }
 
 model CheckoutSession {
-  id             String                @id @default(cuid())
-  userId         String
-  user           User                  @relation(fields: [userId], references: [id])
-  marketCode     String
-  market         Market                @relation(fields: [marketCode], references: [code])
+  id                           String                @id @default(cuid())
+  userId                       String
+  user                         User                  @relation(fields: [userId], references: [id])
+  marketCode                   String
+  market                       Market                @relation(fields: [marketCode], references: [code])
   /// Frozen checkout-time presentation Locale for customer communications.
   /// Nullable only for pre-R13B historical rows; it does not own Market, currency, or pricing.
-  communicationLocale String?               @db.VarChar(2)
-  promotionGrantId String?
+  communicationLocale          String?               @db.VarChar(2)
+  promotionGrantId             String?
   firstOrderPromotionClaimedAt DateTime?
-  currency       String
-  status         CheckoutSessionStatus @default(OPEN)
-  subtotalAmount Int
-  discountAmount Int                   @default(0)
-  shippingAmount Int                   @default(0)
-  totalAmount    Int
-  expiresAt      DateTime
-  submittedAt    DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  currency                     String
+  status                       CheckoutSessionStatus @default(OPEN)
+  subtotalAmount               Int
+  discountAmount               Int                   @default(0)
+  shippingAmount               Int                   @default(0)
+  totalAmount                  Int
+  expiresAt                    DateTime
+  submittedAt                  DateTime?
+  completedAt                  DateTime?
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
 
-  lines    CheckoutSessionLine[]
-  shipping CheckoutSessionShipping?
-  payments Payment[]
-  order    Order?
+  lines                  CheckoutSessionLine[]
+  shipping               CheckoutSessionShipping?
+  payments               Payment[]
+  order                  Order?
   promotionGrant         PromotionGrant?          @relation("CheckoutPromotionGrant", fields: [promotionGrantId], references: [id], onDelete: Restrict)
   reservedPromotionGrant PromotionGrant?          @relation("PromotionReservation")
 
@@ -735,23 +748,23 @@ model CheckoutSession {
 }
 
 model CheckoutSessionLine {
-  id              String          @id @default(cuid())
-  sessionId       String
-  session         CheckoutSession @relation(fields: [sessionId], references: [id])
+  id               String          @id @default(cuid())
+  sessionId        String
+  session          CheckoutSession @relation(fields: [sessionId], references: [id])
   /// Exact mutable CartItem identity from which a cart-checkout line was frozen.
   /// Used only to bound successful-completion cart cleanup; not commercial/order authority.
   sourceCartItemId String?
-  variantId       String
-  variant         WigVariant      @relation(fields: [variantId], references: [id])
+  variantId        String
+  variant          WigVariant      @relation(fields: [variantId], references: [id])
   /// Cart-selected parent identity. This is not inferred from variantId at completion.
-  wigStyleId      String
-  quantity        Int
-  unitAmount      Int
+  wigStyleId       String
+  quantity         Int
+  unitAmount       Int
   /// Discount allocated to this whole frozen line quantity, not per unit.
-  discountAmount  Int             @default(0)
-  fulfillmentType FulfillmentType
-  snapshotData    Json
-  createdAt       DateTime        @default(now())
+  discountAmount   Int             @default(0)
+  fulfillmentType  FulfillmentType
+  snapshotData     Json
+  createdAt        DateTime        @default(now())
 
   @@unique([sessionId, variantId])
   @@index([sourceCartItemId])
@@ -785,7 +798,7 @@ model Payment {
   remediationStatus             PaymentRemediationStatus     @default(NONE)
   amount                        Int
   currency                      String
-  providerOrderId              String?
+  providerOrderId               String?
   providerRef                   String?
   providerConfirmIdempotencyKey String?                      @unique
   providerPaymentKey            String?
@@ -897,8 +910,8 @@ model OrderCancellation {
   requestedBy          User          @relation("OrderCancellationRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
   initialRefundAttempt RefundAttempt @relation("OrderCancellationInitialRefund", fields: [initialRefundAttemptId, orderId], references: [id, orderId], onDelete: Restrict, onUpdate: Cascade)
 
-  @@index([requestedByUserId, acceptedAt])
   @@unique([initialRefundAttemptId, orderId])
+  @@index([requestedByUserId, acceptedAt])
 }
 
 model RefundAttempt {
@@ -928,8 +941,9 @@ model RefundAttempt {
   executionCommand             RefundExecutionCommand?
   providerOperationBinding     RefundExecutionProviderOperationBinding?
   approvedCustomerRefundIntake CustomerRefundIntake?
-  initialOrderCancellation     OrderCancellation?                      @relation("OrderCancellationInitialRefund")
+  initialOrderCancellation     OrderCancellation?                       @relation("OrderCancellationInitialRefund")
   lines                        RefundAttemptLine[]
+  lineEconomicAllocations      RefundAttemptLineEconomicAllocation[]
 
   @@unique([provider, providerRefundId])
   @@unique([id, orderId])
@@ -939,19 +953,35 @@ model RefundAttempt {
 }
 
 /// Immutable merchandise attribution for one refund request. RefundAttempt.amount remains the
-/// independent aggregate cash authority; this row deliberately stores no monetary allocation.
+/// independent aggregate cash authority; coupon Orders additionally require the one-to-one
+/// economic allocation relation used to prove discount reversal.
 model RefundAttemptLine {
   refundAttemptId String
   orderItemId     String
   orderId         String
   quantity        Int
 
-  refundAttempt RefundAttempt @relation(fields: [refundAttemptId, orderId], references: [id, orderId], onDelete: Restrict)
-  orderItem     OrderItem     @relation(fields: [orderItemId, orderId], references: [id, orderId], onDelete: Restrict)
+  refundAttempt      RefundAttempt                        @relation(fields: [refundAttemptId, orderId], references: [id, orderId], onDelete: Restrict)
+  orderItem          OrderItem                            @relation(fields: [orderItemId, orderId], references: [id, orderId], onDelete: Restrict)
+  economicAllocation RefundAttemptLineEconomicAllocation?
 
   @@id([refundAttemptId, orderItemId])
   @@index([orderItemId])
   @@index([orderId])
+}
+
+/// Immutable coupon-economic cash attribution for one RefundAttemptLine. This never changes
+/// RefundAttempt.amount and is required only when the Order used a promotion grant.
+model RefundAttemptLineEconomicAllocation {
+  refundAttemptId         String
+  orderItemId             String
+  merchandiseRefundAmount Int
+  createdAt               DateTime @default(now()) @db.Timestamp(3)
+
+  refundAttempt     RefundAttempt     @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict)
+  refundAttemptLine RefundAttemptLine @relation(fields: [refundAttemptId, orderItemId], references: [refundAttemptId, orderItemId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@id([refundAttemptId, orderItemId])
 }
 
 model RefundAttemptTransition {
@@ -995,9 +1025,9 @@ model RefundExecutionCommand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  evidence         RefundExecutionEvidence[]
-  events           RefundExecutionCommandEvent[]
-  dispatchAttempts RefundExecutionDispatchAttempt[]
+  evidence                     RefundExecutionEvidence[]
+  events                       RefundExecutionCommandEvent[]
+  dispatchAttempts             RefundExecutionDispatchAttempt[]
   eximbaySandboxCanaryApproval EximbayRefundSandboxCanaryApproval?
 
   @@index([status, availableAt, createdAt])
@@ -1006,25 +1036,25 @@ model RefundExecutionCommand {
 
 /// Durable, one-use human authority for one exact Eximbay SANDBOX canary command.
 model EximbayRefundSandboxCanaryApproval {
-  id                              String          @id @default(cuid())
-  formatVersion                   String          @db.VarChar(64)
-  provider                        PaymentProvider
-  mode                            PaymentMode
-  approvalEvidenceDigest          String          @db.VarChar(64)
-  releaseBindingDigest            String          @db.VarChar(64)
-  canaryJobBindingDigest          String          @db.VarChar(64)
-  preflightJobBindingDigest       String          @db.VarChar(64)
-  imageBindingDigest              String          @db.VarChar(64)
-  secretGenerationBindingDigest   String          @db.VarChar(64)
-  targetBindingDigest             String          @db.VarChar(64)
-  commandId                       String          @unique
-  approvedAt                      DateTime        @db.Timestamp(3)
-  expiresAt                       DateTime        @db.Timestamp(3)
-  issuedByPrincipalId             String          @db.VarChar(255)
-  consumedAt                      DateTime?       @db.Timestamp(3)
-  consumedExecutionId             String?         @db.VarChar(255)
-  consumedExecutionBindingDigest  String?         @db.VarChar(64)
-  createdAt                       DateTime        @default(now()) @db.Timestamp(3)
+  id                             String          @id @default(cuid())
+  formatVersion                  String          @db.VarChar(64)
+  provider                       PaymentProvider
+  mode                           PaymentMode
+  approvalEvidenceDigest         String          @db.VarChar(64)
+  releaseBindingDigest           String          @db.VarChar(64)
+  canaryJobBindingDigest         String          @db.VarChar(64)
+  preflightJobBindingDigest      String          @db.VarChar(64)
+  imageBindingDigest             String          @db.VarChar(64)
+  secretGenerationBindingDigest  String          @db.VarChar(64)
+  targetBindingDigest            String          @db.VarChar(64)
+  commandId                      String          @unique
+  approvedAt                     DateTime        @db.Timestamp(3)
+  expiresAt                      DateTime        @db.Timestamp(3)
+  issuedByPrincipalId            String          @db.VarChar(255)
+  consumedAt                     DateTime?       @db.Timestamp(3)
+  consumedExecutionId            String?         @db.VarChar(255)
+  consumedExecutionBindingDigest String?         @db.VarChar(64)
+  createdAt                      DateTime        @default(now()) @db.Timestamp(3)
 
   command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
 
@@ -1104,8 +1134,8 @@ model RefundExecutionProviderOperationBinding {
   credentialGenerationBindingId      String          @db.VarChar(64)
   createdAt                          DateTime        @default(now()) @db.Timestamp(3)
 
-  refundAttempt    RefundAttempt                            @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict, map: "RefundProviderBinding_refundAttempt_fkey")
-  eligibilityProof RefundExecutionProviderEligibilityProof?
+  refundAttempt                RefundAttempt                                @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict, map: "RefundProviderBinding_refundAttempt_fkey")
+  eligibilityProof             RefundExecutionProviderEligibilityProof?
   eximbayPreflightObservations RefundExecutionEximbayPreflightObservation[]
 }
 
@@ -1187,20 +1217,20 @@ model RefundExecutionEvidence {
 }
 
 model OrderItem {
-  id              String                @id @default(cuid())
-  orderId         String
-  order           Order                 @relation(fields: [orderId], references: [id])
-  variantId       String
-  variant         WigVariant            @relation(fields: [variantId], references: [id])
+  id                 String                @id @default(cuid())
+  orderId            String
+  order              Order                 @relation(fields: [orderId], references: [id])
+  variantId          String
+  variant            WigVariant            @relation(fields: [variantId], references: [id])
   /// Checkout-selected parent identity snapshot.
-  wigStyleId      String
-  quantity        Int
-  unitAmount      Int
+  wigStyleId         String
+  quantity           Int
+  unitAmount         Int
   /// Discount allocated to this whole historical line quantity, not per unit.
-  discountAmount  Int                   @default(0)
-  fulfillmentType FulfillmentType
-  snapshotData    Json
-  mr              ManufacturingRequest?
+  discountAmount     Int                   @default(0)
+  fulfillmentType    FulfillmentType
+  snapshotData       Json
+  mr                 ManufacturingRequest?
   refundAttemptLines RefundAttemptLine[]
 
   @@unique([id, orderId])

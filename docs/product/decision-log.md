@@ -383,3 +383,70 @@ Installing this source authorizes no customer activation, provider contact,
 LIVE authority, deployment, or production manufacturing activation; both
 customer cancellation and production start remain separately fail-closed by
 configuration.
+
+## 2026-08-29 — Coupon economic reversal and recovery entitlement C5
+
+Coupon recovery is determined from durable successful refund economics, not
+production state, refund reason, `Order.status` alone, or the existence of an
+`OrderCancellation`. The three refund authorities remain distinct:
+
+```text
+RefundAttempt.amount
+  = aggregate cash-refund authority
+
+RefundAttemptLine
+  = historical item and quantity authority
+
+RefundAttemptLineEconomicAllocation
+  = immutable merchandise-cash attribution used for coupon recovery
+```
+
+For an ordinary administrator refund, the administrator supplies each selected
+line's merchandise amount. Source validates it within the exact frozen quantity
+tranche using cumulative `floor(lineDiscount * quantity / orderedQuantity)`;
+it never invents a proportional split from the aggregate refund amount. A new
+whole-Order C0 cancellation and its bounded replacement may derive the exact
+allocation because that installed policy already determines full remaining
+quantities and frozen line economics. Historical refund lines are not
+backfilled or guessed.
+
+Only coherent `SUCCEEDED` refund attempts contribute. Recovery becomes eligible
+at the first `(processedAt, id)`-ordered success prefix that fully reverses the
+quantity, derived discount, and merchandise cash of every historically
+discount-bearing OrderItem. Shipping and other non-merchandise residual cash do
+not count toward that predicate and need not be fully refunded.
+
+The consumed grant remains redeemed. Recovery creates at most one immutable
+successor with immediate-predecessor provenance and the exact historical policy
+version; recursive `A -> B -> C` recovery is permitted without branching. A
+recovered `firstOrderOnly` grant may pass checkout only through validated
+recovery lineage. The original user-global first-order claim remains historical
+and is neither cleared, reacquired, nor rewritten.
+
+`PromotionPolicyVersion.recoveryGraceDays` is nullable, has no default, and is
+not seeded here. An unlimited source remains unlimited. The first expiring
+recovery uses the later of the source expiry and eligibility plus its configured
+grace; later recoveries carry only the predecessor's remaining usable window.
+
+Successor creation is post-commit and provider-free. An immediate attempt,
+bounded worker reconciliation, and authenticated single-Order administrator
+retry recover a crash or insertion failure without rolling back refund success
+or repeating provider execution. Read paths only classify durable state and do
+not issue grants.
+
+Both issuance and reconciliation are disabled by default and require their
+separate exact `ENABLED` gates. This entry installs no commercial grace value,
+promotion seed, customer activation, provider contact, refund execution,
+deployment, or LIVE authority.
+
+Bounded reconciliation uses one lazily created
+`PromotionRecoveryReconciliationCheckpoint` singleton as scheduler traversal
+metadata only. Its nullable `lastOrderId` is an immutable-ID ordering cursor,
+not entitlement, refund evidence, economic evidence, per-Order completion, or
+successor authority. A short row-locked transaction claims at most 25 broad
+candidates and advances the cursor before processing; the existing Order-locked
+classifier remains the only issuance authority. Scanning is cyclic, so a crash
+after claim may delay work until wrap but cannot permanently discard durable
+eligibility. Cursor loss, reset, or backward movement causes safe rescanning and
+does not alter classification, amounts, `recoveryEligibleAt`, expiry, first-order
+rules, or provider identity.

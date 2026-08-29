@@ -19,6 +19,9 @@ const claimMocks = vi.hoisted(() => ({
   classify: vi.fn(),
   enabled: vi.fn(),
 }));
+const recoveryMocks = vi.hoisted(() => ({
+  ensure: vi.fn(),
+}));
 
 vi.mock("crypto", () => ({ randomUUID: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -33,6 +36,10 @@ vi.mock("@/lib/payment/refund/claim", () => ({
 vi.mock("@/lib/payment/refund/execution-activation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payment/refund/execution-activation")>();
   return { ...actual, isRefundExecutionClaimEnabled: claimMocks.enabled };
+});
+vi.mock("@/lib/promotion", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/promotion")>();
+  return { ...actual, ensurePromotionRecoveryForOrder: recoveryMocks.ensure };
 });
 
 import { requireAdmin } from "@/lib/admin";
@@ -56,6 +63,7 @@ import {
   claimRefundExecutionAction,
   closeRefundRequestAction,
   requestRefundAttemptAction,
+  retryPromotionRecoveryAction,
 } from "../admin/refund";
 
 const NOW = new Date("2026-07-10T08:00:00.000Z");
@@ -105,6 +113,19 @@ beforeEach(() => {
   claimMocks.enabled.mockReturnValue(true);
   claimMocks.claim.mockResolvedValue(claimSuccessResult());
   claimMocks.classify.mockResolvedValue("UNPROVEN");
+  recoveryMocks.ensure.mockResolvedValue({
+    ok: true,
+    issuedNow: true,
+    snapshot: {
+      orderId: VALID_INPUT.orderId,
+      sourceGrantId: "source_grant",
+      classification: {
+        kind: "ISSUED",
+        recoveryEligibleAt: NOW,
+        recoveryGrantId: "recovery_grant",
+      },
+    },
+  });
 });
 
 afterEach(() => {
@@ -299,6 +320,11 @@ describe("requestRefundAttemptAction failure mapping", () => {
     ["OVER_REFUND_LINE_QUANTITY", "INSUFFICIENT_REFUNDABLE"],
     ["REFUND_LINE_HISTORY_UNATTRIBUTED", "MANUAL_REVIEW_REQUIRED"],
     ["REFUND_LINE_LEDGER_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
+    ["REFUND_ECONOMIC_ALLOCATION_REQUIRED", "INVALID_INPUT"],
+    ["REFUND_ECONOMIC_ALLOCATION_UNEXPECTED", "INVALID_INPUT"],
+    ["REFUND_ECONOMIC_ALLOCATION_MISMATCH", "INVALID_INPUT"],
+    ["REFUND_PROMOTION_SNAPSHOT_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
+    ["REFUND_ECONOMIC_HISTORY_INCONSISTENT", "MANUAL_REVIEW_REQUIRED"],
     ["DISPUTE_REVIEW_REQUIRED", "MANUAL_REVIEW_REQUIRED"],
     ["IDEMPOTENCY_CONFLICT", "CONFLICT"],
     ["ORDER_STATUS_CONFLICT", "CONFLICT"],
@@ -662,6 +688,58 @@ describe("claimRefundExecutionAction result taxonomy", () => {
     const result = await claimRefundExecutionAction(VALID_CLAIM_INPUT);
 
     expect(result).toEqual({ success: false, errorCode: "MANUAL_REVIEW_REQUIRED" });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("retryPromotionRecoveryAction", () => {
+  it.each([
+    ["UNAUTHENTICATED", { success: false, errorCode: "UNAUTHENTICATED" }],
+    ["FORBIDDEN", { success: false, errorCode: "FORBIDDEN" }],
+  ] as const)("returns %s without touching recovery state", async (_code, guard) => {
+    mockRequireAdmin.mockResolvedValue(guard);
+
+    await expect(retryPromotionRecoveryAction({ orderId: VALID_INPUT.orderId }))
+      .resolves.toEqual(guard);
+    expect(recoveryMocks.ensure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    {},
+    { orderId: "   " },
+    { orderId: VALID_INPUT.orderId, extra: true },
+    Object.assign(new (class HostileInput {})(), { orderId: VALID_INPUT.orderId }),
+  ])("rejects malformed exact single-Order input: %j", async (input) => {
+    await expect(retryPromotionRecoveryAction(input)).resolves.toEqual({
+      success: false,
+      errorCode: "INVALID_INPUT",
+    });
+    expect(recoveryMocks.ensure).not.toHaveBeenCalled();
+  });
+
+  it("delegates only the normalized Order identity and revalidates its admin detail", async () => {
+    const result = await retryPromotionRecoveryAction({ orderId: `  ${VALID_INPUT.orderId}  ` });
+
+    expect(recoveryMocks.ensure).toHaveBeenCalledWith(mockDb, VALID_INPUT.orderId);
+    expect(result).toMatchObject({
+      success: true,
+      issuedNow: true,
+      classification: { kind: "ISSUED", recoveryGrantId: "recovery_grant" },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledOnce();
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/admin/orders/${VALID_INPUT.orderId}`);
+  });
+
+  it.each([
+    [{ ok: false, code: "FEATURE_DISABLED" }, "FEATURE_DISABLED"],
+    [{ ok: false, code: "ORDER_NOT_FOUND" }, "NOT_FOUND"],
+    [{ ok: false, code: "INVALID_ORDER_ID" }, "INVALID_INPUT"],
+  ] as const)("maps bounded core failure %j", async (core, errorCode) => {
+    recoveryMocks.ensure.mockResolvedValue(core);
+
+    await expect(retryPromotionRecoveryAction({ orderId: VALID_INPUT.orderId }))
+      .resolves.toEqual({ success: false, errorCode });
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });

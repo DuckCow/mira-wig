@@ -12,6 +12,7 @@ interface Props {
   approveState: CustomerRefundIntakeApproveState;
   currency: string;
   remainingRequestableAmount: string;
+  requiresEconomicAllocation: boolean;
   items: readonly {
     id: string;
     name: string;
@@ -27,6 +28,7 @@ export function CustomerRefundIntakeSection({
   approveState,
   currency,
   remainingRequestableAmount,
+  requiresEconomicAllocation,
   items,
 }: Props) {
   const view = buildCustomerRefundIntakeSectionViewModel(intakes);
@@ -50,6 +52,7 @@ export function CustomerRefundIntakeSection({
                   label: `${item.name} · ${item.options}`,
                   orderedQuantity: item.quantity,
                   remainingQuantity: item.remainingAttributableQuantity,
+                  requiresEconomicAllocation,
                 }))}
               />
             ) : null}

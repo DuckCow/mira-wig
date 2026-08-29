@@ -5,3 +5,7 @@ export * from "./grants";
 export * from "./policy";
 export * from "./profile";
 export * from "./redemption";
+export * from "./recovery-activation";
+export * from "./recovery-lineage";
+export * from "./recovery";
+export * from "./recovery-reentry";

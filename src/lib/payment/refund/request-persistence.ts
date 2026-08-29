@@ -51,6 +51,9 @@ export async function persistRefundRequestAfterOrderLock(
       lines: {
         create: lines.map((line) => ({
           quantity: line.quantity,
+          economicAllocation: line.merchandiseRefundAmount === undefined
+            ? undefined
+            : { create: { merchandiseRefundAmount: line.merchandiseRefundAmount } },
           orderItem: {
             connect: {
               id_orderId: { id: line.orderItemId, orderId: order.id },

@@ -41,6 +41,20 @@ describe("promotion policy activation validation", () => {
     })).toThrow();
   });
 
+  it.each([0, -1, 1.5])("rejects invalid recovery grace days: %s", (recoveryGraceDays) => {
+    expect(() => validatePromotionPolicyActivation({
+      ...signupPolicy(),
+      recoveryGraceDays,
+    })).toThrow();
+  });
+
+  it("accepts a positive recovery grace period", () => {
+    expect(() => validatePromotionPolicyActivation({
+      ...signupPolicy(),
+      recoveryGraceDays: 14,
+    })).not.toThrow();
+  });
+
   it.each([
     ["qualifying-purchase requirement", { requiresQualifyingPurchase: false }],
     ["window before", { birthdayWindowBeforeDays: null }],
