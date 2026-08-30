@@ -4,7 +4,7 @@ ARG PROXY_EXECUTABLE_SHA256=12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad8
 FROM node:22.23.1-bookworm-slim@sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27 AS build
 WORKDIR /build
 COPY --link containers/refund-db-bootstrap/package.json containers/refund-db-bootstrap/package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY --link containers/refund-db-bootstrap/entrypoint.ts ./containers/refund-db-bootstrap/
 COPY --link scripts/eximbay-p3e-database-bootstrap.ts ./scripts/
 COPY --link src/lib/payment/refund/worker-migration-inventory.ts ./src/lib/payment/refund/

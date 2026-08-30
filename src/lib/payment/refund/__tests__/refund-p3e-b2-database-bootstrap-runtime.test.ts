@@ -144,6 +144,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       "utf8",
     );
     expect(packageSource).not.toMatch(/toss|aws|secret-manager|next/iu);
+    expect(dockerfile).toContain("RUN npm ci --legacy-peer-deps");
     expect(dockerfile).toContain('CMD ["check"]');
     expect(dockerfile).toContain("scripts/eximbay-p3e-database-bootstrap.ts");
     expect(dockerfile).toContain("COPY --link prisma ./prisma");
