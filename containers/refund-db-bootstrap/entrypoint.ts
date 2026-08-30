@@ -3,6 +3,20 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { Client } from "pg";
 import {
+  APPLICATION_CREDENTIAL_MODE,
+  APPLICATION_ROLES,
+  ApplicationCredentialFailure,
+  generateApplicationCredential,
+  materializeApplicationCredentials,
+  RestSecretMetadataClient,
+  setApplicationPasswords,
+  verifyApplicationPasswordLogins,
+  type ApplicationCredential,
+  type ApplicationRole,
+} from "./application-credentials.js";
+import { verifyExactEffectivePrivileges } from
+  "../../scripts/eximbay-p3e-database-bootstrap.js";
+import {
   loadRefundWorkerMigrationInventory,
   type RefundWorkerMigrationInventory,
 } from "../../src/lib/payment/refund/worker-migration-inventory.js";
@@ -34,6 +48,15 @@ export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
   "LEDGER_READ_FAILED",
   "LEDGER_REJECTED",
   "RUNTIME_LOCAL_FAILED",
+  "SECRET_METADATA_UNAVAILABLE",
+  "SECRET_VERSION_BASELINE_DRIFT",
+  "APPLICATION_PASSWORD_TRANSACTION_FAILED",
+  "APPLICATION_PASSWORD_LOGIN_FAILED",
+  "SECRET_VERSION_ADD_FAILED",
+  "SECRET_VERSION_ADD_AMBIGUOUS_ZERO",
+  "SECRET_VERSION_ADD_AMBIGUOUS_ONE",
+  "SECRET_VERSION_ADD_AMBIGUOUS_DRIFT",
+  "SECRET_VERSION_POSTCONDITION_FAILED",
 ] as const);
 
 export const PROXY_FAILURE_CLASSES = Object.freeze([
@@ -74,7 +97,11 @@ type SafeFailureDetails = Readonly<{
   proxyDiagnosticAvailable?: boolean;
   proxyFailureClass?: ProxyFailureClass;
 }> & Partial<SqlAdminRequestSubtype>;
-type SafeFailureRecord = Readonly<{ code: BootstrapFailureCode }> & SafeFailureDetails;
+type SafeFailureRecord = Readonly<{
+  code: BootstrapFailureCode;
+  secretResourceName?: string;
+  versionCount?: number;
+}> & SafeFailureDetails;
 type ProxyStartObservation = { failed: boolean };
 type ProxyReadinessProcess = Pick<ChildProcess, "exitCode" | "signalCode">;
 type ProxyDiagnosticStream = Pick<NodeJS.ReadableStream, "on">;
@@ -108,7 +135,7 @@ class BootstrapStageFailure extends Error {
   }
 }
 
-export type BootstrapMode = "check" | "apply";
+export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE;
 
 type BootstrapEnvironment = Readonly<Record<string, string | undefined>>;
 type Output = Readonly<{
@@ -179,11 +206,11 @@ export async function runDatabaseBootstrapEntrypoint(
   }
 }
 
-export function proxyArguments(): readonly string[] {
+export function proxyArguments(automaticIamAuthentication = true): readonly string[] {
   return Object.freeze([
     "--structured-logs",
     "--private-ip",
-    "--auto-iam-authn",
+    ...(automaticIamAuthentication ? ["--auto-iam-authn"] : []),
     "--unix-socket=/cloudsql",
     "--health-check",
     "--http-address=127.0.0.1",
@@ -195,7 +222,8 @@ export function proxyArguments(): readonly string[] {
 
 function parseMode(args: readonly string[]): BootstrapMode | null {
   if (args.length !== 1) return null;
-  if (args[0] === "check" || args[0] === "apply") return args[0];
+  if (args[0] === "check" || args[0] === "apply"
+    || args[0] === APPLICATION_CREDENTIAL_MODE) return args[0];
   return null;
 }
 
@@ -273,10 +301,37 @@ async function runWithProxy(
   configuration: RuntimeConfiguration,
   inventory: RefundWorkerMigrationInventory,
 ): Promise<Readonly<Record<string, unknown>>> {
+  if (configuration.mode === APPLICATION_CREDENTIAL_MODE) {
+    return materializeApplicationCredentials({
+      secretManager: new RestSecretMetadataClient(),
+      generateCredential: generateApplicationCredential,
+      generateAndSetPasswords: (generateCredentialValue) => runProxySession(
+        true,
+        () => commitApplicationPasswords(
+          configuration.databaseUrl,
+          inventory,
+          generateCredentialValue,
+        ),
+      ),
+      verifyPasswordLogins: (credentials) => runProxySession(
+        false,
+        () => verifyApplicationPasswordLogins(credentials),
+      ),
+    });
+  }
+  return runProxySession(true, () => configuration.mode === "check"
+    ? checkDatabase(configuration.databaseUrl, inventory)
+    : applyDatabase(configuration.databaseUrl, inventory));
+}
+
+async function runProxySession<Result>(
+  automaticIamAuthentication: boolean,
+  databaseWork: () => Promise<Result>,
+): Promise<Result> {
   const startObservation: ProxyStartObservation = { failed: false };
   let proxy: ChildProcess;
   try {
-    proxy = spawn(PROXY_EXECUTABLE, [...proxyArguments()], {
+    proxy = spawn(PROXY_EXECUTABLE, [...proxyArguments(automaticIamAuthentication)], {
       env: minimalProxyEnvironment(),
       stdio: [...PROXY_STDIO],
     });
@@ -290,11 +345,28 @@ async function runWithProxy(
   ]);
   return retainProxyThroughDatabaseWork({
     awaitReadiness: () => awaitProxyReadiness(proxy, startObservation, diagnostics),
-    databaseWork: () => configuration.mode === "check"
-      ? checkDatabase(configuration.databaseUrl, inventory)
-      : applyDatabase(configuration.databaseUrl, inventory),
+    databaseWork,
     stopProxy: () => stopProxy(proxy),
   });
+}
+
+async function commitApplicationPasswords(
+  databaseUrlValue: string,
+  inventory: RefundWorkerMigrationInventory,
+  generateCredentialValue: (role: ApplicationRole) => ApplicationCredential,
+): Promise<readonly ApplicationCredential[]> {
+  const database = new Client({ connectionString: databaseUrlValue });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const completed = await requireExactMigrationPrefix(database, inventory);
+    if (completed !== inventory.migrationCount) ledgerRejected();
+    await verifyExactEffectivePrivileges(database);
+    const credentials = APPLICATION_ROLES.map(generateCredentialValue);
+    await setApplicationPasswords(database, credentials, verifyExactEffectivePrivileges);
+    return credentials;
+  } finally {
+    await database.end().catch(() => undefined);
+  }
 }
 
 export async function retainProxyThroughDatabaseWork<Result>(
@@ -441,9 +513,19 @@ function ledgerRejected(): never {
 }
 
 function safeFailureRecord(error: unknown): SafeFailureRecord {
-  return error instanceof BootstrapStageFailure
-    ? error.record
-    : Object.freeze({ code: "RUNTIME_LOCAL_FAILED" });
+  if (error instanceof BootstrapStageFailure) return error.record;
+  if (error instanceof ApplicationCredentialFailure) {
+    return Object.freeze({
+      code: error.code,
+      ...(error.secretResourceName
+        ? { secretResourceName: error.secretResourceName }
+        : {}),
+      ...(error.versionCount === undefined
+        ? {}
+        : { versionCount: error.versionCount }),
+    });
+  }
+  return Object.freeze({ code: "RUNTIME_LOCAL_FAILED" });
 }
 
 export function consumeProxyDiagnosticStream(

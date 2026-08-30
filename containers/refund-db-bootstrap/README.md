@@ -1,13 +1,17 @@
 # Refund database-bootstrap image
 
 This purpose-specific Linux AMD64 image owns only the attended P3E-B2 database bootstrap path.
-Its Docker default is the read-only `check` mode. The mutating `apply` mode must be supplied
-explicitly by a separately authorized manual Cloud Run Job execution.
+Its Docker default is the read-only `check` mode. The mutating `apply` and
+`materialize-application-credentials` modes must be supplied explicitly by separately authorized
+manual Cloud Run Job executions.
 
 The image contains the exact Prisma 7 CLI/schema/41-migration corpus, the existing hashed role
-and grant runner, `pg`, and the pinned Cloud SQL Auth Proxy. The proxy always uses private IP,
-automatic IAM database authentication, and a Unix socket. No database password, Secret Manager
-reference, payment-provider credential or provider runtime is included.
+and grant runner, `pg`, and the pinned Cloud SQL Auth Proxy. The credential mode first uses private
+automatic IAM database authentication for its exact two-role password transaction, then restarts
+the same Proxy without automatic IAM authentication to verify each password once over the exact
+Unix socket. It publishes version 1 to only the two existing database-URL secrets through direct
+metadata/version REST calls. No password, URL, verifier, payload-read authority, payment-provider
+credential or provider runtime is included in the image.
 
 The final runtime copies the standard `/etc/ssl/certs/ca-certificates.crt` bundle from the
 already-pinned official Cloud SQL Auth Proxy stage. Offline image verification requires that exact

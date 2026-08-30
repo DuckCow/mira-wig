@@ -281,12 +281,14 @@ function renderHistoricalAuthority(source: string, databaseName: AdmittedDatabas
   return source.replaceAll(token, `DATABASE ${quoteIdentifier(databaseName)}`);
 }
 
-async function verifyExactEffectivePrivileges(database: Client): Promise<void> {
+export async function verifyExactEffectivePrivileges(
+  database: Pick<Client, "query">,
+): Promise<void> {
   await verifyRole(database, "mira_refund_preflight");
   await verifyRole(database, "mira_refund_canary");
 }
 
-async function verifyRole(database: Client, role: RuntimeRole): Promise<void> {
+async function verifyRole(database: Pick<Client, "query">, role: RuntimeRole): Promise<void> {
   const safety = await database.query<RoleSafetyRow>(`
       SELECT
         role.rolcanlogin AS "canLogin",

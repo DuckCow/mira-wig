@@ -24,6 +24,24 @@ locals {
       title = "refund-db-bootstrap-login-single-instance"
     }
   }
+  credential_secret_iam = {
+    canary_adder = {
+      secret_id = "${var.resource_prefix}-canary-database-url"
+      role      = "roles/secretmanager.secretVersionAdder"
+    }
+    canary_viewer = {
+      secret_id = "${var.resource_prefix}-canary-database-url"
+      role      = "roles/secretmanager.viewer"
+    }
+    preflight_adder = {
+      secret_id = "${var.resource_prefix}-preflight-database-url"
+      role      = "roles/secretmanager.secretVersionAdder"
+    }
+    preflight_viewer = {
+      secret_id = "${var.resource_prefix}-preflight-database-url"
+      role      = "roles/secretmanager.viewer"
+    }
+  }
   job_environment = {
     MIRA_DB_BOOTSTRAP_PROJECT_ID               = var.project_id
     MIRA_DB_BOOTSTRAP_REGION                   = local.region

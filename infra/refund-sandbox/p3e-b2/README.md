@@ -325,15 +325,19 @@ deployer identity, custom role, or binding.
 ## Dormant database-bootstrap runtime boundary
 
 `database-bootstrap` is the isolated attended bootstrap Terraform root and uses backend prefix
-`p3e-b2/database-bootstrap`. Its exact five-address graph is frozen by
+`p3e-b2/database-bootstrap`. Its exact nine-address graph is frozen by
 `contracts/database-bootstrap-runtime-v1.json`. The root owns one passwordless bootstrap service
 account, two exact instance-conditioned project IAM members (`roles/cloudsql.client` and
 `roles/cloudsql.instanceUser`), one `CLOUD_IAM_SERVICE_ACCOUNT` Cloud SQL user with only the
-initial `cloudsqlsuperuser` database role, and one dormant Cloud Run v2 Job.
+initial `cloudsqlsuperuser` database role, four exact-secret metadata/version-add IAM members, and
+one dormant Cloud Run v2 Job. The secret bindings grant only
+`roles/secretmanager.secretVersionAdder` and `roles/secretmanager.viewer` to the bootstrap service
+account on the two existing application database-URL secrets; payload access is absent.
 
 The Job has one task, parallelism one, zero retries, digest-only image identity, Direct VPC
 `ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Its default argument is
-`check`; no scheduler, event trigger, invoker binding, database password, Secret Manager version,
+`check`; the only new explicit mode is `materialize-application-credentials`. No scheduler, event
+trigger, invoker binding, embedded database password, Secret Manager version Terraform resource,
 or payment-provider configuration exists. The separate bootstrap image contains the pinned Proxy,
 Prisma CLI, exact 41-migration corpus, `pg`, and existing hashed role/grant runner. Automatic IAM
 database authentication is isolated to that image and uses both `--private-ip` and

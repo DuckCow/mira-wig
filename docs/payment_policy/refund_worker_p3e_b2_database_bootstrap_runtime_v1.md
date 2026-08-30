@@ -8,12 +8,13 @@ GUARANTEES:
 - exact instance-conditioned Cloud SQL Client and Instance User grants;
 - one canonical PostgreSQL IAM service-account user with cloudsqlsuperuser;
 - one digest-bound, check-default, zero-retry, untriggered Cloud Run Job;
-- no database connection or Job execution during materialization.
+- exact-secret metadata/version-add authority without payload-read authority;
+- an explicit one-shot application-credential mode while the Job default remains `check`.
 
 NON-GOALS:
 - application runtime deployment;
 - automatic migration or grant execution;
-- application database credentials;
+- application runtime activation or credential rotation/recovery;
 - payment-provider contact.
 
 THREAT BOUNDARY:
@@ -32,7 +33,8 @@ RESIDUAL RISKS:
 MACHINE-OWNED RESPONSIBILITIES:
 - validate target/source/image/migration/task identities before Proxy spawn;
 - use private automatic IAM authentication and an exact Unix socket;
-- keep check read-only and require explicit apply;
+- keep check read-only and require explicit apply or credential-materialization modes;
+- enforce the initial `(0,0)` secret-version gate, at-most-once publication and safe ambiguity stop;
 - verify migration prefix and exact postconditions.
 
 HUMAN-OWNED RESPONSIBILITIES:
@@ -74,6 +76,11 @@ member carries the same condition for only
 additional deployer binding is admitted. The current deployer is the existing project Owner and
 therefore already has effective `iam.serviceAccounts.actAs`; the root does not restate it.
 
+For the credential mode only, the same service account receives
+`roles/secretmanager.secretVersionAdder` and `roles/secretmanager.viewer` on each of the two exact
+existing database-URL secrets. It receives no Secret Accessor, Version Manager or project-level
+Secret Manager role.
+
 ## Image and modes
 
 The build context is a normalized temporary allowlist, never the repository root. It contains a
@@ -82,7 +89,8 @@ existing hashed SQL role/grant inputs and runner, the bootstrap entrypoint, `pg`
 Auth Proxy 2.22.0. It excludes application refund-worker bundles, Toss/provider SDKs and every
 credential.
 
-The Docker default and Terraform Job argument are `check`. An absent or unknown direct process
+The Docker default and Terraform Job argument are `check`. The only credential command is
+`materialize-application-credentials`; an absent or unknown direct process
 mode fails with code 64. Exact Cloud Run one-task/index/attempt identity, source commit, image
 digest, target, canonical IAM username and migration count/hash are required before the Proxy can
 start. The Proxy vector includes `--private-ip`, `--auto-iam-authn`, and
@@ -94,18 +102,24 @@ unfinished migration and no rollback. Future explicit `apply` rechecks that stat
 `prisma migrate deploy`, requires all 41 migrations, then invokes the unchanged hashed role/grant
 runner and accepts success only after its effective-privilege postcondition.
 
+The separately authorized credential mode requires both exact secrets to have zero versions before
+password generation. It commits both client-generated SCRAM verifiers in one transaction, verifies
+one password login per application role through the same Proxy without automatic IAM database
+authentication, then adds preflight version 1 followed by canary version 1. It never reads a secret
+payload and never retries an ambiguous version-add operation.
+
 ## Current source status
 
 ```text
-BOOTSTRAP_SOURCE: DEFINED_NOT_CLOUD_APPLIED
-BOOTSTRAP_IMAGE: DEFINED_NOT_PUBLISHED
-BOOTSTRAP_JOB: DEFINED_DORMANT_NOT_CREATED
-JOB_EXECUTIONS: 0
-DATABASE_CONNECTIONS: 0
-DATABASE_READS_WRITES: 0/0
+BOOTSTRAP_CREDENTIAL_SOURCE: DEFINED_NOT_CLOUD_APPLIED
+BOOTSTRAP_CREDENTIAL_IMAGE: DEFINED_NOT_PUBLISHED
+BOOTSTRAP_JOB: EXISTING_DORMANT_DEFAULT_CHECK
+THIS_PHASE_JOB_EXECUTIONS: 0
+SOURCE_VALIDATION_DATABASE_CONNECTIONS: 0
+SOURCE_VALIDATION_DATABASE_READS_WRITES: 0/0
 APPLICATION_PASSWORDS: 0
 SECRET_VERSIONS: 0
-PROVIDER_CONTACTS: 0
+THIS_PHASE_PROVIDER_CONTACTS: 0
 ```
 
 Cloud publication/materialization status is never inferred from this document; it requires the

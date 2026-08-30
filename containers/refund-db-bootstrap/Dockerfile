@@ -6,6 +6,7 @@ WORKDIR /build
 COPY --link containers/refund-db-bootstrap/package.json containers/refund-db-bootstrap/package-lock.json ./
 RUN npm ci --legacy-peer-deps
 COPY --link containers/refund-db-bootstrap/entrypoint.ts ./containers/refund-db-bootstrap/
+COPY --link containers/refund-db-bootstrap/application-credentials.ts ./containers/refund-db-bootstrap/
 COPY --link scripts/eximbay-p3e-database-bootstrap.ts ./scripts/
 COPY --link src/lib/payment/refund/worker-migration-inventory.ts ./src/lib/payment/refund/
 COPY --link prisma.config.ts ./

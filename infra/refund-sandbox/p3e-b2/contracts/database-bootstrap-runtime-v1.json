@@ -11,15 +11,19 @@
     "providerVersion": "7.40.0"
   },
   "resourceGraph": {
-    "resourceCount": 5,
+    "resourceCount": 9,
     "addresses": [
       "google_cloud_run_v2_job.bootstrap",
       "google_project_iam_member.cloud_sql_access[\"client\"]",
       "google_project_iam_member.cloud_sql_access[\"instance_user\"]",
+      "google_secret_manager_secret_iam_member.credential_materialization[\"canary_adder\"]",
+      "google_secret_manager_secret_iam_member.credential_materialization[\"canary_viewer\"]",
+      "google_secret_manager_secret_iam_member.credential_materialization[\"preflight_adder\"]",
+      "google_secret_manager_secret_iam_member.credential_materialization[\"preflight_viewer\"]",
       "google_service_account.bootstrap",
       "google_sql_user.bootstrap"
     ],
-    "sortedAddressSha256": "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472"
+    "sortedAddressSha256": "a47352ee2a2bb7efccaa6278df5a12f7c4a0a21c76e3af9aad4fccdb8022a295"
   },
   "identity": {
     "serviceAccountId": "mira-p3e-sbx-db-bootstrap",
@@ -35,6 +39,15 @@
     "resourceScope": "EXACT_CLOUD_SQL_INSTANCE_VIA_IAM_CONDITION",
     "condition": "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'",
     "roles": ["roles/cloudsql.client", "roles/cloudsql.instanceUser"],
+    "credentialSecretScope": [
+      "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-preflight-database-url",
+      "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-canary-database-url"
+    ],
+    "credentialSecretRoles": [
+      "roles/secretmanager.secretVersionAdder",
+      "roles/secretmanager.viewer"
+    ],
+    "secretPayloadAccess": "NONE",
     "deployerActAsBinding": "NOT_CREATED_EXISTING_PROJECT_OWNER_IS_EFFECTIVE"
   },
   "migrations": {
@@ -47,9 +60,9 @@
     "logicalName": "refund-db-bootstrap",
     "platform": "linux/amd64",
     "defaultMode": "check",
-    "mutatingMode": "apply",
+    "mutatingModes": ["apply", "materialize-application-credentials"],
     "providerCredentials": "NONE",
-    "secretManagerDependencies": "NONE",
+    "secretManagerDependencies": "REST_METADATA_AND_VERSION_ADD",
     "cloudSqlAuthProxyVersion": "2.22.0",
     "systemCaTrust": {
       "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
@@ -106,7 +119,16 @@
       "DB_CONNECT_FAILED",
       "LEDGER_READ_FAILED",
       "LEDGER_REJECTED",
-      "RUNTIME_LOCAL_FAILED"
+      "RUNTIME_LOCAL_FAILED",
+      "SECRET_METADATA_UNAVAILABLE",
+      "SECRET_VERSION_BASELINE_DRIFT",
+      "APPLICATION_PASSWORD_TRANSACTION_FAILED",
+      "APPLICATION_PASSWORD_LOGIN_FAILED",
+      "SECRET_VERSION_ADD_FAILED",
+      "SECRET_VERSION_ADD_AMBIGUOUS_ZERO",
+      "SECRET_VERSION_ADD_AMBIGUOUS_ONE",
+      "SECRET_VERSION_ADD_AMBIGUOUS_DRIFT",
+      "SECRET_VERSION_POSTCONDITION_FAILED"
     ]
   },
   "job": {
@@ -115,6 +137,7 @@
     "parallelism": 1,
     "maxRetries": 0,
     "defaultArguments": ["check"],
+    "explicitCredentialArguments": ["materialize-application-credentials"],
     "automaticTrigger": "NONE",
     "network": "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc",
     "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",

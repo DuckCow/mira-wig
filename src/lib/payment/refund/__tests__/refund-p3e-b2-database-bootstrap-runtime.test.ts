@@ -173,11 +173,38 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     ]);
   });
 
+  it("admits only the exact credential-materialization mode without changing the default", async () => {
+    const execute = executeMock(Object.freeze({
+      code: "APP_CREDENTIAL_MATERIALIZATION_COMPLETE",
+      mode: "materialize-application-credentials",
+    }));
+    const result = await runDatabaseBootstrapEntrypoint(
+      ["materialize-application-credentials"],
+      VALID_ENV,
+      outputSink(),
+      dependencies(execute),
+    );
+    expect(result).toBe(0);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      mode: "materialize-application-credentials",
+    });
+  });
+
   it("freezes the private automatic-IAM proxy vector", () => {
     expect(proxyArguments()).toEqual([
       "--structured-logs",
       "--private-ip",
       "--auto-iam-authn",
+      "--unix-socket=/cloudsql",
+      "--health-check",
+      "--http-address=127.0.0.1",
+      "--http-port=9801",
+      "--exit-zero-on-sigterm",
+      "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18",
+    ]);
+    expect(proxyArguments(false)).toEqual([
+      "--structured-logs",
+      "--private-ip",
       "--unix-socket=/cloudsql",
       "--health-check",
       "--http-address=127.0.0.1",
@@ -522,7 +549,10 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     async (mode) => {
       const work = deferred<void>();
       const stopProxy = vi.fn(() => Promise.resolve());
-      const databaseWork = vi.fn(() => requireDatabaseConnection(() => work.promise));
+      const databaseWork = vi.fn(async () => {
+        await requireDatabaseConnection(() => work.promise);
+        return Object.freeze({});
+      });
       const output = outputSink();
       const result = runDatabaseBootstrapEntrypoint(
         [mode],
@@ -559,7 +589,10 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       output,
       dependencies(() => retainProxyThroughDatabaseWork({
         awaitReadiness: () => Promise.resolve(),
-        databaseWork: () => requireDatabaseConnection(rejectSensitiveDiagnostic),
+        databaseWork: async () => {
+          await requireDatabaseConnection(rejectSensitiveDiagnostic);
+          return Object.freeze({});
+        },
         stopProxy,
       })),
     );
@@ -658,6 +691,15 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       "LEDGER_READ_FAILED",
       "LEDGER_REJECTED",
       "RUNTIME_LOCAL_FAILED",
+      "SECRET_METADATA_UNAVAILABLE",
+      "SECRET_VERSION_BASELINE_DRIFT",
+      "APPLICATION_PASSWORD_TRANSACTION_FAILED",
+      "APPLICATION_PASSWORD_LOGIN_FAILED",
+      "SECRET_VERSION_ADD_FAILED",
+      "SECRET_VERSION_ADD_AMBIGUOUS_ZERO",
+      "SECRET_VERSION_ADD_AMBIGUOUS_ONE",
+      "SECRET_VERSION_ADD_AMBIGUOUS_DRIFT",
+      "SECRET_VERSION_POSTCONDITION_FAILED",
     ]);
     expect(contract.diagnostics).toEqual({
       proxyOutput: "BOUNDED_METADATA_ONLY_RAW_CONTENT_NEVER_EMITTED",
@@ -673,25 +715,31 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     });
   });
 
-  it("freezes the exact five-resource dormant Terraform authority", () => {
+  it("freezes the exact nine-resource credential-materialization authority", () => {
     expect(contract.resourceGraph).toEqual({
-      resourceCount: 5,
+      resourceCount: 9,
       addresses: [
         "google_cloud_run_v2_job.bootstrap",
         'google_project_iam_member.cloud_sql_access["client"]',
         'google_project_iam_member.cloud_sql_access["instance_user"]',
+        'google_secret_manager_secret_iam_member.credential_materialization["canary_adder"]',
+        'google_secret_manager_secret_iam_member.credential_materialization["canary_viewer"]',
+        'google_secret_manager_secret_iam_member.credential_materialization["preflight_adder"]',
+        'google_secret_manager_secret_iam_member.credential_materialization["preflight_viewer"]',
         "google_service_account.bootstrap",
         "google_sql_user.bootstrap",
       ],
       sortedAddressSha256:
-        "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472",
+        "a47352ee2a2bb7efccaa6278df5a12f7c4a0a21c76e3af9aad4fccdb8022a295",
     });
     const main = readFileSync(join(
       ROOT,
       "infra/refund-sandbox/p3e-b2/database-bootstrap/main.tf",
     ), "utf8");
-    expect(main.match(/^resource\s+"/gmu)).toHaveLength(4);
-    expect(main).not.toMatch(/service_account_key|secret_manager|run_invoker|scheduler|eventarc/iu);
+    expect(main.match(/^resource\s+"/gmu)).toHaveLength(5);
+    expect(main).not.toMatch(/service_account_key|run_invoker|scheduler|eventarc/iu);
+    expect(main).not.toContain("roles/secretmanager.secretAccessor");
+    expect(main).toContain("google_secret_manager_secret_iam_member");
     expect(main).not.toContain("roles/cloudsql.admin");
     expect(main).toMatch(/database_roles\s+=\s+\["cloudsqlsuperuser"\]/u);
     expect(main).toContain('args  = ["check"]');

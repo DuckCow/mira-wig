@@ -43,6 +43,15 @@ resource "google_sql_user" "bootstrap" {
   depends_on = [google_project_iam_member.cloud_sql_access]
 }
 
+resource "google_secret_manager_secret_iam_member" "credential_materialization" {
+  for_each = local.credential_secret_iam
+
+  project   = var.project_id
+  secret_id = each.value.secret_id
+  role      = each.value.role
+  member    = "serviceAccount:${google_service_account.bootstrap.email}"
+}
+
 resource "google_cloud_run_v2_job" "bootstrap" {
   project             = var.project_id
   location            = local.region
@@ -98,6 +107,7 @@ resource "google_cloud_run_v2_job" "bootstrap" {
 
   depends_on = [
     google_project_iam_member.cloud_sql_access,
+    google_secret_manager_secret_iam_member.credential_materialization,
     google_sql_user.bootstrap,
   ]
 }

@@ -27,9 +27,9 @@ check "exact_machine_contract" {
   assert {
     condition = (
       local.contract.contractVersion == "mira-refund-p3e-b2-db-bootstrap-runtime/v1" &&
-      local.contract.resourceGraph.resourceCount == 5 &&
+      local.contract.resourceGraph.resourceCount == 9 &&
       local.contract.resourceGraph.sortedAddressSha256 ==
-      "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472" &&
+      "a47352ee2a2bb7efccaa6278df5a12f7c4a0a21c76e3af9aad4fccdb8022a295" &&
       local.contract.migrations.count == local.migration_count &&
       local.contract.migrations.sha256 == local.migration_sha256
     )

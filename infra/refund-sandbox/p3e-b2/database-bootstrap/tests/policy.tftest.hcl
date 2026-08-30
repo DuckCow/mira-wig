@@ -27,6 +27,14 @@ variables {
 run "exact_dormant_database_bootstrap_shape" {
   command = plan
 
+  override_resource {
+    target          = google_service_account.bootstrap
+    override_during = plan
+    values = {
+      email = "mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com"
+    }
+  }
+
   assert {
     condition = (
       google_service_account.bootstrap.account_id == "mira-p3e-sbx-db-bootstrap" &&
@@ -47,6 +55,26 @@ run "exact_dormant_database_bootstrap_shape" {
       ])
     )
     error_message = "Only the two exact instance-conditioned Cloud SQL grants are admitted."
+  }
+
+  assert {
+    condition = (
+      length(google_secret_manager_secret_iam_member.credential_materialization) == 4 &&
+      toset([
+        for grant in values(google_secret_manager_secret_iam_member.credential_materialization) :
+        "${grant.secret_id}|${grant.role}"
+      ]) == toset([
+        "mira-p3e-sbx-preflight-database-url|roles/secretmanager.secretVersionAdder",
+        "mira-p3e-sbx-preflight-database-url|roles/secretmanager.viewer",
+        "mira-p3e-sbx-canary-database-url|roles/secretmanager.secretVersionAdder",
+        "mira-p3e-sbx-canary-database-url|roles/secretmanager.viewer",
+      ]) &&
+      alltrue([
+        for grant in values(google_secret_manager_secret_iam_member.credential_materialization) :
+        grant.member == "serviceAccount:mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com"
+      ])
+    )
+    error_message = "Only exact-secret metadata and version-add authority is admitted."
   }
 
   assert {
@@ -84,7 +112,7 @@ run "exact_dormant_database_bootstrap_shape" {
       var.foundation_handoff.network_resource_name &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].vpc_access[0].network_interfaces[0].subnetwork ==
       var.foundation_handoff.subnetwork_resource_name &&
-      google_cloud_run_v2_job.bootstrap.template[0].template[0].vpc_access[0].network_interfaces[0].tags ==
+      toset(google_cloud_run_v2_job.bootstrap.template[0].template[0].vpc_access[0].network_interfaces[0].tags) ==
       toset(["refund-provider-free"])
     )
     error_message = "The exact Direct VPC ALL_TRAFFIC path and firewall tag are required."
@@ -94,9 +122,10 @@ run "exact_dormant_database_bootstrap_shape" {
     condition = (
       output.bootstrap_manifest.default_mode == "check" &&
       output.bootstrap_manifest.explicit_mutating_mode == "apply" &&
+      output.bootstrap_manifest.credential_materialization_mode == "materialize-application-credentials" &&
       output.bootstrap_manifest.automatic_trigger == "NONE" &&
       output.bootstrap_manifest.provider_credentials == "NONE" &&
-      output.bootstrap_manifest.secret_manager_dependencies == "NONE" &&
+      output.bootstrap_manifest.secret_manager_dependencies == "EXACT_SECRET_METADATA_AND_VERSION_ADD_ONLY" &&
       output.bootstrap_manifest.execution_status == "DORMANT_NOT_EXECUTED"
     )
     error_message = "The bootstrap handoff must remain dormant and provider/secret free."

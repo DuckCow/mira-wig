@@ -22,6 +22,7 @@ const sourceDateEpochSeconds = 1_788_130_800;
 const exactAssets = Object.freeze([
   "containers/refund-db-bootstrap/Dockerfile",
   "containers/refund-db-bootstrap/README.md",
+  "containers/refund-db-bootstrap/application-credentials.ts",
   "containers/refund-db-bootstrap/entrypoint.ts",
   "containers/refund-db-bootstrap/package-lock.json",
   "containers/refund-db-bootstrap/package.json",
