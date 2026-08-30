@@ -89,6 +89,11 @@ export type ProxyReadinessDependencies = Readonly<{
   fetchReadiness: () => Promise<boolean>;
   wait: (milliseconds: number) => Promise<void>;
 }>;
+export type ProxyLifetimeDependencies<Result> = Readonly<{
+  awaitReadiness: () => Promise<void>;
+  databaseWork: () => Promise<Result>;
+  stopProxy: () => Promise<void>;
+}>;
 
 export const PROXY_STDIO = Object.freeze(["ignore", "pipe", "pipe"] as const);
 const proxyDiagnosticSettled = new WeakMap<ProxyDiagnosticSummary, Promise<void>>();
@@ -283,13 +288,31 @@ async function runWithProxy(
     consumeProxyDiagnosticStream(proxy.stdout),
     consumeProxyDiagnosticStream(proxy.stderr),
   ]);
-  try {
-    await awaitProxyReadiness(proxy, startObservation, diagnostics);
-    return configuration.mode === "check"
+  return retainProxyThroughDatabaseWork({
+    awaitReadiness: () => awaitProxyReadiness(proxy, startObservation, diagnostics),
+    databaseWork: () => configuration.mode === "check"
       ? checkDatabase(configuration.databaseUrl, inventory)
-      : applyDatabase(configuration.databaseUrl, inventory);
+      : applyDatabase(configuration.databaseUrl, inventory),
+    stopProxy: () => stopProxy(proxy),
+  });
+}
+
+export async function retainProxyThroughDatabaseWork<Result>(
+  dependencies: ProxyLifetimeDependencies<Result>,
+): Promise<Result> {
+  let primaryFailure = false;
+  try {
+    await dependencies.awaitReadiness();
+    return await dependencies.databaseWork();
+  } catch (error) {
+    primaryFailure = true;
+    throw error;
   } finally {
-    await stopProxy(proxy);
+    if (primaryFailure) {
+      await dependencies.stopProxy().catch(() => undefined);
+    } else {
+      await dependencies.stopProxy();
+    }
   }
 }
 

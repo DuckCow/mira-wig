@@ -14,6 +14,7 @@ import {
   PROXY_STDIO,
   PROXY_TRANSPORT_CLASSES,
   proxyArguments,
+  retainProxyThroughDatabaseWork,
   requireDatabaseConnection,
   requireExactLedgerRows,
   requireLedgerRead,
@@ -415,6 +416,124 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(result.stderr).not.toContain(SENSITIVE_DIAGNOSTIC);
   });
 
+  it.each(["check", "apply"] as const)(
+    "retains Proxy ownership through pending and fulfilled %s database work",
+    async (mode) => {
+      const work = deferred<string>();
+      const events: string[] = [];
+      const stopProxy = vi.fn(() => {
+        events.push("proxy-stopped");
+        return Promise.resolve();
+      });
+      const result = retainProxyThroughDatabaseWork({
+        awaitReadiness: () => {
+          events.push("proxy-ready");
+          return Promise.resolve();
+        },
+        databaseWork: async () => {
+          events.push(`${mode}-started`);
+          const value = await work.promise;
+          events.push(`${mode}-fulfilled`);
+          return value;
+        },
+        stopProxy,
+      });
+
+      await vi.waitFor(() => {
+        expect(events).toEqual(["proxy-ready", `${mode}-started`]);
+      });
+      expect(stopProxy).not.toHaveBeenCalled();
+
+      work.resolve(`${mode}-result`);
+      await expect(result).resolves.toBe(`${mode}-result`);
+      expect(events).toEqual([
+        "proxy-ready",
+        `${mode}-started`,
+        `${mode}-fulfilled`,
+        "proxy-stopped",
+      ]);
+      expect(stopProxy).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["check", "apply"] as const)(
+    "stops Proxy once after rejected %s database work reaches the safe boundary",
+    async (mode) => {
+      const work = deferred<void>();
+      const stopProxy = vi.fn(() => Promise.resolve());
+      const databaseWork = vi.fn(() => requireDatabaseConnection(() => work.promise));
+      const output = outputSink();
+      const result = runDatabaseBootstrapEntrypoint(
+        [mode],
+        VALID_ENV,
+        output,
+        dependencies(() => retainProxyThroughDatabaseWork({
+          awaitReadiness: () => Promise.resolve(),
+          databaseWork,
+          stopProxy,
+        })),
+      );
+
+      await vi.waitFor(() => {
+        expect(databaseWork).toHaveBeenCalledOnce();
+        expect(stopProxy).not.toHaveBeenCalled();
+      });
+      work.reject(new Error(SENSITIVE_DIAGNOSTIC));
+
+      await expect(result).resolves.toBe(1);
+      expect(stopProxy).toHaveBeenCalledOnce();
+      expect(output.stderrLines).toEqual([
+        '{"ok":false,"code":"DB_CONNECT_FAILED"}\n',
+      ]);
+      expect(output.stderrLines.join("")).not.toContain(SENSITIVE_DIAGNOSTIC);
+    },
+  );
+
+  it("preserves a classified database failure when Proxy shutdown also rejects", async () => {
+    const stopProxy = vi.fn(() => Promise.reject(new Error("raw shutdown failure")));
+    const output = outputSink();
+    const result = await runDatabaseBootstrapEntrypoint(
+      ["check"],
+      VALID_ENV,
+      output,
+      dependencies(() => retainProxyThroughDatabaseWork({
+        awaitReadiness: () => Promise.resolve(),
+        databaseWork: () => requireDatabaseConnection(rejectSensitiveDiagnostic),
+        stopProxy,
+      })),
+    );
+
+    expect(result).toBe(1);
+    expect(stopProxy).toHaveBeenCalledOnce();
+    expect(output.stderrLines).toEqual([
+      '{"ok":false,"code":"DB_CONNECT_FAILED"}\n',
+    ]);
+    expect(output.stderrLines.join("")).not.toContain(SENSITIVE_DIAGNOSTIC);
+    expect(output.stderrLines.join("")).not.toContain("raw shutdown failure");
+  });
+
+  it("reports a cleanup failure after fulfilled database work", async () => {
+    const stopProxy = vi.fn(() => Promise.reject(new Error("raw shutdown failure")));
+    const output = outputSink();
+    const result = await runDatabaseBootstrapEntrypoint(
+      ["check"],
+      VALID_ENV,
+      output,
+      dependencies(() => retainProxyThroughDatabaseWork({
+        awaitReadiness: () => Promise.resolve(),
+        databaseWork: () => Promise.resolve(Object.freeze({ mode: "check" })),
+        stopProxy,
+      })),
+    );
+
+    expect(result).toBe(1);
+    expect(stopProxy).toHaveBeenCalledOnce();
+    expect(output.stderrLines).toEqual([
+      '{"ok":false,"code":"RUNTIME_LOCAL_FAILED"}\n',
+    ]);
+    expect(output.stderrLines.join("")).not.toContain("raw shutdown failure");
+  });
+
   it("classifies ledger query failure independently", async () => {
     const result = await runFailure(() => requireLedgerRead(
       rejectLedgerDiagnostic,
@@ -459,6 +578,14 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       apply.indexOf("ROLE_BOOTSTRAP_EXECUTABLE"),
     );
     expect(source).not.toMatch(/retryDatabase|connectWithRetry|databaseRetry/iu);
+    const owner = source.slice(
+      source.indexOf("export async function retainProxyThroughDatabaseWork"),
+      source.indexOf("async function checkDatabase"),
+    );
+    expect(owner).toContain("return await dependencies.databaseWork()");
+    expect(owner.indexOf("return await dependencies.databaseWork()")).toBeLessThan(
+      owner.indexOf("await dependencies.stopProxy().catch"),
+    );
   });
 
   it("freezes the small evidence-bounded stage vocabulary", () => {
@@ -662,4 +789,14 @@ function rejectSensitiveDiagnostic(): Promise<void> {
 
 function rejectLedgerDiagnostic(): Promise<void> {
   return Promise.reject(new Error("raw ledger query failure"));
+}
+
+function deferred<Result>() {
+  let resolve!: (value: Result) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<Result>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return Object.freeze({ promise, resolve, reject });
 }
