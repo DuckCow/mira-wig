@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v1.json";
 import {
+  awaitProxyReadiness,
+  BOOTSTRAP_FAILURE_CODES,
+  consumeProxyDiagnosticStream,
+  PROXY_DIAGNOSTIC_BYTE_LIMIT,
+  PROXY_STDIO,
   proxyArguments,
+  requireDatabaseConnection,
+  requireExactLedgerRows,
+  requireLedgerRead,
   runDatabaseBootstrapEntrypoint,
   type RuntimeConfiguration,
   type RuntimeDependencies,
@@ -16,6 +25,8 @@ import {
 const ROOT = process.cwd();
 const COMMIT = "a".repeat(40);
 const DIGEST = "b".repeat(64);
+const SENSITIVE_DIAGNOSTIC =
+  "oauth-token password=secret DATABASE_URL=postgresql://secret";
 const VALID_ENV = Object.freeze({
   MIRA_DB_BOOTSTRAP_PROJECT_ID: "mira-refund-sandbox-0001",
   MIRA_DB_BOOTSTRAP_REGION: "asia-northeast3",
@@ -107,6 +118,133 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       "--exit-zero-on-sigterm",
       "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18",
     ]);
+  });
+
+  it("pipes and boundedly consumes Proxy output without retaining raw bytes", () => {
+    expect(PROXY_STDIO).toEqual(["ignore", "pipe", "pipe"]);
+    const stream = new PassThrough();
+    const summary = consumeProxyDiagnosticStream(stream);
+    const sensitive = "oauth-token password=secret DATABASE_URL=postgresql://secret";
+    stream.write(sensitive.repeat(200));
+    stream.end();
+    expect(summary).toEqual({
+      observedBytes: PROXY_DIAGNOSTIC_BYTE_LIMIT,
+      truncated: true,
+    });
+    expect(JSON.stringify(summary)).not.toContain(sensitive);
+    expect(JSON.stringify(summary)).not.toContain("postgresql://secret");
+  });
+
+  it("reports Proxy early exit with bounded metadata and no raw diagnostic", async () => {
+    const result = await runFailure(async () => {
+      await awaitProxyReadiness(
+        { exitCode: 17, signalCode: null },
+        { failed: false },
+        [{ observedBytes: 32, truncated: false }],
+        readinessDependencies([0, 1]),
+      );
+    });
+    expect(result).toEqual({
+      status: 1,
+      stderr:
+        '{"ok":false,"code":"PROXY_EARLY_EXIT","proxyExitCode":17,"proxySignal":null,"proxyDiagnosticAvailable":true}\n',
+    });
+  });
+
+  it("reports Proxy start failure independently", async () => {
+    const result = await runFailure(async () => {
+      await awaitProxyReadiness(
+        { exitCode: null, signalCode: null },
+        { failed: true },
+        [],
+        readinessDependencies([0, 1]),
+      );
+    });
+    expect(result.stderr).toBe('{"ok":false,"code":"PROXY_START_FAILED"}\n');
+  });
+
+  it("reports the unchanged readiness deadline independently", async () => {
+    const result = await runFailure(async () => {
+      await awaitProxyReadiness(
+        { exitCode: null, signalCode: null },
+        { failed: false },
+        [],
+        readinessDependencies([0, 120_000]),
+      );
+    });
+    expect(result.stderr).toBe('{"ok":false,"code":"PROXY_READY_TIMEOUT"}\n');
+  });
+
+  it("classifies database connect failure without leaking its exception", async () => {
+    const result = await runFailure(() => requireDatabaseConnection(
+      rejectSensitiveDiagnostic,
+    ));
+    expect(result.stderr).toBe('{"ok":false,"code":"DB_CONNECT_FAILED"}\n');
+    expect(result.stderr).not.toContain(SENSITIVE_DIAGNOSTIC);
+  });
+
+  it("classifies ledger query failure independently", async () => {
+    const result = await runFailure(() => requireLedgerRead(
+      rejectLedgerDiagnostic,
+    ));
+    expect(result.stderr).toBe('{"ok":false,"code":"LEDGER_READ_FAILED"}\n');
+    expect(result.stderr).not.toContain("raw ledger query failure");
+  });
+
+  it("classifies semantic ledger rejection independently", async () => {
+    const inventory = await loadRefundWorkerMigrationInventory();
+    const result = await runFailure(() => {
+      requireExactLedgerRows([{
+        migrationName: "unexpected",
+        checksum: "c".repeat(64),
+        finishedAt: new Date(0),
+        rolledBackAt: null,
+      }], inventory);
+    });
+    expect(result.stderr).toBe('{"ok":false,"code":"LEDGER_REJECTED"}\n');
+  });
+
+  it("keeps check read-only, apply ordering unchanged, and database retries absent", () => {
+    const source = readFileSync(
+      join(ROOT, "containers/refund-db-bootstrap/entrypoint.ts"),
+      "utf8",
+    );
+    const check = source.slice(
+      source.indexOf("async function checkDatabase"),
+      source.indexOf("async function applyDatabase"),
+    );
+    const apply = source.slice(
+      source.indexOf("async function applyDatabase"),
+      source.indexOf("async function requireExactMigrationPrefix"),
+    );
+    expect(check.match(/requireDatabaseConnection/gu)).toHaveLength(1);
+    expect(check).not.toMatch(/migrate|ROLE_BOOTSTRAP|INSERT|UPDATE|DELETE/iu);
+    expect(apply.match(/requireDatabaseConnection/gu)).toHaveLength(2);
+    expect(apply.indexOf("requireExactMigrationPrefix")).toBeLessThan(
+      apply.indexOf("PRISMA_EXECUTABLE"),
+    );
+    expect(apply.lastIndexOf("requireExactMigrationPrefix")).toBeLessThan(
+      apply.indexOf("ROLE_BOOTSTRAP_EXECUTABLE"),
+    );
+    expect(source).not.toMatch(/retryDatabase|connectWithRetry|databaseRetry/iu);
+  });
+
+  it("freezes the small evidence-bounded stage vocabulary", () => {
+    expect(BOOTSTRAP_FAILURE_CODES).toEqual([
+      "PROXY_START_FAILED",
+      "PROXY_EARLY_EXIT",
+      "PROXY_READY_TIMEOUT",
+      "DB_CONNECT_FAILED",
+      "LEDGER_READ_FAILED",
+      "LEDGER_REJECTED",
+      "RUNTIME_LOCAL_FAILED",
+    ]);
+    expect(contract.diagnostics).toEqual({
+      proxyOutput: "BOUNDED_METADATA_ONLY_RAW_CONTENT_NEVER_EMITTED",
+      proxyDiagnosticByteLimit: 4096,
+      databaseConnectionRetries: 0,
+      stageCodes: [...BOOTSTRAP_FAILURE_CODES],
+    });
   });
 
   it("freezes the exact five-resource dormant Terraform authority", () => {
@@ -204,4 +342,36 @@ function outputSink() {
     stdout: { write: (value: string) => { stdoutLines.push(value); return true; } },
     stderr: { write: (value: string) => { stderrLines.push(value); return true; } },
   };
+}
+
+async function runFailure(action: () => void | Promise<void>) {
+  const execute = vi.fn(async () => {
+    await action();
+    return Object.freeze({});
+  });
+  const output = outputSink();
+  const status = await runDatabaseBootstrapEntrypoint(
+    ["check"],
+    VALID_ENV,
+    output,
+    dependencies(execute),
+  );
+  return Object.freeze({ status, stderr: output.stderrLines.join("") });
+}
+
+function readinessDependencies(nowValues: readonly number[]) {
+  let nowIndex = 0;
+  return Object.freeze({
+    now: () => nowValues[nowIndex++] ?? nowValues.at(-1) ?? 0,
+    fetchReadiness: () => Promise.resolve(false),
+    wait: () => Promise.resolve(),
+  });
+}
+
+function rejectSensitiveDiagnostic(): Promise<void> {
+  return Promise.reject(new Error(SENSITIVE_DIAGNOSTIC));
+}
+
+function rejectLedgerDiagnostic(): Promise<void> {
+  return Promise.reject(new Error("raw ledger query failure"));
 }

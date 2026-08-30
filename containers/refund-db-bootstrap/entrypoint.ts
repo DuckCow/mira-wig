@@ -24,6 +24,49 @@ const MIGRATIONS_DIRECTORY = "/app/prisma/migrations";
 const READINESS_URL = "http://127.0.0.1:9801/readiness";
 const READINESS_TIMEOUT_MS = 120_000;
 const READINESS_POLL_MS = 250;
+export const PROXY_DIAGNOSTIC_BYTE_LIMIT = 4_096;
+
+export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
+  "PROXY_START_FAILED",
+  "PROXY_EARLY_EXIT",
+  "PROXY_READY_TIMEOUT",
+  "DB_CONNECT_FAILED",
+  "LEDGER_READ_FAILED",
+  "LEDGER_REJECTED",
+  "RUNTIME_LOCAL_FAILED",
+] as const);
+
+type BootstrapFailureCode = (typeof BOOTSTRAP_FAILURE_CODES)[number];
+type SafeFailureDetails = Readonly<{
+  proxyExitCode?: number | null;
+  proxySignal?: string | null;
+  proxyDiagnosticAvailable?: boolean;
+}>;
+type SafeFailureRecord = Readonly<{ code: BootstrapFailureCode }> & SafeFailureDetails;
+type ProxyStartObservation = { failed: boolean };
+type ProxyReadinessProcess = Pick<ChildProcess, "exitCode" | "signalCode">;
+type ProxyDiagnosticStream = Pick<NodeJS.ReadableStream, "on">;
+export type ProxyDiagnosticSummary = {
+  observedBytes: number;
+  truncated: boolean;
+};
+export type ProxyReadinessDependencies = Readonly<{
+  now: () => number;
+  fetchReadiness: () => Promise<boolean>;
+  wait: (milliseconds: number) => Promise<void>;
+}>;
+
+export const PROXY_STDIO = Object.freeze(["ignore", "pipe", "pipe"] as const);
+
+class BootstrapStageFailure extends Error {
+  readonly record: SafeFailureRecord;
+
+  constructor(code: BootstrapFailureCode, details: SafeFailureDetails = {}) {
+    super(code);
+    this.name = "BootstrapStageFailure";
+    this.record = Object.freeze({ code, ...details });
+  }
+}
 
 export type BootstrapMode = "check" | "apply";
 
@@ -90,8 +133,8 @@ export async function runDatabaseBootstrapEntrypoint(
     const result = await dependencies.execute(configuration, inventory);
     output.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`);
     return 0;
-  } catch {
-    output.stderr.write('{"ok":false,"code":"DB_BOOTSTRAP_RUNTIME_FAILED"}\n');
+  } catch (error) {
+    output.stderr.write(`${JSON.stringify({ ok: false, ...safeFailureRecord(error) })}\n`);
     return 1;
   }
 }
@@ -189,12 +232,23 @@ async function runWithProxy(
   configuration: RuntimeConfiguration,
   inventory: RefundWorkerMigrationInventory,
 ): Promise<Readonly<Record<string, unknown>>> {
-  const proxy = spawn(PROXY_EXECUTABLE, [...proxyArguments()], {
-    env: minimalProxyEnvironment(),
-    stdio: ["ignore", "ignore", "ignore"],
-  });
+  const startObservation: ProxyStartObservation = { failed: false };
+  let proxy: ChildProcess;
   try {
-    await awaitProxyReadiness(proxy);
+    proxy = spawn(PROXY_EXECUTABLE, [...proxyArguments()], {
+      env: minimalProxyEnvironment(),
+      stdio: [...PROXY_STDIO],
+    });
+  } catch {
+    throw new BootstrapStageFailure("PROXY_START_FAILED");
+  }
+  proxy.once("error", () => { startObservation.failed = true; });
+  const diagnostics = Object.freeze([
+    consumeProxyDiagnosticStream(proxy.stdout),
+    consumeProxyDiagnosticStream(proxy.stderr),
+  ]);
+  try {
+    await awaitProxyReadiness(proxy, startObservation, diagnostics);
     return configuration.mode === "check"
       ? checkDatabase(configuration.databaseUrl, inventory)
       : applyDatabase(configuration.databaseUrl, inventory);
@@ -209,7 +263,7 @@ async function checkDatabase(
 ): Promise<Readonly<Record<string, unknown>>> {
   const database = new Client({ connectionString: databaseUrlValue });
   try {
-    await database.connect();
+    await requireDatabaseConnection(() => database.connect());
     const completed = await requireExactMigrationPrefix(database, inventory);
     return Object.freeze({
       code: "DB_BOOTSTRAP_CHECK_READY",
@@ -229,7 +283,7 @@ async function applyDatabase(
 ): Promise<Readonly<Record<string, unknown>>> {
   const before = new Client({ connectionString: databaseUrlValue });
   try {
-    await before.connect();
+    await requireDatabaseConnection(() => before.connect());
     await requireExactMigrationPrefix(before, inventory);
   } finally {
     await before.end().catch(() => undefined);
@@ -246,9 +300,9 @@ async function applyDatabase(
 
   const after = new Client({ connectionString: databaseUrlValue });
   try {
-    await after.connect();
+    await requireDatabaseConnection(() => after.connect());
     const completed = await requireExactMigrationPrefix(after, inventory);
-    if (completed !== inventory.migrationCount) throw new Error("MIGRATION_SET_INCOMPLETE");
+    if (completed !== inventory.migrationCount) ledgerRejected();
   } finally {
     await after.end().catch(() => undefined);
   }
@@ -267,34 +321,34 @@ async function requireExactMigrationPrefix(
   database: Client,
   inventory: RefundWorkerMigrationInventory,
 ): Promise<number> {
-  const ledger = await database.query<{ ledger: string | null }>(
+  const ledger = await requireLedgerRead(() => database.query<{ ledger: string | null }>(
     "SELECT to_regclass('public._prisma_migrations')::text AS ledger",
-  );
+  ));
   if (ledger.rows[0]?.ledger === null) {
-    const tables = await database.query<{ tableName: string }>(`
+    const tables = await requireLedgerRead(() => database.query<{ tableName: string }>(`
       SELECT tablename AS "tableName"
       FROM pg_tables
       WHERE schemaname = 'public'
       ORDER BY tablename
-    `);
-    if (tables.rows.length !== 0) throw new Error("NONEMPTY_SCHEMA_WITHOUT_LEDGER");
+    `));
+    if (tables.rows.length !== 0) ledgerRejected();
     return 0;
   }
-  const result = await database.query<LedgerRow>(`
+  const result = await requireLedgerRead(() => database.query<LedgerRow>(`
     SELECT migration_name AS "migrationName", checksum,
       finished_at AS "finishedAt", rolled_back_at AS "rolledBackAt"
     FROM "_prisma_migrations"
     ORDER BY started_at, migration_name
-  `);
+  `));
   requireExactLedgerRows(result.rows, inventory);
   return result.rows.length;
 }
 
-function requireExactLedgerRows(
+export function requireExactLedgerRows(
   rows: readonly LedgerRow[],
   inventory: RefundWorkerMigrationInventory,
 ): void {
-  if (rows.length > inventory.entries.length) throw new Error("UNKNOWN_MIGRATION");
+  if (rows.length > inventory.entries.length) ledgerRejected();
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const expected = inventory.entries[index];
@@ -302,8 +356,55 @@ function requireExactLedgerRows(
       || row.migrationName !== expected.name
       || row.checksum !== expected.sha256
       || row.finishedAt === null
-      || row.rolledBackAt !== null) throw new Error("MIGRATION_LEDGER_INVALID");
+      || row.rolledBackAt !== null) ledgerRejected();
   }
+}
+
+export async function requireDatabaseConnection<Result>(connect: () => Promise<Result>): Promise<void> {
+  try {
+    await connect();
+  } catch {
+    throw new BootstrapStageFailure("DB_CONNECT_FAILED");
+  }
+}
+
+export async function requireLedgerRead<Result>(read: () => Promise<Result>): Promise<Result> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof BootstrapStageFailure) throw error;
+    throw new BootstrapStageFailure("LEDGER_READ_FAILED");
+  }
+}
+
+function ledgerRejected(): never {
+  throw new BootstrapStageFailure("LEDGER_REJECTED");
+}
+
+function safeFailureRecord(error: unknown): SafeFailureRecord {
+  return error instanceof BootstrapStageFailure
+    ? error.record
+    : Object.freeze({ code: "RUNTIME_LOCAL_FAILED" });
+}
+
+export function consumeProxyDiagnosticStream(
+  stream: ProxyDiagnosticStream | null,
+): ProxyDiagnosticSummary {
+  const summary: ProxyDiagnosticSummary = { observedBytes: 0, truncated: false };
+  stream?.on("data", (chunk: unknown) => {
+    const bytes = diagnosticChunkBytes(chunk);
+    if (bytes === 0) return;
+    const remaining = PROXY_DIAGNOSTIC_BYTE_LIMIT - summary.observedBytes;
+    summary.observedBytes += Math.min(remaining, bytes);
+    if (bytes > remaining) summary.truncated = true;
+  });
+  return summary;
+}
+
+function diagnosticChunkBytes(chunk: unknown): number {
+  if (typeof chunk === "string") return Buffer.byteLength(chunk);
+  if (chunk instanceof Uint8Array) return chunk.byteLength;
+  return 0;
 }
 
 async function requireSuccessfulChild(
@@ -331,19 +432,40 @@ async function requireSuccessfulChild(
   if (exit !== 0) throw new Error("BOOTSTRAP_CHILD_FAILED");
 }
 
-async function awaitProxyReadiness(proxy: ChildProcess): Promise<void> {
-  const deadline = Date.now() + READINESS_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (proxy.exitCode !== null) throw new Error("PROXY_EXITED");
-    try {
-      const response = await fetch(READINESS_URL, { signal: AbortSignal.timeout(1_000) });
-      if (response.ok) return;
-    } catch {
-      // A bounded readiness miss is expected while Direct VPC starts.
+const defaultProxyReadinessDependencies = Object.freeze<ProxyReadinessDependencies>({
+  now: Date.now,
+  fetchReadiness: async () => {
+    const response = await fetch(READINESS_URL, { signal: AbortSignal.timeout(1_000) });
+    return response.ok;
+  },
+  wait: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+});
+
+export async function awaitProxyReadiness(
+  proxy: ProxyReadinessProcess,
+  startObservation: Readonly<ProxyStartObservation>,
+  diagnostics: readonly ProxyDiagnosticSummary[],
+  dependencies: ProxyReadinessDependencies = defaultProxyReadinessDependencies,
+): Promise<void> {
+  const deadline = dependencies.now() + READINESS_TIMEOUT_MS;
+  while (dependencies.now() < deadline) {
+    if (startObservation.failed) throw new BootstrapStageFailure("PROXY_START_FAILED");
+    if (proxy.exitCode !== null) {
+      throw new BootstrapStageFailure("PROXY_EARLY_EXIT", {
+        proxyExitCode: proxy.exitCode,
+        proxySignal: proxy.signalCode,
+        proxyDiagnosticAvailable: diagnostics.some((summary) =>
+          summary.observedBytes > 0 || summary.truncated),
+      });
     }
-    await new Promise((resolve) => setTimeout(resolve, READINESS_POLL_MS));
+    try {
+      if (await dependencies.fetchReadiness()) return;
+    } catch {
+      // A bounded local readiness miss is expected while the Proxy starts.
+    }
+    await dependencies.wait(READINESS_POLL_MS);
   }
-  throw new Error("PROXY_READINESS_TIMEOUT");
+  throw new BootstrapStageFailure("PROXY_READY_TIMEOUT");
 }
 
 async function stopProxy(proxy: ChildProcess): Promise<void> {

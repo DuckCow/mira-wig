@@ -62,6 +62,20 @@
       "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
     ]
   },
+  "diagnostics": {
+    "proxyOutput": "BOUNDED_METADATA_ONLY_RAW_CONTENT_NEVER_EMITTED",
+    "proxyDiagnosticByteLimit": 4096,
+    "databaseConnectionRetries": 0,
+    "stageCodes": [
+      "PROXY_START_FAILED",
+      "PROXY_EARLY_EXIT",
+      "PROXY_READY_TIMEOUT",
+      "DB_CONNECT_FAILED",
+      "LEDGER_READ_FAILED",
+      "LEDGER_REJECTED",
+      "RUNTIME_LOCAL_FAILED"
+    ]
+  },
   "job": {
     "name": "mira-p3e-sbx-refund-db-bootstrap",
     "taskCount": 1,

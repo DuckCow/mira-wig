@@ -30,10 +30,10 @@ function main(args: readonly string[] = process.argv.slice(2)): void {
     "--network=none",
     "--entrypoint", "/usr/local/bin/node", tag,
     "--input-type=module", "--eval",
-    "import('/app/scripts/refund-db-bootstrap-entrypoint.mjs').then(async runtime => { const inventory = await runtime.defaultRuntimeDependencies.loadMigrationInventory(); process.stdout.write(JSON.stringify({ count: inventory.migrationCount, sha256: inventory.migrationDigest })); })",
+    "import('/app/scripts/refund-db-bootstrap-entrypoint.mjs').then(async runtime => { const inventory = await runtime.defaultRuntimeDependencies.loadMigrationInventory(); process.stdout.write(JSON.stringify({ count: inventory.migrationCount, sha256: inventory.migrationDigest, failureCodes: runtime.BOOTSTRAP_FAILURE_CODES, proxyDiagnosticByteLimit: runtime.PROXY_DIAGNOSTIC_BYTE_LIMIT, proxyStdio: runtime.PROXY_STDIO })); })",
   ]);
   if (migrationInventory.stdout !==
-    '{"count":41,"sha256":"4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"}') {
+    '{"count":41,"sha256":"4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c","failureCodes":["PROXY_START_FAILED","PROXY_EARLY_EXIT","PROXY_READY_TIMEOUT","DB_CONNECT_FAILED","LEDGER_READ_FAILED","LEDGER_REJECTED","RUNTIME_LOCAL_FAILED"],"proxyDiagnosticByteLimit":4096,"proxyStdio":["ignore","pipe","pipe"]}') {
     throw new Error("DB_BOOTSTRAP_MIGRATION_INVENTORY_INVALID");
   }
   const unknown = run(tag, ["--network=none", tag, "unknown"], false);
@@ -49,6 +49,8 @@ function main(args: readonly string[] = process.argv.slice(2)): void {
     prisma: "7.8.0",
     migrationCount: 41,
     migrationSha256: "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
+    diagnosticStageCount: 7,
+    proxyDiagnosticByteLimit: 4096,
     unknownModeExit: 64,
     network: "none",
   })}\n`);
