@@ -6,8 +6,10 @@ import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/datab
 import {
   awaitProxyReadiness,
   BOOTSTRAP_FAILURE_CODES,
+  classifyProxyStructuredLogLine,
   consumeProxyDiagnosticStream,
   PROXY_DIAGNOSTIC_BYTE_LIMIT,
+  PROXY_FAILURE_CLASSES,
   PROXY_STDIO,
   proxyArguments,
   requireDatabaseConnection,
@@ -109,6 +111,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
 
   it("freezes the private automatic-IAM proxy vector", () => {
     expect(proxyArguments()).toEqual([
+      "--structured-logs",
       "--private-ip",
       "--auto-iam-authn",
       "--unix-socket=/cloudsql",
@@ -130,9 +133,72 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(summary).toEqual({
       observedBytes: PROXY_DIAGNOSTIC_BYTE_LIMIT,
       truncated: true,
+      failureClass: null,
     });
     expect(JSON.stringify(summary)).not.toContain(sensitive);
     expect(JSON.stringify(summary)).not.toContain("postgresql://secret");
+  });
+
+  it.each([
+    [
+      "credential initialization",
+      "The proxy has encountered a terminal error: unable to start: error initializing dialer: failed to create default credentials: credentials: could not find default credentials",
+      "PROXY_CREDENTIAL_SOURCE_FAILED",
+    ],
+    [
+      "SQL Admin permission",
+      "[mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18] could not resolve instance version: failed to get instance: refresh error: failed to get instance metadata (connection name = \"mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18\"): googleapi: Error 403: permission denied",
+      "PROXY_SQLADMIN_PERMISSION_DENIED",
+    ],
+    [
+      "SQL Admin request",
+      "[mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18] could not resolve instance version: failed to get instance: refresh error: failed to get instance metadata (connection name = \"mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18\"): Get \"https://sqladmin.googleapis.com/sql/v1beta4/projects/example/instances/example/connectSettings\": network unavailable",
+      "PROXY_SQLADMIN_REQUEST_FAILED",
+    ],
+    [
+      "instance configuration",
+      "[invalid] could not resolve instance version: config error: invalid instance connection name, expected PROJECT:REGION:INSTANCE (connection name = \"invalid\")",
+      "PROXY_INSTANCE_CONFIG_FAILED",
+    ],
+    [
+      "listener",
+      "[mira-refund-sandbox-0001:asia-northeast3:mira-p3e-b2-refund-pg18] could not mount unix socket \"/cloudsql\": permission denied",
+      null,
+    ],
+    [
+      "exact listener",
+      "[mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18] could not mount unix socket \"/cloudsql\": permission denied",
+      "PROXY_LISTENER_FAILED",
+    ],
+  ])("classifies exact v2.22.0 structured %s errors", (_name, message, expected) => {
+    expect(classifyProxyStructuredLogLine(structuredProxyLog("ERROR", message))).toBe(expected);
+  });
+
+  it("does not promote substrings, non-errors, malformed JSON, or raw secrets", () => {
+    const permissionMessage =
+      "[mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18] could not resolve instance version: failed to get instance: refresh error: failed to get instance metadata (connection name = \"mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18\"): googleapi: Error 500: server text contains googleapi: Error 403: oauth-token password=secret";
+    expect(classifyProxyStructuredLogLine(
+      structuredProxyLog("ERROR", permissionMessage),
+    )).toBe("PROXY_SQLADMIN_REQUEST_FAILED");
+    expect(classifyProxyStructuredLogLine(
+      structuredProxyLog("INFO", permissionMessage),
+    )).toBeNull();
+    expect(classifyProxyStructuredLogLine("not-json oauth-token password=secret")).toBeNull();
+  });
+
+  it("parses split structured records without retaining or forwarding raw messages", () => {
+    const stream = new PassThrough();
+    const summary = consumeProxyDiagnosticStream(stream);
+    const raw = structuredProxyLog(
+      "ERROR",
+      "The proxy has encountered a terminal error: unable to start: error initializing dialer: failed to create scoped credentials: password=secret",
+    );
+    stream.write(raw.slice(0, 41));
+    stream.write(`${raw.slice(41)}\n`);
+    stream.end();
+    expect(summary.failureClass).toBe("PROXY_CREDENTIAL_SOURCE_FAILED");
+    expect(JSON.stringify(summary)).not.toContain("password=secret");
+    expect(JSON.stringify(summary)).not.toContain(raw);
   });
 
   it("reports Proxy early exit with bounded metadata and no raw diagnostic", async () => {
@@ -140,15 +206,33 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       await awaitProxyReadiness(
         { exitCode: 17, signalCode: null },
         { failed: false },
-        [{ observedBytes: 32, truncated: false }],
+        [{
+          observedBytes: 32,
+          truncated: false,
+          failureClass: "PROXY_SQLADMIN_PERMISSION_DENIED",
+        }],
         readinessDependencies([0, 1]),
       );
     });
     expect(result).toEqual({
       status: 1,
       stderr:
-        '{"ok":false,"code":"PROXY_EARLY_EXIT","proxyExitCode":17,"proxySignal":null,"proxyDiagnosticAvailable":true}\n',
+        '{"ok":false,"code":"PROXY_EARLY_EXIT","proxyExitCode":17,"proxySignal":null,"proxyDiagnosticAvailable":true,"proxyFailureClass":"PROXY_SQLADMIN_PERMISSION_DENIED"}\n',
     });
+  });
+
+  it("keeps unknown structured errors nested under an unclassified early exit", async () => {
+    const result = await runFailure(async () => {
+      await awaitProxyReadiness(
+        { exitCode: 1, signalCode: null },
+        { failed: false },
+        [{ observedBytes: 24, truncated: false, failureClass: null }],
+        readinessDependencies([0, 1]),
+      );
+    });
+    expect(result.stderr).toBe(
+      '{"ok":false,"code":"PROXY_EARLY_EXIT","proxyExitCode":1,"proxySignal":null,"proxyDiagnosticAvailable":true,"proxyFailureClass":"PROXY_EARLY_EXIT_UNCLASSIFIED"}\n',
+    );
   });
 
   it("reports Proxy start failure independently", async () => {
@@ -242,6 +326,8 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(contract.diagnostics).toEqual({
       proxyOutput: "BOUNDED_METADATA_ONLY_RAW_CONTENT_NEVER_EMITTED",
       proxyDiagnosticByteLimit: 4096,
+      proxyStructuredLogSchema: ["timestamp", "severity", "message"],
+      proxyFailureClasses: [...PROXY_FAILURE_CLASSES],
       databaseConnectionRetries: 0,
       stageCodes: [...BOOTSTRAP_FAILURE_CODES],
     });
@@ -342,6 +428,14 @@ function outputSink() {
     stdout: { write: (value: string) => { stdoutLines.push(value); return true; } },
     stderr: { write: (value: string) => { stderrLines.push(value); return true; } },
   };
+}
+
+function structuredProxyLog(severity: "DEBUG" | "INFO" | "ERROR", message: string): string {
+  return JSON.stringify({
+    timestamp: "2026-08-30T16:42:31Z",
+    severity,
+    message,
+  });
 }
 
 async function runFailure(action: () => void | Promise<void>) {

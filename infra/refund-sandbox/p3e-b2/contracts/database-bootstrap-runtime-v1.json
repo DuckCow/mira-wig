@@ -52,6 +52,7 @@
     "secretManagerDependencies": "NONE",
     "cloudSqlAuthProxyVersion": "2.22.0",
     "proxyArguments": [
+      "--structured-logs",
       "--private-ip",
       "--auto-iam-authn",
       "--unix-socket=/cloudsql",
@@ -65,6 +66,15 @@
   "diagnostics": {
     "proxyOutput": "BOUNDED_METADATA_ONLY_RAW_CONTENT_NEVER_EMITTED",
     "proxyDiagnosticByteLimit": 4096,
+    "proxyStructuredLogSchema": ["timestamp", "severity", "message"],
+    "proxyFailureClasses": [
+      "PROXY_CREDENTIAL_SOURCE_FAILED",
+      "PROXY_SQLADMIN_PERMISSION_DENIED",
+      "PROXY_SQLADMIN_REQUEST_FAILED",
+      "PROXY_INSTANCE_CONFIG_FAILED",
+      "PROXY_LISTENER_FAILED",
+      "PROXY_EARLY_EXIT_UNCLASSIFIED"
+    ],
     "databaseConnectionRetries": 0,
     "stageCodes": [
       "PROXY_START_FAILED",
@@ -100,6 +110,9 @@
     "foundationResourceChanges": 0
   },
   "evidence": [
+    "https://github.com/GoogleCloudPlatform/cloud-sql-proxy/blob/v2.22.0/cmd/root.go",
+    "https://github.com/GoogleCloudPlatform/cloud-sql-proxy/blob/v2.22.0/internal/log/log.go",
+    "https://github.com/GoogleCloudPlatform/cloud-sql-proxy/blob/v2.22.0/internal/proxy/proxy.go",
     "https://docs.cloud.google.com/sql/docs/postgres/iam-logins",
     "https://docs.cloud.google.com/sql/docs/postgres/add-manage-iam-users",
     "https://docs.cloud.google.com/sql/docs/postgres/iam-conditions",

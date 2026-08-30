@@ -36,11 +36,22 @@ export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
   "RUNTIME_LOCAL_FAILED",
 ] as const);
 
+export const PROXY_FAILURE_CLASSES = Object.freeze([
+  "PROXY_CREDENTIAL_SOURCE_FAILED",
+  "PROXY_SQLADMIN_PERMISSION_DENIED",
+  "PROXY_SQLADMIN_REQUEST_FAILED",
+  "PROXY_INSTANCE_CONFIG_FAILED",
+  "PROXY_LISTENER_FAILED",
+  "PROXY_EARLY_EXIT_UNCLASSIFIED",
+] as const);
+
 type BootstrapFailureCode = (typeof BOOTSTRAP_FAILURE_CODES)[number];
+export type ProxyFailureClass = (typeof PROXY_FAILURE_CLASSES)[number];
 type SafeFailureDetails = Readonly<{
   proxyExitCode?: number | null;
   proxySignal?: string | null;
   proxyDiagnosticAvailable?: boolean;
+  proxyFailureClass?: ProxyFailureClass;
 }>;
 type SafeFailureRecord = Readonly<{ code: BootstrapFailureCode }> & SafeFailureDetails;
 type ProxyStartObservation = { failed: boolean };
@@ -49,6 +60,7 @@ type ProxyDiagnosticStream = Pick<NodeJS.ReadableStream, "on">;
 export type ProxyDiagnosticSummary = {
   observedBytes: number;
   truncated: boolean;
+  failureClass: Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null;
 };
 export type ProxyReadinessDependencies = Readonly<{
   now: () => number;
@@ -57,6 +69,7 @@ export type ProxyReadinessDependencies = Readonly<{
 }>;
 
 export const PROXY_STDIO = Object.freeze(["ignore", "pipe", "pipe"] as const);
+const proxyDiagnosticSettled = new WeakMap<ProxyDiagnosticSummary, Promise<void>>();
 
 class BootstrapStageFailure extends Error {
   readonly record: SafeFailureRecord;
@@ -141,6 +154,7 @@ export async function runDatabaseBootstrapEntrypoint(
 
 export function proxyArguments(): readonly string[] {
   return Object.freeze([
+    "--structured-logs",
     "--private-ip",
     "--auto-iam-authn",
     "--unix-socket=/cloudsql",
@@ -390,13 +404,41 @@ function safeFailureRecord(error: unknown): SafeFailureRecord {
 export function consumeProxyDiagnosticStream(
   stream: ProxyDiagnosticStream | null,
 ): ProxyDiagnosticSummary {
-  const summary: ProxyDiagnosticSummary = { observedBytes: 0, truncated: false };
+  const summary: ProxyDiagnosticSummary = {
+    observedBytes: 0,
+    truncated: false,
+    failureClass: null,
+  };
+  let pending = "";
+  let settle = Promise.resolve();
+  if (stream) {
+    settle = new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        classifyPendingProxyLine(summary, pending);
+        pending = "";
+        resolve();
+      };
+      stream.on("end", finish);
+      stream.on("close", finish);
+      stream.on("error", finish);
+    });
+  }
+  proxyDiagnosticSettled.set(summary, settle);
   stream?.on("data", (chunk: unknown) => {
     const bytes = diagnosticChunkBytes(chunk);
     if (bytes === 0) return;
     const remaining = PROXY_DIAGNOSTIC_BYTE_LIMIT - summary.observedBytes;
     summary.observedBytes += Math.min(remaining, bytes);
     if (bytes > remaining) summary.truncated = true;
+    if (remaining <= 0) return;
+    const accepted = diagnosticChunkBuffer(chunk).subarray(0, remaining);
+    pending += accepted.toString("utf8");
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) classifyPendingProxyLine(summary, line);
   });
   return summary;
 }
@@ -405,6 +447,84 @@ function diagnosticChunkBytes(chunk: unknown): number {
   if (typeof chunk === "string") return Buffer.byteLength(chunk);
   if (chunk instanceof Uint8Array) return chunk.byteLength;
   return 0;
+}
+
+function diagnosticChunkBuffer(chunk: unknown): Buffer {
+  if (typeof chunk === "string") return Buffer.from(chunk);
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  return Buffer.alloc(0);
+}
+
+function classifyPendingProxyLine(summary: ProxyDiagnosticSummary, line: string): void {
+  const failureClass = classifyProxyStructuredLogLine(line);
+  if (failureClass) summary.failureClass = failureClass;
+}
+
+export function classifyProxyStructuredLogLine(
+  line: string,
+): Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const message = proxyStructuredErrorMessage(value);
+  if (message === null) return null;
+  return classifyProxyStructuredErrorMessage(message);
+}
+
+function classifyProxyStructuredErrorMessage(
+  message: string,
+): Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null {
+  const instanceFailure = classifyProxyInstanceResolutionFailure(message);
+  if (instanceFailure) return instanceFailure;
+  if (isProxyCredentialSourceFailure(message)) return "PROXY_CREDENTIAL_SOURCE_FAILED";
+  if (isProxyListenerFailure(message)) return "PROXY_LISTENER_FAILED";
+  return null;
+}
+
+function classifyProxyInstanceResolutionFailure(
+  message: string,
+): Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null {
+  const instancePrefix = `[${CONNECTION_NAME}] could not resolve instance version: `;
+  const sqlAdminPrefix = `${instancePrefix}failed to get instance: refresh error: `
+    + `failed to get instance metadata (connection name = "${CONNECTION_NAME}"): `;
+  if (message.startsWith(sqlAdminPrefix)) {
+    const requestFailure = message.slice(sqlAdminPrefix.length);
+    if (/^googleapi: Error 403(?:\b|:)/u.test(requestFailure)) {
+      return "PROXY_SQLADMIN_PERMISSION_DENIED";
+    }
+    if (/^(?:googleapi: Error \d{3}(?:\b|:)|(?:Get|Post) "https:\/\/sqladmin\.googleapis\.com\/)/u
+      .test(requestFailure)) return "PROXY_SQLADMIN_REQUEST_FAILED";
+  }
+  if (/^\[[^\]\r\n]{1,255}\] could not resolve instance version: config error: invalid instance connection name, expected PROJECT:REGION:INSTANCE \(connection name = "[^"\r\n]{1,255}"\)$/u
+    .test(message)) {
+    return "PROXY_INSTANCE_CONFIG_FAILED";
+  }
+  return null;
+}
+
+function isProxyCredentialSourceFailure(message: string): boolean {
+  const terminalPrefix =
+    "The proxy has encountered a terminal error: unable to start: error initializing dialer: ";
+  return message.startsWith(`${terminalPrefix}failed to create default credentials:`)
+    || message.startsWith(`${terminalPrefix}failed to create scoped credentials:`);
+}
+
+function isProxyListenerFailure(message: string): boolean {
+  return message.startsWith(`[${CONNECTION_NAME}] could not mount unix socket "/cloudsql": `)
+    || message.startsWith(`[${CONNECTION_NAME}] could not listen to address `);
+}
+
+function proxyStructuredErrorMessage(value: unknown): string | null {
+  if (typeof value !== "object" || value === null) return null;
+  if (!("severity" in value) || !("timestamp" in value) || !("message" in value)) return null;
+  if (value.severity !== "ERROR"
+    || typeof value.timestamp !== "string"
+    || !Number.isFinite(Date.parse(value.timestamp))
+    || typeof value.message !== "string") return null;
+  return value.message;
 }
 
 async function requireSuccessfulChild(
@@ -451,11 +571,16 @@ export async function awaitProxyReadiness(
   while (dependencies.now() < deadline) {
     if (startObservation.failed) throw new BootstrapStageFailure("PROXY_START_FAILED");
     if (proxy.exitCode !== null) {
+      await Promise.all(diagnostics.map((summary) =>
+        proxyDiagnosticSettled.get(summary) ?? Promise.resolve()));
       throw new BootstrapStageFailure("PROXY_EARLY_EXIT", {
         proxyExitCode: proxy.exitCode,
         proxySignal: proxy.signalCode,
         proxyDiagnosticAvailable: diagnostics.some((summary) =>
           summary.observedBytes > 0 || summary.truncated),
+        proxyFailureClass: diagnostics.find((summary) =>
+          summary.failureClass !== null)?.failureClass
+          ?? "PROXY_EARLY_EXIT_UNCLASSIFIED",
       });
     }
     try {
