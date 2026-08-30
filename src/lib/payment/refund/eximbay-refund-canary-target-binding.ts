@@ -12,6 +12,7 @@ import {
   RefundExecutionCommandStatus,
   type PrismaClient,
 } from "@prisma/client";
+import { sumSucceededRefundAmount } from "./invariants";
 import {
   deriveEximbayRefundOperationFamily,
   EXIMBAY_REFUND_CANCEL_WIRE_VERSION,
@@ -25,8 +26,7 @@ export type EximbayRefundCanaryTargetSealInput = Readonly<{
   commandId: string;
   merchantAccountBindingId: string;
   credentialGenerationBindingId: string;
-  syntheticProvenanceDigest: string;
-  noCustomerPiiAttested: true;
+  custodyArtifactSha256: string;
 }>;
 
 export type EximbayRefundCanaryTargetSeal = Readonly<{
@@ -41,53 +41,207 @@ export async function sealEximbayRefundCanaryTarget(
   client: PrismaClient,
   input: EximbayRefundCanaryTargetSealInput,
 ): Promise<EximbayRefundCanaryTargetSeal> {
-  return client.$transaction((tx) => inspectTarget(tx, input, true));
+  return client.$transaction((tx) => sealEximbayRefundCanaryTargetInTransaction(tx, input));
+}
+
+export function sealEximbayRefundCanaryTargetInTransaction(
+  tx: Prisma.TransactionClient,
+  input: EximbayRefundCanaryTargetSealInput,
+): Promise<EximbayRefundCanaryTargetSeal> {
+  return inspectTarget(tx, input, true);
 }
 
 export async function verifyEximbayRefundCanaryTarget(
   tx: Prisma.TransactionClient,
   input: EximbayRefundCanaryTargetSealInput & Readonly<{ expectedTargetBindingDigest: string }>,
 ): Promise<EximbayRefundCanaryTargetSeal | null> {
-  if (!DIGEST.test(input.expectedTargetBindingDigest)) return null;
-  const sealed = await inspectTarget(tx, input, false).catch(() => null);
+  if (!DIGEST.test(input.expectedTargetBindingDigest) || !validInput(input)) return null;
+  const ownership = await discoverTargetOwnership(tx, input.commandId);
+  if (!ownership) return null;
+  const locked = await lockConsumptionTargetRows(tx, ownership, input.commandId);
+  if (!locked) return null;
+  const sealed = await inspectTarget(tx, input, false, locked).catch(() => null);
   return sealed?.targetBindingDigest === input.expectedTargetBindingDigest ? sealed : null;
+}
+
+type TargetOwnership = Readonly<{ orderId: string; refundAttemptId: string }>;
+type LockedTargetIdentity = TargetOwnership & Readonly<{
+  paymentId: string;
+  bindingId: string;
+}>;
+
+async function discoverTargetOwnership(
+  tx: Prisma.TransactionClient,
+  commandId: string,
+): Promise<TargetOwnership | null> {
+  const command = await tx.refundExecutionCommand.findUnique({
+    where: { id: commandId },
+    select: { refundAttemptId: true, refundAttempt: { select: { orderId: true } } },
+  });
+  return command ? Object.freeze({
+    orderId: command.refundAttempt.orderId,
+    refundAttemptId: command.refundAttemptId,
+  }) : null;
+}
+
+/**
+ * The caller already holds the approval. The remaining order mirrors the installed
+ * refund lifecycle: Order -> every ordered RefundAttempt -> Command -> Payment -> binding.
+ */
+async function lockConsumptionTargetRows(
+  tx: Prisma.TransactionClient,
+  ownership: TargetOwnership,
+  commandId: string,
+): Promise<LockedTargetIdentity | null> {
+  const orders = await tx.$queryRaw<{ id: string; paymentId: string }[]>(Prisma.sql`
+    SELECT "id", "paymentId" FROM "Order" WHERE "id" = ${ownership.orderId} FOR UPDATE
+  `);
+  const order = orders[0];
+  if (orders.length !== 1 || !order) return null;
+  const attempts = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT "id" FROM "RefundAttempt"
+    WHERE "orderId" = ${ownership.orderId} ORDER BY "id" FOR UPDATE
+  `);
+  if (!attempts.some((row) => row.id === ownership.refundAttemptId)) return null;
+  const commands = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT "id" FROM "RefundExecutionCommand"
+    WHERE "id" = ${commandId} AND "refundAttemptId" = ${ownership.refundAttemptId}
+    FOR UPDATE
+  `);
+  if (commands.length !== 1) return null;
+  const binding = await tx.refundExecutionProviderOperationBinding.findUnique({
+    where: { refundAttemptId: ownership.refundAttemptId }, select: { id: true },
+  });
+  if (!binding) return null;
+  const restrictedCanary = await isRestrictedCanarySession(tx);
+  if (!(await lockPayment(tx, order.paymentId, restrictedCanary))
+    || !(await lockBinding(tx, binding.id, restrictedCanary))) return null;
+  return Object.freeze({ ...ownership, paymentId: order.paymentId, bindingId: binding.id });
+}
+
+async function lockPayment(
+  tx: Prisma.TransactionClient,
+  paymentId: string,
+  restrictedCanary: boolean,
+): Promise<boolean> {
+  if (!restrictedCanary) {
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} FOR UPDATE
+    `);
+    return rows.length === 1;
+  }
+  const rows = await tx.$queryRaw<{ locked: boolean }[]>(Prisma.sql`
+    SELECT public.mira_refund_canary_lock_payment(${paymentId}) AS "locked"
+  `);
+  return rows.length === 1 && rows[0]?.locked === true;
+}
+
+async function lockBinding(
+  tx: Prisma.TransactionClient,
+  bindingId: string,
+  restrictedCanary: boolean,
+): Promise<boolean> {
+  if (!restrictedCanary) {
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionProviderOperationBinding"
+      WHERE "id" = ${bindingId} FOR UPDATE
+    `);
+    return rows.length === 1;
+  }
+  const rows = await tx.$queryRaw<{ locked: boolean }[]>(Prisma.sql`
+    SELECT public.mira_refund_canary_lock_provider_operation_binding(${bindingId}) AS "locked"
+  `);
+  return rows.length === 1 && rows[0]?.locked === true;
+}
+
+async function isRestrictedCanarySession(tx: Prisma.TransactionClient): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ restrictedCanary: boolean }[]>(Prisma.sql`
+    SELECT current_user = 'mira_refund_canary' AS "restrictedCanary"
+  `);
+  return rows.length === 1 && rows[0]?.restrictedCanary === true;
 }
 
 async function inspectTarget(
   tx: Prisma.TransactionClient,
   input: EximbayRefundCanaryTargetSealInput,
   allowBindingCreate: boolean,
+  locked?: LockedTargetIdentity,
 ): Promise<EximbayRefundCanaryTargetSeal> {
   if (!validInput(input)) throw new Error("EXIMBAY_CANARY_TARGET_INPUT_INVALID");
-  await tx.$queryRaw(Prisma.sql`
-    SELECT "id" FROM "RefundExecutionCommand" WHERE "id" = ${input.commandId} FOR UPDATE
-  `);
-  const command = await loadTarget(tx, input.commandId);
-  if (!command || !targetStateIsAdmissible(command)) {
-    throw new Error("EXIMBAY_CANARY_TARGET_NOT_ADMISSIBLE");
-  }
+  const command = await loadAdmissibleTargetAfterLock(tx, input.commandId, locked);
   const attempt = command.refundAttempt;
-  const paymentKey = attempt.payment.providerPaymentKey;
-  if (!paymentKey) throw new Error("EXIMBAY_CANARY_PAYMENT_IDENTITY_INVALID");
+  const paymentKey = requirePaymentKey(attempt.payment.providerPaymentKey);
   const family = deriveEximbayRefundOperationFamily(
     attempt.idempotencyKey, paymentKey, attempt.amount, attempt.currency,
   );
+  const binding = await requireMatchingBinding(
+    tx, attempt, family, input, allowBindingCreate,
+  );
+  return buildTargetSeal(command, binding, family, input, paymentKey);
+}
+
+async function loadAdmissibleTargetAfterLock(
+  tx: Prisma.TransactionClient,
+  commandId: string,
+  locked?: LockedTargetIdentity,
+): Promise<Target> {
+  if (!locked) {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionCommand" WHERE "id" = ${commandId} FOR UPDATE
+    `);
+  }
+  const command = await loadTarget(tx, commandId);
+  if (!command || !targetStateIsAdmissible(command)) {
+    throw new Error("EXIMBAY_CANARY_TARGET_NOT_ADMISSIBLE");
+  }
+  if (locked && !lockedIdentityMatches(command, locked)) {
+    throw new Error("EXIMBAY_CANARY_TARGET_IDENTITY_CHANGED");
+  }
+  return command;
+}
+
+function requirePaymentKey(paymentKey: string | null): string {
+  if (!paymentKey) throw new Error("EXIMBAY_CANARY_PAYMENT_IDENTITY_INVALID");
+  return paymentKey;
+}
+
+async function requireMatchingBinding(
+  tx: Prisma.TransactionClient,
+  attempt: Target["refundAttempt"],
+  family: Readonly<{ key: string; fingerprint: string }>,
+  input: EximbayRefundCanaryTargetSealInput,
+  allowBindingCreate: boolean,
+): Promise<TargetBinding> {
   const binding = await loadOrCreateBinding(
     tx, attempt, family, input, allowBindingCreate,
   );
   if (!binding || !bindingMatches(binding, attempt.id, family, input)) {
     throw new Error("EXIMBAY_CANARY_OPERATION_BINDING_MISMATCH");
   }
+  return binding;
+}
+
+function buildTargetSeal(
+  command: Target,
+  binding: TargetBinding,
+  family: Readonly<{ key: string; fingerprint: string }>,
+  input: EximbayRefundCanaryTargetSealInput,
+  paymentKey: string,
+): EximbayRefundCanaryTargetSeal {
+  const attempt = command.refundAttempt;
   const targetBindingDigest = createHash("sha256").update(JSON.stringify([
     "mira-refund-eximbay-sandbox-canary-target/v1",
-    command.id, attempt.id, attempt.payment.id, binding.id,
-    "EXIMBAY", "SANDBOX", attempt.amount, attempt.currency,
+    command.id, attempt.id, attempt.order.id, attempt.payment.id, binding.id,
+    "EXIMBAY", "SANDBOX",
+    attempt.amount, attempt.currency,
+    attempt.payment.amount, attempt.payment.currency,
+    attempt.order.totalAmount, attempt.order.currency,
     attempt.idempotencyKey, attempt.payment.providerOrderId, paymentKey,
     attempt.payment.financialSucceededAt?.toISOString(),
     family.key, family.fingerprint,
     "READY", "PROCESSING", "REFUND_PENDING", "SUCCEEDED", "EXTERNAL", "FINALIZED",
     0, null, input.merchantAccountBindingId, input.credentialGenerationBindingId,
-    input.syntheticProvenanceDigest, true, 1, false,
+    input.custodyArtifactSha256, 1, false,
   ]), "utf8").digest("hex");
   return Object.freeze({
     commandId: command.id,
@@ -98,14 +252,24 @@ async function inspectTarget(
   });
 }
 
+function lockedIdentityMatches(command: Target, locked: LockedTargetIdentity): boolean {
+  const attempt = command.refundAttempt;
+  return attempt.id === locked.refundAttemptId
+    && attempt.order.id === locked.orderId
+    && attempt.payment.id === locked.paymentId
+    && attempt.providerOperationBinding?.id === locked.bindingId;
+}
+
 function loadTarget(tx: Prisma.TransactionClient, commandId: string) {
   return tx.refundExecutionCommand.findUnique({
     where: { id: commandId },
     include: {
       refundAttempt: {
-        include: { payment: true, order: true, providerOperationBinding: {
-          include: { eligibilityProof: true },
-        } },
+        include: {
+          payment: true,
+          order: { include: { refundAttempts: true } },
+          providerOperationBinding: { include: { eligibilityProof: true } },
+        },
       },
     },
   });
@@ -143,6 +307,8 @@ async function loadOrCreateBinding(
 function targetStateIsAdmissible(command: Target): boolean {
   const attempt = command.refundAttempt;
   const payment = attempt.payment;
+  const order = attempt.order;
+  const priorSucceeded = sumSucceededRefundAmount(order.refundAttempts);
   return [
     command.status === RefundExecutionCommandStatus.READY,
     command.dispatchAttempt === 0,
@@ -153,7 +319,10 @@ function targetStateIsAdmissible(command: Target): boolean {
     attempt.providerRefundId === null,
     attempt.actorType === RefundAttemptActorType.SYSTEM,
     attempt.actorUserId === null,
-    attempt.order.status === OrderStatus.REFUND_PENDING,
+    order.status === OrderStatus.REFUND_PENDING,
+    order.id === attempt.orderId,
+    order.paymentId === payment.id,
+    order.refundAttempts.length === 1,
     payment.status === PaymentAttemptStatus.SUCCEEDED,
     payment.attemptLifecycle === PaymentAttemptLifecycle.FINALIZED,
     payment.adapterExecutionKind === PaymentAdapterExecutionKind.EXTERNAL,
@@ -162,9 +331,14 @@ function targetStateIsAdmissible(command: Target): boolean {
     nonempty(payment.providerOrderId),
     nonempty(payment.providerPaymentKey),
     payment.financialSucceededAt instanceof Date,
+    attempt.paymentId === payment.id,
     attempt.amount === payment.amount,
+    attempt.amount === order.totalAmount,
     attempt.currency === payment.currency,
-    attempt.order.currency === attempt.currency,
+    order.currency === attempt.currency,
+    order.promotionGrantId === null,
+    order.discountAmount === 0,
+    priorSucceeded === 0,
     ["USD", "JPY"].includes(attempt.currency),
   ].every(Boolean);
 }
@@ -193,8 +367,7 @@ function validInput(input: EximbayRefundCanaryTargetSealInput): boolean {
   return typeof input.commandId === "string" && input.commandId.length > 0
     && BINDING.test(input.merchantAccountBindingId)
     && BINDING.test(input.credentialGenerationBindingId)
-    && DIGEST.test(input.syntheticProvenanceDigest)
-    && input.noCustomerPiiAttested === true;
+    && DIGEST.test(input.custodyArtifactSha256);
 }
 
 function nonempty(value: string | null): value is string {

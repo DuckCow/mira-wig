@@ -38,6 +38,7 @@ describe("Eximbay refund sandbox canary authority boundaries", () => {
     expect(parseEximbayRefundCanaryEnvironment(valid)).toMatchObject({
       lane: "EXIMBAY_SANDBOX_V1",
       secretVersion: "7",
+      custodyArtifactSha256: "f".repeat(64),
     });
     for (const mutation of [
       { EXIMBAY_SANDBOX_API_KEY: "secret" },

@@ -1,6 +1,8 @@
-import { PaymentMode, PaymentProvider, Prisma, type PrismaClient } from "@prisma/client";
-import { EXIMBAY_REFUND_SANDBOX_CANARY_APPROVAL_VERSION } from
-  "./eximbay-refund-sandbox-canary-approval-contract";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  EXIMBAY_REFUND_SANDBOX_CANARY_APPROVAL_VERSION,
+  isEximbayRefundCanaryDatabaseSessionIssuer,
+} from "./eximbay-refund-sandbox-canary-approval-contract";
 import type { EximbayRefundCanaryEnvironment } from "./eximbay-refund-canary-environment";
 import { verifyEximbayRefundCanaryTarget } from "./eximbay-refund-canary-target-binding";
 
@@ -31,16 +33,16 @@ async function consumeInTransaction(
   });
   if (!approval) return configMismatch();
   if (approval.consumedAt !== null) return alreadyConsumed();
-  const capturedAt = await captureDatabaseTime(tx);
-  if (!capturedAt || !approvalIsCurrent(approval.approvedAt, approval.expiresAt, capturedAt)) {
-    return configMismatch();
-  }
   const targetMatches = await exactTargetMatches(tx, authority, approval);
   if (!targetMatches) return Object.freeze({ outcome: "TARGET_MISMATCH" });
-  const consumed = await consumeByCas(tx, authority, approval.id, capturedAt);
+  const postLockApproval = await tx.eximbayRefundSandboxCanaryApproval.findUnique({
+    where: { id: approval.id },
+  });
+  if (!postLockApproval || postLockApproval.consumedAt !== null) return configMismatch();
+  const consumed = await consumeByCas(tx, authority, postLockApproval);
   return consumed === 1
     ? Object.freeze({ outcome: "ADMITTED", commandId: approval.commandId })
-    : alreadyConsumed();
+    : configMismatch();
 }
 
 async function lockExactApprovalId(
@@ -64,29 +66,23 @@ async function lockExactApprovalId(
   return ids.length === 1 && first ? first.id : null;
 }
 
-async function captureDatabaseTime(tx: Prisma.TransactionClient): Promise<Date | null> {
-  const rows = await tx.$queryRaw<{ capturedAt: Date }[]>(Prisma.sql`
-    SELECT date_trunc('milliseconds', clock_timestamp()) AS "capturedAt"
-  `);
-  const capturedAt = rows[0]?.capturedAt;
-  return rows.length === 1 && capturedAt instanceof Date ? capturedAt : null;
-}
-
-function approvalIsCurrent(approvedAt: Date, expiresAt: Date, now: Date): boolean {
-  return approvedAt.getTime() <= now.getTime() && expiresAt.getTime() > now.getTime();
-}
-
 async function exactTargetMatches(
   tx: Prisma.TransactionClient,
   authority: EximbayRefundCanaryEnvironment,
-  approval: Readonly<{ commandId: string; targetBindingDigest: string }>,
+  approval: Readonly<{
+    commandId: string;
+    targetBindingDigest: string;
+    approvalEvidenceDigest: string;
+    issuedByPrincipalId: string;
+  }>,
 ): Promise<boolean> {
+  if (approval.approvalEvidenceDigest !== authority.custodyArtifactSha256
+    || !isEximbayRefundCanaryDatabaseSessionIssuer(approval.issuedByPrincipalId)) return false;
   const target = await verifyEximbayRefundCanaryTarget(tx, {
     commandId: approval.commandId,
     merchantAccountBindingId: authority.merchantAccountBindingId,
     credentialGenerationBindingId: authority.credentialGenerationBindingId,
-    syntheticProvenanceDigest: authority.syntheticProvenanceDigest,
-    noCustomerPiiAttested: true,
+    custodyArtifactSha256: authority.custodyArtifactSha256,
     expectedTargetBindingDigest: approval.targetBindingDigest,
   });
   return target !== null;
@@ -95,26 +91,60 @@ async function exactTargetMatches(
 async function consumeByCas(
   tx: Prisma.TransactionClient,
   authority: EximbayRefundCanaryEnvironment,
-  approvalId: string,
-  capturedAt: Date,
+  approval: Readonly<{
+    id: string;
+    commandId: string;
+    approvalEvidenceDigest: string;
+    releaseBindingDigest: string;
+    canaryJobBindingDigest: string;
+    preflightJobBindingDigest: string;
+    imageBindingDigest: string;
+    secretGenerationBindingDigest: string;
+    targetBindingDigest: string;
+    approvedAt: Date;
+    expiresAt: Date;
+    issuedByPrincipalId: string;
+  }>,
 ): Promise<number> {
-  const consumed = await tx.eximbayRefundSandboxCanaryApproval.updateMany({
-    where: {
-      id: approvalId,
-      formatVersion: EXIMBAY_REFUND_SANDBOX_CANARY_APPROVAL_VERSION,
-      provider: PaymentProvider.EXIMBAY,
-      mode: PaymentMode.SANDBOX,
-      consumedAt: null,
-      approvedAt: { lte: capturedAt },
-      expiresAt: { gt: capturedAt },
-    },
-    data: {
-      consumedAt: capturedAt,
-      consumedExecutionId: authority.consumedExecutionId,
-      consumedExecutionBindingDigest: authority.consumedExecutionBindingDigest,
-    },
-  });
-  return consumed.count;
+  const consumed = await tx.$queryRaw<{ consumedAt: Date }[]>(Prisma.sql`
+    WITH decision AS (
+      SELECT date_trunc('milliseconds', clock_timestamp()) AS "decisionAt"
+    )
+    UPDATE "EximbayRefundSandboxCanaryApproval" AS approval
+    SET "consumedAt" = decision."decisionAt",
+      "consumedExecutionId" = ${authority.consumedExecutionId},
+      "consumedExecutionBindingDigest" = ${authority.consumedExecutionBindingDigest}
+    FROM decision
+    WHERE approval."id" = ${approval.id}
+      AND approval."formatVersion" = ${EXIMBAY_REFUND_SANDBOX_CANARY_APPROVAL_VERSION}
+      AND approval."provider" = 'EXIMBAY'::"PaymentProvider"
+      AND approval."mode" = 'SANDBOX'::"PaymentMode"
+      AND approval."approvalEvidenceDigest" = ${approval.approvalEvidenceDigest}
+      AND approval."approvalEvidenceDigest" = ${authority.custodyArtifactSha256}
+      AND approval."releaseBindingDigest" = ${approval.releaseBindingDigest}
+      AND approval."releaseBindingDigest" = ${authority.releaseBindingDigest}
+      AND approval."canaryJobBindingDigest" = ${approval.canaryJobBindingDigest}
+      AND approval."canaryJobBindingDigest" = ${authority.canaryJobBindingDigest}
+      AND approval."preflightJobBindingDigest" = ${approval.preflightJobBindingDigest}
+      AND approval."preflightJobBindingDigest" = ${authority.preflightJobBindingDigest}
+      AND approval."imageBindingDigest" = ${approval.imageBindingDigest}
+      AND approval."imageBindingDigest" = ${authority.imageBindingDigest}
+      AND approval."secretGenerationBindingDigest" = ${approval.secretGenerationBindingDigest}
+      AND approval."secretGenerationBindingDigest" = ${authority.secretGenerationBindingDigest}
+      AND approval."targetBindingDigest" = ${approval.targetBindingDigest}
+      AND approval."targetBindingDigest" = ${authority.targetBindingDigest}
+      AND approval."commandId" = ${approval.commandId}
+      AND approval."approvedAt" = ${approval.approvedAt}
+      AND approval."expiresAt" = ${approval.expiresAt}
+      AND approval."issuedByPrincipalId" = ${approval.issuedByPrincipalId}
+      AND approval."consumedAt" IS NULL
+      AND approval."consumedExecutionId" IS NULL
+      AND approval."consumedExecutionBindingDigest" IS NULL
+      AND approval."approvedAt" <= decision."decisionAt"
+      AND approval."expiresAt" > decision."decisionAt"
+    RETURNING approval."consumedAt"
+  `);
+  return consumed.length;
 }
 
 function configMismatch(): ConsumeEximbayRefundCanaryApprovalResult {

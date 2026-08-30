@@ -3,9 +3,9 @@
   "parentAuthoritySha256": "9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a",
   "baselineCommit": "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
   "buildContext": {
-    "manifestSha256": "94010dbb24719af5352dfdade2711b9970eaf0e7db3a37027267c6ed6a1a27b8",
-    "fileCount": 211,
-    "repositoryGraphInputCount": 156,
+    "manifestSha256": "c68d97d09c2848e981252a41e65cfa73936958f0b7c654cc8f7c759836628bb3",
+    "fileCount": 215,
+    "repositoryGraphInputCount": 160,
     "packagedGraphInputCount": 373
   },
   "entrypoints": [
@@ -18,6 +18,10 @@
       "runtimePath": "/app/src/lib/payment/refund/eximbay-refund-canary.mjs"
     },
     {
+      "source": "scripts/prepare-eximbay-refund-canary-admission.ts",
+      "runtimePath": "/app/src/lib/payment/refund/prepare-eximbay-refund-canary-admission.mjs"
+    },
+    {
       "source": "scripts/refund-execution-worker.ts",
       "runtimePath": "/app/src/lib/payment/refund/refund-execution-worker.mjs"
     },
@@ -27,17 +31,17 @@
     }
   ],
   "applicationClosure": {
-    "entryCount": 193,
-    "metadataManifestSha256": "f7e1b5f8b7ece4166bee6321a8efaee3685ad82acd528ccbbcbded1ecfa4a900",
-    "contentManifestSha256": "112d267f52b61da43c6da0cfc01d108eedf8189050e7405ce4cccdee08d22b0e"
+    "entryCount": 194,
+    "metadataManifestSha256": "3839fb85b72034cf20974e457162e702ead46ce7f0440b62fa03255485acccf0",
+    "contentManifestSha256": "cf73bf1f1d06cf828afc55d2bc1eadd83a2bd82ad5e541311ab1a20e338a130c"
   },
   "systemClosure": {
     "removedEntryCount": 2620,
     "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
     "changedEntryCount": 3,
     "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
-    "addedEntryCount": 196,
-    "addedMetadataContentManifestSha256": "28359833d2ace3f758b386814724fbc655bec4bd40ada7b2efad8eaef4bccbcd"
+    "addedEntryCount": 197,
+    "addedMetadataContentManifestSha256": "37a47103447eebc7481cf39a0eb9ce965d5216d41379cf071fef68a03a6be2da"
   },
   "nonApplicationAdditionCount": 3,
   "nonApplicationAdditions": [

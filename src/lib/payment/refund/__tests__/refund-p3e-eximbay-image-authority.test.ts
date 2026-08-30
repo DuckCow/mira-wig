@@ -78,7 +78,7 @@ describe("conjunctive historical A and current Eximbay B image authority", () =>
     expect(() => enforceCurrentClosure(historicalFilesystem, authority)).toThrow();
   });
 
-  it("rejects a missing or fifth current entrypoint", () => {
+  it("rejects a missing or substituted current entrypoint", () => {
     expect(() => parseCurrentEximbayImageAuthority({
       ...currentPolicy,
       entrypoints: currentPolicy.entrypoints.slice(0, 3),
@@ -86,7 +86,7 @@ describe("conjunctive historical A and current Eximbay B image authority", () =>
     const changed = parseCurrentEximbayImageAuthority({
       ...currentPolicy,
       entrypoints: currentPolicy.entrypoints.map((entry, index) => index === 3
-        ? { ...entry, source: "scripts/unapproved-fifth-entrypoint.ts" }
+        ? { ...entry, source: "scripts/unapproved-substitute-entrypoint.ts" }
         : entry),
     });
     expect(() => enforceCurrentSubject(changed, currentContext(authority))).toThrow(

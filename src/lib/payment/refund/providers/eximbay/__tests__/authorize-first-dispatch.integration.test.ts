@@ -358,8 +358,7 @@ async function trackedFixture(
       commandId: fixture.commandId,
       merchantAccountBindingId: CONFIG.merchantAccountBindingId,
       credentialGenerationBindingId: CONFIG.credentialGenerationBindingId,
-      syntheticProvenanceDigest: "a".repeat(64),
-      noCustomerPiiAttested: true,
+      custodyArtifactSha256: "a".repeat(64),
     });
   }
   const leased = await acquireRefundExecutionLease(db, {

@@ -33,6 +33,7 @@ const CURRENT_BASELINE_COMMIT = "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939";
 const CURRENT_ENTRYPOINTS = Object.freeze([
   Object.freeze({ source: "containers/refund-worker/entrypoint.ts", runtimePath: "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs" }),
   Object.freeze({ source: "scripts/eximbay-refund-canary.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-refund-canary.mjs" }),
+  Object.freeze({ source: "scripts/prepare-eximbay-refund-canary-admission.ts", runtimePath: "/app/src/lib/payment/refund/prepare-eximbay-refund-canary-admission.mjs" }),
   Object.freeze({ source: "scripts/refund-execution-worker.ts", runtimePath: "/app/src/lib/payment/refund/refund-execution-worker.mjs" }),
   Object.freeze({ source: "scripts/refund-sandbox-provider-free-preflight.ts", runtimePath: "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs" }),
 ]);
@@ -1601,7 +1602,7 @@ function hasExactKeys(value: Readonly<Record<string, unknown>>, expected: readon
 function parseCurrentEntrypoints(
   value: unknown,
 ): readonly Readonly<{ source: string; runtimePath: string }>[] {
-  requireCondition(Array.isArray(value) && value.length === 4,
+  requireCondition(Array.isArray(value) && value.length === 5,
     "CURRENT_ENTRYPOINTS_SHAPE");
   const entrypoints: Readonly<{ source: string; runtimePath: string }>[] = [];
   for (const entry of value) {

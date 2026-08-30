@@ -32,7 +32,7 @@ export type EximbayRefundCanaryEnvironment = Readonly<{
   imageBindingDigest: string;
   secretGenerationBindingDigest: string;
   targetBindingDigest: string;
-  syntheticProvenanceDigest: string;
+  custodyArtifactSha256: string;
   secretResource: string;
   secretVersion: string;
   mid: string;
@@ -53,7 +53,11 @@ export function parseEximbayRefundCanaryEnvironment(
   const imageBindingDigest = value(env, "MIRA_REFUND_EXIMBAY_CANARY_IMAGE_BINDING_DIGEST");
   const secretGenerationBindingDigest = value(env, "MIRA_REFUND_EXIMBAY_CANARY_SECRET_GENERATION_BINDING_DIGEST");
   const targetBindingDigest = value(env, "MIRA_REFUND_EXIMBAY_CANARY_TARGET_BINDING_DIGEST");
-  const syntheticProvenanceDigest = value(env, "MIRA_REFUND_EXIMBAY_CANARY_SYNTHETIC_PROVENANCE_DIGEST");
+  // The legacy-named Terraform input is byte identity only. It does not prove
+  // synthetic custody, absence of customer data, provider truth, or review.
+  const custodyArtifactSha256 = value(
+    env, "MIRA_REFUND_EXIMBAY_CANARY_SYNTHETIC_PROVENANCE_DIGEST",
+  );
   const secretResource = value(env, "MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE");
   const secretVersion = value(env, "MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION");
   const mid = value(env, EXIMBAY_SANDBOX_MID);
@@ -65,7 +69,7 @@ export function parseEximbayRefundCanaryEnvironment(
   const execution = value(env, "CLOUD_RUN_EXECUTION");
   const digests = [releaseBindingDigest, canaryJobBindingDigest, preflightJobBindingDigest,
     imageBindingDigest, secretGenerationBindingDigest, targetBindingDigest,
-    syntheticProvenanceDigest];
+    custodyArtifactSha256];
   if (!laneIdentityIsValid(lane, digests)) return null;
   if (!nonSecretConfigIsValid(mid, merchantAccountBindingId,
     credentialGenerationBindingId)) return null;
@@ -81,7 +85,7 @@ export function parseEximbayRefundCanaryEnvironment(
     lane: EXIMBAY_REFUND_CANARY_LANE,
     releaseBindingDigest, canaryJobBindingDigest, preflightJobBindingDigest,
     imageBindingDigest, secretGenerationBindingDigest, targetBindingDigest,
-    syntheticProvenanceDigest, secretResource, secretVersion, mid,
+    custodyArtifactSha256, secretResource, secretVersion, mid,
     merchantAccountBindingId, credentialGenerationBindingId,
     consumedExecutionId, consumedExecutionBindingDigest,
   });
@@ -112,8 +116,7 @@ function executionIdentityIsValid(
   job: string,
   execution: string,
 ): boolean {
-  return env.MIRA_REFUND_EXIMBAY_CANARY_NO_CUSTOMER_PII_ATTESTED === "TRUE"
-    && exactCloudRunTask(env) && [job, execution].every((label) => LABEL.test(label));
+  return exactCloudRunTask(env) && [job, execution].every((label) => LABEL.test(label));
 }
 
 function secretAuthorityIsValid(
