@@ -7,10 +7,12 @@ import {
   awaitProxyReadiness,
   BOOTSTRAP_FAILURE_CODES,
   classifyProxyStructuredLogLine,
+  classifyProxyStructuredLogLineDetails,
   consumeProxyDiagnosticStream,
   PROXY_DIAGNOSTIC_BYTE_LIMIT,
   PROXY_FAILURE_CLASSES,
   PROXY_STDIO,
+  PROXY_TRANSPORT_CLASSES,
   proxyArguments,
   requireDatabaseConnection,
   requireExactLedgerRows,
@@ -134,6 +136,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       observedBytes: PROXY_DIAGNOSTIC_BYTE_LIMIT,
       truncated: true,
       failureClass: null,
+      requestSubtype: null,
     });
     expect(JSON.stringify(summary)).not.toContain(sensitive);
     expect(JSON.stringify(summary)).not.toContain("postgresql://secret");
@@ -186,6 +189,125 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(classifyProxyStructuredLogLine("not-json oauth-token password=secret")).toBeNull();
   });
 
+  it.each([
+    ["401", "googleapi: Error 401: unauthenticated", 401],
+    ["404", "googleapi: Error 404: not found", 404],
+    ["429", "googleapi: Error 429: resource exhausted", 429],
+    ["500", "googleapi: Error 500: backend error", 500],
+    [
+      "fallback 503",
+      "googleapi: got HTTP response code 503 with body: upstream body is discarded",
+      503,
+    ],
+  ])("retains only the exact Google API HTTP status for %s", (_name, failure, status) => {
+    expect(sqlAdminRequestDetails(failure)).toEqual({
+      failureClass: "PROXY_SQLADMIN_REQUEST_FAILED",
+      requestSubtype: {
+        requestPhase: "INSTANCE_METADATA",
+        host: "sqladmin.googleapis.com",
+        httpStatus: status,
+      },
+    });
+  });
+
+  it.each([
+    [
+      "token acquisition",
+      "credentials: cannot fetch token: Get \"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token?secret=token-like-value\": context deadline exceeded",
+      { transportClass: "TOKEN", timeout: true },
+    ],
+    [
+      "DNS",
+      "dial tcp: lookup sqladmin.googleapis.com on 169.254.169.254:53: no such host",
+      { transportClass: "DNS" },
+    ],
+    [
+      "DNS timeout",
+      "dial tcp: lookup sqladmin.googleapis.com on 169.254.169.254:53: i/o timeout",
+      { transportClass: "DNS", timeout: true },
+    ],
+    [
+      "connect refused",
+      "dial tcp 199.36.153.4:443: connect: connection refused",
+      { transportClass: "CONNECT" },
+    ],
+    [
+      "connect unreachable",
+      "dial tcp 199.36.153.4:443: connect: network is unreachable",
+      { transportClass: "CONNECT" },
+    ],
+    [
+      "TLS certificate",
+      "tls: failed to verify certificate: x509: certificate signed by unknown authority",
+      { transportClass: "TLS" },
+    ],
+    [
+      "context deadline",
+      "context deadline exceeded",
+      { transportClass: "TIMEOUT", timeout: true },
+    ],
+    [
+      "TLS handshake timeout",
+      "net/http: TLS handshake timeout",
+      { transportClass: "TIMEOUT", timeout: true },
+    ],
+    [
+      "connection reset",
+      "read tcp 10.0.0.2:54321->199.36.153.4:443: read: connection reset by peer",
+      { transportClass: "RESET" },
+    ],
+    ["unknown", "network unavailable secret=token-like-value", { transportClass: "OTHER" }],
+  ])("classifies only pinned request transport evidence: %s", (_name, cause, expected) => {
+    expect(sqlAdminRequestDetails(metadataUrlError(cause))).toEqual({
+      failureClass: "PROXY_SQLADMIN_REQUEST_FAILED",
+      requestSubtype: {
+        requestPhase: "INSTANCE_METADATA",
+        host: "sqladmin.googleapis.com",
+        ...expected,
+      },
+    });
+  });
+
+  it("preserves the installed exact 403 permission path", () => {
+    expect(sqlAdminRequestDetails("googleapi: Error 403: permission denied")).toEqual({
+      failureClass: "PROXY_SQLADMIN_PERMISSION_DENIED",
+      requestSubtype: null,
+    });
+  });
+
+  it("does not extract status numbers or network classes from unrelated text", () => {
+    expect(sqlAdminRequestDetails(metadataUrlError(
+      "server mentioned Error 429 and lookup sqladmin.googleapis.com in prose",
+    ))?.requestSubtype).toEqual({
+      requestPhase: "INSTANCE_METADATA",
+      host: "sqladmin.googleapis.com",
+      transportClass: "OTHER",
+    });
+    expect(sqlAdminRequestDetails(
+      "Get \"https://example.com/sql/v1beta4/projects/123/instances/456/connectSettings?token=secret\": context deadline exceeded",
+    )).toBeNull();
+  });
+
+  it.each([
+    [
+      "wrong method",
+      "Post \"https://sqladmin.googleapis.com/sql/v1beta4/projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18/connectSettings\": context deadline exceeded",
+    ],
+    [
+      "wrong same-host path",
+      "Get \"https://sqladmin.googleapis.com/sql/v1beta4/projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18/other\": context deadline exceeded",
+    ],
+    [
+      "fragment",
+      "Get \"https://sqladmin.googleapis.com/sql/v1beta4/projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18/connectSettings#fragment\": context deadline exceeded",
+    ],
+  ])("withholds subtype fields for a same-host %s envelope", (_name, failure) => {
+    expect(sqlAdminRequestDetails(failure)).toEqual({
+      failureClass: "PROXY_SQLADMIN_REQUEST_FAILED",
+      requestSubtype: null,
+    });
+  });
+
   it("parses split structured records without retaining or forwarding raw messages", () => {
     const stream = new PassThrough();
     const summary = consumeProxyDiagnosticStream(stream);
@@ -197,6 +319,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     stream.write(`${raw.slice(41)}\n`);
     stream.end();
     expect(summary.failureClass).toBe("PROXY_CREDENTIAL_SOURCE_FAILED");
+    expect(summary.requestSubtype).toBeNull();
     expect(JSON.stringify(summary)).not.toContain("password=secret");
     expect(JSON.stringify(summary)).not.toContain(raw);
   });
@@ -210,6 +333,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
           observedBytes: 32,
           truncated: false,
           failureClass: "PROXY_SQLADMIN_PERMISSION_DENIED",
+          requestSubtype: null,
         }],
         readinessDependencies([0, 1]),
       );
@@ -221,12 +345,36 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     });
   });
 
+  it("emits only allowlisted SQL Admin subtype fields on Proxy early exit", async () => {
+    const stream = new PassThrough();
+    const summary = consumeProxyDiagnosticStream(stream);
+    const raw = structuredProxyLog("ERROR", sqlAdminRequestMessage(metadataUrlError(
+      "credentials: cannot fetch token: token-like-value query=secret",
+    )));
+    stream.end(`${raw}\n`);
+    const result = await runFailure(async () => {
+      await awaitProxyReadiness(
+        { exitCode: 1, signalCode: null },
+        { failed: false },
+        [summary],
+        readinessDependencies([0, 1]),
+      );
+    });
+    expect(result.stderr).toBe(
+      '{"ok":false,"code":"PROXY_EARLY_EXIT","proxyExitCode":1,"proxySignal":null,"proxyDiagnosticAvailable":true,"proxyFailureClass":"PROXY_SQLADMIN_REQUEST_FAILED","requestPhase":"INSTANCE_METADATA","host":"sqladmin.googleapis.com","transportClass":"TOKEN"}\n',
+    );
+    expect(result.stderr).not.toContain("token-like-value");
+    expect(result.stderr).not.toContain("connectSettings");
+    expect(result.stderr).not.toContain("?");
+    expect(result.stderr).not.toContain(raw);
+  });
+
   it("keeps unknown structured errors nested under an unclassified early exit", async () => {
     const result = await runFailure(async () => {
       await awaitProxyReadiness(
         { exitCode: 1, signalCode: null },
         { failed: false },
-        [{ observedBytes: 24, truncated: false, failureClass: null }],
+        [{ observedBytes: 24, truncated: false, failureClass: null, requestSubtype: null }],
         readinessDependencies([0, 1]),
       );
     });
@@ -328,6 +476,10 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       proxyDiagnosticByteLimit: 4096,
       proxyStructuredLogSchema: ["timestamp", "severity", "message"],
       proxyFailureClasses: [...PROXY_FAILURE_CLASSES],
+      sqlAdminRequestPhase: "INSTANCE_METADATA",
+      sqlAdminRequestHost: "sqladmin.googleapis.com",
+      proxyTransportClasses: [...PROXY_TRANSPORT_CLASSES],
+      temporarySignal: "OMITTED_UPSTREAM_TYPED_SIGNAL_FLATTENED",
       databaseConnectionRetries: 0,
       stageCodes: [...BOOTSTRAP_FAILURE_CODES],
     });
@@ -436,6 +588,27 @@ function structuredProxyLog(severity: "DEBUG" | "INFO" | "ERROR", message: strin
     severity,
     message,
   });
+}
+
+function sqlAdminRequestMessage(failure: string): string {
+  return "[mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18] "
+    + "could not resolve instance version: failed to get instance: refresh error: "
+    + "failed to get instance metadata (connection name = "
+    + "\"mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18\"): "
+    + failure;
+}
+
+function metadataUrlError(cause: string): string {
+  return "Get \"https://sqladmin.googleapis.com/sql/v1beta4/projects/"
+    + "mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18/connectSettings"
+    + "?alt=json&prettyPrint=false\": "
+    + cause;
+}
+
+function sqlAdminRequestDetails(failure: string) {
+  return classifyProxyStructuredLogLineDetails(
+    structuredProxyLog("ERROR", sqlAdminRequestMessage(failure)),
+  );
 }
 
 async function runFailure(action: () => void | Promise<void>) {

@@ -17,9 +17,43 @@ exact 2.22.0 command setup replaces the structured logger with plain stderr when
 combined. Debug logging and connection testing remain disabled.
 
 The safe nested classes cover exact credential initialization, SQL Admin 403/request, instance
-name, and listener startup paths. Unknown or malformed output becomes
-`PROXY_EARLY_EXIT_UNCLASSIFIED`. This diagnostic custody does not add connection retries or change
-the 120-second local Proxy-readiness deadline, database connection behavior, migration execution,
-or grant execution.
+name, and listener startup paths. For the pinned connector's instance-metadata request only, a
+request failure may additionally emit the static phase `INSTANCE_METADATA`, the static host
+`sqladmin.googleapis.com`, an exact `googleapi.Error` HTTP status, or one of the bounded transport
+classes `TOKEN`, `DNS`, `CONNECT`, `TLS`, `TIMEOUT`, `RESET`, and `OTHER`. The classifier is bound
+to the connector's exact metadata `GET` path and Go `url.Error` envelope. It recognizes Cloud Auth
+token prefixes, Go resolver and TCP dial forms, TLS/x509 prefixes, explicit timeout/deadline text,
+and reset/broken-pipe forms from the pinned dependency versions. The raw URL, query, nested error,
+and structured message are discarded. `temporary` is intentionally omitted because the Proxy log
+has flattened the upstream typed error signal to text.
+
+Unknown structured startup output becomes `PROXY_EARLY_EXIT_UNCLASSIFIED`; unknown transport text
+within the exact request becomes `OTHER`. This diagnostic custody does not add connection retries
+or change the 120-second local Proxy-readiness deadline, database connection behavior, migration
+execution, or grant execution.
+
+Pinned safe pattern authority:
+
+- HTTP status: the leading Proxy-pinned Google API forms `googleapi: Error NNN` and
+  `googleapi: got HTTP response code NNN with body:`;
+- `TOKEN`: the leading Cloud Auth forms `credentials: cannot fetch token:`,
+  `credentials: invalid token JSON from metadata:`, and
+  `credentials: incomplete token received from metadata`;
+- `DNS`: Go's resolver form `[dial tcp:] lookup sqladmin.googleapis.com [on resolver]: reason`;
+- `CONNECT`: Go's TCP dial form `dial tcp[4|6] address: connect: reason`, restricted to refused or
+  unreachable/no-route reasons;
+- `TLS`: leading `remote error: tls:`, allowlisted `tls:` handshake/certificate forms, or `x509:`;
+- `TIMEOUT`: explicit terminal `context deadline exceeded`, `i/o timeout`, TLS handshake timeout,
+  waiting-for-connection cancellation, or client header timeout text;
+- `RESET`: exact read/write TCP reset or broken-pipe forms;
+- `OTHER`: the request envelope is exact but none of the preceding forms matches.
+
+The parser does not scan arbitrary text for keywords or numbers. A nested transport match is
+admitted only after validating method `GET`, HTTPS, the exact host, and the exact configured
+project/instance `connectSettings` path. Query parameters may be present for the pinned client but
+are never retained. If that exact request envelope cannot be validated, the broader installed
+request-failure class remains available but all subtype fields are withheld. The Proxy binary
+pinned by image digest was built with Go 1.26.3; that compiled toolchain, rather than the module's
+Go declaration, owns the standard-library `url.Error` format used here.
 
 The current phase may build, verify and publish this image, but must not run either database mode.

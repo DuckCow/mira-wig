@@ -45,14 +45,35 @@ export const PROXY_FAILURE_CLASSES = Object.freeze([
   "PROXY_EARLY_EXIT_UNCLASSIFIED",
 ] as const);
 
+export const PROXY_TRANSPORT_CLASSES = Object.freeze([
+  "TOKEN",
+  "DNS",
+  "CONNECT",
+  "TLS",
+  "TIMEOUT",
+  "RESET",
+  "OTHER",
+] as const);
+
+export const SQLADMIN_REQUEST_PHASE = "INSTANCE_METADATA" as const;
+export const SQLADMIN_REQUEST_HOST = "sqladmin.googleapis.com" as const;
+
 type BootstrapFailureCode = (typeof BOOTSTRAP_FAILURE_CODES)[number];
 export type ProxyFailureClass = (typeof PROXY_FAILURE_CLASSES)[number];
+export type ProxyTransportClass = (typeof PROXY_TRANSPORT_CLASSES)[number];
+export type SqlAdminRequestSubtype = Readonly<{
+  requestPhase: typeof SQLADMIN_REQUEST_PHASE;
+  host: typeof SQLADMIN_REQUEST_HOST;
+  httpStatus?: number;
+  transportClass?: ProxyTransportClass;
+  timeout?: true;
+}>;
 type SafeFailureDetails = Readonly<{
   proxyExitCode?: number | null;
   proxySignal?: string | null;
   proxyDiagnosticAvailable?: boolean;
   proxyFailureClass?: ProxyFailureClass;
-}>;
+}> & Partial<SqlAdminRequestSubtype>;
 type SafeFailureRecord = Readonly<{ code: BootstrapFailureCode }> & SafeFailureDetails;
 type ProxyStartObservation = { failed: boolean };
 type ProxyReadinessProcess = Pick<ChildProcess, "exitCode" | "signalCode">;
@@ -61,6 +82,7 @@ export type ProxyDiagnosticSummary = {
   observedBytes: number;
   truncated: boolean;
   failureClass: Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null;
+  requestSubtype: SqlAdminRequestSubtype | null;
 };
 export type ProxyReadinessDependencies = Readonly<{
   now: () => number;
@@ -408,6 +430,7 @@ export function consumeProxyDiagnosticStream(
     observedBytes: 0,
     truncated: false,
     failureClass: null,
+    requestSubtype: null,
   };
   let pending = "";
   let settle = Promise.resolve();
@@ -456,13 +479,24 @@ function diagnosticChunkBuffer(chunk: unknown): Buffer {
 }
 
 function classifyPendingProxyLine(summary: ProxyDiagnosticSummary, line: string): void {
-  const failureClass = classifyProxyStructuredLogLine(line);
-  if (failureClass) summary.failureClass = failureClass;
+  const classification = classifyProxyStructuredLogLineDetails(line);
+  if (!classification) return;
+  summary.failureClass = classification.failureClass;
+  summary.requestSubtype = classification.requestSubtype;
 }
 
 export function classifyProxyStructuredLogLine(
   line: string,
 ): Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null {
+  return classifyProxyStructuredLogLineDetails(line)?.failureClass ?? null;
+}
+
+export function classifyProxyStructuredLogLineDetails(
+  line: string,
+): Readonly<{
+  failureClass: Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED">;
+  requestSubtype: SqlAdminRequestSubtype | null;
+}> | null {
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -476,33 +510,125 @@ export function classifyProxyStructuredLogLine(
 
 function classifyProxyStructuredErrorMessage(
   message: string,
-): Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null {
+): Readonly<{
+  failureClass: Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED">;
+  requestSubtype: SqlAdminRequestSubtype | null;
+}> | null {
   const instanceFailure = classifyProxyInstanceResolutionFailure(message);
   if (instanceFailure) return instanceFailure;
-  if (isProxyCredentialSourceFailure(message)) return "PROXY_CREDENTIAL_SOURCE_FAILED";
-  if (isProxyListenerFailure(message)) return "PROXY_LISTENER_FAILED";
+  if (isProxyCredentialSourceFailure(message)) {
+    return Object.freeze({
+      failureClass: "PROXY_CREDENTIAL_SOURCE_FAILED",
+      requestSubtype: null,
+    });
+  }
+  if (isProxyListenerFailure(message)) {
+    return Object.freeze({ failureClass: "PROXY_LISTENER_FAILED", requestSubtype: null });
+  }
   return null;
 }
 
 function classifyProxyInstanceResolutionFailure(
   message: string,
-): Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED"> | null {
+): Readonly<{
+  failureClass: Exclude<ProxyFailureClass, "PROXY_EARLY_EXIT_UNCLASSIFIED">;
+  requestSubtype: SqlAdminRequestSubtype | null;
+}> | null {
   const instancePrefix = `[${CONNECTION_NAME}] could not resolve instance version: `;
   const sqlAdminPrefix = `${instancePrefix}failed to get instance: refresh error: `
     + `failed to get instance metadata (connection name = "${CONNECTION_NAME}"): `;
   if (message.startsWith(sqlAdminPrefix)) {
     const requestFailure = message.slice(sqlAdminPrefix.length);
     if (/^googleapi: Error 403(?:\b|:)/u.test(requestFailure)) {
-      return "PROXY_SQLADMIN_PERMISSION_DENIED";
+      return Object.freeze({
+        failureClass: "PROXY_SQLADMIN_PERMISSION_DENIED",
+        requestSubtype: null,
+      });
     }
-    if (/^(?:googleapi: Error \d{3}(?:\b|:)|(?:Get|Post) "https:\/\/sqladmin\.googleapis\.com\/)/u
-      .test(requestFailure)) return "PROXY_SQLADMIN_REQUEST_FAILED";
+    if (/^(?:googleapi: (?:Error \d{3}(?:\b|:)|got HTTP response code \d{3} with body:)|(?:Get|Post) "https:\/\/sqladmin\.googleapis\.com\/)/u
+      .test(requestFailure)) {
+      return Object.freeze({
+        failureClass: "PROXY_SQLADMIN_REQUEST_FAILED",
+        requestSubtype: classifySqlAdminRequestSubtype(requestFailure),
+      });
+    }
   }
   if (/^\[[^\]\r\n]{1,255}\] could not resolve instance version: config error: invalid instance connection name, expected PROJECT:REGION:INSTANCE \(connection name = "[^"\r\n]{1,255}"\)$/u
     .test(message)) {
-    return "PROXY_INSTANCE_CONFIG_FAILED";
+    return Object.freeze({
+      failureClass: "PROXY_INSTANCE_CONFIG_FAILED",
+      requestSubtype: null,
+    });
   }
   return null;
+}
+
+function classifySqlAdminRequestSubtype(requestFailure: string): SqlAdminRequestSubtype | null {
+  const base = Object.freeze({
+    requestPhase: SQLADMIN_REQUEST_PHASE,
+    host: SQLADMIN_REQUEST_HOST,
+  });
+  const httpStatus = googleApiHttpStatus(requestFailure);
+  if (httpStatus !== null) return Object.freeze({ ...base, httpStatus });
+
+  const urlError = /^(Get|Post) "([^"\r\n]{1,3072})": ([^\r\n]{1,3072})$/u.exec(requestFailure);
+  if (!urlError || !isExactMetadataRequestUrl(urlError[1], urlError[2])) {
+    return null;
+  }
+  const cause = urlError[3] ?? "";
+  const timeout = isExplicitTimeout(cause) ? true : undefined;
+  const transportClass = classifyTransportCause(cause);
+  return Object.freeze({
+    ...base,
+    transportClass,
+    ...(timeout ? { timeout } : {}),
+  });
+}
+
+function googleApiHttpStatus(value: string): number | null {
+  const match = /^googleapi: (?:Error (\d{3})(?:\b|:)|got HTTP response code (\d{3}) with body:)/u
+    .exec(value);
+  const candidate = match?.[1] ?? match?.[2];
+  if (!candidate) return null;
+  const status = Number(candidate);
+  return status >= 100 && status <= 599 ? status : null;
+}
+
+function isExactMetadataRequestUrl(method: string | undefined, value: string | undefined): boolean {
+  if (method !== "Get" || !value) return false;
+  let requestUrl: URL;
+  try {
+    requestUrl = new URL(value);
+  } catch {
+    return false;
+  }
+  return requestUrl.protocol === "https:"
+    && requestUrl.hostname === SQLADMIN_REQUEST_HOST
+    && requestUrl.port === ""
+    && requestUrl.username === ""
+    && requestUrl.password === ""
+    && requestUrl.pathname === `/sql/v1beta4/projects/${PROJECT_ID}/instances/${INSTANCE}/connectSettings`
+    && requestUrl.hash === "";
+}
+
+function classifyTransportCause(cause: string): ProxyTransportClass {
+  if (/^credentials: (?:cannot fetch token:|invalid token JSON from metadata:|incomplete token received from metadata(?:$|:))/u
+    .test(cause)) return "TOKEN";
+  if (/^(?:dial tcp(?:4|6)?: )?lookup sqladmin\.googleapis\.com(?: on [^\r\n]+)?: /u
+    .test(cause)) return "DNS";
+  if (/^dial tcp(?:4|6)? .+: connect: (?:connection refused|network is unreachable|no route to host|host is unreachable)$/u
+    .test(cause)) return "CONNECT";
+  if (/^(?:remote error: tls:|tls: (?:failed to verify certificate:|handshake failure|first record does not look like a TLS handshake)|x509: )/u
+    .test(cause)) return "TLS";
+  if (/^(?:(?:read|write) tcp .+: (?:read|write): )?(?:connection reset by peer|broken pipe)$/u
+    .test(cause)) return "RESET";
+  if (isExplicitTimeout(cause)) return "TIMEOUT";
+  return "OTHER";
+}
+
+function isExplicitTimeout(cause: string): boolean {
+  return /(?:^|: )(?:context deadline exceeded|i\/o timeout|net\/http: TLS handshake timeout|net\/http: request canceled while waiting for connection|Client\.Timeout exceeded while awaiting headers)$/u
+    .test(cause);
 }
 
 function isProxyCredentialSourceFailure(message: string): boolean {
@@ -578,9 +704,7 @@ export async function awaitProxyReadiness(
         proxySignal: proxy.signalCode,
         proxyDiagnosticAvailable: diagnostics.some((summary) =>
           summary.observedBytes > 0 || summary.truncated),
-        proxyFailureClass: diagnostics.find((summary) =>
-          summary.failureClass !== null)?.failureClass
-          ?? "PROXY_EARLY_EXIT_UNCLASSIFIED",
+        ...proxyFailureDetails(diagnostics),
       });
     }
     try {
@@ -591,6 +715,17 @@ export async function awaitProxyReadiness(
     await dependencies.wait(READINESS_POLL_MS);
   }
   throw new BootstrapStageFailure("PROXY_READY_TIMEOUT");
+}
+
+function proxyFailureDetails(diagnostics: readonly ProxyDiagnosticSummary[]): SafeFailureDetails {
+  const classified = diagnostics.find((summary) => summary.failureClass !== null);
+  if (!classified?.failureClass) {
+    return Object.freeze({ proxyFailureClass: "PROXY_EARLY_EXIT_UNCLASSIFIED" });
+  }
+  return Object.freeze({
+    proxyFailureClass: classified.failureClass,
+    ...(classified.requestSubtype ?? {}),
+  });
 }
 
 async function stopProxy(proxy: ChildProcess): Promise<void> {

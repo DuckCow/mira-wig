@@ -75,6 +75,18 @@
       "PROXY_LISTENER_FAILED",
       "PROXY_EARLY_EXIT_UNCLASSIFIED"
     ],
+    "sqlAdminRequestPhase": "INSTANCE_METADATA",
+    "sqlAdminRequestHost": "sqladmin.googleapis.com",
+    "proxyTransportClasses": [
+      "TOKEN",
+      "DNS",
+      "CONNECT",
+      "TLS",
+      "TIMEOUT",
+      "RESET",
+      "OTHER"
+    ],
+    "temporarySignal": "OMITTED_UPSTREAM_TYPED_SIGNAL_FLATTENED",
     "databaseConnectionRetries": 0,
     "stageCodes": [
       "PROXY_START_FAILED",
@@ -113,6 +125,11 @@
     "https://github.com/GoogleCloudPlatform/cloud-sql-proxy/blob/v2.22.0/cmd/root.go",
     "https://github.com/GoogleCloudPlatform/cloud-sql-proxy/blob/v2.22.0/internal/log/log.go",
     "https://github.com/GoogleCloudPlatform/cloud-sql-proxy/blob/v2.22.0/internal/proxy/proxy.go",
+    "https://github.com/GoogleCloudPlatform/cloud-sql-go-connector/blob/v1.21.1/internal/cloudsql/refresh.go",
+    "https://github.com/googleapis/google-api-go-client/blob/v0.280.0/googleapi/googleapi.go",
+    "https://github.com/googleapis/google-cloud-go/blob/auth/v0.20.0/auth/credentials/compute.go",
+    "https://github.com/golang/go/blob/go1.26.3/src/net/url/url.go",
+    "https://github.com/golang/go/blob/go1.26.3/src/net/http/client.go",
     "https://docs.cloud.google.com/sql/docs/postgres/iam-logins",
     "https://docs.cloud.google.com/sql/docs/postgres/add-manage-iam-users",
     "https://docs.cloud.google.com/sql/docs/postgres/iam-conditions",
