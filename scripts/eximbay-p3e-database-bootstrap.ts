@@ -31,7 +31,7 @@ export const EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS = Object.freeze([
       repositoryRoot,
       "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql",
     ),
-    sha256: "a01d35767a4e9976cfaa3dd7be35b720987346dd034a814247725a5373dda742",
+    sha256: "a8ddd82fc14f09db4caee476377d15b6584e3c7e9cf4828ad8aed977d924d614",
   }),
   Object.freeze({
     id: "EXIMBAY_CANARY_ROLE_GRANT_DELTA",
@@ -355,7 +355,7 @@ async function verifyRole(database: Client, role: RuntimeRole): Promise<void> {
   requireNoSequencePrivileges(sequences.rows);
 }
 
-function requireRoleSafety(rows: readonly RoleSafetyRow[]): void {
+export function requireRoleSafety(rows: readonly RoleSafetyRow[]): void {
   const safetyRow = rows[0];
   const expected = Object.freeze<RoleSafetyRow>({
     canLogin: true,
@@ -455,7 +455,7 @@ function failPostcondition(): never {
   throw new EximbayP3eDatabaseBootstrapError("ROLE_AUTHORITY_POSTCONDITION_FAILED");
 }
 
-type RoleSafetyRow = Readonly<{
+export type RoleSafetyRow = Readonly<{
   canLogin: boolean;
   superuser: boolean;
   createDatabase: boolean;

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -22,6 +23,10 @@ import {
   type RuntimeConfiguration,
   type RuntimeDependencies,
 } from "../../../../../containers/refund-db-bootstrap/entrypoint";
+import {
+  requireRoleSafety,
+  type RoleSafetyRow,
+} from "../../../../../scripts/eximbay-p3e-database-bootstrap";
 import {
   loadRefundWorkerMigrationInventory,
   type RefundWorkerMigrationInventory,
@@ -59,6 +64,62 @@ const INVALID_MODE_VECTORS: readonly Readonly<{ args: readonly string[] }>[] = [
 ];
 
 describe("P3E-B2 dormant database-bootstrap runtime", () => {
+  it("uses only Cloud SQL-compatible role creation and password sanitation", () => {
+    const roleSql = readFileSync(
+      join(ROOT, "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql"),
+      "utf8",
+    );
+    expect([...roleSql.matchAll(/^\s*CREATE ROLE [^;]+;/gmu)].map(([statement]) =>
+      statement.trim())).toEqual([
+      "CREATE ROLE mira_refund_preflight LOGIN NOINHERIT;",
+      "CREATE ROLE mira_refund_canary LOGIN NOINHERIT;",
+    ]);
+    expect(roleSql).not.toMatch(
+      /^\s*CREATE ROLE [^;]*(?:SUPERUSER|CREATEDB|CREATEROLE|REPLICATION|BYPASSRLS|PASSWORD)/gmu,
+    );
+    expect([...roleSql.matchAll(/^ALTER ROLE [^;]+;/gmu)].map(([statement]) =>
+      statement.trim())).toEqual([
+      "ALTER ROLE mira_refund_preflight PASSWORD NULL;",
+      "ALTER ROLE mira_refund_canary PASSWORD NULL;",
+    ]);
+    expect(roleSql.slice(roleSql.indexOf("GRANT CONNECT"))).not.toBe("");
+    expect(sha256(roleSql.slice(roleSql.indexOf("GRANT CONNECT")))).toBe(
+      "59e6155e0a23c0b538414d84ff5ec542ad7d2ad3ee9dd27d71f94520d06f553c",
+    );
+  });
+
+  it("fails closed on every unsafe existing-role attribute mismatch", () => {
+    const exact = Object.freeze<RoleSafetyRow>({
+      canLogin: true,
+      superuser: false,
+      createDatabase: false,
+      createRole: false,
+      inherit: false,
+      replication: false,
+      bypassRls: false,
+      connect: true,
+      databaseCreate: false,
+      schemaUsage: true,
+      schemaCreate: false,
+      membershipCount: 0,
+    });
+    const unsafe = Object.freeze<readonly Partial<RoleSafetyRow>[]>([
+      { canLogin: false },
+      { superuser: true },
+      { createDatabase: true },
+      { createRole: true },
+      { inherit: true },
+      { replication: true },
+      { bypassRls: true },
+    ]);
+    expect(() => requireRoleSafety([exact])).not.toThrow();
+    for (const mutation of unsafe) {
+      expect(() => requireRoleSafety([{ ...exact, ...mutation }])).toThrowError(
+        "ROLE_AUTHORITY_POSTCONDITION_FAILED",
+      );
+    }
+  });
+
   it.each(INVALID_MODE_VECTORS)(
     "rejects non-exact mode vector $args before execution",
     async ({ args }) => {
@@ -717,6 +778,10 @@ function executeMock(
     _configuration: RuntimeConfiguration,
     _inventory: RefundWorkerMigrationInventory,
   ): Promise<Readonly<Record<string, unknown>>> => Promise.resolve(result));
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function outputSink() {

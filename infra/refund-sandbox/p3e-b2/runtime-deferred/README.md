@@ -50,8 +50,9 @@ cloud materialization, Job execution or database access.
 
 `resource-ownership-v1.json` freezes every B1 runtime, IAM, image, secret-version, connectivity,
 bootstrap, observability, and invocation owner, plus the explicit R2B1 supersession subset.
-`database_roles.sql` was moved byte-identically from the retired root; it remains an unexecuted
-later database-bootstrap input.
+`database_roles.sql` was moved byte-identically from the retired root at the R1B handoff. That
+movement remains historical; the later database-bootstrap owner now owns reviewed corrections and
+attended execution of this input.
 
 Repository history—not stale `.tf`, `.disabled`, `.bak`, or copied Job HCL—is the source for the
 retired definitions. Later packages must re-derive runtime authority from current contracts.

@@ -1,17 +1,10 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import legacyResourceMap from "../../../../../infra/refund-sandbox/p3e-b/legacy-resource-map-v1.json";
 
 const ROOT = process.cwd();
 const RETIRED_ROOT = join(ROOT, "infra/refund-sandbox/p3e-b");
-const DEFERRED_SQL = join(
-  ROOT,
-  "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql",
-);
-const EXPECTED_DATABASE_ROLES_SHA256 =
-  "a01d35767a4e9976cfaa3dd7be35b720987346dd034a814247725a5373dda742";
 
 describe("retired P3E-B1 infrastructure policy", () => {
   it("contains only the bounded retirement authority", () => {
@@ -69,12 +62,6 @@ describe("retired P3E-B1 infrastructure policy", () => {
       disposition: "MOVED_BYTE_IDENTICALLY",
       newIdentity: "p3e-b2/runtime-deferred/database_roles.sql",
     });
-  });
-
-  it("preserves the relocated database-role SQL byte-for-byte", () => {
-    expect(
-      createHash("sha256").update(readFileSync(DEFERRED_SQL)).digest("hex"),
-    ).toBe(EXPECTED_DATABASE_ROLES_SHA256);
   });
 });
 

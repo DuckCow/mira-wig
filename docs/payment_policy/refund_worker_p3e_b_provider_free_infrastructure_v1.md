@@ -65,7 +65,8 @@ other database secret. There is no default Compute identity, service-account key
 `GOOGLE_APPLICATION_CREDENTIALS`, job executor/developer/admin grant, wildcard member, scheduler
 identity, provider secret, or secret version resource.
 
-`database_roles.sql` is an idempotent, non-executing reviewed manifest. The preflight role has only
+`database_roles.sql` is an idempotent reviewed input executed only by the separately admitted
+database-bootstrap transaction. The preflight role has only
 CONNECT, schema USAGE, and SELECT on the migration ledger plus the exact health/manual/reconciliation
 tables. The canary role's SELECT/UPDATE/INSERT list is derived table-by-table from selector, lease,
 authorization, contact-marker, provider-observation application, result persistence, and recovery.

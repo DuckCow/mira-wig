@@ -37,7 +37,8 @@ The old resource ownership is exact:
 | `google_secret_manager_secret_iam_member.preflight_database_access` | runtime deferred | intentionally deferred |
 | `google_secret_manager_secret_iam_member.canary_database_access` | runtime deferred | intentionally deferred |
 
-`database_roles.sql` is moved byte-identically to the later database-bootstrap boundary.
+`database_roles.sql` was moved byte-identically at the foundation handoff. Subsequent reviewed
+role-authority corrections belong exclusively to the later database-bootstrap boundary.
 Observability definitions are deferred rather than retained as executable Terraform.
 
 ## Service activation

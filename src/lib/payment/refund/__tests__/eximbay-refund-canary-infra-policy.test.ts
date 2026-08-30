@@ -56,9 +56,9 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(terraform).not.toMatch(/google_secret_manager_secret(?:_version)?\s+"/u);
   });
 
-  it("preserves frozen role authority and adds only the exact approval-table delta", () => {
+  it("preserves corrected role authority and adds only the exact approval-table delta", () => {
     expect(sha256(readFileSync(FROZEN_DATABASE_ROLES))).toBe(
-      "a01d35767a4e9976cfaa3dd7be35b720987346dd034a814247725a5373dda742",
+      "a8ddd82fc14f09db4caee476377d15b6584e3c7e9cf4828ad8aed977d924d614",
     );
     const grants = source("database-role-grants.sql");
     expect(grants).toContain(

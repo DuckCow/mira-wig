@@ -1,20 +1,20 @@
--- P3E-B1 reviewed manifest only. It is not run by Terraform or any package script.
--- Substitute the two role names through a separately reviewed administrative session in P3E-B2.
--- Password/database-secret creation is deliberately out of this manifest and out of Terraform state.
+-- P3E-B2 reviewed Cloud SQL-compatible application-role authority.
+-- It is executed only by the separately admitted database-bootstrap role/grant transaction.
+-- PASSWORD NULL is bounded sanitation; password/secret creation remains out of scope.
 
 DO $roles$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mira_refund_preflight') THEN
-    CREATE ROLE mira_refund_preflight LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+    CREATE ROLE mira_refund_preflight LOGIN NOINHERIT;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mira_refund_canary') THEN
-    CREATE ROLE mira_refund_canary LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+    CREATE ROLE mira_refund_canary LOGIN NOINHERIT;
   END IF;
 END
 $roles$;
 
-ALTER ROLE mira_refund_preflight NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
-ALTER ROLE mira_refund_canary NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+ALTER ROLE mira_refund_preflight PASSWORD NULL;
+ALTER ROLE mira_refund_canary PASSWORD NULL;
 
 GRANT CONNECT ON DATABASE refund_sandbox TO mira_refund_preflight;
 GRANT CONNECT ON DATABASE refund_sandbox TO mira_refund_canary;
