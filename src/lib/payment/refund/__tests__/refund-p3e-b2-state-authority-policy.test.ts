@@ -12,17 +12,10 @@ const POLICY_DOCUMENT = join(
   ROOT,
   "docs/payment_policy/refund_worker_p3e_b2_state_authority_v1.md",
 );
-const EXECUTABLE_ROOTS = Object.freeze([BOOTSTRAP, AUTHORITY, GUARDRAILS]);
+const EXECUTABLE_ROOTS = Object.freeze([BOOTSTRAP, AUTHORITY]);
 const EXPECTED_R1A_INFRASTRUCTURE_FILES = Object.freeze([
   "README.md",
-  "authority-guardrails/.terraform.lock.hcl",
-  "authority-guardrails/main.tf",
-  "authority-guardrails/outputs.tf",
-  "authority-guardrails/providers.tf",
-  "authority-guardrails/terraform.tfvars.example",
-  "authority-guardrails/tests/policy.tftest.hcl",
-  "authority-guardrails/variables.tf",
-  "authority-guardrails/versions.tf",
+  "authority-guardrails/README.md",
   "modules/state-bucket/.terraform.lock.hcl",
   "modules/state-bucket/checks.tf",
   "modules/state-bucket/main.tf",
@@ -49,8 +42,8 @@ const EXPECTED_R1A_INFRASTRUCTURE_FILES = Object.freeze([
   "state-bootstrap-create/versions.tf",
 ]);
 
-describe("P3E-B2-R1A state and execution authority policy", () => {
-  it("preserves the exact committed R1A-owned 33-path subinventory", () => {
+describe("P3E-B2-R1A state authority and retired deny policy", () => {
+  it("preserves the exact committed R1A-owned 26-path subinventory", () => {
     const infrastructureRoot = realpathSync(INFRA);
     const files = walk(infrastructureRoot)
       .map((path) => relative(infrastructureRoot, path).split(sep).join("/"))
@@ -62,8 +55,8 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
         path.startsWith("state-bootstrap-create/")
       ))
       .sort();
-    expect(EXPECTED_R1A_INFRASTRUCTURE_FILES).toHaveLength(33);
-    expect(new Set(EXPECTED_R1A_INFRASTRUCTURE_FILES).size).toBe(33);
+    expect(EXPECTED_R1A_INFRASTRUCTURE_FILES).toHaveLength(26);
+    expect(new Set(EXPECTED_R1A_INFRASTRUCTURE_FILES).size).toBe(26);
     expect(files).toEqual(EXPECTED_R1A_INFRASTRUCTURE_FILES);
   });
 
@@ -78,12 +71,10 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
 
     const bootstrapVersions = readFileSync(join(BOOTSTRAP, "versions.tf"), "utf8");
     const authorityVersions = readFileSync(join(AUTHORITY, "versions.tf"), "utf8");
-    const guardrailVersions = readFileSync(join(GUARDRAILS, "versions.tf"), "utf8");
     expect(bootstrapVersions).toMatch(/backend\s+"local"\s+\{\}/u);
     expect(bootstrapVersions).not.toMatch(/backend\s+"gcs"/u);
     expect(authorityVersions).toMatch(/backend\s+"gcs"\s+\{\}/u);
-    expect(guardrailVersions).toMatch(/backend\s+"gcs"\s+\{\}/u);
-    expect(`${authorityVersions}\n${guardrailVersions}`).not.toMatch(
+    expect(authorityVersions).not.toMatch(
       /\b(?:bucket|prefix|credentials)\s*=/u,
     );
   });
@@ -141,41 +132,19 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     expect(imports).not.toMatch(/\b(?:destroy|state rm|-target)\b/u);
   });
 
-  it("defines only the project-scoped universal two-permission execution deny", () => {
-    const source = readTerraform(GUARDRAILS);
-    const variables = readFileSync(join(GUARDRAILS, "variables.tf"), "utf8");
-    const main = readFileSync(join(GUARDRAILS, "main.tf"), "utf8");
-    const provider = readFileSync(join(GUARDRAILS, "providers.tf"), "utf8");
-    const projectNumberBlock = variables.slice(
-      variables.indexOf('variable "project_number"'),
-      variables.indexOf('variable "attachment_scope"'),
+  it("retires the infeasible deny root and permanently rejects its failed plan", () => {
+    const files = walk(GUARDRAILS).map((path) => basename(path));
+    const marker = readFileSync(join(GUARDRAILS, "README.md"), "utf8");
+    expect(files).toEqual(["README.md"]);
+    expect(readTerraform(GUARDRAILS)).toBe("");
+    expect(marker).toContain("not attached to an organization");
+    expect(marker).toContain("unavailable");
+    expect(marker).toContain("not required");
+    expect(marker).toContain(
+      "d26b446e26b41c1b88f52e530dadc2ef4ec82420b7acce87faf5e8ddd995e86b",
     );
-    expect(resourceTypes(source)).toEqual(["google_iam_deny_policy"]);
-    expect(main).toContain(
-      'parent       = "cloudresourcemanager.googleapis.com/projects/${var.project_number}"',
-    );
-    expect(main).not.toContain("${var.project_id}");
-    expect(provider).toContain("project = var.project_id");
-    expect(projectNumberBlock).toMatch(/variable\s+"project_number"\s+\{/u);
-    expect(projectNumberBlock).toContain("type        = string");
-    expect(projectNumberBlock).not.toMatch(/\bdefault\s*=/u);
-    expect(source).not.toMatch(/data\s+"google_/u);
-    expect(source).toContain('"principalSet://goog/public:all"');
-    expect(source).toContain('"run.googleapis.com/jobs.run"');
-    expect(source).toContain('"run.googleapis.com/jobs.runWithOverrides"');
-    expect(source).toContain('deletion_policy = "PREVENT"');
-    expect(source).toContain("length(var.exception_principals) == 0");
-    expect(source).toContain("length(var.exception_permissions) == 0");
-    expect(variables).not.toMatch(
-      /"run\.googleapis\.com\/jobs\.(?:create|update|setIamPolicy)"/u,
-    );
-    expect(variables).not.toMatch(
-      /"run\.googleapis\.com\/[^"]*\*[^"]*"/u,
-    );
-    expect(source).not.toMatch(
-      /resource\s+"google_(?:project_iam|cloud_run|service_account|secret|sql|cloud_scheduler|artifact_registry)/u,
-    );
-    expect(source).not.toMatch(/resource\s+"google_.*_iam_(?:binding|member|policy)"/u);
+    expect(marker).toMatch(/must\s+never be retried/u);
+    expect(marker).toMatch(/must\s+never be reused/u);
   });
 
   it("contains no R1A foundation, runtime, credential, or execution resource", () => {
@@ -234,7 +203,6 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     const documentation = readFileSync(POLICY_DOCUMENT, "utf8");
     for (const prefix of [
       "p3e-b2/state-backend-authority",
-      "p3e-b2/authority-guardrails",
       "p3e-b2/service-activation",
       "p3e-b2/foundation",
       "p3e-b2/foundation-deployer-authority",
@@ -244,6 +212,8 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     ]) {
       expect(documentation).toContain(prefix);
     }
+    expect(documentation).toContain("p3e-b2/authority-guardrails");
+    expect(documentation).toContain("must never be reused");
     for (const step of [
       "review the local creation plan",
       "adopt/import the existing bucket and IAM",
@@ -255,8 +225,10 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     expect(documentation).toContain("Object versioning is the R1A");
     expect(documentation).toContain("recovery authority");
     expect(documentation).toContain("soft-delete retention duration explicitly to zero");
-    expect(documentation).toContain("authority root creates no binding");
-    expect(documentation).toContain("R1A creates no exception and performs no probe");
+    expect(documentation).toContain("non-executable retirement marker");
+    expect(documentation).toContain(
+      "IAM Deny is not applicable to the current no-organization project",
+    );
     expect(documentation).toContain(
       "FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED",
     );
@@ -266,7 +238,7 @@ describe("P3E-B2-R1A state and execution authority policy", () => {
     const documentation = readFileSync(POLICY_DOCUMENT, "utf8");
     for (const status of [
       "STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED",
-      "JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED",
+      "IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION",
       "FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED",
       "P3E_B2_FOUNDATION: NOT_PROVISIONED",
       "P3E_B2_RUNTIME: NOT_DEPLOYABLE",

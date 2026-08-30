@@ -28,11 +28,6 @@ variable "foundation_handoff" {
   type        = any
 }
 
-variable "execution_deny_handoff" {
-  description = "Exact nonsecret operator-attested execution-deny handoff with no exception."
-  type        = any
-}
-
 variable "release_image_handoff" {
   description = "Exact separately reviewed immutable release-image reference; never the R2A local proof digest."
   type        = any

@@ -360,7 +360,7 @@ FOUNDATION_DEPLOYER_IDENTITY: NOT_SELECTED
 
 A future package must independently select an identity, prove absence of basic or inherited broad
 roles, bind the custom role, separately grant backend object access, prove the principal cannot
-mutate the execution deny or execute Jobs, and remove the binding when required. R1B does none of
+execute Jobs, and remove the binding when required. R1B does none of
 this.
 
 ## Runtime deferred
@@ -369,7 +369,7 @@ this.
 manifest assigns later ownership for both runtime identities; project and secret IAM; both Jobs;
 image digest; database secret versions; Job CPU/memory; private-IP proxy/socket architecture;
 database bootstrap, migrations, and grants; observability/alerts; preflight invocation; future
-invocation authority; and any later deny exception.
+invocation authority; and future stronger organization-backed guardrails if ever required.
 
 ```text
 RUNTIME_IDENTITY_AUTHORITY: DEFERRED
@@ -430,7 +430,7 @@ Terraform tests are not cloud evidence.
 ```text
 P3E_B1_MONOLITH: RETIRED_UNAPPLIED
 STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED
-JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 SERVICE_ACTIVATION_AUTHORITY: DEFINED_NOT_PROVISIONED
 SERVICE_ACTIVATION_BOOTSTRAP_PREREQUISITES: EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED
 SERVICE_ACTIVATION_BOOTSTRAP_API_SET: DEFINED_NOT_VERIFIED
@@ -466,11 +466,11 @@ identity, exact database secret-version reference admission, and dormant Cloud R
 The authoritative current contract is
 `infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. The original R1B inventory in
 repository history remains historical authority. R2B1 does not authorize runtime apply, image publication,
-secret payload/version creation, database bootstrap, Job invocation, scheduler, deny exception, or
+secret payload/version creation, database bootstrap, Job invocation, scheduler, or
 provider contact.
 
 Provider-free proxy/egress correction note (2026-08-30): the R2B1 production root remains
-unconditionally plan/apply-blocked while deny effectiveness is not cloud-proven. Its two Direct
+unconditionally plan/apply-blocked by its independent constant-false release gate. Its two Direct
 VPC Job interfaces use `ALL_TRAFFIC` with the exact foundation firewall target tag
 `refund-provider-free`. The current foundation graph is the fifteen-address contract above:
 proxy TCP 3307 to PSA, restricted Google API TCP 443 and private DNS, then deny-all. No runtime

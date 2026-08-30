@@ -29,22 +29,6 @@ variables {
     provider_version                        = "7.40.0"
   }
 
-  execution_deny_handoff = {
-    contract_version       = "mira-refund-p3e-b2-job-execution-deny/v1"
-    project_id             = "mira-refund-sbx-example"
-    project_number         = "123456789012"
-    attachment_parent      = "cloudresourcemanager.googleapis.com/projects/123456789012"
-    policy_id              = "refund-job-execution-deny"
-    source_state_prefix    = "p3e-b2/authority-guardrails"
-    denied_principals      = ["principalSet://goog/public:all"]
-    denied_permissions     = ["run.googleapis.com/jobs.run", "run.googleapis.com/jobs.runWithOverrides"]
-    exception_principals   = []
-    exception_permissions  = []
-    deny_apply_status      = "APPLIED"
-    operator_review_status = "OPERATOR_REVIEWED"
-    evidence_type          = "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED"
-  }
-
   release_image_handoff = {
     contract_version                  = "mira-refund-worker-release-image-handoff/v1"
     image_digest_uri                  = "asia-northeast3-docker.pkg.dev/mira-refund-sbx-example/mira-p3e-sbx-refund-images/refund-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -191,48 +175,6 @@ run "reject_wrong_foundation_project" {
   }
   expect_failures = [
     check.foundation_handoff,
-    google_service_account.dormant_canary,
-    google_service_account.preflight,
-  ]
-}
-
-run "reject_execution_deny_exception" {
-  command = plan
-  variables {
-    execution_deny_handoff = merge(var.execution_deny_handoff, {
-      exception_principals = ["principalSet://goog/public:all"]
-    })
-  }
-  expect_failures = [
-    check.execution_deny_handoff,
-    google_service_account.dormant_canary,
-    google_service_account.preflight,
-  ]
-}
-
-run "reject_execution_deny_exception_permission" {
-  command = plan
-  variables {
-    execution_deny_handoff = merge(var.execution_deny_handoff, {
-      exception_permissions = ["run.googleapis.com/jobs.get"]
-    })
-  }
-  expect_failures = [
-    check.execution_deny_handoff,
-    google_service_account.dormant_canary,
-    google_service_account.preflight,
-  ]
-}
-
-run "reject_unapplied_execution_deny" {
-  command = plan
-  variables {
-    execution_deny_handoff = merge(var.execution_deny_handoff, {
-      deny_apply_status = "DEFINED_NOT_APPLIED"
-    })
-  }
-  expect_failures = [
-    check.execution_deny_handoff,
     google_service_account.dormant_canary,
     google_service_account.preflight,
   ]
@@ -395,7 +337,6 @@ run "reject_null_foundation_handoff" {
   }
   expect_failures = [
     check.foundation_handoff,
-    check.execution_deny_handoff,
     check.preflight_database_secret_version_reference,
     check.canary_database_secret_version_reference,
     google_service_account.dormant_canary,
@@ -410,7 +351,6 @@ run "reject_absent_foundation_fields" {
   }
   expect_failures = [
     check.foundation_handoff,
-    check.execution_deny_handoff,
     check.preflight_database_secret_version_reference,
     check.canary_database_secret_version_reference,
     google_service_account.dormant_canary,
@@ -425,7 +365,6 @@ run "reject_malformed_foundation_handoff" {
   }
   expect_failures = [
     check.foundation_handoff,
-    check.execution_deny_handoff,
     check.preflight_database_secret_version_reference,
     check.canary_database_secret_version_reference,
     google_service_account.dormant_canary,

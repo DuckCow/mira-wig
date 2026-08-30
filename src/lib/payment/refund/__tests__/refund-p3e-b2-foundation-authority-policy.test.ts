@@ -253,8 +253,8 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(isR1BPath(
       "contracts/trusted-project-bootstrap-readiness-v2.json",
     )).toBe(false);
-    expect(files).toHaveLength(94);
-    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(56);
+    expect(files).toHaveLength(87);
+    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(49);
   });
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {
@@ -301,6 +301,12 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(authorityContract.statePrefixes).toContain(
       "p3e-b2/foundation-deployer-authority",
     );
+    expect(authorityContract.statePrefixes).not.toContain(
+      "p3e-b2/authority-guardrails",
+    );
+    expect(authorityContract.retiredStatePrefixes).toEqual([
+      "p3e-b2/authority-guardrails",
+    ]);
   });
 
   it("freezes the pinned-provider method, permission, shared-read, and exclusive sets independently", () => {
@@ -738,7 +744,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     for (const status of [
       "P3E_B1_MONOLITH: RETIRED_UNAPPLIED",
       "STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED",
-      "JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED",
+      "IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION",
       "SERVICE_ACTIVATION_AUTHORITY: DEFINED_NOT_PROVISIONED",
       "SERVICE_ACTIVATION_BOOTSTRAP_PREREQUISITES: EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED",
       "SERVICE_ACTIVATION_BOOTSTRAP_API_SET: DEFINED_NOT_VERIFIED",

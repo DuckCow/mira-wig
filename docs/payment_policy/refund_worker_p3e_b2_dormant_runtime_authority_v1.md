@@ -12,13 +12,13 @@ test-only override that can change it:
 ```text
 RUNTIME_ROOT_APPLY_POLICY: UNCONDITIONALLY_BLOCKED_IN_R2B1
 RUNTIME_APPLY_AUTHORIZED: FALSE
-JOB_EXECUTION_DENY_EFFECTIVE: NOT_CLOUD_PROVEN
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 ```
 
 Syntactically valid operator-attested handoffs remain useful only for inspecting the dormant
 definition contract. They are not cloud evidence and cannot admit a plan or apply. Removing the
-barrier belongs to a separate independently reviewed package after cloud-authenticated deny
-evidence exists.
+barrier belongs to a separate independently reviewed runtime-authority package after foundation,
+image, and secret readiness is independently established.
 
 The machine authority is
 `infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. The isolated Terraform root is
@@ -82,8 +82,6 @@ remains absent.
 The root accepts bounded exact-key operator-attested handoffs for:
 
 - the applied and reviewed foundation manifest;
-- the applied and reviewed universal execution deny with exactly
-  `run.googleapis.com/jobs.run` and `run.googleapis.com/jobs.runWithOverrides`, no exceptions;
 - a separately reviewed immutable release-image digest;
 - one exact existing numeric database-secret version for each Job.
 
@@ -139,14 +137,32 @@ and process margin. It exceeds the enforced 120-second cooperative worker budget
 that budget. The proxy remains private-IP-only and the application continues to use its `/cloudsql`
 Unix socket.
 
-## Execution deny, lifecycle, cost, and evidence
+## Trusted-operator execution safety, lifecycle, cost, and evidence
 
-R2B1 does not modify or except the R1A universal execution deny. It adds no Cloud Run Invoker or
-Developer role, scheduler, Workflows, Pub/Sub trigger, public/authenticated invocation, target, or
-approval. Repository definitions cannot prove that the deny is effective:
+The current project is not attached to an organization, so IAM Deny is unavailable and is not a
+required execution gate. The accepted boundary trusts the project Owner or an explicitly
+authorized human. A trusted Owner may technically invoke a future Job; resistance to a malicious
+Owner is not required.
 
 ```text
-JOB_EXECUTION_DENY_EFFECTIVE: NOT_CLOUD_PROVEN
+TRUSTED_OPERATOR_MODEL: PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN
+MALICIOUS_OWNER_RESISTANCE: NOT_REQUIRED
+AUTOMATIC_EXECUTION: NOT_ADMITTED
+PERSISTENT_AUTOMATIC_TRIGGER: NONE
+JOB_RETRIES: ZERO
+```
+
+Creation and invocation are distinct: a Job resource may exist after a later release, a trusted
+Owner can technically invoke it, that invocation remains provider-free and non-financial, and a
+financial effect requires the separately preserved provider activation, credential, exact target,
+and one-use approval capabilities.
+
+R2B1 adds no Cloud Run Invoker or Developer role, scheduler, Eventarc trigger, Workflows, Pub/Sub
+subscription, public/authenticated invocation, target, or approval. Both Jobs have zero retries,
+and no provider credential or provider-contact path is admitted:
+
+```text
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 RUNTIME_APPLY_AUTHORIZED: FALSE
 ```
 
@@ -159,7 +175,7 @@ but R2B1 executes nothing.
 
 Runtime deployer authority remains deferred. The exact provider method/permission set has not been
 independently derived across Job deployment, service-account and IAM mutation, Artifact Registry,
-deny separation, and `actAs`; copying the foundation role would be unsafe. No deployer identity,
+and `actAs`; copying the foundation role would be unsafe. No deployer identity,
 role, or binding exists. The contract records the required create/get/update operation families for
 service accounts, project IAM, secret IAM, Cloud Run v2 Jobs, long-running-operation reads, and
 service-account `actAs`, but does not promote those families into a permission set. Exact pinned
@@ -168,7 +184,14 @@ and delete-free replacement behavior remain unresolved.
 
 Still deferred are image publication; database secret payload/version creation; database bootstrap,
 migrations, and grants; provider credential secret versions; preflight invocation; future
-invocation authority; any deny exception; and monitoring/alert deployment.
+invocation authority; and monitoring/alert deployment.
+
+No database-bootstrap Cloud Run Job or runtime wrapper exists. The preserved attended implementation
+at `scripts/eximbay-p3e-database-bootstrap.ts` requires its exact explicit sandbox admission input
+before it can execute SQL; this task does not modify or invoke it. Any future Job wrapper must
+default to a non-mutating, fail-closed mode. Mutation must default false and require an explicit
+attended human action; it may have no automatic trigger, must use zero retries, and must not hold
+provider credentials, contact a provider, or create a synthetic sale or refund.
 
 ## Canonical status
 
@@ -184,7 +207,7 @@ CANARY_EXECUTABLE: FALSE
 PROVIDER_EXECUTION: BLOCKED
 SCHEDULED_SANDBOX: BLOCKED
 LIVE: UNREACHABLE
-JOB_EXECUTION_DENY_EFFECTIVE: NOT_CLOUD_PROVEN
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 RUNTIME_APPLY_AUTHORIZED: FALSE
 CLOUD_RUN_API_ACTIVATION: DEFERRED_NOT_VERIFIED
 RUNTIME_ROOT_APPLY_POLICY: UNCONDITIONALLY_BLOCKED_IN_R2B1

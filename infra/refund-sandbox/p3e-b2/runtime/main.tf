@@ -19,11 +19,6 @@ resource "google_service_account" "preflight" {
     }
 
     precondition {
-      condition     = local.execution_deny_handoff_valid
-      error_message = "The exact applied-and-reviewed universal execution deny without exceptions is required before runtime admission."
-    }
-
-    precondition {
       condition     = local.release_image_handoff_valid
       error_message = "A separately reviewed immutable release image digest is required before runtime admission."
     }
@@ -58,11 +53,6 @@ resource "google_service_account" "dormant_canary" {
     precondition {
       condition     = local.foundation_handoff_valid
       error_message = "The exact applied-and-reviewed foundation handoff is required before runtime admission."
-    }
-
-    precondition {
-      condition     = local.execution_deny_handoff_valid
-      error_message = "The exact applied-and-reviewed universal execution deny without exceptions is required before runtime admission."
     }
 
     precondition {

@@ -7,6 +7,11 @@ Retrieved and reconciled against primary authority on 2026-07-24.
 P3E-B2-R2A defines a provider-free, reproducible Linux AMD64 image and a fail-closed private
 Cloud SQL socket architecture. It creates no cloud fact and publishes no image.
 
+The following block is a frozen historical R2A snapshot, not current runtime status. In particular,
+`JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED` is superseded and must not be treated as pending current
+closure. Current authority is `contracts/runtime-authority-v1.json`, where
+`IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION` applies.
+
 ```text
 P3E_B1_MONOLITH: RETIRED_UNAPPLIED
 STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED
@@ -360,7 +365,8 @@ reference admission, and dormant Cloud Run Job Terraform. Its authority is
 `infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. It consumes the unchanged R2A
 image contract and does not publish the image, create a release digest, create a database secret
 payload/version, apply Terraform, invoke a Job, or authorize provider contact. This R2A document
-remains the immutable image and private-socket authority.
+remains the immutable image and private-socket authority. Its hash-bound status block is historical
+only; R2B1 status supersedes it and the retired IAM Deny must not be restarted from that snapshot.
 
 ## Primary authorities
 

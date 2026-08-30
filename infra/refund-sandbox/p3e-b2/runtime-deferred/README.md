@@ -36,9 +36,17 @@ either. The historical statuses above remain the R1B snapshot.
 
 Still deferred are image publication; database secret payloads and versions; database bootstrap,
 migrations, and grants; monitoring and alert deployment; preflight invocation; future invocation
-authority; provider credential secret versions; and any deny exception. The R2A private proxy
+authority; and provider credential secret versions. The R2A private proxy
 socket architecture remains owned by R2A. R2B1 adds no invoker, scheduler, execution, target,
 approval, provider credential, or trusted cloud evidence.
+
+No database-bootstrap Cloud Run Job or runtime wrapper exists. The attended implementation at
+`../../../scripts/eximbay-p3e-database-bootstrap.ts` is present and requires exact explicit sandbox
+admission before SQL execution; it remains unchanged and was not invoked here. Any future Job
+wrapper must default to a non-mutating, fail-closed mode with mutation disabled. Mutation requires
+an explicit attended human action; no automatic trigger is allowed, retries remain zero, provider
+credentials remain absent, provider contact remains impossible, and synthetic sale or refund
+creation remains out of scope.
 
 `resource-ownership-v1.json` freezes every B1 runtime, IAM, image, secret-version, connectivity,
 bootstrap, observability, and invocation owner, plus the explicit R2B1 supersession subset.

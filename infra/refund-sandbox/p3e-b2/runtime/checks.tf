@@ -10,6 +10,11 @@ check "machine_contract_alignment" {
       local.authority_contract.jobs.resources.memory == local.memory &&
       local.authority_contract.status.RUNTIME_ROOT_APPLY_POLICY ==
       local.runtime_root_apply_policy &&
+      local.authority_contract.threatModel.trustedOperatorModel ==
+      local.trusted_operator_model &&
+      local.authority_contract.threatModel.maliciousOwnerResistance ==
+      local.malicious_owner_resistance &&
+      local.authority_contract.jobs.maxRetries == local.max_retries &&
       local.authority_contract.network.tags == local.network_tags
     )
     error_message = "Runtime Terraform and the machine authority contract must remain exact."
@@ -30,13 +35,6 @@ check "foundation_handoff" {
   assert {
     condition     = local.foundation_handoff_valid
     error_message = "foundation_handoff must be the exact applied-and-reviewed bounded R1B manifest."
-  }
-}
-
-check "execution_deny_handoff" {
-  assert {
-    condition     = local.execution_deny_handoff_valid
-    error_message = "execution_deny_handoff must attest the exact applied universal deny without exceptions."
   }
 }
 

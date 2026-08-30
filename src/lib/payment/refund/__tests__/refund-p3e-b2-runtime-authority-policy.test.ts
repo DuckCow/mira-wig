@@ -25,6 +25,10 @@ const POLICY_DOCUMENT = join(
   ROOT,
   "docs/payment_policy/refund_worker_p3e_b2_dormant_runtime_authority_v1.md",
 );
+const RUNTIME_IMAGE_POLICY_DOCUMENT = join(
+  ROOT,
+  "docs/payment_policy/refund_worker_p3e_b2_runtime_image_connection_v1.md",
+);
 
 const EXPECTED_R2B1_PATHS = Object.freeze([
   "docs/payment_policy/refund_worker_p3e_b2_dormant_runtime_authority_v1.md",
@@ -119,8 +123,8 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     expect(locals.match(
       /runtime_apply_authorized\s*=\s*false/gu,
     )).toHaveLength(1);
-    expect(locals).toContain(
-      'runtime_root_apply_policy = "UNCONDITIONALLY_BLOCKED_IN_R2B1"',
+    expect(locals).toMatch(
+      /runtime_root_apply_policy\s*=\s*"UNCONDITIONALLY_BLOCKED_IN_R2B1"/u,
     );
     expect(variables).not.toContain("runtime_apply_authorized");
     expect(variables).not.toContain("runtime_root_apply_policy");
@@ -136,7 +140,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
         "RESOURCE_LIFECYCLE_PRECONDITION_ON_EVERY_RESOURCE_DECLARATION",
       error: "R2B1_RUNTIME_ROOT_UNCONDITIONALLY_BLOCKED",
       futureRelease:
-        "SEPARATE_INDEPENDENTLY_REVIEWED_PACKAGE_AFTER_CLOUD_AUTHENTICATED_DENY_EVIDENCE",
+        "SEPARATE_INDEPENDENTLY_REVIEWED_RUNTIME_AUTHORITY_AFTER_FOUNDATION_IMAGE_AND_SECRET_READINESS",
     });
   });
 
@@ -176,6 +180,10 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       taskCount: 1,
       parallelism: 1,
       maxRetries: 0,
+      trustedOwnerManualInvocation:
+        "TECHNICALLY_POSSIBLE_PROVIDER_FREE_NON_FINANCIAL",
+      automaticExecution: "NOT_ADMITTED",
+      persistentAutomaticTrigger: "NONE",
       executionEnvironment: "SECOND_GENERATION",
       resources: { cpu: "1", memory: "512Mi" },
       taskTimeout: {
@@ -264,11 +272,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       payload: "FORBIDDEN",
       currentRealStatus: "ABSENT",
     });
-    expect(contract.handoffs.executionDeny.deniedPermissions).toEqual([
-      "run.googleapis.com/jobs.run",
-      "run.googleapis.com/jobs.runWithOverrides",
-    ]);
-    expect(contract.handoffs.executionDeny.exceptions).toBe("FORBIDDEN");
+    expect(contract.handoffs).not.toHaveProperty("executionDeny");
     expect(contract.status.RELEASE_IMAGE_DIGEST).toBe("ABSENT");
     expect(contract.status.DB_SECRET_VERSIONS).toBe("ABSENT_IN_REAL_CLOUD");
   });
@@ -297,7 +301,6 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       "database_bootstrap_and_grants",
       "future_invocation_authority",
       "image_publication",
-      "later_deny_exception",
       "migrations_and_role_grants",
       "monitoring_and_alert_deployment",
       "preflight_invocation_binding",
@@ -305,11 +308,15 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     ]);
   });
 
-  it("contains no invocation, scheduler, secret payload, remote-state, or executable authority", () => {
+  it("contains no automatic trigger, invocation binding, secret payload, remote-state, or executable authority", () => {
     const source = readTerraform();
     const declarations = terraformResourceDeclarations(source);
     expect(declarations.some((address) =>
+      address.startsWith("google_cloudbuild_trigger") ||
       address.startsWith("google_cloud_scheduler_") ||
+      address.startsWith("google_eventarc_") ||
+      address.startsWith("google_pubsub_") ||
+      address.startsWith("google_workflows_") ||
       address.includes("_job_iam_") ||
       address === "google_secret_manager_secret_version" ||
       address === "google_service_account_key"
@@ -320,16 +327,22 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     expect(source).not.toMatch(
       /(?:TOSS_SECRET_KEY|EXIMBAY|PAYPAL|REFUND_SANDBOX_TARGET|EXECUTABLE_APPROVAL|secret_data|DATABASE_URL=)/u,
     );
-    expect(contract.forbiddenResources).toContain(
+    for (const trigger of [
+      "google_cloudbuild_trigger",
       "google_cloud_scheduler_job",
-    );
+      "google_eventarc_trigger",
+      "google_pubsub_subscription",
+      "google_workflows_workflow",
+    ]) {
+      expect(contract.forbiddenResources).toContain(trigger);
+    }
     expect(contract.status).toMatchObject({
       RUNTIME_DEPLOYABLE: "FALSE",
       CANARY_EXECUTABLE: "FALSE",
       PROVIDER_EXECUTION: "BLOCKED",
       SCHEDULED_SANDBOX: "BLOCKED",
       LIVE: "UNREACHABLE",
-      JOB_EXECUTION_DENY_EFFECTIVE: "NOT_CLOUD_PROVEN",
+      IAM_DENY_CURRENT_PROJECT: "NOT_APPLICABLE_NO_ORGANIZATION",
       RUNTIME_APPLY_AUTHORIZED: "FALSE",
       RUNTIME_ROOT_APPLY_POLICY: "UNCONDITIONALLY_BLOCKED_IN_R2B1",
     });
@@ -338,6 +351,45 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       cloudRunScope: "R2B1_TERRAFORM_ONLY",
       domainCoreCloudRunDependency: false,
       r2aImageCloudRunSpecificLogic: false,
+    });
+  });
+
+  it("states the accepted trusted-operator boundary without an IAM deny handoff", () => {
+    const source = readTerraform();
+    const variables = readFileSync(join(RUNTIME, "variables.tf"), "utf8");
+    const example = readFileSync(
+      join(RUNTIME, "terraform.tfvars.example"),
+      "utf8",
+    );
+    expect(contract.threatModel).toEqual({
+      trustedOperatorModel: "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN",
+      maliciousOwnerResistance: "NOT_REQUIRED",
+      trustedOwnerManualInvocation: "TECHNICALLY_POSSIBLE_ACCEPTED",
+      automaticExecution: "NOT_ADMITTED",
+      persistentAutomaticTrigger: "NONE",
+    });
+    expect(`${source}\n${variables}\n${example}`).not.toContain(
+      "execution_deny_handoff",
+    );
+    expect(contract.handoffs).not.toHaveProperty("executionDeny");
+  });
+
+  it("fails future database bootstrap closed and admits mutation only attended", () => {
+    expect(contract.bootstrapFutureSafety).toEqual({
+      futureCloudRunJobImplementationStatus: "ABSENT",
+      existingAttendedScript: {
+        path: "scripts/eximbay-p3e-database-bootstrap.ts",
+        status: "PRESENT_EXPLICIT_INPUT_ADMISSION_REQUIRED",
+        automaticInvocation: "ABSENT",
+      },
+      defaultMode: "NON_MUTATING_FAIL_CLOSED",
+      mutationModeDefault: false,
+      mutationAdmission: "EXPLICIT_ATTENDED_HUMAN_REQUIRED",
+      automaticTrigger: "FORBIDDEN",
+      maxRetries: 0,
+      providerCredentials: "ABSENT",
+      providerContact: "IMPOSSIBLE",
+      syntheticSaleOrRefund: "OUT_OF_SCOPE",
     });
   });
 
@@ -357,6 +409,48 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       INFRA,
       "contracts/runtime-image-connection-v1.json",
     )))).toBe("4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473");
+    expect(contract.historicalAuthorityDisposition).toEqual({
+      runtimeImageConnectionContract:
+        "contracts/runtime-image-connection-v1.json",
+      statusScope: "FROZEN_HISTORICAL_R2A_SNAPSHOT_NOT_CURRENT_RUNTIME_STATUS",
+      supersededStatusKey: "JOB_EXECUTION_DENY",
+      currentStatusKey: "IAM_DENY_CURRENT_PROJECT",
+      currentStatusValue: "NOT_APPLICABLE_NO_ORGANIZATION",
+    });
+    const imageDocumentation = readFileSync(
+      RUNTIME_IMAGE_POLICY_DOCUMENT,
+      "utf8",
+    );
+    expect(imageDocumentation).toContain(
+      "frozen historical R2A snapshot, not current runtime status",
+    );
+    expect(imageDocumentation).toContain(
+      "IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION",
+    );
+  });
+
+  it("preserves network, database, provider-free, and Eximbay financial boundaries byte-for-byte", () => {
+    const frozen = {
+      "infra/refund-sandbox/p3e-b2/foundation/network.tf":
+        "affe2fdca13b42ee287e5439c12c220c61f0c37b0e5d0e1f5f777d7b4cab045e",
+      "infra/refund-sandbox/p3e-b2/foundation/cloud-sql.tf":
+        "0c36b8f56ed3a62ecc122ce1b6cd98bc6749f78af3783ccc6988813d04a04402",
+      "src/lib/payment/refund/refund-worker-container-supervisor.ts":
+        "4e3334cb48744d2e5b7d89d07af00d3c52fe4d7f67df385393210d5b113194d9",
+      "src/lib/payment/refund/refund-sandbox-provider-free-preflight-environment.ts":
+        "838e5d1405ba1330d334b4f9006ab753f6dba9c59533e3c1bcc04b9f960ebe27",
+      "infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf":
+        "6b4865199543b45a996aefbfe0b5c896bbda45542c0941080f67c1d8a82ca3f7",
+      "src/lib/payment/refund/eximbay-refund-canary-target-binding.ts":
+        "36a215ebc6ccfa504e4f9d5ace54de32dd480de73947317e002ca9be0aecf4da",
+      "src/lib/payment/refund/eximbay-refund-sandbox-canary-approval-contract.ts":
+        "d73a7cade4a5417b8df589567909d8a23c49beda1445ba08b53678bef807c72c",
+      "src/lib/payment/refund/consume-eximbay-refund-canary-approval.ts":
+        "297b5cc35a410e6087b649cd14fc178c514748174a174d2f48d1debf92a9d0e5",
+    } as const;
+    for (const [path, expected] of Object.entries(frozen)) {
+      expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expected);
+    }
   });
 
   it("publishes every exact non-authorizing status in the policy document", () => {

@@ -14,7 +14,7 @@
     "PROVIDER_EXECUTION": "BLOCKED",
     "SCHEDULED_SANDBOX": "BLOCKED",
     "LIVE": "UNREACHABLE",
-    "JOB_EXECUTION_DENY_EFFECTIVE": "NOT_CLOUD_PROVEN",
+    "IAM_DENY_CURRENT_PROJECT": "NOT_APPLICABLE_NO_ORGANIZATION",
     "RUNTIME_APPLY_AUTHORIZED": "FALSE",
     "CLOUD_RUN_API_ACTIVATION": "DEFERRED_NOT_VERIFIED",
     "RUNTIME_ROOT_APPLY_POLICY": "UNCONDITIONALLY_BLOCKED_IN_R2B1"
@@ -41,7 +41,21 @@
     "coveredResourceInstances": 8,
     "mechanism": "RESOURCE_LIFECYCLE_PRECONDITION_ON_EVERY_RESOURCE_DECLARATION",
     "error": "R2B1_RUNTIME_ROOT_UNCONDITIONALLY_BLOCKED",
-    "futureRelease": "SEPARATE_INDEPENDENTLY_REVIEWED_PACKAGE_AFTER_CLOUD_AUTHENTICATED_DENY_EVIDENCE"
+    "futureRelease": "SEPARATE_INDEPENDENTLY_REVIEWED_RUNTIME_AUTHORITY_AFTER_FOUNDATION_IMAGE_AND_SECRET_READINESS"
+  },
+  "threatModel": {
+    "trustedOperatorModel": "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN",
+    "maliciousOwnerResistance": "NOT_REQUIRED",
+    "trustedOwnerManualInvocation": "TECHNICALLY_POSSIBLE_ACCEPTED",
+    "automaticExecution": "NOT_ADMITTED",
+    "persistentAutomaticTrigger": "NONE"
+  },
+  "historicalAuthorityDisposition": {
+    "runtimeImageConnectionContract": "contracts/runtime-image-connection-v1.json",
+    "statusScope": "FROZEN_HISTORICAL_R2A_SNAPSHOT_NOT_CURRENT_RUNTIME_STATUS",
+    "supersededStatusKey": "JOB_EXECUTION_DENY",
+    "currentStatusKey": "IAM_DENY_CURRENT_PROJECT",
+    "currentStatusValue": "NOT_APPLICABLE_NO_ORGANIZATION"
   },
   "resourceGraph": {
     "resourceCount": 8,
@@ -176,16 +190,6 @@
       "requiredStatus": "APPLIED_AND_OPERATOR_REVIEWED",
       "evidence": "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED"
     },
-    "executionDeny": {
-      "contractVersion": "mira-refund-p3e-b2-job-execution-deny/v1",
-      "schemaFieldNamesSha256": "8667b1a276e7b95827355642263dbe3ded7d2cf4a717cc43663a583a9e7b8d45",
-      "deniedPermissions": [
-        "run.googleapis.com/jobs.run",
-        "run.googleapis.com/jobs.runWithOverrides"
-      ],
-      "exceptions": "FORBIDDEN",
-      "requiredStatus": "APPLIED_AND_OPERATOR_REVIEWED"
-    },
     "releaseImage": {
       "contractVersion": "mira-refund-worker-release-image-handoff/v1",
       "schemaFieldNamesSha256": "f05d9f9e90e1e6210918f16f17604f21eef491984cb871a8762d64b6e901bb32",
@@ -208,6 +212,9 @@
     "taskCount": 1,
     "parallelism": 1,
     "maxRetries": 0,
+    "trustedOwnerManualInvocation": "TECHNICALLY_POSSIBLE_PROVIDER_FREE_NON_FINANCIAL",
+    "automaticExecution": "NOT_ADMITTED",
+    "persistentAutomaticTrigger": "NONE",
     "executionEnvironment": "SECOND_GENERATION",
     "resources": {
       "cpu": "1",
@@ -286,7 +293,7 @@
   },
   "runtimeDeployer": {
     "status": "DEFERRED",
-    "reason": "EXACT_PROVIDER_METHOD_AND_PERMISSION_SET_NOT_INDEPENDENTLY_DERIVED_ACROSS_JOB_IAM_SERVICE_ACCOUNT_SECRET_AND_DENY_SEPARATION",
+    "reason": "EXACT_PROVIDER_METHOD_AND_PERMISSION_SET_NOT_INDEPENDENTLY_DERIVED_ACROSS_JOB_IAM_SERVICE_ACCOUNT_AND_SECRET_SEPARATION",
     "providerLifecycleDerivation": {
       "status": "INCOMPLETE_NOT_ROLE_AUTHORITY",
       "resourceFamilies": [
@@ -342,7 +349,6 @@
     "database_bootstrap_and_grants",
     "future_invocation_authority",
     "image_publication",
-    "later_deny_exception",
     "migrations_and_role_grants",
     "monitoring_and_alert_deployment",
     "preflight_invocation_binding",
@@ -363,20 +369,41 @@
     "jobExecutionOccurred": false
   },
   "forbiddenResources": [
+    "google_cloudbuild_trigger",
+    "google_eventarc_trigger",
     "google_cloud_run_v2_job_iam_binding",
     "google_cloud_run_v2_job_iam_member",
     "google_cloud_scheduler_job",
+    "google_pubsub_subscription",
     "google_secret_manager_secret_version",
     "google_service_account_key",
+    "google_workflows_workflow",
     "terraform_remote_state"
   ],
+  "bootstrapFutureSafety": {
+    "futureCloudRunJobImplementationStatus": "ABSENT",
+    "existingAttendedScript": {
+      "path": "scripts/eximbay-p3e-database-bootstrap.ts",
+      "status": "PRESENT_EXPLICIT_INPUT_ADMISSION_REQUIRED",
+      "automaticInvocation": "ABSENT"
+    },
+    "defaultMode": "NON_MUTATING_FAIL_CLOSED",
+    "mutationModeDefault": false,
+    "mutationAdmission": "EXPLICIT_ATTENDED_HUMAN_REQUIRED",
+    "automaticTrigger": "FORBIDDEN",
+    "maxRetries": 0,
+    "providerCredentials": "ABSENT",
+    "providerContact": "IMPOSSIBLE",
+    "syntheticSaleOrRefund": "OUT_OF_SCOPE"
+  },
   "evidence": {
     "repositoryDefinitionOnly": true,
     "providerMockOnly": true,
     "trustedCloudEvidence": false,
     "realSecretVersionCreated": false,
     "releaseImagePublished": false,
-    "jobExecuted": false
+    "jobExecuted": false,
+    "automaticTriggerDefined": false
   },
   "nextPackageBoundary": "IMAGE_PUBLICATION_AND_SECRET_PAYLOAD_CREATION_AND_DATABASE_BOOTSTRAP_AND_SEPARATELY_AUTHORIZED_PREFLIGHT_INVOCATION_REMAIN_DISTINCT_LATER_PACKAGES"
 }

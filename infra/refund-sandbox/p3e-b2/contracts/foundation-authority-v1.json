@@ -289,7 +289,6 @@
     "runtime_project_role_bindings"
   ],
   "statePrefixes": [
-    "p3e-b2/authority-guardrails",
     "p3e-b2/database-bootstrap",
     "p3e-b2/foundation",
     "p3e-b2/foundation-deployer-authority",
@@ -298,10 +297,13 @@
     "p3e-b2/service-activation",
     "p3e-b2/state-backend-authority"
   ],
+  "retiredStatePrefixes": [
+    "p3e-b2/authority-guardrails"
+  ],
   "statuses": {
     "P3E_B1_MONOLITH": "RETIRED_UNAPPLIED",
     "STATE_BACKEND_AUTHORITY": "DEFINED_NOT_PROVISIONED",
-    "JOB_EXECUTION_DENY": "DEFINED_NOT_APPLIED",
+    "IAM_DENY_CURRENT_PROJECT": "NOT_APPLICABLE_NO_ORGANIZATION",
     "SERVICE_ACTIVATION_AUTHORITY": "DEFINED_NOT_PROVISIONED",
     "SERVICE_ACTIVATION_BOOTSTRAP_PREREQUISITES": "EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED",
     "SERVICE_ACTIVATION_BOOTSTRAP_API_SET": "DEFINED_NOT_VERIFIED",

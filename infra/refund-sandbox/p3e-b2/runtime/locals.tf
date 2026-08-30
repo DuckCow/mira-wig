@@ -3,9 +3,11 @@ locals {
   project_id         = var.project_id
   region             = "asia-northeast3"
 
-  runtime_apply_authorized  = false
-  runtime_root_apply_policy = "UNCONDITIONALLY_BLOCKED_IN_R2B1"
-  network_tags              = ["refund-provider-free"]
+  runtime_apply_authorized   = false
+  runtime_root_apply_policy  = "UNCONDITIONALLY_BLOCKED_IN_R2B1"
+  network_tags               = ["refund-provider-free"]
+  trusted_operator_model     = "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN"
+  malicious_owner_resistance = "NOT_REQUIRED"
 
   preflight_service_account_id = "${var.resource_prefix}-preflight"
   canary_service_account_id    = "${var.resource_prefix}-canary"
@@ -128,45 +130,6 @@ locals {
     var.foundation_handoff.evidence_type == "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED" &&
     var.foundation_handoff.provider_source == "hashicorp/google" &&
     var.foundation_handoff.provider_version == "7.40.0",
-    false,
-  )
-
-  execution_deny_handoff_valid = try(
-    toset(keys(var.execution_deny_handoff)) == toset([
-      "attachment_parent",
-      "contract_version",
-      "denied_permissions",
-      "denied_principals",
-      "deny_apply_status",
-      "evidence_type",
-      "exception_permissions",
-      "exception_principals",
-      "operator_review_status",
-      "policy_id",
-      "project_id",
-      "project_number",
-      "source_state_prefix",
-    ]) &&
-    var.execution_deny_handoff.contract_version ==
-    "mira-refund-p3e-b2-job-execution-deny/v1" &&
-    var.execution_deny_handoff.project_id == var.project_id &&
-    var.execution_deny_handoff.project_number == var.foundation_handoff.project_number &&
-    var.execution_deny_handoff.attachment_parent ==
-    "cloudresourcemanager.googleapis.com/projects/${var.foundation_handoff.project_number}" &&
-    var.execution_deny_handoff.policy_id == "refund-job-execution-deny" &&
-    var.execution_deny_handoff.source_state_prefix == "p3e-b2/authority-guardrails" &&
-    var.execution_deny_handoff.denied_principals == ["principalSet://goog/public:all"] &&
-    toset(var.execution_deny_handoff.denied_permissions) == toset([
-      "run.googleapis.com/jobs.run",
-      "run.googleapis.com/jobs.runWithOverrides",
-    ]) &&
-    length(var.execution_deny_handoff.denied_permissions) == 2 &&
-    length(var.execution_deny_handoff.exception_principals) == 0 &&
-    length(var.execution_deny_handoff.exception_permissions) == 0 &&
-    var.execution_deny_handoff.deny_apply_status == "APPLIED" &&
-    var.execution_deny_handoff.operator_review_status == "OPERATOR_REVIEWED" &&
-    var.execution_deny_handoff.evidence_type ==
-    "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED",
     false,
   )
 

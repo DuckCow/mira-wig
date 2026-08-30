@@ -110,7 +110,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(94);
+    expect(completeInfra).toHaveLength(87);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",

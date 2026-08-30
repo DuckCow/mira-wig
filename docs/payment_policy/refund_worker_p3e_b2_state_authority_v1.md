@@ -4,8 +4,9 @@ P3E-B2-R1A is repository preparation only. The provisioning feasibility review f
 committed P3E-B1 monolith cannot safely become an empty-project apply sequence: state authority,
 resource-graph splitting, image preparation, private database connectivity, database bootstrap,
 secret versions, runtime definitions, and invocation authority have distinct owners and unresolved
-dependencies. R1A defines only the first state and execution-deny authority contracts. It supplies
-no cloud evidence and authorizes no mutation.
+dependencies. R1A originally defined state authority and an attempted execution-deny authority.
+The current no-organization project cannot admit that deny architecture; the executable deny root
+is now retired. This document supplies no cloud evidence and authorizes no mutation.
 
 ## Package boundary
 
@@ -13,7 +14,7 @@ R1A owns:
 
 1. one local-state, one-time bucket creation root;
 2. one remote authority root that adopts and manages the same bucket;
-3. one separate project IAM deny-policy root;
+3. one non-executable retirement marker for the infeasible IAM deny root;
 4. state handoff/recovery and authority-separation contracts;
 5. provider-mocked and repository policy tests.
 
@@ -23,8 +24,9 @@ private-IP proxy/socket design, database bootstrap, database credential secret v
 Job definitions, and preflight invocation. R1A does not move or redesign any P3E-B1 resource and
 does not conceal those blockers behind an early root migration.
 
-R1B subsequently completed that repository-only split. The 33-path R1A-owned subinventory remains
-unchanged and exact; R1B adds a separately audited inventory rather than rewriting R1A history.
+R1B subsequently completed that repository-only split. The current 26-path R1A-owned
+subinventory is exact, including the deny retirement marker; repository history preserves the
+former executable root without leaving it runnable.
 
 ## State creation, authority, and handoff
 
@@ -89,7 +91,6 @@ use requires incident authorization and evidence; it is not an ordinary runner.
 Exact future backend prefixes are:
 
 - `p3e-b2/state-backend-authority`
-- `p3e-b2/authority-guardrails`
 - `p3e-b2/service-activation`
 - `p3e-b2/foundation`
 - `p3e-b2/foundation-deployer-authority`
@@ -102,46 +103,23 @@ authority shares a state file and no `terraform_remote_state` exposes complete s
 root-to-root exchange uses explicit reviewed nonsecret manifests. Passwords, database URLs, secret
 payloads, credentials, provider targets, and approvals are never outputs.
 
-## Cloud Run Job execution deny
+The former `p3e-b2/authority-guardrails` prefix is retired and must never be reused.
 
-The separate `authority-guardrails` root requires both a bounded alphanumeric project ID and a
-separately evidenced canonical decimal project number. The Google provider may use the project ID;
-the IAM deny parent is frozen to
-`cloudresourcemanager.googleapis.com/projects/<project-number>` and uses only the supplied project
-number. The repository performs no project-number lookup, and neither input proves that a project
-exists. The root defines exactly one project-attached IAM deny policy. Its denied principal is
-`principalSet://goog/public:all`; its exact permissions are `run.googleapis.com/jobs.run` and
-`run.googleapis.com/jobs.runWithOverrides`. It adds no unrelated Cloud Run permission. There is no
-condition, permission wildcard, exception principal, exception permission, allow binding, Job,
-identity, custom role, secret, SQL, scheduler, or runtime resource. Terraform deletion policy is
-`PREVENT`.
+## Retired Cloud Run Job execution deny
 
-This is a definition, not a deployed guardrail. A dedicated project and proof that no inherited
-Owner, Editor, or basic role defeats separation remain external prerequisites. No project was
-inspected and no deny policy was applied.
+IAM Deny is not applicable to the current no-organization project. The project Owner does not hold
+`iam.denypolicies.create`; the role containing it cannot be granted at this project hierarchy, and
+no deny policy materialized. The former Terraform root has been removed and replaced by
+`infra/refund-sandbox/p3e-b2/authority-guardrails/README.md`.
 
-## Deny administrator separation and propagation
+The failed saved plan SHA-256
+`d26b446e26b41c1b88f52e530dadc2ef4ec82420b7acce87faf5e8ddd995e86b` is invalid and must never be
+retried. Its malformed unencoded parent remains historical evidence, not a repair candidate.
 
-Future mutation requires Deny Admin or an exact derived equivalent. The deny administrator is a
-break-glass authority distinct from state administrator, infrastructure deployer, runtime-definition
-deployer, credential owner, database-bootstrap executor, preflight executor, and observer. The
-authority root creates no binding. Foundation and preflight identities must not update or delete
-the deny. The policy is not claimed to protect against a Deny Admin authorized to remove it.
-
-Deny changes are eventually consistent. A future separately approved protocol must:
-
-1. apply the deny/exception change under separate authentication and approval;
-2. capture policy name, UID, etag, update time, permissions, and principals;
-3. wait for observed propagation without a fixed sleep as proof;
-4. negatively probe a non-excepted identity;
-5. for a later approved exception, negatively probe the canary and unrelated identities and
-   positively probe only the exact preflight identity;
-6. execute no Job until those probes match;
-7. remove the exception after execution;
-8. repeat negative probes after removal;
-9. freeze the evidence.
-
-R1A creates no exception and performs no probe.
+The accepted threat model trusts the project Owner or an explicitly authorized human. A trusted
+Owner may technically invoke a future Job; resistance to a malicious Owner is not required.
+Execution safety instead requires no persistent automatic trigger, zero retries, no provider
+credential or target, and no provider contact.
 
 ## R1B deployer authority amendment
 
@@ -155,10 +133,10 @@ binding and supplies no cloud evidence.
 ## Rollback, cost, and evidence
 
 No cost begins from repository definitions. Future bucket mutation begins storage/operation cost;
-future deny mutation may affect authority but does not execute a Job. Rollback cannot use destroy,
+the retired deny root creates no cost. Rollback cannot use destroy,
 backend/state bypass, public IAM, broad basic roles, or deletion-protection removal. Bucket recovery
-and deny-policy break glass require separate authorization, two-person evidence, and post-action
-verification. Repository files prove no cloud fact.
+and any future stronger organization-backed guardrail require separate authorization and evidence.
+Repository files prove no cloud fact.
 
 The distributed admission, provider-free preflight, Cloud SQL guard, worker host/process, P3E-A,
 P3D, schema, and migrations remain unchanged. The definitions-only B1 monolith is retired without
@@ -168,7 +146,7 @@ Exact status:
 
 ```text
 STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED
-JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 SERVICE_ACTIVATION_AUTHORITY: DEFINED_NOT_PROVISIONED
 FOUNDATION_ROOT: DEFINED_NOT_PROVISIONED
 FOUNDATION_DEPLOYER_ROLE: DEFINED_NOT_CREATED

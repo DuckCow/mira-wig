@@ -70,8 +70,8 @@ R1A defines three deliberately separate Terraform authority boundaries:
   bucket and its bucket-scoped IAM after separate authorization.
 - `state-backend-authority` is the permanent remote-state authority for that same bucket and IAM.
   It uses the shared module and declarative import blocks.
-- `authority-guardrails` is an independent remote-state root for one project-attached IAM deny
-  policy. It cannot manage the bucket, foundation, runtime, identities, or allow grants.
+- `authority-guardrails` is a non-executable retirement marker. The former IAM deny root is not
+  applicable to the current no-organization project and must not be restored.
 
 R1B adds three deliberately separate executable definition roots:
 
@@ -89,7 +89,7 @@ accounts, two single-instance-conditioned Cloud SQL Client members, two exact se
 database accessors, and two deletion-protected dormant Cloud Run v2 Jobs. The root consumes only
 bounded operator-attested handoffs and exact future references; it performs no lookup, creates no
 secret version, publishes no image, grants no invocation authority, and cannot prove that the
-foundation or execution deny exists in cloud.
+foundation exists in cloud.
 
 ## State bucket contract
 
@@ -148,7 +148,7 @@ repository:
 | Authority | Exact prefix |
 |---|---|
 | State backend authority | `p3e-b2/state-backend-authority` |
-| IAM authority guardrails | `p3e-b2/authority-guardrails` |
+| Retired IAM deny state; never reuse | `p3e-b2/authority-guardrails` |
 | Service activation | `p3e-b2/service-activation` |
 | Foundation resources | `p3e-b2/foundation` |
 | Foundation deployer role definition | `p3e-b2/foundation-deployer-authority` |
@@ -162,38 +162,22 @@ use reviewed nonsecret manifests containing only identifiers such as approved pr
 resource names, immutable image digest, or numeric resource generation. Passwords, connection URLs,
 secret payloads, credentials, targets, and approvals are forbidden in outputs.
 
-## Execution deny authority
+## Retired execution deny authority
 
-`authority-guardrails` requires both the dedicated project's bounded alphanumeric project ID and a
-separately evidenced canonical decimal project number. The Google provider uses the project ID;
-the IAM v2 deny attachment uses only
-`cloudresourcemanager.googleapis.com/projects/<project-number>`. The repository performs no
-project-number lookup, and neither supplied value proves that a project exists. The policy denies
-`principalSet://goog/public:all` exactly:
+The current dedicated project is not attached to an organization. Organization-level IAM Deny
+creation is therefore unavailable and is not required by the accepted trusted-operator model. The
+former executable Terraform root has been removed. Its state prefix
+`p3e-b2/authority-guardrails` must never be reused.
 
-- `run.googleapis.com/jobs.run`
-- `run.googleapis.com/jobs.runWithOverrides`
+The failed plan SHA-256
+`d26b446e26b41c1b88f52e530dadc2ef4ec82420b7acce87faf5e8ddd995e86b` must never be retried. The
+malformed unencoded parent is historical evidence and was not “fixed” into another unusable
+current-project architecture.
 
-It has no wildcard, exception principal, exception permission, condition, allow grant, Job, service
-account, custom role, secret, database, scheduler, or foundation resource. Terraform deletion
-policy is `PREVENT`. Repository presence is not deployment evidence; no project was inspected and
-no deny policy was applied.
-
-Future deny mutation requires Deny Admin or a separately derived exact equivalent. That break-glass
-authority must be contractually distinct from state administration, foundation deployment,
-runtime-definition deployment, credential ownership, database bootstrap, preflight execution, and
-observation. This root creates no binding. The foundation deployer and preflight executor must not
-receive deny-policy update/deletion authority. Absence of inherited Owner, Editor, or other basic
-roles remains an external evidence gate. The deny cannot protect against an authorized Deny Admin
-who changes or removes it.
-
-Deny propagation is eventually consistent. A future approved change must capture policy name, UID,
-etag, update time, permissions, and principals; wait for observed propagation without treating a
-fixed sleep as proof; and perform a negative probe with a non-excepted identity. A later separately
-approved exception requires negative probes for canary and unrelated identities plus a positive
-probe only for the exact preflight identity. No Job may execute until probes match. Afterward the
-exception must be removed, negative probes repeated, and evidence frozen. R1A creates no exception
-and runs no probe.
+A project Owner or explicitly authorized human is trusted. Such an Owner can technically invoke a
+future Job; malicious-Owner resistance is outside the required assurance boundary. Current safety
+requires no automatic trigger, zero retries, no provider credential or target, and no provider
+contact.
 
 ## R1B foundation authority
 
@@ -298,15 +282,15 @@ future exact numeric database-secret version and its own secret-level
 
 Every production resource declaration has an unconditional lifecycle precondition backed by a
 constant false local. No caller input, handoff, environment, workspace, command mode, or test
-override can admit plan/apply while execution-deny effectiveness is not cloud-proven.
+override can admit plan/apply. This constant-false release gate is independent of IAM Deny.
 
 Cloud SQL proxy connection authority is `roles/cloudsql.client` for each dedicated runtime
 identity, with an IAM condition for the exact admitted instance resource and SQL Admin API
 service. The application does not call the Logging API, so no logging role is retained.
 
 The preflight Job runs only `sandbox-preflight`. The dormant canary definition runs
-`worker-once`, but has no provider credential, target, approval, invoker, scheduler, or deny
-exception. Both definitions use Gen2 Direct VPC egress, the exact foundation network and subnet,
+`worker-once`, but has no provider credential, target, approval, invoker, scheduler, or automatic
+trigger. Both definitions use Gen2 Direct VPC egress, the exact foundation network and subnet,
 `ALL_TRAFFIC`, one task, parallelism one, zero retries, one CPU, 512 MiB, and 300 seconds.
 Each interface has exactly the committed foundation firewall target tag
 `refund-provider-free`; there is no additional tag or connector. The foundation admits proxy
@@ -326,14 +310,14 @@ CANARY_EXECUTABLE: FALSE
 PROVIDER_EXECUTION: BLOCKED
 SCHEDULED_SANDBOX: BLOCKED
 LIVE: UNREACHABLE
-JOB_EXECUTION_DENY_EFFECTIVE: NOT_CLOUD_PROVEN
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 RUNTIME_APPLY_AUTHORIZED: FALSE
 RUNTIME_ROOT_APPLY_POLICY: UNCONDITIONALLY_BLOCKED_IN_R2B1
 ```
 
 Runtime deployer authority remains deferred because the exact create/read/update provider method
 and permission set has not been independently derived across Cloud Run Job, service-account,
-project IAM, secret IAM, Artifact Registry, and deny-authority separation. R2B1 defines no
+project IAM, secret IAM, and Artifact Registry. R2B1 defines no
 deployer identity, custom role, or binding.
 
 Exact status:
@@ -341,7 +325,7 @@ Exact status:
 ```text
 P3E_B1_MONOLITH: RETIRED_UNAPPLIED
 STATE_BACKEND_AUTHORITY: DEFINED_NOT_PROVISIONED
-JOB_EXECUTION_DENY: DEFINED_NOT_APPLIED
+IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 SERVICE_ACTIVATION_AUTHORITY: DEFINED_NOT_PROVISIONED
 SERVICE_ACTIVATION_BOOTSTRAP_PREREQUISITES: EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED
 SERVICE_ACTIVATION_BOOTSTRAP_API_SET: DEFINED_NOT_VERIFIED
