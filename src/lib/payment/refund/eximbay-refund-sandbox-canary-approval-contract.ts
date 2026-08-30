@@ -6,6 +6,12 @@ export const EXIMBAY_REFUND_SANDBOX_CANARY_EVIDENCE_VERSION =
   "mira-refund-eximbay-sandbox-canary-evidence/v1";
 
 const DIGEST = /^[0-9a-f]{64}$/u;
+const POSTGRES_ROLE = /^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/u;
+const DATABASE_SESSION_ISSUER_PREFIX = "postgres-session/v1:";
+const NON_ISSUER_RUNTIME_ROLES = new Set([
+  "mira_refund_preflight",
+  "mira_refund_canary",
+]);
 
 export type EximbayRefundSandboxCanaryEvidence = Readonly<{
   formatVersion: typeof EXIMBAY_REFUND_SANDBOX_CANARY_EVIDENCE_VERSION;
@@ -40,6 +46,24 @@ export function evaluateEximbayRefundSandboxCanaryEvidence(
       .digest("hex"),
     executionAuthorization: "NOT_ISSUED",
   });
+}
+
+export function eximbayRefundCanaryDatabaseSessionIssuer(
+  sessionUser: string,
+): string | null {
+  return POSTGRES_ROLE.test(sessionUser) && !NON_ISSUER_RUNTIME_ROLES.has(sessionUser)
+    ? `${DATABASE_SESSION_ISSUER_PREFIX}${sessionUser}`
+    : null;
+}
+
+export function isEximbayRefundCanaryDatabaseSessionIssuer(
+  value: unknown,
+): value is string {
+  if (typeof value !== "string" || !value.startsWith(DATABASE_SESSION_ISSUER_PREFIX)) {
+    return false;
+  }
+  const role = value.slice(DATABASE_SESSION_ISSUER_PREFIX.length);
+  return POSTGRES_ROLE.test(role) && !NON_ISSUER_RUNTIME_ROLES.has(role);
 }
 
 function isExactEvidence(value: unknown): value is EximbayRefundSandboxCanaryEvidence {

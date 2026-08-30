@@ -41,11 +41,12 @@ export async function lockAndLoadEximbayLifecycleState(
   const core = await lockCoreRows(tx, ownership, commandId);
   if (!core) return null;
   const bindingId = await discoverBindingId(tx, ownership.refundAttemptId);
-  if (!(await lockPayment(tx, core.paymentId))) return null;
-  if (bindingId && !(await lockBinding(tx, bindingId))) return null;
+  const restrictedCanary = await isRestrictedCanarySession(tx);
+  if (!(await lockPayment(tx, core.paymentId, restrictedCanary))) return null;
+  if (bindingId && !(await lockBinding(tx, bindingId, restrictedCanary))) return null;
   await lockDispatches(tx, commandId);
-  await lockEvidence(tx, commandId);
-  await lockEvents(tx, commandId);
+  await lockEvidence(tx, commandId, restrictedCanary);
+  await lockEvents(tx, commandId, restrictedCanary);
   return loadPostLockState(tx, ownership, commandId, core.paymentId, bindingId);
 }
 
@@ -125,19 +126,47 @@ async function discoverBindingId(
   return binding?.id ?? null;
 }
 
-async function lockPayment(tx: EximbayLifecycleTx, paymentId: string): Promise<boolean> {
-  const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} FOR UPDATE
+async function lockPayment(
+  tx: EximbayLifecycleTx,
+  paymentId: string,
+  restrictedCanary: boolean,
+): Promise<boolean> {
+  if (!restrictedCanary) {
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} FOR UPDATE
+    `);
+    return rows.length === 1;
+  }
+  const rows = await tx.$queryRaw<{ locked: boolean }[]>(Prisma.sql`
+    SELECT public.mira_refund_canary_lock_payment(${paymentId}) AS "locked"
   `);
-  return rows.length === 1;
+  return rows.length === 1 && rows[0]?.locked === true;
 }
 
-async function lockBinding(tx: EximbayLifecycleTx, bindingId: string): Promise<boolean> {
-  const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "RefundExecutionProviderOperationBinding"
-    WHERE "id" = ${bindingId} FOR UPDATE
+async function lockBinding(
+  tx: EximbayLifecycleTx,
+  bindingId: string,
+  restrictedCanary: boolean,
+): Promise<boolean> {
+  if (!restrictedCanary) {
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionProviderOperationBinding"
+      WHERE "id" = ${bindingId} FOR UPDATE
+    `);
+    return rows.length === 1;
+  }
+  const rows = await tx.$queryRaw<{ locked: boolean }[]>(Prisma.sql`
+    SELECT public.mira_refund_canary_lock_provider_operation_binding(${bindingId})
+      AS "locked"
   `);
-  return rows.length === 1;
+  return rows.length === 1 && rows[0]?.locked === true;
+}
+
+async function isRestrictedCanarySession(tx: EximbayLifecycleTx): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ restrictedCanary: boolean }[]>(Prisma.sql`
+    SELECT current_user = 'mira_refund_canary' AS "restrictedCanary"
+  `);
+  return rows.length === 1 && rows[0]?.restrictedCanary === true;
 }
 
 async function lockDispatches(tx: EximbayLifecycleTx, commandId: string): Promise<void> {
@@ -147,17 +176,37 @@ async function lockDispatches(tx: EximbayLifecycleTx, commandId: string): Promis
   `);
 }
 
-async function lockEvidence(tx: EximbayLifecycleTx, commandId: string): Promise<void> {
-  await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "RefundExecutionEvidence"
-    WHERE "commandId" = ${commandId} ORDER BY "id" FOR UPDATE
+async function lockEvidence(
+  tx: EximbayLifecycleTx,
+  commandId: string,
+  restrictedCanary: boolean,
+): Promise<void> {
+  if (!restrictedCanary) {
+    await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionEvidence"
+      WHERE "commandId" = ${commandId} ORDER BY "id" FOR UPDATE
+    `);
+    return;
+  }
+  await tx.$queryRaw<{ lockResult: string }[]>(Prisma.sql`
+    SELECT public.mira_refund_canary_lock_evidence(${commandId})::text AS "lockResult"
   `);
 }
 
-async function lockEvents(tx: EximbayLifecycleTx, commandId: string): Promise<void> {
-  await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT "id" FROM "RefundExecutionCommandEvent"
-    WHERE "commandId" = ${commandId} ORDER BY "occurredAt", "id" FOR UPDATE
+async function lockEvents(
+  tx: EximbayLifecycleTx,
+  commandId: string,
+  restrictedCanary: boolean,
+): Promise<void> {
+  if (!restrictedCanary) {
+    await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "RefundExecutionCommandEvent"
+      WHERE "commandId" = ${commandId} ORDER BY "occurredAt", "id" FOR UPDATE
+    `);
+    return;
+  }
+  await tx.$queryRaw<{ lockResult: string }[]>(Prisma.sql`
+    SELECT public.mira_refund_canary_lock_command_events(${commandId})::text AS "lockResult"
   `);
 }
 

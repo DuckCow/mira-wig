@@ -56,7 +56,7 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(terraform).not.toMatch(/google_secret_manager_secret(?:_version)?\s+"/u);
   });
 
-  it("preserves frozen role authority and adds only the exact approval-table delta", () => {
+  it("preserves the frozen historical bytes and installs a self-contained convergence owner", () => {
     expect(sha256(readFileSync(FROZEN_DATABASE_ROLES))).toBe(
       "a01d35767a4e9976cfaa3dd7be35b720987346dd034a814247725a5373dda742",
     );
@@ -64,15 +64,29 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(grants).toContain(
       "20260825130000_eximbay_refund_sandbox_canary_approval",
     );
+    expect(grants).toContain("CREATE ROLE mira_refund_canary");
+    expect(grants).toContain("NOBYPASSRLS");
     expect(grants).toMatch(
-      /GRANT SELECT ON TABLE "EximbayRefundSandboxCanaryApproval"\s+TO mira_refund_preflight, mira_refund_canary;/u,
+      /REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public/u,
+    );
+    expect(grants).toMatch(
+      /"EximbayRefundSandboxCanaryApproval"\s+TO mira_refund_canary;/u,
     );
     expect(grants).toMatch(
       /GRANT UPDATE \(\s*"consumedAt",\s*"consumedExecutionId",\s*"consumedExecutionBindingDigest"\s*\) ON TABLE "EximbayRefundSandboxCanaryApproval"\s+TO mira_refund_canary;/u,
     );
-    expect(grants).not.toMatch(/GRANT\s+(?:INSERT|DELETE|TRUNCATE|REFERENCES|TRIGGER)/u);
-    expect(grants).not.toMatch(/GRANT\s+(?:ALL|CREATE|USAGE|ALTER|OWNERSHIP)/u);
+    expect(grants).toMatch(/"PaymentOutbox"\s+TO mira_refund_canary;/u);
+    expect(grants).toMatch(/GRANT SELECT \("id", "communicationLocale"\)/u);
+    expect(grants).not.toMatch(
+      /GRANT INSERT ON TABLE(?:(?!TO mira_refund_canary;)[\s\S])*"RefundExecutionProviderOperationBinding"/u,
+    );
+    expect(grants).not.toMatch(
+      /GRANT INSERT ON TABLE(?:(?!TO mira_refund_canary;)[\s\S])*"RefundExecutionProviderContactEligibilityProof"/u,
+    );
+    expect(grants).not.toMatch(/GRANT\s+(?:DELETE|TRUNCATE|REFERENCES|TRIGGER)/u);
+    expect(grants).not.toMatch(/GRANT\s+(?:ALL|CREATE|ALTER|OWNERSHIP)/u);
     expect(grants).not.toMatch(/GRANT UPDATE ON TABLE/u);
+    expect(grants).not.toContain("Apply only after the frozen historical");
   });
 });
 

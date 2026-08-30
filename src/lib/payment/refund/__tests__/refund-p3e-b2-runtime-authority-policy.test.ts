@@ -341,7 +341,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       applicationTransport: "POSTGRESQL_UNIX_SOCKET",
     });
     expect(sha256(readFileSync(join(ROOT, "containers/refund-worker/Dockerfile"))))
-      .toBe("32f175db685d10bee47fc35c8320422c325f99c8fcd89bccfbb21d78f91caae8");
+      .toBe("12c872d38c4990c22023dd051c2811bde803e6cd0905cdbfab3baac6c8ca7f67");
     expect(sha256(readFileSync(join(ROOT, "package-lock.json"))))
       .toBe("c45bd86701bae2fb55b8954739d5f3d29c58b72281139155cc9f74f0c9ca828f");
     expect(sha256(readFileSync(join(

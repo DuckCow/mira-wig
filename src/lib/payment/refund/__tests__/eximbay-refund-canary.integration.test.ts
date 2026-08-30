@@ -323,7 +323,229 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
       await Promise.all([first.$disconnect(), second.$disconnect()]);
     }
   });
+
+  it("waits on Order and rejects committed money drift before secret access", async () => {
+    const prepared = await prepareTarget();
+    await createApproval(prepared);
+    await expectInterleavedRuntimeRejection(
+      prepared,
+      ['SELECT "id" FROM "Order" WHERE "id" = $1 FOR UPDATE', prepared.fixture.orderId],
+      (blocker) => blocker.query(`
+        UPDATE "Order"
+        SET "subtotalAmount" = "subtotalAmount" + 1,
+          "totalAmount" = "totalAmount" + 1
+        WHERE "id" = $1
+      `, [prepared.fixture.orderId]),
+    );
+  });
+
+  it("waits on Payment and rejects committed payment money drift before secret access", async () => {
+    const prepared = await prepareTarget();
+    await createApproval(prepared);
+    await expectInterleavedRuntimeRejection(
+      prepared,
+      ['SELECT "id" FROM "Payment" WHERE "id" = $1 FOR UPDATE', prepared.fixture.paymentId],
+      (blocker) => blocker.query(`
+        UPDATE "Payment" SET "amount" = "amount" + 1 WHERE "id" = $1
+      `, [prepared.fixture.paymentId]),
+    );
+  });
+
+  it("waits on the intended RefundAttempt and rejects committed attempt drift", async () => {
+    const prepared = await prepareTarget();
+    await createApproval(prepared);
+    await expectInterleavedRuntimeRejection(
+      prepared,
+      ['SELECT "id" FROM "RefundAttempt" WHERE "id" = $1 FOR UPDATE',
+        prepared.fixture.refundAttemptId],
+      (blocker) => blocker.query(`
+        UPDATE "RefundAttempt" SET "amount" = "amount" + 1 WHERE "id" = $1
+      `, [prepared.fixture.refundAttemptId]),
+    );
+  });
+
+  it("serializes on Order and rejects a newly committed SUCCEEDED sibling refund", async () => {
+    const prepared = await prepareTarget();
+    await createApproval(prepared);
+    const siblingId = `interleaved_succeeded_${randomUUID()}`;
+    await expectInterleavedRuntimeRejection(
+      prepared,
+      ['SELECT "id" FROM "Order" WHERE "id" = $1 FOR UPDATE', prepared.fixture.orderId],
+      (blocker) => blocker.query(`
+        INSERT INTO "RefundAttempt" (
+          "id", "orderId", "paymentId", "amount", "currency", "status", "reason",
+          "actorType", "actorUserId", "provider", "mode", "providerRefundId",
+          "idempotencyKey", "processedAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, 1, 'USD', 'SUCCEEDED', 'interleaved prior success',
+          'SYSTEM', NULL, 'EXIMBAY', 'SANDBOX', $4, $5, clock_timestamp(), clock_timestamp()
+        )
+      `, [siblingId, prepared.fixture.orderId, prepared.fixture.paymentId,
+        `provider-refund-${siblingId}`, `idempotency-${siblingId}`]),
+    );
+  });
+
+  it("waits on the provider binding and rejects committed binding mutation", async () => {
+    const prepared = await prepareTarget();
+    await createApproval(prepared);
+    await expectInterleavedRuntimeRejection(
+      prepared,
+      [`SELECT "id" FROM "RefundExecutionProviderOperationBinding"
+        WHERE "refundAttemptId" = $1 FOR UPDATE`, prepared.fixture.refundAttemptId],
+      (blocker) => blocker.query(`
+        UPDATE "RefundExecutionProviderOperationBinding"
+        SET "merchantAccountBindingId" = 'mutated-merchant'
+        WHERE "refundAttemptId" = $1
+      `, [prepared.fixture.refundAttemptId]),
+    );
+  });
+
+  it("uses post-wait wall time and rejects an approval that expires during lock wait", async () => {
+    const prepared = await prepareTarget();
+    const blocker = await connectedAdmin();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        'SELECT "id" FROM "Order" WHERE "id" = $1 FOR UPDATE',
+        [prepared.fixture.orderId],
+      );
+      const approval = await createApproval(prepared, 3_000);
+      const before = await approvalFor(prepared.fixture.commandId);
+      const running = startCanaryRuntime(prepared);
+      await waitForApprovalRowLock(prepared.fixture.commandId);
+      expect(running.isSettled()).toBe(false);
+      expect((await databaseWallClock()).getTime()).toBeLessThan(approval.expiresAt.getTime());
+      await waitForDatabaseWallClockAfter(approval.expiresAt);
+      await blocker.query("COMMIT");
+      const result = await running.promise;
+      expect(result).toMatchObject({
+        ok: false,
+        code: "CONFIG_MISMATCH",
+        preflightRetrieveCount: 0,
+        reconciliationLookupCount: 0,
+        cancellationCount: 0,
+      });
+      expect(running.readSecret).not.toHaveBeenCalled();
+      expect(running.fetch).not.toHaveBeenCalled();
+      expect(await approvalFor(prepared.fixture.commandId)).toEqual(before);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      await blocker.end();
+    }
+  });
 });
+
+type RowBarrier = readonly [sql: string, id: string];
+
+async function expectInterleavedRuntimeRejection(
+  prepared: PreparedTarget,
+  barrier: RowBarrier,
+  mutate: (blocker: Client) => Promise<unknown>,
+): Promise<void> {
+  const before = await approvalFor(prepared.fixture.commandId);
+  const blocker = await connectedAdmin();
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query(barrier[0], [barrier[1]]);
+    const running = startCanaryRuntime(prepared);
+    await waitForApprovalRowLock(prepared.fixture.commandId);
+    expect(running.isSettled()).toBe(false);
+    await mutate(blocker);
+    await blocker.query("COMMIT");
+    const result = await running.promise;
+    expect(result).toMatchObject({
+      ok: false,
+      code: "TARGET_MISMATCH",
+      preflightRetrieveCount: 0,
+      reconciliationLookupCount: 0,
+      cancellationCount: 0,
+    });
+    expect(running.readSecret).not.toHaveBeenCalled();
+    expect(running.fetch).not.toHaveBeenCalled();
+    expect(await approvalFor(prepared.fixture.commandId)).toEqual(before);
+  } finally {
+    await blocker.query("ROLLBACK").catch(() => undefined);
+    await blocker.end();
+  }
+}
+
+function startCanaryRuntime(prepared: PreparedTarget) {
+  const readSecret = vi.fn(() => Promise.reject(new Error("MUST_NOT_READ_SECRET")));
+  const fetch = vi.fn(() => Promise.reject(new Error("MUST_NOT_CONTACT_PROVIDER")));
+  let settled = false;
+  const promise = runEximbayRefundCanaryOnce(prepared.env, {
+    createDatabase: () => db,
+    disconnectDatabase: () => Promise.resolve(),
+    readSecret,
+    fetch,
+    sleep: () => Promise.resolve(),
+    now: () => 0,
+    timeoutMs: 1,
+    runAdmission: async (_env, operation) => Object.freeze({
+      outcome: "ACQUIRED" as const,
+      result: await operation(),
+    }),
+  }).finally(() => { settled = true; });
+  return Object.freeze({ promise, readSecret, fetch, isSettled: () => settled });
+}
+
+async function waitForApprovalRowLock(commandId: string): Promise<void> {
+  const probe = await connectedAdmin();
+  const deadline = Date.now() + 10_000;
+  try {
+    while (Date.now() < deadline) {
+      if (await approvalRowIsLocked(probe, commandId)) return;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  } finally {
+    await probe.end();
+  }
+  throw new Error("CONSUMER_DID_NOT_HOLD_APPROVAL_WHILE_WAITING");
+}
+
+async function approvalRowIsLocked(probe: Client, commandId: string): Promise<boolean> {
+  try {
+    await probe.query(`
+      SELECT "id" FROM "EximbayRefundSandboxCanaryApproval"
+      WHERE "commandId" = $1 FOR UPDATE NOWAIT
+    `, [commandId]);
+    return false;
+  } catch (error) {
+    if (postgresErrorCode(error) === "55P03") return true;
+    throw error;
+  }
+}
+
+async function waitForDatabaseWallClockAfter(limit: Date): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if ((await databaseWallClock()).getTime() > limit.getTime()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("DATABASE_WALL_CLOCK_DID_NOT_ADVANCE_PAST_EXPIRY");
+}
+
+async function databaseWallClock(): Promise<Date> {
+  const rows = await db.$queryRaw<{ capturedAt: Date }[]>`
+    SELECT date_trunc('milliseconds', clock_timestamp()) AS "capturedAt"
+  `;
+  const capturedAt = rows[0]?.capturedAt;
+  if (rows.length !== 1 || !(capturedAt instanceof Date)) {
+    throw new Error("DATABASE_WALL_CLOCK_UNAVAILABLE");
+  }
+  return capturedAt;
+}
+
+async function connectedAdmin(): Promise<Client> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  return client;
+}
+
+function postgresErrorCode(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error
+    && typeof error.code === "string" ? error.code : null;
+}
 
 async function installRestrictedRoleAuthority(): Promise<void> {
   const admin = new Client({ connectionString: databaseUrl });
@@ -405,8 +627,7 @@ async function prepareTarget(): Promise<PreparedTarget> {
     commandId: fixture.commandId,
     merchantAccountBindingId: "merchant-v1",
     credentialGenerationBindingId: "credential-v1",
-    syntheticProvenanceDigest: "f".repeat(64),
-    noCustomerPiiAttested: true,
+    custodyArtifactSha256: "f".repeat(64),
   });
   const env = canaryEnvironment(sealed.targetBindingDigest);
   const authority = parseEximbayRefundCanaryEnvironment(env);
@@ -449,24 +670,24 @@ async function requireDisposableDatabase(): Promise<void> {
   }
 }
 
-async function createApproval(prepared: PreparedTarget) {
+async function createApproval(prepared: PreparedTarget, lifetimeMs = 15 * 60_000) {
   const rows = await db.$queryRaw<{ capturedAt: Date }[]>`
     SELECT date_trunc('milliseconds', clock_timestamp()) AS "capturedAt"
   `;
   const now = rows[0]?.capturedAt;
   if (rows.length !== 1 || !(now instanceof Date)) throw new Error("DATABASE_TIME_UNAVAILABLE");
   return db.eximbayRefundSandboxCanaryApproval.create({
-    data: approvalData(prepared, now),
+    data: approvalData(prepared, now, lifetimeMs),
   });
 }
 
-function approvalData(prepared: PreparedTarget, now: Date) {
+function approvalData(prepared: PreparedTarget, now: Date, lifetimeMs = 15 * 60_000) {
   return {
     id: `eximbay_canary_${randomUUID()}`,
     formatVersion: EXIMBAY_REFUND_SANDBOX_CANARY_APPROVAL_VERSION,
     provider: PaymentProvider.EXIMBAY,
     mode: PaymentMode.SANDBOX,
-    approvalEvidenceDigest: "9".repeat(64),
+    approvalEvidenceDigest: prepared.authority.custodyArtifactSha256,
     releaseBindingDigest: prepared.authority.releaseBindingDigest,
     canaryJobBindingDigest: prepared.authority.canaryJobBindingDigest,
     preflightJobBindingDigest: prepared.authority.preflightJobBindingDigest,
@@ -475,8 +696,8 @@ function approvalData(prepared: PreparedTarget, now: Date) {
     targetBindingDigest: prepared.targetBindingDigest,
     commandId: prepared.fixture.commandId,
     approvedAt: new Date(now.getTime() - 1_000),
-    expiresAt: new Date(now.getTime() + 15 * 60_000),
-    issuedByPrincipalId: "synthetic-reviewer",
+    expiresAt: new Date(now.getTime() + lifetimeMs),
+    issuedByPrincipalId: "postgres-session/v1:synthetic_reviewer",
   };
 }
 

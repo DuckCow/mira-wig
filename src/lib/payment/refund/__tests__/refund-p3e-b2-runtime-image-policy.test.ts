@@ -183,11 +183,14 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       fileCount: currentAuthority.buildContext.fileCount,
       repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
       packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
-      entrypointCount: 4,
+      entrypointCount: 5,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
     if (!isRecordWithStringArray(observed, "paths")) return;
+    expect(observed.paths).toContain(
+      "scripts/prepare-eximbay-refund-canary-admission.ts",
+    );
     for (const forbidden of [
       "src/app/", "__tests__/", ".test.", ".spec.", "acceptance",
       ".terraform", ".env", ".git", ".next", "tfstate", "tfplan",
