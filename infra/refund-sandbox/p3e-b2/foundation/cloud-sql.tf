@@ -17,6 +17,11 @@ resource "google_sql_database_instance" "refund" {
     data_api_access             = "DISALLOW_DATA_API"
     retain_backups_on_delete    = var.database_retain_backups_on_delete
 
+    database_flags {
+      name  = "cloudsql.iam_authentication"
+      value = "on"
+    }
+
     final_backup_config {
       enabled        = var.database_final_backup_enabled
       retention_days = var.database_final_backup_retention_days

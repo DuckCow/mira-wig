@@ -156,6 +156,16 @@ run "exact_provider_free_foundation_shape" {
 
   assert {
     condition = (
+      length(google_sql_database_instance.refund.settings[0].database_flags) == 1 &&
+      one(google_sql_database_instance.refund.settings[0].database_flags).name ==
+      "cloudsql.iam_authentication" &&
+      one(google_sql_database_instance.refund.settings[0].database_flags).value == "on"
+    )
+    error_message = "Cloud SQL must enable only the exact IAM database-authentication flag."
+  }
+
+  assert {
+    condition = (
       google_sql_database_instance.refund.settings[0].backup_configuration[0].enabled &&
       google_sql_database_instance.refund.settings[0].backup_configuration[0].point_in_time_recovery_enabled &&
       google_sql_database_instance.refund.settings[0].backup_configuration[0].transaction_log_retention_days == 7 &&
@@ -184,6 +194,7 @@ run "exact_provider_free_foundation_shape" {
     condition = (
       output.foundation_manifest.contract_version ==
       "mira-refund-p3e-b2-foundation-authority/v1" &&
+      length(local.authority_contract.foundationResourceAddresses) == 15 &&
       output.foundation_manifest.resource_graph_sha256 ==
       "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f" &&
       output.foundation_manifest.googleapis_private_zone_name ==

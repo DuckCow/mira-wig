@@ -223,6 +223,13 @@ retention inputs, finite positive disk-autoresize capacity, provider deletion pr
 Terraform `prevent_destroy`. The database depends on the instance. The repository is immutable.
 The two secrets are containers only.
 
+The instance enables only the `cloudsql.iam_authentication=on` database flag so a later dedicated
+bootstrap administrative identity can use Cloud SQL IAM database authentication through the
+selected Cloud SQL Auth Proxy `--auto-iam-authn` path. This flag does not create an IAM database
+user, grant GCP IAM roles, assign `cloudsqlsuperuser`, create a database credential, make bootstrap
+executable, or authorize a database connection or migration. The application runtime remains on
+its separately governed password-based proxy model.
+
 Provider-free proxy data traffic is allowed only as TCP 3307 to the allocated PSA `/16`. Google
 API control traffic is allowed only as TCP 443 to the restricted VIP `199.36.153.4/30`. A private
 `googleapis.com.` zone bound to the exact foundation VPC resolves `restricted.googleapis.com.` to
