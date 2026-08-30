@@ -23,6 +23,9 @@
     "refund:image:bundle": "node --import tsx scripts/build-refund-worker-bundles.mts",
     "refund:image:verify": "node --import tsx scripts/verify-refund-worker-image.mts",
     "refund:image:reproducibility": "node --import tsx scripts/verify-refund-worker-reproducibility.mts",
+    "refund:db-bootstrap:context": "node --import tsx scripts/build-refund-db-bootstrap-context.mts",
+    "refund:db-bootstrap:image:build": "node --import tsx scripts/build-refund-db-bootstrap-image.mts",
+    "refund:db-bootstrap:image:verify": "node --import tsx scripts/verify-refund-db-bootstrap-image.mts",
     "refund:ops:manual": "node --import tsx scripts/refund-operations.ts manual",
     "refund:ops:reconcile": "node --import tsx scripts/refund-operations.ts reconcile",
     "refund:ops:credential": "node --import tsx scripts/refund-operations.ts credential"

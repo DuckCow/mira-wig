@@ -1,0 +1,95 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-db-bootstrap-runtime/v1",
+  "status": "SOURCE_DEFINED_NOT_CLOUD_APPLIED",
+  "project": "mira-refund-sandbox-0001",
+  "region": "asia-northeast3",
+  "terraform": {
+    "root": "infra/refund-sandbox/p3e-b2/database-bootstrap",
+    "backendBucket": "mira-refund-sandbox-0001-tfstate-925882331349",
+    "backendPrefix": "p3e-b2/database-bootstrap",
+    "provider": "hashicorp/google",
+    "providerVersion": "7.40.0"
+  },
+  "resourceGraph": {
+    "resourceCount": 5,
+    "addresses": [
+      "google_cloud_run_v2_job.bootstrap",
+      "google_project_iam_member.cloud_sql_access[\"client\"]",
+      "google_project_iam_member.cloud_sql_access[\"instance_user\"]",
+      "google_service_account.bootstrap",
+      "google_sql_user.bootstrap"
+    ],
+    "sortedAddressSha256": "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472"
+  },
+  "identity": {
+    "serviceAccountId": "mira-p3e-sbx-db-bootstrap",
+    "serviceAccountEmail": "mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com",
+    "userManagedKeys": 0,
+    "iamDatabaseUsername": "mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam",
+    "iamDatabaseUserType": "CLOUD_IAM_SERVICE_ACCOUNT",
+    "databaseRoles": ["cloudsqlsuperuser"],
+    "password": "NONE"
+  },
+  "iam": {
+    "grantContainer": "PROJECT_IAM_POLICY",
+    "resourceScope": "EXACT_CLOUD_SQL_INSTANCE_VIA_IAM_CONDITION",
+    "condition": "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'",
+    "roles": ["roles/cloudsql.client", "roles/cloudsql.instanceUser"],
+    "deployerActAsBinding": "NOT_CREATED_EXISTING_PROJECT_OWNER_IS_EFFECTIVE"
+  },
+  "migrations": {
+    "count": 41,
+    "sha256": "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
+    "terminal": "20260827090000_add_checkout_communication_locale",
+    "prismaCommand": ["prisma", "migrate", "deploy"]
+  },
+  "image": {
+    "logicalName": "refund-db-bootstrap",
+    "platform": "linux/amd64",
+    "defaultMode": "check",
+    "mutatingMode": "apply",
+    "providerCredentials": "NONE",
+    "secretManagerDependencies": "NONE",
+    "cloudSqlAuthProxyVersion": "2.22.0",
+    "proxyArguments": [
+      "--private-ip",
+      "--auto-iam-authn",
+      "--unix-socket=/cloudsql",
+      "--health-check",
+      "--http-address=127.0.0.1",
+      "--http-port=9801",
+      "--exit-zero-on-sigterm",
+      "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
+    ]
+  },
+  "job": {
+    "name": "mira-p3e-sbx-refund-db-bootstrap",
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "defaultArguments": ["check"],
+    "automaticTrigger": "NONE",
+    "network": "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc",
+    "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",
+    "networkTags": ["refund-provider-free"],
+    "egress": "ALL_TRAFFIC",
+    "executionStatus": "DORMANT_NOT_EXECUTED"
+  },
+  "boundaries": {
+    "cloudRunJobInvocation": "NOT_AUTHORIZED_IN_THIS_PHASE",
+    "databaseConnection": "NOT_AUTHORIZED_IN_THIS_PHASE",
+    "databaseReadWrite": "ZERO",
+    "applicationPasswords": 0,
+    "secretVersions": 0,
+    "providerContact": 0,
+    "applicationRuntimeChanges": 0,
+    "foundationResourceChanges": 0
+  },
+  "evidence": [
+    "https://docs.cloud.google.com/sql/docs/postgres/iam-logins",
+    "https://docs.cloud.google.com/sql/docs/postgres/add-manage-iam-users",
+    "https://docs.cloud.google.com/sql/docs/postgres/iam-conditions",
+    "https://raw.githubusercontent.com/hashicorp/terraform-provider-google/v7.40.0/website/docs/r/sql_user.html.markdown",
+    "https://cloud.google.com/run/docs/create-jobs"
+  ]
+}

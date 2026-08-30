@@ -322,6 +322,27 @@ and permission set has not been independently derived across Cloud Run Job, serv
 project IAM, secret IAM, and Artifact Registry. R2B1 defines no
 deployer identity, custom role, or binding.
 
+## Dormant database-bootstrap runtime boundary
+
+`database-bootstrap` is the isolated attended bootstrap Terraform root and uses backend prefix
+`p3e-b2/database-bootstrap`. Its exact five-address graph is frozen by
+`contracts/database-bootstrap-runtime-v1.json`. The root owns one passwordless bootstrap service
+account, two exact instance-conditioned project IAM members (`roles/cloudsql.client` and
+`roles/cloudsql.instanceUser`), one `CLOUD_IAM_SERVICE_ACCOUNT` Cloud SQL user with only the
+initial `cloudsqlsuperuser` database role, and one dormant Cloud Run v2 Job.
+
+The Job has one task, parallelism one, zero retries, digest-only image identity, Direct VPC
+`ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Its default argument is
+`check`; no scheduler, event trigger, invoker binding, database password, Secret Manager version,
+or payment-provider configuration exists. The separate bootstrap image contains the pinned Proxy,
+Prisma CLI, exact 41-migration corpus, `pg`, and existing hashed role/grant runner. Automatic IAM
+database authentication is isolated to that image and uses both `--private-ip` and
+`--auto-iam-authn` over `/cloudsql`.
+
+Repository definition and a digest input never authorize Job execution. This source status remains
+`DEFINED_NOT_CLOUD_APPLIED`; authoritative cloud materialization and execution counts require
+separate attended readback.
+
 Exact status:
 
 ```text

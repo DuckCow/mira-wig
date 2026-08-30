@@ -40,13 +40,13 @@ authority; and provider credential secret versions. The R2A private proxy
 socket architecture remains owned by R2A. R2B1 adds no invoker, scheduler, execution, target,
 approval, provider credential, or trusted cloud evidence.
 
-No database-bootstrap Cloud Run Job or runtime wrapper exists. The attended implementation at
-`../../../scripts/eximbay-p3e-database-bootstrap.ts` is present and requires exact explicit sandbox
-admission before SQL execution; it remains unchanged and was not invoked here. Any future Job
-wrapper must default to a non-mutating, fail-closed mode with mutation disabled. Mutation requires
-an explicit attended human action; no automatic trigger is allowed, retries remain zero, provider
-credentials remain absent, provider contact remains impossible, and synthetic sale or refund
-creation remains out of scope.
+The later database-bootstrap owner now exists at `../database-bootstrap`, with machine contract
+`../contracts/database-bootstrap-runtime-v1.json` and a separate purpose-built image under
+`containers/refund-db-bootstrap`. It supersedes only the historical `LATER_DB_BOOTSTRAP` slots in
+this R1B inventory. Its Docker and Cloud Run defaults are non-mutating `check`; `apply` remains an
+explicit separately attended mode. It adds no trigger, retry, provider credential, application
+password or secret version. The current source definition does not itself prove image publication,
+cloud materialization, Job execution or database access.
 
 `resource-ownership-v1.json` freezes every B1 runtime, IAM, image, secret-version, connectivity,
 bootstrap, observability, and invocation owner, plus the explicit R2B1 supersession subset.

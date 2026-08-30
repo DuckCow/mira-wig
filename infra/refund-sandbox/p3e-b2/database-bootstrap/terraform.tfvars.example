@@ -1,0 +1,21 @@
+project_id      = "mira-refund-sandbox-0001"
+resource_prefix = "mira-p3e-sbx"
+source_commit   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+foundation_handoff = {
+  contract_version                 = "mira-refund-p3e-b2-foundation-authority/v1"
+  project_id                       = "mira-refund-sandbox-0001"
+  region                           = "asia-northeast3"
+  network_resource_name            = "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc"
+  subnetwork_resource_name         = "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3"
+  cloud_sql_instance_name          = "mira-p3e-sbx-refund-pg18"
+  cloud_sql_instance_resource_name = "projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18"
+  cloud_sql_connection_name        = "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
+  database_name                    = "refund_sandbox"
+  cloud_sql_iam_authentication     = "on"
+  foundation_resource_graph_sha256 = "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f"
+  source_state_prefix              = "p3e-b2/foundation"
+  apply_status                     = "APPLIED"
+  operator_review_status           = "OPERATOR_REVIEWED"
+}
