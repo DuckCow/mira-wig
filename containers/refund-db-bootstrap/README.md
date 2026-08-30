@@ -9,6 +9,12 @@ and grant runner, `pg`, and the pinned Cloud SQL Auth Proxy. The proxy always us
 automatic IAM database authentication, and a Unix socket. No database password, Secret Manager
 reference, payment-provider credential or provider runtime is included.
 
+The final runtime copies the standard `/etc/ssl/certs/ca-certificates.crt` bundle from the
+already-pinned official Cloud SQL Auth Proxy stage. Offline image verification requires that exact
+path to be a nonempty regular file readable as UID/GID 65532. Go discovers this standard Linux
+trust location without `SSL_CERT_FILE`, `SSL_CERT_DIR`, or `NODE_EXTRA_CA_CERTS`; custom roots and
+TLS verification bypasses remain prohibited.
+
 Proxy stdout and stderr are consumed continuously but never emitted raw. Proxy 2.22.0 runs with
 `--structured-logs`; its exact `timestamp`/`severity`/`message` JSON records are parsed within the
 existing 4096-byte bound. Only allowlisted startup classifications are retained and nested under

@@ -524,7 +524,24 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(dockerfile).toContain('CMD ["check"]');
     expect(dockerfile).toContain("scripts/eximbay-p3e-database-bootstrap.ts");
     expect(dockerfile).toContain("COPY --link prisma ./prisma");
+    expect(dockerfile).toContain(
+      "COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt "
+      + "/etc/ssl/certs/ca-certificates.crt",
+    );
+    expect(dockerfile.match(/ca-certificates\.crt/gu)).toHaveLength(2);
+    expect(dockerfile).not.toMatch(/ENV\s+(?:SSL_CERT_FILE|SSL_CERT_DIR|NODE_EXTRA_CA_CERTS)/u);
     expect(dockerfile).not.toContain("refund-worker/Dockerfile");
+    expect(contract.image.systemCaTrust).toEqual({
+      sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
+      sourcePath: "/etc/ssl/certs/ca-certificates.crt",
+      runtimePath: "/etc/ssl/certs/ca-certificates.crt",
+      runtimeUid: 65532,
+      runtimeGid: 65532,
+      requiredType: "REGULAR_FILE",
+      requiredNonempty: true,
+      requiredReadable: true,
+      sslRootOverride: "NONE",
+    });
   });
 
   it("binds the exact 41-migration corpus", async () => {
@@ -551,6 +568,10 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(entrypoint).toContain('MIGRATIONS_DIRECTORY = "/app/prisma/migrations"');
     expect(entrypoint).toContain("loadRefundWorkerMigrationInventory(MIGRATIONS_DIRECTORY)");
     expect(verifier).toContain("defaultRuntimeDependencies.loadMigrationInventory()");
+    expect(verifier).toContain('CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt"');
+    expect(verifier).toContain('"--network=none"');
+    expect(verifier).toContain("process.getuid()");
+    expect(verifier).toContain("process.env.SSL_CERT_FILE ?? null");
   });
 });
 

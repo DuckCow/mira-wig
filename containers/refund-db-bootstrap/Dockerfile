@@ -40,6 +40,7 @@ LABEL org.opencontainers.image.created="${SOURCE_DATE_EPOCH}" \
       mira.refund.default-mode="check"
 WORKDIR /app
 COPY --link --from=proxy-verified /verified/cloud-sql-proxy /usr/local/bin/cloud-sql-proxy
+COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --link --from=build /build/dist ./scripts
 COPY --link --from=build /build/node_modules ./node_modules
 COPY --link --from=build /build/package.json ./package.json

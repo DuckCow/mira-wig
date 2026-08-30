@@ -2,6 +2,20 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const TAG = /^asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/refund-db-bootstrap:p3e-b2-[0-9a-f]{12}$/u;
+const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
+
+type CaBundleEvidence = Readonly<{
+  path: typeof CA_BUNDLE_PATH;
+  uid: 65532;
+  gid: 65532;
+  regularFile: true;
+  readable: true;
+  size: number;
+  sha256: string;
+  sslCertFile: null;
+  sslCertDir: null;
+  nodeExtraCaCerts: null;
+}>;
 
 function main(args: readonly string[] = process.argv.slice(2)): void {
   const tag = args[0];
@@ -26,6 +40,7 @@ function main(args: readonly string[] = process.argv.slice(2)): void {
   if (!prismaVersion.stdout.includes("prisma") || !prismaVersion.stdout.includes("7.8.0")) {
     throw new Error("DB_BOOTSTRAP_PRISMA_VERSION_INVALID");
   }
+  const caBundle = inspectCaBundle(tag);
   const migrationInventory = run(tag, [
     "--network=none",
     "--entrypoint", "/usr/local/bin/node", tag,
@@ -53,9 +68,68 @@ function main(args: readonly string[] = process.argv.slice(2)): void {
     proxyFailureClassCount: 6,
     proxyTransportClassCount: 7,
     proxyDiagnosticByteLimit: 4096,
+    caBundle,
     unknownModeExit: 64,
     network: "none",
   })}\n`);
+}
+
+function inspectCaBundle(tag: string): CaBundleEvidence {
+  const result = run(tag, [
+    "--network=none",
+    "--entrypoint", "/usr/local/bin/node", tag,
+    "--input-type=module", "--eval",
+    `import { createHash } from "node:crypto";
+      import { accessSync, constants, readFileSync, statSync } from "node:fs";
+      const path = "${CA_BUNDLE_PATH}";
+      accessSync(path, constants.R_OK);
+      const stat = statSync(path);
+      const body = readFileSync(path);
+      process.stdout.write(JSON.stringify({
+        path,
+        uid: process.getuid(),
+        gid: process.getgid(),
+        regularFile: stat.isFile(),
+        readable: true,
+        size: body.byteLength,
+        sha256: createHash("sha256").update(body).digest("hex"),
+        sslCertFile: process.env.SSL_CERT_FILE ?? null,
+        sslCertDir: process.env.SSL_CERT_DIR ?? null,
+        nodeExtraCaCerts: process.env.NODE_EXTRA_CA_CERTS ?? null,
+      }));`,
+  ]);
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    throw new Error("DB_BOOTSTRAP_CA_BUNDLE_EVIDENCE_INVALID");
+  }
+  if (!isRecord(value)) {
+    throw new Error("DB_BOOTSTRAP_CA_BUNDLE_INVALID");
+  }
+  const exactFields = Object.freeze({
+    path: CA_BUNDLE_PATH,
+    uid: 65532,
+    gid: 65532,
+    regularFile: true,
+    readable: true,
+    sslCertFile: null,
+    sslCertDir: null,
+    nodeExtraCaCerts: null,
+  });
+  for (const [key, expected] of Object.entries(exactFields)) {
+    if (value[key] !== expected) throw new Error("DB_BOOTSTRAP_CA_BUNDLE_INVALID");
+  }
+  const { size, sha256 } = value;
+  if (typeof size !== "number" || size <= 0
+    || typeof sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(sha256)) {
+    throw new Error("DB_BOOTSTRAP_CA_BUNDLE_INVALID");
+  }
+  return Object.freeze({ ...exactFields, size, sha256 });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function validInput(

@@ -51,6 +51,17 @@
     "providerCredentials": "NONE",
     "secretManagerDependencies": "NONE",
     "cloudSqlAuthProxyVersion": "2.22.0",
+    "systemCaTrust": {
+      "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
+      "sourcePath": "/etc/ssl/certs/ca-certificates.crt",
+      "runtimePath": "/etc/ssl/certs/ca-certificates.crt",
+      "runtimeUid": 65532,
+      "runtimeGid": 65532,
+      "requiredType": "REGULAR_FILE",
+      "requiredNonempty": true,
+      "requiredReadable": true,
+      "sslRootOverride": "NONE"
+    },
     "proxyArguments": [
       "--structured-logs",
       "--private-ip",
