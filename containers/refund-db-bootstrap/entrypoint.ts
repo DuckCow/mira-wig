@@ -5,12 +5,16 @@ import { Client } from "pg";
 import {
   APPLICATION_CREDENTIAL_MODE,
   APPLICATION_ROLES,
+  CANARY_CREDENTIAL_RECOVERY_MODE,
   ApplicationCredentialFailure,
   generateApplicationCredential,
   materializeApplicationCredentials,
+  recoverCanaryApplicationCredential,
   RestSecretMetadataClient,
   setApplicationPasswords,
+  setCanaryApplicationPassword,
   verifyApplicationPasswordLogins,
+  verifyCanaryApplicationPasswordLogin,
   type ApplicationCredential,
   type ApplicationRole,
 } from "./application-credentials.js";
@@ -135,7 +139,8 @@ class BootstrapStageFailure extends Error {
   }
 }
 
-export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE;
+export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE
+  | typeof CANARY_CREDENTIAL_RECOVERY_MODE;
 
 type BootstrapEnvironment = Readonly<Record<string, string | undefined>>;
 type Output = Readonly<{
@@ -223,7 +228,8 @@ export function proxyArguments(automaticIamAuthentication = true): readonly stri
 function parseMode(args: readonly string[]): BootstrapMode | null {
   if (args.length !== 1) return null;
   if (args[0] === "check" || args[0] === "apply"
-    || args[0] === APPLICATION_CREDENTIAL_MODE) return args[0];
+    || args[0] === APPLICATION_CREDENTIAL_MODE
+    || args[0] === CANARY_CREDENTIAL_RECOVERY_MODE) return args[0];
   return null;
 }
 
@@ -301,6 +307,24 @@ async function runWithProxy(
   configuration: RuntimeConfiguration,
   inventory: RefundWorkerMigrationInventory,
 ): Promise<Readonly<Record<string, unknown>>> {
+  if (configuration.mode === CANARY_CREDENTIAL_RECOVERY_MODE) {
+    return recoverCanaryApplicationCredential({
+      secretManager: new RestSecretMetadataClient(),
+      generateCredential: generateApplicationCredential,
+      generateAndSetCanaryPassword: (generateCredentialValue) => runProxySession(
+        true,
+        () => commitCanaryApplicationPassword(
+          configuration.databaseUrl,
+          inventory,
+          generateCredentialValue,
+        ),
+      ),
+      verifyCanaryPasswordLogin: (credential) => runProxySession(
+        false,
+        () => verifyCanaryApplicationPasswordLogin(credential),
+      ),
+    });
+  }
   if (configuration.mode === APPLICATION_CREDENTIAL_MODE) {
     return materializeApplicationCredentials({
       secretManager: new RestSecretMetadataClient(),
@@ -364,6 +388,29 @@ async function commitApplicationPasswords(
     const credentials = APPLICATION_ROLES.map(generateCredentialValue);
     await setApplicationPasswords(database, credentials, verifyExactEffectivePrivileges);
     return credentials;
+  } finally {
+    await database.end().catch(() => undefined);
+  }
+}
+
+async function commitCanaryApplicationPassword(
+  databaseUrlValue: string,
+  inventory: RefundWorkerMigrationInventory,
+  generateCredentialValue: (role: ApplicationRole) => ApplicationCredential,
+): Promise<ApplicationCredential> {
+  const database = new Client({ connectionString: databaseUrlValue });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const completed = await requireExactMigrationPrefix(database, inventory);
+    if (completed !== inventory.migrationCount) ledgerRejected();
+    await verifyExactEffectivePrivileges(database);
+    const credential = generateCredentialValue("mira_refund_canary");
+    await setCanaryApplicationPassword(
+      database,
+      credential,
+      verifyExactEffectivePrivileges,
+    );
+    return credential;
   } finally {
     await database.end().catch(() => undefined);
   }

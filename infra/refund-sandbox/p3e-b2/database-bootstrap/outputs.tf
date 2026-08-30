@@ -15,6 +15,7 @@ output "bootstrap_manifest" {
     default_mode                    = "check"
     explicit_mutating_mode          = "apply"
     credential_materialization_mode = "materialize-application-credentials"
+    credential_recovery_mode        = "recover-canary-application-credential"
     task_count                      = 1
     parallelism                     = 1
     max_retries                     = 0

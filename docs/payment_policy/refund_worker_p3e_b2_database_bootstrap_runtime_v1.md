@@ -14,7 +14,7 @@ GUARANTEES:
 NON-GOALS:
 - application runtime deployment;
 - automatic migration or grant execution;
-- application runtime activation or credential rotation/recovery;
+- application runtime activation or generic/automatic credential rotation and recovery;
 - payment-provider contact.
 
 THREAT BOUNDARY:
@@ -34,7 +34,8 @@ MACHINE-OWNED RESPONSIBILITIES:
 - validate target/source/image/migration/task identities before Proxy spawn;
 - use private automatic IAM authentication and an exact Unix socket;
 - keep check read-only and require explicit apply or credential-materialization modes;
-- enforce the initial `(0,0)` secret-version gate, at-most-once publication and safe ambiguity stop;
+- enforce the initial `(0,0)` secret-version gate, the exact canary-only `(1,0)` recovery gate,
+  at-most-once publication and safe ambiguity stop;
 - verify migration prefix and exact postconditions.
 
 HUMAN-OWNED RESPONSIBILITIES:
@@ -89,9 +90,10 @@ existing hashed SQL role/grant inputs and runner, the bootstrap entrypoint, `pg`
 Auth Proxy 2.22.0. It excludes application refund-worker bundles, Toss/provider SDKs and every
 credential.
 
-The Docker default and Terraform Job argument are `check`. The only credential command is
-`materialize-application-credentials`; an absent or unknown direct process
-mode fails with code 64. Exact Cloud Run one-task/index/attempt identity, source commit, image
+The Docker default and Terraform Job argument are `check`. Credential commands are the initial
+`materialize-application-credentials` mode and the exact partial-state
+`recover-canary-application-credential` mode; an absent or unknown direct process mode fails with
+code 64. Exact Cloud Run one-task/index/attempt identity, source commit, image
 digest, target, canonical IAM username and migration count/hash are required before the Proxy can
 start. The Proxy vector includes `--private-ip`, `--auto-iam-authn`, and
 `--unix-socket=/cloudsql`.
@@ -107,6 +109,13 @@ password generation. It commits both client-generated SCRAM verifiers in one tra
 one password login per application role through the same Proxy without automatic IAM database
 authentication, then adds preflight version 1 followed by canary version 1. It never reads a secret
 payload and never retries an ambiguous version-add operation.
+
+The canary recovery mode accepts only preflight version 1 enabled with acknowledged client checksum
+and canary with zero versions. It never reads or changes preflight credential material. It verifies
+the exact ledger and both roles' privilege state, generates and commits only a replacement canary
+SCRAM verifier, verifies one canary password login, and attempts canary version 1 publication once.
+SecretVersion names are parsed as exact path components and accept only project ID
+`mira-refund-sandbox-0001` or project number `925882331349`.
 
 ## Current source status
 

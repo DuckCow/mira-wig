@@ -190,6 +190,48 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     });
   });
 
+  it("admits only the exact canary credential recovery mode", async () => {
+    const execute = executeMock(Object.freeze({
+      code: "APP_CREDENTIAL_CANARY_RECOVERY_COMPLETE",
+      mode: "recover-canary-application-credential",
+    }));
+    const result = await runDatabaseBootstrapEntrypoint(
+      ["recover-canary-application-credential"],
+      VALID_ENV,
+      outputSink(),
+      dependencies(execute),
+    );
+    expect(result).toBe(0);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      mode: "recover-canary-application-credential",
+    });
+    expect(contract.image.mutatingModes).toEqual([
+      "apply",
+      "materialize-application-credentials",
+      "recover-canary-application-credential",
+    ]);
+    expect(contract.job.explicitCredentialArguments).toEqual([
+      "materialize-application-credentials",
+      "recover-canary-application-credential",
+    ]);
+    expect(contract.job.secretVersionProjectRepresentations).toEqual([
+      "mira-refund-sandbox-0001",
+      "925882331349",
+    ]);
+    expect(contract.job.initialCredentialAdmission).toEqual({
+      preflightVersionCount: 0,
+      canaryVersionCount: 0,
+    });
+    expect(contract.job.canaryRecoveryAdmission).toEqual({
+      preflightVersionCount: 1,
+      preflightVersion: "1",
+      preflightState: "ENABLED",
+      preflightClientSpecifiedPayloadChecksum: true,
+      canaryVersionCount: 0,
+      preflightPayloadAccess: "NONE",
+    });
+  });
+
   it("freezes the private automatic-IAM proxy vector", () => {
     expect(proxyArguments()).toEqual([
       "--structured-logs",

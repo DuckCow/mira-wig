@@ -1,9 +1,10 @@
 # Refund database-bootstrap image
 
 This purpose-specific Linux AMD64 image owns only the attended P3E-B2 database bootstrap path.
-Its Docker default is the read-only `check` mode. The mutating `apply` and
-`materialize-application-credentials` modes must be supplied explicitly by separately authorized
-manual Cloud Run Job executions.
+Its Docker default is the read-only `check` mode. The mutating `apply`,
+`materialize-application-credentials`, and exact `(1,0)` partial-state
+`recover-canary-application-credential` modes must be supplied explicitly by separately
+authorized manual Cloud Run Job executions.
 
 The image contains the exact Prisma 7 CLI/schema/41-migration corpus, the existing hashed role
 and grant runner, `pg`, and the pinned Cloud SQL Auth Proxy. The credential mode first uses private
@@ -11,7 +12,11 @@ automatic IAM database authentication for its exact two-role password transactio
 the same Proxy without automatic IAM authentication to verify each password once over the exact
 Unix socket. It publishes version 1 to only the two existing database-URL secrets through direct
 metadata/version REST calls. No password, URL, verifier, payload-read authority, payment-provider
-credential or provider runtime is included in the image.
+credential or provider runtime is included in the image. The recovery mode accepts preflight
+version 1 only when it is enabled with an acknowledged client checksum, requires canary to have
+zero versions, and then rotates, verifies, and publishes canary only. SecretVersion response names
+accept only the installed project ID or project number while independently requiring the exact
+secret and positive decimal version path components.
 
 The final runtime copies the standard `/etc/ssl/certs/ca-certificates.crt` bundle from the
 already-pinned official Cloud SQL Auth Proxy stage. Offline image verification requires that exact
@@ -66,4 +71,5 @@ request-failure class remains available but all subtype fields are withheld. The
 pinned by image digest was built with Go 1.26.3; that compiled toolchain, rather than the module's
 Go declaration, owns the standard-library `url.Error` format used here.
 
-The current phase may build, verify and publish this image, but must not run either database mode.
+Source definition, build, verification, and publication do not themselves authorize a database
+mode; every execution requires separate explicit human authority.

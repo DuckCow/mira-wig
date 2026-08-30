@@ -336,9 +336,10 @@ account on the two existing application database-URL secrets; payload access is 
 
 The Job has one task, parallelism one, zero retries, digest-only image identity, Direct VPC
 `ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Its default argument is
-`check`; the only new explicit mode is `materialize-application-credentials`. No scheduler, event
-trigger, invoker binding, embedded database password, Secret Manager version Terraform resource,
-or payment-provider configuration exists. The separate bootstrap image contains the pinned Proxy,
+`check`; explicit credential modes are the initial `materialize-application-credentials` `(0,0)`
+path and the exact `recover-canary-application-credential` `(1,0)` partial-state path. No scheduler,
+event trigger, invoker binding, embedded database password, Secret Manager version Terraform
+resource, or payment-provider configuration exists. The separate bootstrap image contains the pinned Proxy,
 Prisma CLI, exact 41-migration corpus, `pg`, and existing hashed role/grant runner. Automatic IAM
 database authentication is isolated to that image and uses both `--private-ip` and
 `--auto-iam-authn` over `/cloudsql`.

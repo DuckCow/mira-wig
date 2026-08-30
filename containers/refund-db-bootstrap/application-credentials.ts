@@ -8,6 +8,8 @@ import { Client, escapeIdentifier, escapeLiteral } from "pg";
 
 export const APPLICATION_CREDENTIAL_MODE =
   "materialize-application-credentials" as const;
+export const CANARY_CREDENTIAL_RECOVERY_MODE =
+  "recover-canary-application-credential" as const;
 export const APPLICATION_ROLES = Object.freeze([
   "mira_refund_preflight",
   "mira_refund_canary",
@@ -59,6 +61,21 @@ export type ApplicationCredentialMaterializationResult = Readonly<{
     verified: true;
   }>[];
   secrets: readonly SecretVersionEvidence[];
+  secretPayloadReads: 0;
+  applicationRuntimeExecutions: 0;
+  providerEffects: 0;
+}>;
+
+export type CanaryCredentialRecoveryResult = Readonly<{
+  code: "APP_CREDENTIAL_CANARY_RECOVERY_COMPLETE";
+  mode: typeof CANARY_CREDENTIAL_RECOVERY_MODE;
+  databasePasswordTransaction: "COMMITTED";
+  passwordLogin: Readonly<{
+    role: "mira_refund_canary";
+    currentDatabase: typeof DATABASE_NAME;
+    verified: true;
+  }>;
+  secret: SecretVersionEvidence;
   secretPayloadReads: 0;
   applicationRuntimeExecutions: 0;
   providerEffects: 0;
@@ -138,6 +155,15 @@ export type ApplicationCredentialDependencies = Readonly<{
   ) => Promise<void>;
 }>;
 
+export type CanaryCredentialRecoveryDependencies = Readonly<{
+  secretManager: SecretMetadataClient;
+  generateCredential: (role: ApplicationRole) => ApplicationCredential;
+  generateAndSetCanaryPassword: (
+    generateCredential: (role: ApplicationRole) => ApplicationCredential,
+  ) => Promise<ApplicationCredential>;
+  verifyCanaryPasswordLogin: (credential: ApplicationCredential) => Promise<void>;
+}>;
+
 export async function materializeApplicationCredentials(
   dependencies: ApplicationCredentialDependencies,
 ): Promise<ApplicationCredentialMaterializationResult> {
@@ -177,6 +203,60 @@ export async function materializeApplicationCredentials(
       verified: true,
     }))),
     secrets: Object.freeze(secrets),
+    secretPayloadReads: 0,
+    applicationRuntimeExecutions: 0,
+    providerEffects: 0,
+  });
+}
+
+export async function recoverCanaryApplicationCredential(
+  dependencies: CanaryCredentialRecoveryDependencies,
+): Promise<CanaryCredentialRecoveryResult> {
+  const preflightSecret = APPLICATION_SECRETS.mira_refund_preflight;
+  const preflight = await requireVersionMetadata(
+    dependencies.secretManager,
+    preflightSecret,
+  );
+  const preflightVersion = preflight.versions[0];
+  if (preflight.count !== 1 || preflight.versions.length !== 1
+    || !preflightVersion
+    || !exactEnabledVersion(preflightVersion, preflightSecret, "1")) {
+    throw new ApplicationCredentialFailure("SECRET_VERSION_BASELINE_DRIFT", {
+      secretResourceName: preflightSecret,
+      versionCount: preflight.count,
+    });
+  }
+
+  const canarySecret = APPLICATION_SECRETS.mira_refund_canary;
+  const canary = await requireVersionMetadata(dependencies.secretManager, canarySecret);
+  if (canary.count !== 0 || canary.versions.length !== 0) {
+    throw new ApplicationCredentialFailure("SECRET_VERSION_BASELINE_DRIFT", {
+      secretResourceName: canarySecret,
+      versionCount: canary.count,
+    });
+  }
+
+  const credential = await dependencies.generateAndSetCanaryPassword(
+    dependencies.generateCredential,
+  );
+  requireExactCanaryCredential(credential);
+  await dependencies.verifyCanaryPasswordLogin(credential);
+  const secret = await publishCredential(
+    dependencies.secretManager,
+    canarySecret,
+    credential.databaseUrl,
+  );
+
+  return Object.freeze({
+    code: "APP_CREDENTIAL_CANARY_RECOVERY_COMPLETE",
+    mode: CANARY_CREDENTIAL_RECOVERY_MODE,
+    databasePasswordTransaction: "COMMITTED",
+    passwordLogin: Object.freeze({
+      role: "mira_refund_canary",
+      currentDatabase: DATABASE_NAME,
+      verified: true,
+    }),
+    secret,
     secretPayloadReads: 0,
     applicationRuntimeExecutions: 0,
     providerEffects: 0,
@@ -280,6 +360,27 @@ export async function setApplicationPasswords<Database extends PasswordSqlClient
   }
 }
 
+export async function setCanaryApplicationPassword<Database extends PasswordSqlClient>(
+  database: Database,
+  credential: ApplicationCredential,
+  verifyExactPrivileges: (database: Database) => Promise<void>,
+): Promise<void> {
+  requireExactCanaryCredential(credential);
+  await verifyExactPrivileges(database);
+  let transactionOpen = false;
+  try {
+    await database.query("BEGIN");
+    transactionOpen = true;
+    await database.query(applicationPasswordSql(credential));
+    await verifyExactPrivileges(database);
+    await database.query("COMMIT");
+    transactionOpen = false;
+  } catch {
+    if (transactionOpen) await database.query("ROLLBACK").catch(() => undefined);
+    throw new ApplicationCredentialFailure("APPLICATION_PASSWORD_TRANSACTION_FAILED");
+  }
+}
+
 export async function verifyApplicationPasswordLogins(
   credentials: readonly ApplicationCredential[],
   createClient: (databaseUrl: string) => LoginClient =
@@ -289,6 +390,15 @@ export async function verifyApplicationPasswordLogins(
   for (const credential of credentials) {
     await verifyOneApplicationPasswordLogin(credential, createClient);
   }
+}
+
+export async function verifyCanaryApplicationPasswordLogin(
+  credential: ApplicationCredential,
+  createClient: (databaseUrl: string) => LoginClient =
+    (databaseUrl) => new Client({ connectionString: databaseUrl }),
+): Promise<void> {
+  requireExactCanaryCredential(credential);
+  await verifyOneApplicationPasswordLogin(credential, createClient);
 }
 
 async function verifyOneApplicationPasswordLogin(
@@ -427,12 +537,11 @@ async function publishCredential(
   }
   const payload = Buffer.from(databaseUrl, "utf8");
   const added = await addCredentialVersion(client, secretResourceName, payload);
-  const expectedName = `${secretResourceName}/versions/1`;
-  requireExactEnabledVersion(added, expectedName, secretResourceName);
+  requireExactEnabledVersion(added, secretResourceName, "1");
   const after = await requireVersionMetadata(client, secretResourceName);
   const version = after.versions[0];
   if (after.count !== 1 || after.versions.length !== 1
-    || !version || !exactEnabledVersion(version, expectedName)) {
+    || !version || !exactEnabledVersion(version, secretResourceName, "1")) {
     throw new ApplicationCredentialFailure("SECRET_VERSION_POSTCONDITION_FAILED", {
       secretResourceName,
       versionCount: after.count,
@@ -482,10 +591,10 @@ function requireExactEnabledVersion(
     createTime: string;
     checksumAcknowledged: boolean;
   }>,
-  expectedName: string,
   secretResourceName: string,
+  expectedVersion: string,
 ): void {
-  if (!exactEnabledVersion(version, expectedName)) {
+  if (!exactEnabledVersion(version, secretResourceName, expectedVersion)) {
     throw new ApplicationCredentialFailure("SECRET_VERSION_POSTCONDITION_FAILED", {
       secretResourceName,
     });
@@ -499,9 +608,10 @@ function exactEnabledVersion(
     createTime: string;
     checksumAcknowledged: boolean;
   }>,
-  expectedName: string,
+  secretResourceName: string,
+  expectedVersion: string,
 ): boolean {
-  return version.name === expectedName
+  return exactSecretVersionName(version.name, secretResourceName, expectedVersion)
     && version.state === "ENABLED"
     && version.checksumAcknowledged
     && validTimestamp(version.createTime);
@@ -571,7 +681,7 @@ function parseVersionList(value: unknown, secretResourceName: string) {
 function parseVersion(value: unknown, secretResourceName: string) {
   if (!isRecord(value)
     || typeof value.name !== "string"
-    || !value.name.startsWith(`${secretResourceName}/versions/`)
+    || !exactSecretVersionName(value.name, secretResourceName)
     || typeof value.state !== "string"
     || typeof value.createTime !== "string"
     || typeof value.clientSpecifiedPayloadChecksum !== "boolean") {
@@ -583,6 +693,20 @@ function parseVersion(value: unknown, secretResourceName: string) {
     createTime: value.createTime,
     checksumAcknowledged: value.clientSpecifiedPayloadChecksum,
   });
+}
+
+function exactSecretVersionName(
+  value: string,
+  secretResourceName: string,
+  expectedVersion?: string,
+): boolean {
+  const match = /^projects\/([^/]+)\/secrets\/([^/]+)\/versions\/([1-9][0-9]*)$/u.exec(value);
+  if (!match) return false;
+  const expectedSecret = /^projects\/mira-refund-sandbox-0001\/secrets\/([^/]+)$/u
+    .exec(secretResourceName)?.[1];
+  return (match[1] === "mira-refund-sandbox-0001" || match[1] === "925882331349")
+    && match[2] === expectedSecret
+    && (expectedVersion === undefined || match[3] === expectedVersion);
 }
 
 function metadataInvalid(secretResourceName: string): ApplicationCredentialFailure {
@@ -619,6 +743,10 @@ function requireExactCredentialSet(
     || credentials.some((credential, index) => credential.role !== APPLICATION_ROLES[index])) {
     throw new Error("CREDENTIAL_SET_INVALID");
   }
+}
+
+function requireExactCanaryCredential(credential: ApplicationCredential): void {
+  if (credential.role !== "mira_refund_canary") throw new Error("CREDENTIAL_SET_INVALID");
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

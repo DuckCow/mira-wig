@@ -60,7 +60,11 @@
     "logicalName": "refund-db-bootstrap",
     "platform": "linux/amd64",
     "defaultMode": "check",
-    "mutatingModes": ["apply", "materialize-application-credentials"],
+    "mutatingModes": [
+      "apply",
+      "materialize-application-credentials",
+      "recover-canary-application-credential"
+    ],
     "providerCredentials": "NONE",
     "secretManagerDependencies": "REST_METADATA_AND_VERSION_ADD",
     "cloudSqlAuthProxyVersion": "2.22.0",
@@ -137,7 +141,26 @@
     "parallelism": 1,
     "maxRetries": 0,
     "defaultArguments": ["check"],
-    "explicitCredentialArguments": ["materialize-application-credentials"],
+    "explicitCredentialArguments": [
+      "materialize-application-credentials",
+      "recover-canary-application-credential"
+    ],
+    "secretVersionProjectRepresentations": [
+      "mira-refund-sandbox-0001",
+      "925882331349"
+    ],
+    "initialCredentialAdmission": {
+      "preflightVersionCount": 0,
+      "canaryVersionCount": 0
+    },
+    "canaryRecoveryAdmission": {
+      "preflightVersionCount": 1,
+      "preflightVersion": "1",
+      "preflightState": "ENABLED",
+      "preflightClientSpecifiedPayloadChecksum": true,
+      "canaryVersionCount": 0,
+      "preflightPayloadAccess": "NONE"
+    },
     "automaticTrigger": "NONE",
     "network": "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc",
     "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",

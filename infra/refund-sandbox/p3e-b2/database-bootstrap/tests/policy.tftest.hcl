@@ -63,7 +63,7 @@ run "exact_dormant_database_bootstrap_shape" {
       toset([
         for grant in values(google_secret_manager_secret_iam_member.credential_materialization) :
         "${grant.secret_id}|${grant.role}"
-      ]) == toset([
+        ]) == toset([
         "mira-p3e-sbx-preflight-database-url|roles/secretmanager.secretVersionAdder",
         "mira-p3e-sbx-preflight-database-url|roles/secretmanager.viewer",
         "mira-p3e-sbx-canary-database-url|roles/secretmanager.secretVersionAdder",
@@ -123,6 +123,7 @@ run "exact_dormant_database_bootstrap_shape" {
       output.bootstrap_manifest.default_mode == "check" &&
       output.bootstrap_manifest.explicit_mutating_mode == "apply" &&
       output.bootstrap_manifest.credential_materialization_mode == "materialize-application-credentials" &&
+      output.bootstrap_manifest.credential_recovery_mode == "recover-canary-application-credential" &&
       output.bootstrap_manifest.automatic_trigger == "NONE" &&
       output.bootstrap_manifest.provider_credentials == "NONE" &&
       output.bootstrap_manifest.secret_manager_dependencies == "EXACT_SECRET_METADATA_AND_VERSION_ADD_ONLY" &&
