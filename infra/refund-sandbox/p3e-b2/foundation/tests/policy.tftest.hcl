@@ -13,13 +13,14 @@ variables {
       "compute.googleapis.com",
       "dns.googleapis.com",
       "iam.googleapis.com",
+      "run.googleapis.com",
       "secretmanager.googleapis.com",
       "servicenetworking.googleapis.com",
       "serviceusage.googleapis.com",
       "sqladmin.googleapis.com",
       "storage.googleapis.com",
     ]
-    managed_api_set_sha256 = "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5"
+    managed_api_set_sha256 = "a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4"
     bootstrap_preenabled_api_names = [
       "cloudresourcemanager.googleapis.com",
       "serviceusage.googleapis.com",
@@ -221,13 +222,14 @@ run "reject_unreviewed_activation_manifest" {
         "compute.googleapis.com",
         "dns.googleapis.com",
         "iam.googleapis.com",
+        "run.googleapis.com",
         "secretmanager.googleapis.com",
         "servicenetworking.googleapis.com",
         "serviceusage.googleapis.com",
         "sqladmin.googleapis.com",
         "storage.googleapis.com",
       ]
-      managed_api_set_sha256 = "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5"
+      managed_api_set_sha256 = "a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4"
       bootstrap_preenabled_api_names = [
         "cloudresourcemanager.googleapis.com",
         "serviceusage.googleapis.com",
@@ -396,7 +398,7 @@ run "reject_extra_managed_api" {
     service_activation_handoff = merge(var.service_activation_handoff, {
       managed_api_names = concat(
         var.service_activation_handoff.managed_api_names,
-        ["run.googleapis.com"],
+        ["logging.googleapis.com"],
       )
     })
   }

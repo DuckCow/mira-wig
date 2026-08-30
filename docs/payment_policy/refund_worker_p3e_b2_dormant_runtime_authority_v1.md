@@ -89,12 +89,13 @@ These handoffs are repository admission evidence, not trusted cloud evidence. Th
 private IP, state, secret payload, password, database URL, credential, target, approval, or
 execution token. The root uses no remote state or cloud data source.
 
-The historical R1B activation set does not include `run.googleapis.com`. R2B1 does not mutate that
-historical subinventory or enable the API elsewhere. Cloud Run API activation and its separately
-authorized operator evidence therefore remain deferred:
+The historical R1B activation set did not include `run.googleapis.com`, and R2B1 did not mutate that
+historical subinventory or enable the API elsewhere. The current service-activation authority now
+separately defines `run.googleapis.com` as managed, but this runtime root neither enables nor verifies
+it. Until a later reviewed apply and readback succeeds, its activation status remains:
 
 ```text
-CLOUD_RUN_API_ACTIVATION: DEFERRED_NOT_VERIFIED
+CLOUD_RUN_API_ACTIVATION: DEFINED_AS_MANAGED_NOT_YET_CLOUD_APPLIED
 ```
 
 ## Jobs and private network
@@ -209,7 +210,7 @@ SCHEDULED_SANDBOX: BLOCKED
 LIVE: UNREACHABLE
 IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
 RUNTIME_APPLY_AUTHORIZED: FALSE
-CLOUD_RUN_API_ACTIVATION: DEFERRED_NOT_VERIFIED
+CLOUD_RUN_API_ACTIVATION: DEFINED_AS_MANAGED_NOT_YET_CLOUD_APPLIED
 RUNTIME_ROOT_APPLY_POLICY: UNCONDITIONALLY_BLOCKED_IN_R2B1
 ```
 

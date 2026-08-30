@@ -49,6 +49,7 @@ Observability definitions are deferred rather than retained as executable Terraf
 - `compute.googleapis.com`
 - `dns.googleapis.com`
 - `iam.googleapis.com`
+- `run.googleapis.com`
 - `secretmanager.googleapis.com`
 - `servicenetworking.googleapis.com`
 - `serviceusage.googleapis.com`
@@ -56,8 +57,9 @@ Observability definitions are deferred rather than retained as executable Terraf
 - `storage.googleapis.com`
 
 The API-set SHA-256 is
-`a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5`.
-Runtime-only Logging, Monitoring, and Cloud Run APIs are deferred. Every service uses
+`a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4`.
+`run.googleapis.com` is defined as managed but is not claimed cloud-applied until a later reviewed
+apply and readback succeeds. Runtime-only Logging and Monitoring APIs remain deferred. Every service uses
 `disable_on_destroy = false` and `disable_dependent_services = false`. The root creates no project,
 billing link, service identity, IAM, foundation, or runtime resource.
 
@@ -71,10 +73,10 @@ it enables the remaining services, and the pinned provider validates the project
 Resource Manager reads. R1B defines no bootstrap identity, role, binding, script, project,
 credential, or automatic command and makes no claim that a service is enabled or inspected.
 
-After that attended prerequisite, the pinned `google_project_service` family tracks all ten
+After that attended prerequisite, the pinned `google_project_service` family tracks all eleven
 services. Adoption of an already enabled service is idempotent under the pinned provider contract
 and requires no import solely because the service is enabled. Discovery of incompatible provider
-behavior is a kill condition, and routine `-target` is forbidden. The other seven services are not
+behavior is a kill condition, and routine `-target` is forbidden. The other eight services are not
 bootstrap prerequisites, without assuming that they are currently disabled.
 
 The earlier four-permission candidate was rejected because it described generic singleton
@@ -405,7 +407,7 @@ Their future prefixes are:
 - `p3e-b2/foundation-deployer-authority`
 
 The service-activation output is available only after a successful future apply. Its bounded raw
-post-apply manifest contains the exact contract and project, ten managed APIs and hash, three
+post-apply manifest contains the exact contract and project, eleven managed APIs and hash, three
 bootstrap APIs and hash, pinned provider/resource identity, source state prefix,
 `activation_apply_status = APPLIED`, `operator_review_status = REVIEW_REQUIRED`, and
 `evidence_type = TERRAFORM_APPLY_OUTPUT_NOT_CLOUD_AUTHENTICATED`. It contains no credential,

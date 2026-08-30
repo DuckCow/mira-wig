@@ -74,6 +74,7 @@ const EXPECTED_APIS = Object.freeze([
   "compute.googleapis.com",
   "dns.googleapis.com",
   "iam.googleapis.com",
+  "run.googleapis.com",
   "secretmanager.googleapis.com",
   "servicenetworking.googleapis.com",
   "serviceusage.googleapis.com",
@@ -269,7 +270,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
       "oslogin.googleapis.com",
     );
     expect(authorityContract.serviceActivationApiSetSha256).toBe(
-      "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5",
+      "a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4",
     );
     expect(authorityContract.serviceActivationBootstrap.preenabledApiNames).toEqual(
       EXPECTED_BOOTSTRAP_APIS,

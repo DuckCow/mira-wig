@@ -14,6 +14,7 @@ run "exact_foundation_authority_api_set" {
       "compute.googleapis.com",
       "dns.googleapis.com",
       "iam.googleapis.com",
+      "run.googleapis.com",
       "secretmanager.googleapis.com",
       "servicenetworking.googleapis.com",
       "serviceusage.googleapis.com",
@@ -41,6 +42,7 @@ run "exact_foundation_authority_api_set" {
         "compute.googleapis.com",
         "dns.googleapis.com",
         "iam.googleapis.com",
+        "run.googleapis.com",
         "secretmanager.googleapis.com",
         "servicenetworking.googleapis.com",
         "serviceusage.googleapis.com",
@@ -48,7 +50,7 @@ run "exact_foundation_authority_api_set" {
         "storage.googleapis.com",
       ]) &&
       output.service_activation_manifest.api_set_sha256 ==
-      "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5" &&
+      "a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4" &&
       output.service_activation_manifest.bootstrap_preenabled_api_names == tolist([
         "cloudresourcemanager.googleapis.com",
         "serviceusage.googleapis.com",

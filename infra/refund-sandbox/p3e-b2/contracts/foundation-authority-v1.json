@@ -6,13 +6,14 @@
     "compute.googleapis.com",
     "dns.googleapis.com",
     "iam.googleapis.com",
+    "run.googleapis.com",
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
     "serviceusage.googleapis.com",
     "sqladmin.googleapis.com",
     "storage.googleapis.com"
   ],
-  "serviceActivationApiSetSha256": "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5",
+  "serviceActivationApiSetSha256": "a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4",
   "serviceActivationBootstrap": {
     "status": "EXTERNAL_PRE_ENABLED_AND_REVIEWED_REQUIRED",
     "preenabledApiNames": [

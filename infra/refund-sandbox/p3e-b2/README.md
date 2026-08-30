@@ -75,7 +75,7 @@ R1A defines three deliberately separate Terraform authority boundaries:
 
 R1B adds three deliberately separate executable definition roots:
 
-- `service-activation` owns only the exact ten APIs required by R1A/R1B authorities and the
+- `service-activation` owns only the exact eleven APIs required by the installed authorities and the
   provider-free foundation;
 - `foundation` owns exactly fifteen long-lived provider-free resources;
 - `foundation-deployer-authority` owns one unbound non-executing custom-role definition.
@@ -194,13 +194,15 @@ Their sorted hash is
 This package creates no bootstrap identity, role, binding, script, credential, or automatic
 command and makes no claim that those APIs were inspected or enabled.
 
-The activation root then tracks the exact ten-service set
-(`artifactregistry`, `cloudresourcemanager`, `compute`, `dns`, `iam`, `secretmanager`,
+The activation root then tracks the exact eleven-service set
+(`artifactregistry`, `cloudresourcemanager`, `compute`, `dns`, `iam`, `run`, `secretmanager`,
 `servicenetworking`, `serviceusage`, `sqladmin`, and `storage`) with hash
-`a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5`.
+`a26c970477ca78a45b2561e21faf743ee8ad6d49e3ca400618dba9881b4a72f4`.
+`run.googleapis.com` is defined as managed by this source authority but is not claimed cloud-applied
+until a later reviewed apply and readback succeeds.
 Pinned-provider adoption of an already enabled service is idempotent and needs no import solely
 for prior enablement. Both deletion flags remain false, routine `-target` is forbidden, and
-incompatible provider behavior is a kill condition. The other seven services are not bootstrap
+incompatible provider behavior is a kill condition. The other eight services are not bootstrap
 prerequisites, without assuming they are disabled.
 
 Its authority contract is pinned to `hashicorp/google` 7.40.0 and
