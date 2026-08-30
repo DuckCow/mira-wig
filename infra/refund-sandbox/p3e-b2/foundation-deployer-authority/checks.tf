@@ -1,8 +1,8 @@
 check "exact_supported_nonexecuting_permissions" {
   assert {
     condition = (
-      length(local.deployer_permissions) == 50 &&
-      length(distinct(local.deployer_permissions)) == 50 &&
+      length(local.deployer_permissions) == 60 &&
+      length(distinct(local.deployer_permissions)) == 60 &&
       tolist(local.deployer_permissions) == sort(local.deployer_permissions) &&
       sha256(join("\n", local.deployer_permissions)) ==
       local.authority_contract.foundationDeployerPermissionSetSha256 &&

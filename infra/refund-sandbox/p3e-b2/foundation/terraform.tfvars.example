@@ -9,6 +9,7 @@ service_activation_handoff = {
     "artifactregistry.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
+    "dns.googleapis.com",
     "iam.googleapis.com",
     "secretmanager.googleapis.com",
     "servicenetworking.googleapis.com",
@@ -16,7 +17,7 @@ service_activation_handoff = {
     "sqladmin.googleapis.com",
     "storage.googleapis.com",
   ]
-  managed_api_set_sha256 = "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3"
+  managed_api_set_sha256 = "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5"
   bootstrap_preenabled_api_names = [
     "cloudresourcemanager.googleapis.com",
     "serviceusage.googleapis.com",

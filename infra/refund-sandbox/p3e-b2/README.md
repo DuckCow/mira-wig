@@ -75,9 +75,9 @@ R1A defines three deliberately separate Terraform authority boundaries:
 
 R1B adds three deliberately separate executable definition roots:
 
-- `service-activation` owns only the exact nine APIs required by R1A/R1B authorities and the
+- `service-activation` owns only the exact ten APIs required by R1A/R1B authorities and the
   provider-free foundation;
-- `foundation` owns exactly eleven long-lived provider-free resources;
+- `foundation` owns exactly fifteen long-lived provider-free resources;
 - `foundation-deployer-authority` owns one unbound non-executing custom-role definition.
 
 `runtime-deferred` is a non-executable ownership boundary. The old `../p3e-b` monolith is retired,
@@ -210,13 +210,13 @@ Their sorted hash is
 This package creates no bootstrap identity, role, binding, script, credential, or automatic
 command and makes no claim that those APIs were inspected or enabled.
 
-The activation root then tracks the exact nine-service set
-(`artifactregistry`, `cloudresourcemanager`, `compute`, `iam`, `secretmanager`,
+The activation root then tracks the exact ten-service set
+(`artifactregistry`, `cloudresourcemanager`, `compute`, `dns`, `iam`, `secretmanager`,
 `servicenetworking`, `serviceusage`, `sqladmin`, and `storage`) with hash
-`61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3`.
+`a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5`.
 Pinned-provider adoption of an already enabled service is idempotent and needs no import solely
 for prior enablement. Both deletion flags remain false, routine `-target` is forbidden, and
-incompatible provider behavior is a kill condition. The other six services are not bootstrap
+incompatible provider behavior is a kill condition. The other seven services are not bootstrap
 prerequisites, without assuming they are disabled.
 
 Its authority contract is pinned to `hashicorp/google` 7.40.0 and
@@ -259,10 +259,12 @@ The deployer role is derived from the reviewed resource ledger and is intentiona
 update-only. It excludes delete, Job execution, API activation, project IAM, deny mutation, secret
 payload/version, SQL user, key, billing, and impersonation permissions. The authority root creates
 no identity or binding. Replacement requiring deletion is a separate future break-glass operation.
-The exact 50-permission role hash is
-`13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944`.
+The exact 60-permission role hash is
+`7460121269bcfd3a129ae36c9b24c0e49d17ae67b70624d288cf5796ba3ce8b7`.
 Its foundation-only `compute.networks.updatePolicy` permission is justified only by both firewall
-resources and the subnetwork in the eleven-address ledger; it is not IAM policy authority.
+allow resources, the deny firewall, and the subnetwork in the fifteen-address ledger; it is not
+IAM policy authority. The ten Cloud DNS permissions are restricted to create/read/update of the
+private zone and its exact record sets; zone and record deletion remain excluded.
 
 ## R2A image boundary
 
@@ -305,9 +307,11 @@ service. The application does not call the Logging API, so no logging role is re
 The preflight Job runs only `sandbox-preflight`. The dormant canary definition runs
 `worker-once`, but has no provider credential, target, approval, invoker, scheduler, or deny
 exception. Both definitions use Gen2 Direct VPC egress, the exact foundation network and subnet,
-`PRIVATE_RANGES_ONLY`, one task, parallelism one, zero retries, one CPU, 512 MiB, and 300 seconds.
+`ALL_TRAFFIC`, one task, parallelism one, zero retries, one CPU, 512 MiB, and 300 seconds.
 Each interface has exactly the committed foundation firewall target tag
-`refund-provider-free`; there is no additional tag or connector.
+`refund-provider-free`; there is no additional tag or connector. The foundation admits proxy
+TCP 3307 only to PSA and Google API HTTPS only to `199.36.153.4/30`, resolves `googleapis.com`
+through a VPC-private restricted zone, and denies all other IPv4 egress.
 The timeout is 120 seconds of proxy readiness plus the existing 150-second external worker
 deadline, three seconds of proxy shutdown, and 27 seconds of result/process margin.
 

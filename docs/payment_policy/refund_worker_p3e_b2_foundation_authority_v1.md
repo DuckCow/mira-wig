@@ -47,6 +47,7 @@ Observability definitions are deferred rather than retained as executable Terraf
 - `artifactregistry.googleapis.com`
 - `cloudresourcemanager.googleapis.com`
 - `compute.googleapis.com`
+- `dns.googleapis.com`
 - `iam.googleapis.com`
 - `secretmanager.googleapis.com`
 - `servicenetworking.googleapis.com`
@@ -55,7 +56,7 @@ Observability definitions are deferred rather than retained as executable Terraf
 - `storage.googleapis.com`
 
 The API-set SHA-256 is
-`61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3`.
+`a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5`.
 Runtime-only Logging, Monitoring, and Cloud Run APIs are deferred. Every service uses
 `disable_on_destroy = false` and `disable_dependent_services = false`. The root creates no project,
 billing link, service identity, IAM, foundation, or runtime resource.
@@ -70,10 +71,10 @@ it enables the remaining services, and the pinned provider validates the project
 Resource Manager reads. R1B defines no bootstrap identity, role, binding, script, project,
 credential, or automatic command and makes no claim that a service is enabled or inspected.
 
-After that attended prerequisite, the pinned `google_project_service` family tracks all nine
+After that attended prerequisite, the pinned `google_project_service` family tracks all ten
 services. Adoption of an already enabled service is idempotent under the pinned provider contract
 and requires no import solely because the service is enabled. Discovery of incompatible provider
-behavior is a kill condition, and routine `-target` is forbidden. The other six services are not
+behavior is a kill condition, and routine `-target` is forbidden. The other seven services are not
 bootstrap prerequisites, without assuming that they are currently disabled.
 
 The earlier four-permission candidate was rejected because it described generic singleton
@@ -189,14 +190,18 @@ or operation was inspected, and no API was enabled.
 
 ## Foundation graph
 
-The foundation root owns exactly eleven addresses:
+The foundation root owns exactly fifteen addresses:
 
 - `google_artifact_registry_repository.refund_images`
 - `google_compute_firewall.allow_private_sql`
+- `google_compute_firewall.allow_restricted_google_apis`
 - `google_compute_firewall.deny_other_egress`
 - `google_compute_global_address.private_service_access`
 - `google_compute_network.refund`
 - `google_compute_subnetwork.refund`
+- `google_dns_managed_zone.googleapis`
+- `google_dns_record_set.restricted_googleapis_a`
+- `google_dns_record_set.wildcard_googleapis_cname`
 - `google_secret_manager_secret.canary_database_url`
 - `google_secret_manager_secret.preflight_database_url`
 - `google_service_networking_connection.private_service_access`
@@ -204,7 +209,7 @@ The foundation root owns exactly eleven addresses:
 - `google_sql_database_instance.refund`
 
 The exact sorted graph SHA-256 is
-`f15f2716c0524ccd5ca3b86757076b433cce9a5c4c468aa808eae645c028c0ec`.
+`7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f`.
 `foundation-resource-graph-v1.json` records every address, resource type, create/read/update
 operation, long-running-operation read, API, permission, official source, retrieval date, support
 classification, deletion consequence, and future break-glass owner. The ledger and actual HCL must
@@ -218,13 +223,21 @@ retention inputs, finite positive disk-autoresize capacity, provider deletion pr
 Terraform `prevent_destroy`. The database depends on the instance. The repository is immutable.
 The two secrets are containers only.
 
+Provider-free proxy data traffic is allowed only as TCP 3307 to the allocated PSA `/16`. Google
+API control traffic is allowed only as TCP 443 to the restricted VIP `199.36.153.4/30`. A private
+`googleapis.com.` zone bound to the exact foundation VPC resolves `restricted.googleapis.com.` to
+the four addresses in that `/30` and resolves `*.googleapis.com.` by CNAME to that restricted
+name. The priority-1000 deny-all rule remains after the priority-900 and priority-910 exceptions.
+There is no general public TCP 443 exception or Cloud NAT.
+
 Cloud SQL tier, availability, disk size, disk-autoresize cap, backup/PITR retention, maintenance
 window, and deletion/final-backup decision are explicit synthetic inputs. The Service Networking
 connection uses provider deletion policy `ABANDON` plus `prevent_destroy`; ordinary replacement or
 deletion is not admitted. No NAT, Serverless VPC Access connector, runtime identity, IAM binding,
 secret version, SQL user, Job, scheduler, or provider credential is present.
 
-The admitted create/update methods for `google_compute_firewall.allow_private_sql` and
+The admitted create/update methods for `google_compute_firewall.allow_private_sql`,
+`google_compute_firewall.allow_restricted_google_apis`, and
 `google_compute_firewall.deny_other_egress`, plus the creation of
 `google_compute_subnetwork.refund`, require the custom-role-supported
 `compute.networks.updatePolicy` permission on the exact foundation VPC network-policy scope.
@@ -237,9 +250,9 @@ operation is admitted.
 
 ## Foundation deployer derivation
 
-The exact 50-permission set, with SHA-256
-`13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944`,
-is the union of the reviewed create/read/update needs of the eleven foundation resources:
+The exact 60-permission set, with SHA-256
+`7460121269bcfd3a129ae36c9b24c0e49d17ae67b70624d288cf5796ba3ce8b7`,
+is the union of the reviewed create/read/update needs of the fifteen foundation resources:
 
 ```text
 artifactregistry.locations.get
@@ -280,6 +293,16 @@ compute.subnetworks.list
 compute.subnetworks.setPrivateIpGoogleAccess
 compute.subnetworks.update
 compute.subnetworks.use
+dns.changes.create
+dns.changes.get
+dns.managedZones.create
+dns.managedZones.get
+dns.managedZones.update
+dns.networks.bindPrivateDNSZone
+dns.networks.targetWithPeeringZone
+dns.resourceRecordSets.create
+dns.resourceRecordSets.list
+dns.resourceRecordSets.update
 resourcemanager.projects.get
 secretmanager.locations.get
 secretmanager.locations.list
@@ -294,7 +317,7 @@ servicenetworking.services.updateConsumerConfig
 serviceusage.services.use
 ```
 
-Official Google permission and product references were refreshed on 2026-07-23 and are frozen
+Official Google permission and product references were refreshed on 2026-08-30 and are frozen
 per ledger entry. Each permission is classified `SUPPORTED`. This includes permissions for which
 the current custom-role support authority omits an explicit support level: Google states that a
 missing support-level marker means the permission is supported. No `TESTING` or `NOT_SUPPORTED`
@@ -302,7 +325,7 @@ permission is included. Public documentation is repository design authority only
 that the role is valid, created, propagated, or usable in any real project.
 
 The sources are the official Google IAM custom-role support guide; Compute Engine, Cloud SQL,
-Artifact Registry, Secret Manager, Service Networking, Service Usage, and Resource Manager
+Artifact Registry, Cloud DNS, Secret Manager, Service Networking, Service Usage, and Resource Manager
 permission references; private-services-access documentation; and official HashiCorp Google
 provider 7.40.0 Registry schemas. Exact titles and URLs are recorded in the resource-graph ledger.
 
@@ -375,7 +398,7 @@ Their future prefixes are:
 - `p3e-b2/foundation-deployer-authority`
 
 The service-activation output is available only after a successful future apply. Its bounded raw
-post-apply manifest contains the exact contract and project, nine managed APIs and hash, three
+post-apply manifest contains the exact contract and project, ten managed APIs and hash, three
 bootstrap APIs and hash, pinned provider/resource identity, source state prefix,
 `activation_apply_status = APPLIED`, `operator_review_status = REVIEW_REQUIRED`, and
 `evidence_type = TERRAFORM_APPLY_OUTPUT_NOT_CLOUD_AUTHENTICATED`. It contains no credential,
@@ -441,12 +464,14 @@ LIVE: UNREACHABLE
 R2B1 supersession note (2026-07-26): P3E-B2-R2B1 now defines, but does not provision, runtime
 identity, exact database secret-version reference admission, and dormant Cloud Run Job Terraform.
 The authoritative current contract is
-`infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. The R1B inventory and status
-block above remain historical authority. R2B1 does not authorize runtime apply, image publication,
+`infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json`. The original R1B inventory in
+repository history remains historical authority. R2B1 does not authorize runtime apply, image publication,
 secret payload/version creation, database bootstrap, Job invocation, scheduler, deny exception, or
 provider contact.
 
-Correction note: the R2B1 production root is unconditionally plan/apply-blocked while deny
-effectiveness is not cloud-proven. Its two Direct VPC Job interfaces use exactly the foundation
-firewall target tag `refund-provider-free`, connecting the dormant definitions to both committed
-egress rules without changing this historical foundation graph.
+Provider-free proxy/egress correction note (2026-08-30): the R2B1 production root remains
+unconditionally plan/apply-blocked while deny effectiveness is not cloud-proven. Its two Direct
+VPC Job interfaces use `ALL_TRAFFIC` with the exact foundation firewall target tag
+`refund-provider-free`. The current foundation graph is the fifteen-address contract above:
+proxy TCP 3307 to PSA, restricted Google API TCP 443 and private DNS, then deny-all. No runtime
+apply, provider egress, or Eximbay canary behavior is admitted by this correction.

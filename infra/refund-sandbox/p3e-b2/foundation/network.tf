@@ -62,7 +62,26 @@ resource "google_compute_firewall" "allow_private_sql" {
 
   allow {
     protocol = "tcp"
-    ports    = ["5432"]
+    ports    = ["3307"]
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_compute_firewall" "allow_restricted_google_apis" {
+  project            = local.project_id
+  name               = "${var.resource_prefix}-allow-restricted-google-apis"
+  network            = google_compute_network.refund.name
+  direction          = "EGRESS"
+  priority           = 910
+  target_tags        = ["refund-provider-free"]
+  destination_ranges = ["199.36.153.4/30"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
   }
 
   lifecycle {
@@ -82,6 +101,55 @@ resource "google_compute_firewall" "deny_other_egress" {
   deny {
     protocol = "all"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_dns_managed_zone" "googleapis" {
+  project     = local.project_id
+  name        = local.names.googleapis_dns_zone
+  dns_name    = "googleapis.com."
+  description = "Restricted Google APIs for provider-free refund workloads."
+  visibility  = "private"
+
+  private_visibility_config {
+    networks {
+      network_url = google_compute_network.refund.id
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_dns_record_set" "restricted_googleapis_a" {
+  project      = local.project_id
+  managed_zone = google_dns_managed_zone.googleapis.name
+  name         = "restricted.googleapis.com."
+  type         = "A"
+  ttl          = 300
+  rrdatas = [
+    "199.36.153.4",
+    "199.36.153.5",
+    "199.36.153.6",
+    "199.36.153.7",
+  ]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_dns_record_set" "wildcard_googleapis_cname" {
+  project      = local.project_id
+  managed_zone = google_dns_managed_zone.googleapis.name
+  name         = "*.googleapis.com."
+  type         = "CNAME"
+  ttl          = 300
+  rrdatas      = ["restricted.googleapis.com."]
 
   lifecycle {
     prevent_destroy = true

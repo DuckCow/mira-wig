@@ -192,7 +192,7 @@ writable directories, and the verified proxy executable.
 ## Private network and socket contract
 
 The later Job must use the second-generation Cloud Run environment, Direct VPC egress, and
-`private-ranges-only`. Database traffic uses Cloud SQL Auth Proxy v2 with `--private-ip`, then
+`ALL_TRAFFIC`. Database traffic uses Cloud SQL Auth Proxy v2 with `--private-ip`, then
 PostgreSQL uses:
 
 ```text
@@ -201,8 +201,11 @@ PostgreSQL uses:
 
 The committed subnet is `10.74.0.0/24`, which is larger than the current documented `/26`
 minimum. No Serverless VPC Access connector or NAT is introduced. Private database traffic
-follows Direct VPC; SQL Admin API and payment-provider HTTPS remain ordinary external egress.
-No private database IP is embedded in DATABASE_URL or exposed by foundation outputs.
+follows Direct VPC as proxy TCP 3307 to PSA. Proxy control-plane HTTPS resolves through the
+VPC-private `googleapis.com.` zone to `restricted.googleapis.com.` and is admitted only to
+`199.36.153.4/30`; deny-all retains every other IPv4 destination. Provider HTTPS is not authorized
+for these provider-free Jobs. No private database IP is embedded in DATABASE_URL or exposed by
+foundation outputs.
 
 `REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME` must exactly equal the instance segment admitted by
 the existing canonical DATABASE_URL guard. That guard retains literal `host=`, the `/cloudsql`

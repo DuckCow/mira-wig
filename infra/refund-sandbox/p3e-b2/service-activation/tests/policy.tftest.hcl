@@ -12,6 +12,7 @@ run "exact_foundation_authority_api_set" {
       "artifactregistry.googleapis.com",
       "cloudresourcemanager.googleapis.com",
       "compute.googleapis.com",
+      "dns.googleapis.com",
       "iam.googleapis.com",
       "secretmanager.googleapis.com",
       "servicenetworking.googleapis.com",
@@ -38,6 +39,7 @@ run "exact_foundation_authority_api_set" {
         "artifactregistry.googleapis.com",
         "cloudresourcemanager.googleapis.com",
         "compute.googleapis.com",
+        "dns.googleapis.com",
         "iam.googleapis.com",
         "secretmanager.googleapis.com",
         "servicenetworking.googleapis.com",
@@ -46,7 +48,7 @@ run "exact_foundation_authority_api_set" {
         "storage.googleapis.com",
       ]) &&
       output.service_activation_manifest.api_set_sha256 ==
-      "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3" &&
+      "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5" &&
       output.service_activation_manifest.bootstrap_preenabled_api_names == tolist([
         "cloudresourcemanager.googleapis.com",
         "serviceusage.googleapis.com",
@@ -99,9 +101,9 @@ run "exact_foundation_authority_api_set" {
         "resourcemanager.projects.get",
       ]) &&
       length(output.service_activation_manifest.activation_exclusive_foundation_intersection) == 0 &&
-      output.service_activation_manifest.foundation_deployer_permission_count == 50 &&
+      output.service_activation_manifest.foundation_deployer_permission_count == 60 &&
       output.service_activation_manifest.foundation_deployer_permission_set_sha256 ==
-      "13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944" &&
+      "7460121269bcfd3a129ae36c9b24c0e49d17ae67b70624d288cf5796ba3ce8b7" &&
       output.service_activation_manifest.foundation_deployer_can_complete_activation_lifecycle == false
     )
     error_message = "Shared-read and activation-exclusive authority drifted."

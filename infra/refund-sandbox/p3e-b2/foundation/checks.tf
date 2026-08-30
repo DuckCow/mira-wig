@@ -32,7 +32,7 @@ check "exact_foundation_graph_contract" {
   assert {
     condition = (
       local.authority_contract.foundationResourceGraphSha256 ==
-      "f15f2716c0524ccd5ca3b86757076b433cce9a5c4c468aa808eae645c028c0ec"
+      "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f"
     )
     error_message = "Foundation resource-graph authority drifted."
   }

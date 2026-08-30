@@ -1,6 +1,6 @@
 {
   "contractVersion": "mira-refund-eximbay-canary-image-policy/v1",
-  "parentAuthoritySha256": "9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a",
+  "parentAuthoritySha256": "4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473",
   "baselineCommit": "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
   "buildContext": {
     "manifestSha256": "00591418f2a5bb073e70cff114868520e22d71a49d170d5ea2302c07249fc10e",

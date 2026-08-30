@@ -72,6 +72,7 @@ const EXPECTED_APIS = Object.freeze([
   "artifactregistry.googleapis.com",
   "cloudresourcemanager.googleapis.com",
   "compute.googleapis.com",
+  "dns.googleapis.com",
   "iam.googleapis.com",
   "secretmanager.googleapis.com",
   "servicenetworking.googleapis.com",
@@ -148,10 +149,14 @@ const EXPECTED_EXCLUDED_PERMISSION_PREFIXES = Object.freeze([
 const EXPECTED_FOUNDATION_ADDRESSES = Object.freeze([
   "google_artifact_registry_repository.refund_images",
   "google_compute_firewall.allow_private_sql",
+  "google_compute_firewall.allow_restricted_google_apis",
   "google_compute_firewall.deny_other_egress",
   "google_compute_global_address.private_service_access",
   "google_compute_network.refund",
   "google_compute_subnetwork.refund",
+  "google_dns_managed_zone.googleapis",
+  "google_dns_record_set.restricted_googleapis_a",
+  "google_dns_record_set.wildcard_googleapis_cname",
   "google_secret_manager_secret.canary_database_url",
   "google_secret_manager_secret.preflight_database_url",
   "google_service_networking_connection.private_service_access",
@@ -198,6 +203,16 @@ const EXPECTED_PERMISSIONS = Object.freeze([
   "compute.subnetworks.setPrivateIpGoogleAccess",
   "compute.subnetworks.update",
   "compute.subnetworks.use",
+  "dns.changes.create",
+  "dns.changes.get",
+  "dns.managedZones.create",
+  "dns.managedZones.get",
+  "dns.managedZones.update",
+  "dns.networks.bindPrivateDNSZone",
+  "dns.networks.targetWithPeeringZone",
+  "dns.resourceRecordSets.create",
+  "dns.resourceRecordSets.list",
+  "dns.resourceRecordSets.update",
   "resourcemanager.projects.get",
   "secretmanager.locations.get",
   "secretmanager.locations.list",
@@ -244,8 +259,17 @@ describe("P3E-B2-R1B foundation authority policy", () => {
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {
     expect(authorityContract.serviceActivationApis).toEqual(EXPECTED_APIS);
+    expect(authorityContract.serviceActivationApis).toContain(
+      "dns.googleapis.com",
+    );
+    expect(authorityContract.serviceActivationApis).not.toContain(
+      "iamcredentials.googleapis.com",
+    );
+    expect(authorityContract.serviceActivationApis).not.toContain(
+      "oslogin.googleapis.com",
+    );
     expect(authorityContract.serviceActivationApiSetSha256).toBe(
-      "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3",
+      "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5",
     );
     expect(authorityContract.serviceActivationBootstrap.preenabledApiNames).toEqual(
       EXPECTED_BOOTSTRAP_APIS,
@@ -268,7 +292,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
       EXPECTED_PERMISSIONS,
     );
     expect(authorityContract.foundationDeployerPermissionSetSha256).toBe(
-      "13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944",
+      "7460121269bcfd3a129ae36c9b24c0e49d17ae67b70624d288cf5796ba3ce8b7",
     );
     expect(authorityContract.statePrefixes).toContain(
       "p3e-b2/service-activation",
@@ -352,12 +376,12 @@ describe("P3E-B2-R1B foundation authority policy", () => {
         foundation.has(permission),
       ),
     ).toBe(false);
-    expect(EXPECTED_PERMISSIONS).toHaveLength(50);
+    expect(EXPECTED_PERMISSIONS).toHaveLength(60);
     expect(authorityContract.foundationDeployerPermissions).toEqual(
       EXPECTED_PERMISSIONS,
     );
     expect(authorityContract.foundationDeployerPermissionSetSha256).toBe(
-      "13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944",
+      "7460121269bcfd3a129ae36c9b24c0e49d17ae67b70624d288cf5796ba3ce8b7",
     );
   });
 
@@ -432,7 +456,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
         ({ deleteIntentionallyExcluded }) => deleteIntentionallyExcluded,
       ),
     ).toBe(true);
-    expect(resourceGraph.retrievedAt).toBe("2026-07-23");
+    expect(resourceGraph.retrievedAt).toBe("2026-08-30");
     expect(
       Object.values(resourceGraph.sources).every(
         ({ url }) => (
@@ -449,6 +473,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
       .sort();
     expect(networkPolicyResources).toEqual([
       "google_compute_firewall.allow_private_sql",
+      "google_compute_firewall.allow_restricted_google_apis",
       "google_compute_firewall.deny_other_egress",
       "google_compute_subnetwork.refund",
     ]);
@@ -465,6 +490,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
           method: "compute.firewalls.insert",
           resourceAddresses: [
             "google_compute_firewall.allow_private_sql",
+            "google_compute_firewall.allow_restricted_google_apis",
             "google_compute_firewall.deny_other_egress",
           ],
         },
@@ -472,6 +498,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
           method: "compute.firewalls.patch",
           resourceAddresses: [
             "google_compute_firewall.allow_private_sql",
+            "google_compute_firewall.allow_restricted_google_apis",
             "google_compute_firewall.deny_other_egress",
           ],
         },
@@ -523,7 +550,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
         "compute.subnetworks.update",
       ]),
     );
-    expect(authorityContract.foundationResourceAddresses).toHaveLength(11);
+    expect(authorityContract.foundationResourceAddresses).toHaveLength(15);
     expect(
       exactSetHash(authorityContract.foundationResourceAddresses),
     ).toBe(authorityContract.foundationResourceGraphSha256);
@@ -544,6 +571,31 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(source).not.toMatch(
       /(?:authorized_networks|terraform_remote_state|credentials\s*=|-target)/u,
     );
+  });
+
+  it("routes only proxy data and restricted Google API control traffic before deny-all", () => {
+    const network = readFileSync(join(FOUNDATION, "network.tf"), "utf8");
+    expect(network).toContain('ports    = ["3307"]');
+    expect(network).not.toContain('ports    = ["5432"]');
+    expect(network).toContain('destination_ranges = ["199.36.153.4/30"]');
+    expect(network).toContain('ports    = ["443"]');
+    expect(network).not.toMatch(
+      /destination_ranges\s*=\s*\["0\.0\.0\.0\/0"\][\s\S]{0,160}allow\s*\{[\s\S]{0,80}ports\s*=\s*\["443"\]/u,
+    );
+    expect(network).toContain('priority           = 900');
+    expect(network).toContain('priority           = 910');
+    expect(network).toContain('priority           = 1000');
+    expect(network.match(
+      /target_tags\s*=\s*\["refund-provider-free"\]/gu,
+    )).toHaveLength(3);
+    expect(network).toContain('dns_name    = "googleapis.com."');
+    expect(network).toContain('visibility  = "private"');
+    expect(network).toContain('name         = "restricted.googleapis.com."');
+    expect(network).toContain('name         = "*.googleapis.com."');
+    expect(network).toContain('rrdatas      = ["restricted.googleapis.com."]');
+    for (const address of [4, 5, 6, 7]) {
+      expect(network).toContain(`"199.36.153.${address}"`);
+    }
   });
 
   it("derives the exact supported delete-free role from the resource ledger", () => {

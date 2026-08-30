@@ -256,7 +256,12 @@
       "refund-provider-free"
     ],
     "foundationFirewallTargetTag": "refund-provider-free",
-    "egress": "PRIVATE_RANGES_ONLY",
+    "egress": "ALL_TRAFFIC",
+    "proxyDataPlaneTcpPort": 3307,
+    "restrictedGoogleApisTcpPort": 443,
+    "restrictedGoogleApisIpv4Range": "199.36.153.4/30",
+    "googleapisPrivateDnsZone": "EXACT_FOUNDATION_HANDOFF",
+    "otherIpv4Egress": "DENY",
     "serverlessVpcAccessConnector": "FORBIDDEN",
     "databaseEndpoint": "CLOUD_SQL_PRIVATE_IP_ONLY",
     "applicationTransport": "POSTGRESQL_UNIX_SOCKET",

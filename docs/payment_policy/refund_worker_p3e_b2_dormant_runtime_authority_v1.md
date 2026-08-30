@@ -121,15 +121,17 @@ max retries: 0
 CPU: 1
 memory: 512Mi
 task timeout: 300 seconds
-Direct VPC egress: PRIVATE_RANGES_ONLY
+Direct VPC egress: ALL_TRAFFIC
 network/subnetwork: exact foundation handoff
 network interface tags: exactly ["refund-provider-free"]
 Serverless VPC Access connector: absent
 ```
 
-That tag is the exact target tag used by both committed foundation egress firewall rules. It puts
-each Job Direct VPC interface inside the reviewed allow-private-SQL and deny-other-egress target
-set.
+That tag is the exact target tag used by all three committed foundation egress firewall rules. It
+puts each Job Direct VPC interface inside the reviewed proxy TCP 3307-to-PSA allow, restricted
+Google API TCP 443-to-`199.36.153.4/30` allow, and deny-other-egress target set. The private
+`googleapis.com.` zone maps API names to `restricted.googleapis.com.`; no general public HTTPS
+route, connector, or NAT is admitted.
 
 The exact timeout is 120 seconds of proxy readiness, the existing 150-second external worker hard
 deadline, three seconds of orderly/forced proxy cleanup, and 27 seconds of result serialization

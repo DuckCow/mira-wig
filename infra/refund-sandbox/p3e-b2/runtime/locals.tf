@@ -85,6 +85,7 @@ locals {
       "foundation_apply_status",
       "foundation_operator_review_status",
       "foundation_resource_graph_sha256",
+      "googleapis_private_zone_name",
       "network_resource_name",
       "preflight_database_secret_resource_name",
       "project_id",
@@ -92,6 +93,7 @@ locals {
       "provider_source",
       "provider_version",
       "region",
+      "restricted_googleapis_ipv4_range",
       "source_state_prefix",
       "subnetwork_resource_name",
     ]) &&
@@ -113,8 +115,11 @@ locals {
     "projects/${var.project_id}/secrets/${var.resource_prefix}-canary-database-url" &&
     var.foundation_handoff.artifact_repository_resource_name ==
     "projects/${var.project_id}/locations/asia-northeast3/repositories/${var.resource_prefix}-refund-images" &&
+    var.foundation_handoff.googleapis_private_zone_name ==
+    "${var.resource_prefix}-googleapis" &&
+    var.foundation_handoff.restricted_googleapis_ipv4_range == "199.36.153.4/30" &&
     var.foundation_handoff.foundation_resource_graph_sha256 ==
-    "f15f2716c0524ccd5ca3b86757076b433cce9a5c4c468aa808eae645c028c0ec" &&
+    "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f" &&
     var.foundation_handoff.source_state_prefix == "p3e-b2/foundation" &&
     var.foundation_handoff.activation_apply_status == "APPLIED" &&
     var.foundation_handoff.activation_operator_review_status == "OPERATOR_REVIEWED" &&

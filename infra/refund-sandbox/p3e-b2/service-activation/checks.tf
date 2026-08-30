@@ -33,7 +33,7 @@ check "exact_service_activation_contract" {
       local.activation_permissions &&
       local.activation_foundation_intersection == tolist(["resourcemanager.projects.get"]) &&
       length(local.exclusive_foundation_intersection) == 0 &&
-      length(local.foundation_deployer_permissions) == 50 &&
+      length(local.foundation_deployer_permissions) == 60 &&
       sha256(join("\n", local.foundation_deployer_permissions)) ==
       local.authority_contract.foundationDeployerPermissionSetSha256 &&
       length(local.bootstrap_preenabled_services) == 3 &&

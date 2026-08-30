@@ -181,7 +181,7 @@ resource "google_cloud_run_v2_job" "preflight" {
       }
 
       vpc_access {
-        egress = "PRIVATE_RANGES_ONLY"
+        egress = "ALL_TRAFFIC"
 
         network_interfaces {
           network    = local.foundation_network_resource_name
@@ -247,7 +247,7 @@ resource "google_cloud_run_v2_job" "dormant_canary" {
       }
 
       vpc_access {
-        egress = "PRIVATE_RANGES_ONLY"
+        egress = "ALL_TRAFFIC"
 
         network_interfaces {
           network    = local.foundation_network_resource_name

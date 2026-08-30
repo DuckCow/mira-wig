@@ -19,10 +19,10 @@ run "exact_unbound_nonexecuting_custom_role" {
 
   assert {
     condition = (
-      length(google_project_iam_custom_role.foundation_deployer.permissions) == 50 &&
-      length(distinct(google_project_iam_custom_role.foundation_deployer.permissions)) == 50 &&
+      length(google_project_iam_custom_role.foundation_deployer.permissions) == 60 &&
+      length(distinct(google_project_iam_custom_role.foundation_deployer.permissions)) == 60 &&
       sha256(join("\n", google_project_iam_custom_role.foundation_deployer.permissions)) ==
-      "13f34b23381d8cc4303a33a4aa7d10e1f203b3ea9e8be56da80a6c0dde49b944" &&
+      "7460121269bcfd3a129ae36c9b24c0e49d17ae67b70624d288cf5796ba3ce8b7" &&
       contains(google_project_iam_custom_role.foundation_deployer.permissions, "compute.networks.updatePolicy")
     )
     error_message = "Foundation deployer exact permission set drifted."

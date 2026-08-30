@@ -24,7 +24,7 @@ const CONTRACT_PATH = resolve(
   "../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
 );
 const FROZEN_PARENT_AUTHORITY_SHA256 =
-  "9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a";
+  "4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473";
 const CURRENT_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",

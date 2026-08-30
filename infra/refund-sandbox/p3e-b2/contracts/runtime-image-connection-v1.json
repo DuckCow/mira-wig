@@ -79,7 +79,7 @@
   "defaultCommand": "NONE_FAIL_CLOSED",
   "connection": {
     "networkMode": "DIRECT_VPC_EGRESS",
-    "egressMode": "PRIVATE_RANGES_ONLY",
+    "egressMode": "ALL_TRAFFIC",
     "databaseEndpoint": "CLOUD_SQL_PRIVATE_IP_ONLY",
     "applicationTransport": "POSTGRESQL_UNIX_SOCKET",
     "socketRoot": "/cloudsql",

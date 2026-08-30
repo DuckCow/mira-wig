@@ -13,6 +13,8 @@ output "foundation_manifest" {
     network_self_link                 = google_compute_network.refund.self_link
     subnetwork_name                   = google_compute_subnetwork.refund.name
     subnetwork_self_link              = google_compute_subnetwork.refund.self_link
+    googleapis_private_zone_name      = google_dns_managed_zone.googleapis.name
+    restricted_googleapis_ipv4_range  = one(google_compute_firewall.allow_restricted_google_apis.destination_ranges)
     private_service_access_range_name = google_compute_global_address.private_service_access.name
     artifact_repository_id            = google_artifact_registry_repository.refund_images.repository_id
     artifact_repository_name          = google_artifact_registry_repository.refund_images.name

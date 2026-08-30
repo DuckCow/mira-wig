@@ -1167,7 +1167,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     });
     expect(contract.connection).toMatchObject({
       networkMode: "DIRECT_VPC_EGRESS",
-      egressMode: "PRIVATE_RANGES_ONLY",
+      egressMode: "ALL_TRAFFIC",
       socketRoot: "/cloudsql",
       region: "asia-northeast3",
       instanceConnectionNameEnvironmentKey:

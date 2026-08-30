@@ -6,6 +6,7 @@ locals {
     artifact_repository = "${var.resource_prefix}-refund-images"
     network             = "${var.resource_prefix}-refund-vpc"
     subnet              = "${var.resource_prefix}-refund-ane3"
+    googleapis_dns_zone = "${var.resource_prefix}-googleapis"
     sql_instance        = "${var.resource_prefix}-refund-pg18"
     database            = "refund_sandbox"
     preflight_db_secret = "${var.resource_prefix}-preflight-database-url"

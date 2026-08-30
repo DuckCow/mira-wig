@@ -200,9 +200,14 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     });
     expect(contract.network).toMatchObject({
       mode: "DIRECT_VPC_EGRESS",
-      egress: "PRIVATE_RANGES_ONLY",
+      egress: "ALL_TRAFFIC",
       tags: ["refund-provider-free"],
       foundationFirewallTargetTag: "refund-provider-free",
+      proxyDataPlaneTcpPort: 3307,
+      restrictedGoogleApisTcpPort: 443,
+      restrictedGoogleApisIpv4Range: "199.36.153.4/30",
+      googleapisPrivateDnsZone: "EXACT_FOUNDATION_HANDOFF",
+      otherIpv4Egress: "DENY",
       serverlessVpcAccessConnector: "FORBIDDEN",
       databaseEndpoint: "CLOUD_SQL_PRIVATE_IP_ONLY",
       applicationTransport: "POSTGRESQL_UNIX_SOCKET",
@@ -226,13 +231,17 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
         job,
       );
       expect(block.match(/tags\s*=\s*local\.network_tags/gu)).toHaveLength(1);
-      expect(block).toContain('egress = "PRIVATE_RANGES_ONLY"');
+      expect(block).toContain('egress = "ALL_TRAFFIC"');
       expect(block).not.toContain("connector");
     }
     expect(runtimeLocals.match(
       /network_tags\s*=\s*\["refund-provider-free"\]/gu,
     )).toHaveLength(1);
-    for (const firewall of ["allow_private_sql", "deny_other_egress"]) {
+    for (const firewall of [
+      "allow_private_sql",
+      "allow_restricted_google_apis",
+      "deny_other_egress",
+    ]) {
       const block = terraformResourceBlock(
         foundationNetwork,
         "google_compute_firewall",
@@ -336,7 +345,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     expect(imageContract.localProof.releaseImageDigest).toBe("ABSENT");
     expect(imageContract.connection).toMatchObject({
       networkMode: "DIRECT_VPC_EGRESS",
-      egressMode: "PRIVATE_RANGES_ONLY",
+      egressMode: "ALL_TRAFFIC",
       databaseEndpoint: "CLOUD_SQL_PRIVATE_IP_ONLY",
       applicationTransport: "POSTGRESQL_UNIX_SOCKET",
     });
@@ -347,7 +356,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     expect(sha256(readFileSync(join(
       INFRA,
       "contracts/runtime-image-connection-v1.json",
-    )))).toBe("9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a");
+    )))).toBe("4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473");
   });
 
   it("publishes every exact non-authorizing status in the policy document", () => {

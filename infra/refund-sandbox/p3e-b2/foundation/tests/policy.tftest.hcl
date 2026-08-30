@@ -11,6 +11,7 @@ variables {
       "artifactregistry.googleapis.com",
       "cloudresourcemanager.googleapis.com",
       "compute.googleapis.com",
+      "dns.googleapis.com",
       "iam.googleapis.com",
       "secretmanager.googleapis.com",
       "servicenetworking.googleapis.com",
@@ -18,7 +19,7 @@ variables {
       "sqladmin.googleapis.com",
       "storage.googleapis.com",
     ]
-    managed_api_set_sha256 = "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3"
+    managed_api_set_sha256 = "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5"
     bootstrap_preenabled_api_names = [
       "cloudresourcemanager.googleapis.com",
       "serviceusage.googleapis.com",
@@ -80,12 +81,44 @@ run "exact_provider_free_foundation_shape" {
   assert {
     condition = (
       google_compute_firewall.allow_private_sql.direction == "EGRESS" &&
+      google_compute_firewall.allow_private_sql.priority == 900 &&
+      google_compute_firewall.allow_private_sql.target_tags == toset(["refund-provider-free"]) &&
       one(google_compute_firewall.allow_private_sql.allow).protocol == "tcp" &&
-      toset(one(google_compute_firewall.allow_private_sql.allow).ports) == toset(["5432"]) &&
+      toset(one(google_compute_firewall.allow_private_sql.allow).ports) == toset(["3307"]) &&
+      google_compute_firewall.allow_restricted_google_apis.direction == "EGRESS" &&
+      google_compute_firewall.allow_restricted_google_apis.priority == 910 &&
+      google_compute_firewall.allow_restricted_google_apis.target_tags == toset(["refund-provider-free"]) &&
+      google_compute_firewall.allow_restricted_google_apis.destination_ranges == toset(["199.36.153.4/30"]) &&
+      one(google_compute_firewall.allow_restricted_google_apis.allow).protocol == "tcp" &&
+      toset(one(google_compute_firewall.allow_restricted_google_apis.allow).ports) == toset(["443"]) &&
       google_compute_firewall.deny_other_egress.direction == "EGRESS" &&
+      google_compute_firewall.deny_other_egress.priority == 1000 &&
+      google_compute_firewall.deny_other_egress.target_tags == toset(["refund-provider-free"]) &&
+      google_compute_firewall.deny_other_egress.destination_ranges == toset(["0.0.0.0/0"]) &&
       one(google_compute_firewall.deny_other_egress.deny).protocol == "all"
     )
     error_message = "Provider-free firewall policy drifted."
+  }
+
+  assert {
+    condition = (
+      google_dns_managed_zone.googleapis.dns_name == "googleapis.com." &&
+      google_dns_managed_zone.googleapis.visibility == "private" &&
+      one(google_dns_managed_zone.googleapis.private_visibility_config).networks[0].network_url ==
+      google_compute_network.refund.id &&
+      google_dns_record_set.restricted_googleapis_a.name == "restricted.googleapis.com." &&
+      google_dns_record_set.restricted_googleapis_a.type == "A" &&
+      toset(google_dns_record_set.restricted_googleapis_a.rrdatas) == toset([
+        "199.36.153.4",
+        "199.36.153.5",
+        "199.36.153.6",
+        "199.36.153.7",
+      ]) &&
+      google_dns_record_set.wildcard_googleapis_cname.name == "*.googleapis.com." &&
+      google_dns_record_set.wildcard_googleapis_cname.type == "CNAME" &&
+      google_dns_record_set.wildcard_googleapis_cname.rrdatas == tolist(["restricted.googleapis.com."])
+    )
+    error_message = "Provider-free private restricted Google API DNS policy drifted."
   }
 
   assert {
@@ -152,7 +185,11 @@ run "exact_provider_free_foundation_shape" {
       output.foundation_manifest.contract_version ==
       "mira-refund-p3e-b2-foundation-authority/v1" &&
       output.foundation_manifest.resource_graph_sha256 ==
-      "f15f2716c0524ccd5ca3b86757076b433cce9a5c4c468aa808eae645c028c0ec" &&
+      "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f" &&
+      output.foundation_manifest.googleapis_private_zone_name ==
+      "mira-p3e-sbx-googleapis" &&
+      output.foundation_manifest.restricted_googleapis_ipv4_range ==
+      "199.36.153.4/30" &&
       output.foundation_manifest.activation_handoff_status ==
       "OPERATOR_ATTESTED_APPLIED_AND_REVIEWED" &&
       output.foundation_manifest.cloud_authentication == "NOT_PERFORMED"
@@ -171,6 +208,7 @@ run "reject_unreviewed_activation_manifest" {
         "artifactregistry.googleapis.com",
         "cloudresourcemanager.googleapis.com",
         "compute.googleapis.com",
+        "dns.googleapis.com",
         "iam.googleapis.com",
         "secretmanager.googleapis.com",
         "servicenetworking.googleapis.com",
@@ -178,7 +216,7 @@ run "reject_unreviewed_activation_manifest" {
         "sqladmin.googleapis.com",
         "storage.googleapis.com",
       ]
-      managed_api_set_sha256 = "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3"
+      managed_api_set_sha256 = "a281c1c9cd5adcb27aeb15e93256ccebf7b49a4e5e4d812f1199bce0c0d2d7d5"
       bootstrap_preenabled_api_names = [
         "cloudresourcemanager.googleapis.com",
         "serviceusage.googleapis.com",
@@ -197,12 +235,13 @@ run "reject_unreviewed_activation_manifest" {
   expect_failures = [check.applied_and_reviewed_service_activation_handoff]
 }
 
-run "reject_old_eight_api_handoff" {
+run "reject_old_nine_api_handoff" {
   command = plan
   variables {
     service_activation_handoff = merge(var.service_activation_handoff, {
       managed_api_names = [
         "artifactregistry.googleapis.com",
+        "cloudresourcemanager.googleapis.com",
         "compute.googleapis.com",
         "iam.googleapis.com",
         "secretmanager.googleapis.com",
@@ -211,7 +250,7 @@ run "reject_old_eight_api_handoff" {
         "sqladmin.googleapis.com",
         "storage.googleapis.com",
       ]
-      managed_api_set_sha256 = "e01bde8bafc50ede3004e6e30321f18de89aa490f251fc5e7c0ec3676e83ce50"
+      managed_api_set_sha256 = "61c64454752499de36658856988c5f93f402e35cc003ff2ceb59c56e45b923d3"
     })
   }
   expect_failures = [check.applied_and_reviewed_service_activation_handoff]
@@ -224,6 +263,7 @@ run "reject_missing_cloud_resource_manager" {
       managed_api_names = [
         "artifactregistry.googleapis.com",
         "compute.googleapis.com",
+        "dns.googleapis.com",
         "iam.googleapis.com",
         "secretmanager.googleapis.com",
         "servicenetworking.googleapis.com",

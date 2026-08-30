@@ -1,6 +1,6 @@
 {
   "contractVersion": "mira-refund-p3e-b2-foundation-resource-graph/v1",
-  "retrievedAt": "2026-07-23",
+  "retrievedAt": "2026-08-30",
   "sources": {
     "artifactRegistry": {
       "title": "Artifact Registry roles and permissions",
@@ -17,6 +17,14 @@
     "computeNetworkPolicyMethods": {
       "title": "Compute Engine firewall and subnetwork method permission requirements",
       "url": "https://docs.cloud.google.com/compute/docs/access/iam"
+    },
+    "cloudDns": {
+      "title": "Cloud DNS roles and method permissions",
+      "url": "https://docs.cloud.google.com/dns/docs/access-control"
+    },
+    "cloudDnsRestrictedApis": {
+      "title": "Configure Private Google Access for on-premises hosts",
+      "url": "https://docs.cloud.google.com/vpc/docs/configure-private-google-access-hybrid"
     },
     "customRoleSupport": {
       "title": "Support levels for permissions in custom roles",
@@ -67,6 +75,17 @@
       "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
     },
     {
+      "address": "google_compute_firewall.allow_restricted_google_apis",
+      "resourceType": "google_compute_firewall",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "compute.googleapis.com",
+      "permissions": ["compute.firewalls.create", "compute.firewalls.get", "compute.firewalls.list", "compute.firewalls.update", "compute.networks.get", "compute.networks.updatePolicy", "compute.projects.get", "compute.globalOperations.get", "serviceusage.services.use"],
+      "sourceIds": ["compute", "computeNetworkPolicyMethods", "cloudDnsRestrictedApis", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Removal blocks the restricted Google API control-plane path and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
       "address": "google_compute_firewall.deny_other_egress",
       "resourceType": "google_compute_firewall",
       "operations": ["CREATE", "READ", "UPDATE"],
@@ -108,6 +127,39 @@
       "permissions": ["compute.networks.get", "compute.networks.updatePolicy", "compute.networks.use", "compute.projects.get", "compute.regions.get", "compute.regionOperations.get", "compute.subnetworks.create", "compute.subnetworks.get", "compute.subnetworks.list", "compute.subnetworks.setPrivateIpGoogleAccess", "compute.subnetworks.update", "compute.subnetworks.use", "serviceusage.services.use"],
       "sourceIds": ["compute", "computeNetworkPolicyMethods", "customRoleSupport", "terraformProvider"],
       "deletionReplacementConsequence": "Subnet deletion breaks later private connectivity and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_dns_managed_zone.googleapis",
+      "resourceType": "google_dns_managed_zone",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "dns.googleapis.com",
+      "permissions": ["dns.managedZones.create", "dns.managedZones.get", "dns.managedZones.update", "dns.networks.bindPrivateDNSZone", "dns.networks.targetWithPeeringZone", "resourcemanager.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["cloudDns", "cloudDnsRestrictedApis", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Removal breaks the VPC-local restricted Google API resolution boundary and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_dns_record_set.restricted_googleapis_a",
+      "resourceType": "google_dns_record_set",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "dns.googleapis.com",
+      "permissions": ["dns.changes.create", "dns.changes.get", "dns.resourceRecordSets.create", "dns.resourceRecordSets.list", "dns.resourceRecordSets.update", "resourcemanager.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["cloudDns", "cloudDnsRestrictedApis", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Removal breaks the exact restricted.googleapis.com A-record contract and is break-glass.",
+      "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
+    },
+    {
+      "address": "google_dns_record_set.wildcard_googleapis_cname",
+      "resourceType": "google_dns_record_set",
+      "operations": ["CREATE", "READ", "UPDATE"],
+      "deleteIntentionallyExcluded": true,
+      "api": "dns.googleapis.com",
+      "permissions": ["dns.changes.create", "dns.changes.get", "dns.resourceRecordSets.create", "dns.resourceRecordSets.list", "dns.resourceRecordSets.update", "resourcemanager.projects.get", "serviceusage.services.use"],
+      "sourceIds": ["cloudDns", "cloudDnsRestrictedApis", "customRoleSupport", "terraformProvider"],
+      "deletionReplacementConsequence": "Removal breaks wildcard Google API resolution to the restricted VIP and is break-glass.",
       "futureBreakGlassOwner": "EXTERNAL_FOUNDATION_BREAK_GLASS_NOT_DEFINED"
     },
     {
@@ -170,6 +222,7 @@
     "artifactregistry.locations.get":"SUPPORTED","artifactregistry.locations.list":"SUPPORTED","artifactregistry.repositories.create":"SUPPORTED","artifactregistry.repositories.get":"SUPPORTED","artifactregistry.repositories.list":"SUPPORTED","artifactregistry.repositories.update":"SUPPORTED",
     "cloudsql.databases.create":"SUPPORTED","cloudsql.databases.get":"SUPPORTED","cloudsql.databases.list":"SUPPORTED","cloudsql.databases.update":"SUPPORTED","cloudsql.instances.create":"SUPPORTED","cloudsql.instances.get":"SUPPORTED","cloudsql.instances.list":"SUPPORTED","cloudsql.instances.update":"SUPPORTED",
     "compute.firewalls.create":"SUPPORTED","compute.firewalls.get":"SUPPORTED","compute.firewalls.list":"SUPPORTED","compute.firewalls.update":"SUPPORTED","compute.globalAddresses.create":"SUPPORTED","compute.globalAddresses.createInternal":"SUPPORTED","compute.globalAddresses.get":"SUPPORTED","compute.globalAddresses.list":"SUPPORTED","compute.globalAddresses.use":"SUPPORTED","compute.globalOperations.get":"SUPPORTED","compute.networks.create":"SUPPORTED","compute.networks.get":"SUPPORTED","compute.networks.list":"SUPPORTED","compute.networks.updatePolicy":"SUPPORTED","compute.networks.use":"SUPPORTED","compute.projects.get":"SUPPORTED","compute.regionOperations.get":"SUPPORTED","compute.regions.get":"SUPPORTED","compute.subnetworks.create":"SUPPORTED","compute.subnetworks.get":"SUPPORTED","compute.subnetworks.list":"SUPPORTED","compute.subnetworks.setPrivateIpGoogleAccess":"SUPPORTED","compute.subnetworks.update":"SUPPORTED","compute.subnetworks.use":"SUPPORTED",
+    "dns.changes.create":"SUPPORTED","dns.changes.get":"SUPPORTED","dns.managedZones.create":"SUPPORTED","dns.managedZones.get":"SUPPORTED","dns.managedZones.update":"SUPPORTED","dns.networks.bindPrivateDNSZone":"SUPPORTED","dns.networks.targetWithPeeringZone":"SUPPORTED","dns.resourceRecordSets.create":"SUPPORTED","dns.resourceRecordSets.list":"SUPPORTED","dns.resourceRecordSets.update":"SUPPORTED",
     "resourcemanager.projects.get":"SUPPORTED",
     "secretmanager.locations.get":"SUPPORTED","secretmanager.locations.list":"SUPPORTED","secretmanager.secrets.create":"SUPPORTED","secretmanager.secrets.get":"SUPPORTED","secretmanager.secrets.list":"SUPPORTED","secretmanager.secrets.update":"SUPPORTED",
     "servicenetworking.operations.get":"SUPPORTED","servicenetworking.services.addPeering":"SUPPORTED","servicenetworking.services.get":"SUPPORTED","servicenetworking.services.updateConsumerConfig":"SUPPORTED",
@@ -181,11 +234,11 @@
       "methodResourceRelationships": [
         {
           "method": "compute.firewalls.insert",
-          "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.deny_other_egress"]
+          "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.allow_restricted_google_apis", "google_compute_firewall.deny_other_egress"]
         },
         {
           "method": "compute.firewalls.patch",
-          "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.deny_other_egress"]
+          "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.allow_restricted_google_apis", "google_compute_firewall.deny_other_egress"]
         },
         {
           "method": "compute.subnetworks.insert",
@@ -193,7 +246,7 @@
         }
       ],
       "resourceScope": "exact foundation VPC network policy",
-      "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.deny_other_egress", "google_compute_subnetwork.refund"],
+      "resourceAddresses": ["google_compute_firewall.allow_private_sql", "google_compute_firewall.allow_restricted_google_apis", "google_compute_firewall.deny_other_egress", "google_compute_subnetwork.refund"],
       "sourceIds": ["compute", "computeNetworkPolicyMethods", "customRoleSupport", "terraformProvider"],
       "retrievedAt": "2026-07-23",
       "customRoleSupport": "SUPPORTED",
