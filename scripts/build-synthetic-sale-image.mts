@@ -6,6 +6,32 @@ import { pathToFileURL } from "node:url";
 import { assembleSyntheticSaleBuildContext } from "./build-synthetic-sale-context.mjs";
 
 const TAG = /^mira-synthetic-sale-review:[0-9a-f]{12}-[ab]$/u;
+const FULL_SOURCE_COMMIT = /^[0-9a-f]{40}$/u;
+const PUBLICATION_REPOSITORY = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale";
+
+export type SyntheticSalePublicationTarget = Readonly<{
+  imageFamily: "synthetic-sale";
+  repository: typeof PUBLICATION_REPOSITORY;
+  sourceCommit: string;
+  tag: string;
+  tagUri: string;
+}>;
+
+export function deriveSyntheticSalePublicationTarget(
+  sourceCommit: string,
+): SyntheticSalePublicationTarget {
+  if (!FULL_SOURCE_COMMIT.test(sourceCommit)) {
+    throw new Error("SYNTHETIC_SALE_PUBLICATION_SOURCE_COMMIT_INVALID");
+  }
+  const tag = `p3e-b2-${sourceCommit.slice(0, 12)}`;
+  return Object.freeze({
+    imageFamily: "synthetic-sale",
+    repository: PUBLICATION_REPOSITORY,
+    sourceCommit,
+    tag,
+    tagUri: `${PUBLICATION_REPOSITORY}:${tag}`,
+  });
+}
 
 export async function buildSyntheticSaleImage(tag: string, sourceCommit: string) {
   if (!TAG.test(tag) || !/^[0-9a-f]{40}$/u.test(sourceCommit)

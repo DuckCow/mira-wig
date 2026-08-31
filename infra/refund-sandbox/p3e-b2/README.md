@@ -193,6 +193,16 @@ must bind the exact bucket and prefix above and set `impersonate_service_account
 workspace multiplexing, human-owned fallback state, and migration/import as part of a normal release
 are forbidden. Its expected first remote state is empty; this source does not claim that state exists.
 
+## Synthetic-sale image publication tag
+
+`scripts/build-synthetic-sale-image.mts` separately owns the immutable Artifact Registry publication
+target for the `synthetic-sale` family. It accepts only one full 40-character lowercase hexadecimal
+source commit and derives `p3e-b2-<first-12>` under
+`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale`.
+There is no tag override or mutable alias. After publication, the digest-qualified URI is the runtime
+authority. The existing `mira-synthetic-sale-review:<commit12>-[ab]` tags remain local deterministic
+review selectors and are not registry publication authority. This source does not claim publication.
+
 ## Retired execution deny authority
 
 The current dedicated project is not attached to an organization. Organization-level IAM Deny
