@@ -868,7 +868,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const runtime = syntheticRuntimeInventory();
     const observed = inspectImageNativeInventories(runtime, base);
     expect(observed.reviewedRemovalCount).toBe(1);
-    expect(observed.reviewedRuntimeAdditionCount).toBe(5);
+    expect(observed.reviewedRuntimeAdditionCount).toBe(8);
     expect(observed.reviewedChangedEntryCount).toBe(1);
 
     const restoredBasePath = syntheticRuntimeInventory({
@@ -1202,6 +1202,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
 
   it("checks the pinned proxy executable inside the Docker build", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const verifier = readFileSync(
+      join(ROOT, "scripts/verify-refund-worker-image.mts"),
+      "utf8",
+    );
     const expected =
       "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb";
     expect(dockerfile.match(new RegExp(expected, "gu"))).toHaveLength(1);
@@ -1211,14 +1215,55 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(dockerfile).toContain(
       "COPY --link --from=proxy-verified /verified/cloud-sql-proxy",
     );
+    expect(dockerfile).toContain(
+      "COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt "
+      + "/etc/ssl/certs/ca-certificates.crt",
+    );
+    expect(dockerfile.match(/ca-certificates\.crt/gu)).toHaveLength(2);
+    expect(dockerfile).not.toMatch(/ENV\s+(?:SSL_CERT_FILE|SSL_CERT_DIR)/u);
+    expect(currentAuthority.systemCaTrust).toEqual({
+      sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
+      sourcePath: "/etc/ssl/certs/ca-certificates.crt",
+      runtimePath: "/etc/ssl/certs/ca-certificates.crt",
+      runtimeUser: "65532:65532",
+      requiredType: "REGULAR_FILE",
+      requiredNonempty: true,
+      requiredReadable: true,
+      requiredOwner: "0:0",
+      sslCertFileOverride: "NONE",
+      sslCertDirOverride: "NONE",
+    });
+    expect(currentAuthority.nonApplicationAdditionCount).toBe(6);
+    expect(currentAuthority.nonApplicationAdditions.map(({ path }) => path)).toEqual([
+      "/cloudsql",
+      "/etc/ssl",
+      "/etc/ssl/certs",
+      "/etc/ssl/certs/ca-certificates.crt",
+      "/tmp/refund-worker",
+      "/usr/local/bin/cloud-sql-proxy",
+    ]);
+    expect(currentAuthority.nonApplicationAdditions[3]).toMatchObject({
+      path: "/etc/ssl/certs/ca-certificates.crt",
+      type: "REGULAR_FILE",
+      mode: 0o555,
+      uid: 0,
+      gid: 0,
+      sha256: "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+    });
+    expect(verifier).toContain('CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt"');
+    expect(verifier).toContain("fs.accessSync(caBundlePath, fs.constants.R_OK)");
+    expect(verifier).toContain("caBundleStat.isFile()");
+    expect(verifier).toContain("caBundle.byteLength");
+    expect(verifier).toContain("process.env.SSL_CERT_FILE ?? null");
+    expect(verifier).toContain("process.env.SSL_CERT_DIR ?? null");
+    expect(verifier).not.toContain(
+      'requireCondition(runtime.nodeCaCertificateCount > 0, "RUNTIME_CA")',
+    );
     expect(dockerfile).not.toContain("--chown=65532:65532");
     expect(dockerfile).not.toMatch(
       /RUN\s+(?:curl|wget)|https?:\/\/[^\s]*cloud-sql-proxy/iu,
     );
-    expect(readFileSync(
-      join(ROOT, "scripts/verify-refund-worker-image.mts"),
-      "utf8",
-    )).toContain("PROXY_CHECKSUM_NEGATIVE_BUILD");
+    expect(verifier).toContain("PROXY_CHECKSUM_NEGATIVE_BUILD");
   });
 
   it("freezes root-owned code and exactly two worker-writable directories", () => {
@@ -1702,6 +1747,9 @@ function syntheticRuntimeInventory(
     regular("/app/synthetic-bundle.mjs", "5".repeat(64)),
     directory("/cloudsql", 65532, 65532, 0o700),
     directory("/etc"),
+    directory("/etc/ssl"),
+    directory("/etc/ssl/certs"),
+    regular("/etc/ssl/certs/ca-certificates.crt", "8".repeat(64), 0o644),
     directory("/tmp"),
     directory("/tmp/refund-worker", 65532, 65532, 0o700),
     directory("/usr"),

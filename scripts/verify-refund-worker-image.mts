@@ -36,6 +36,19 @@ const CURRENT_ENTRYPOINTS = Object.freeze([
   Object.freeze({ source: "scripts/refund-execution-worker.ts", runtimePath: "/app/src/lib/payment/refund/refund-execution-worker.mjs" }),
   Object.freeze({ source: "scripts/refund-sandbox-provider-free-preflight.ts", runtimePath: "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs" }),
 ]);
+const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
+const SYSTEM_CA_TRUST = Object.freeze({
+  sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
+  sourcePath: CA_BUNDLE_PATH,
+  runtimePath: CA_BUNDLE_PATH,
+  runtimeUser: "65532:65532",
+  requiredType: "REGULAR_FILE",
+  requiredNonempty: true,
+  requiredReadable: true,
+  requiredOwner: "0:0",
+  sslCertFileOverride: "NONE",
+  sslCertDirOverride: "NONE",
+});
 
 export const DOCKER_INSPECTION_LIMITS = Object.freeze({
   inspectionJsonMaxBytes: 262_144,
@@ -158,6 +171,7 @@ const RUNTIME_USER_WRITABLE_ROOTS = Object.freeze([
   "/tmp/refund-worker",
 ]);
 const CRITICAL_ROOT_OWNED_FILES = Object.freeze([
+  CA_BUNDLE_PATH,
   "/usr/local/bin/cloud-sql-proxy",
   "/usr/local/bin/node",
 ]);
@@ -242,9 +256,10 @@ export type CurrentEximbayImageAuthority = Readonly<{
     packagedGraphInputCount: number;
   }>;
   entrypoints: readonly Readonly<{ source: string; runtimePath: string }>[];
+  systemCaTrust: typeof SYSTEM_CA_TRUST;
   applicationClosure: FrozenImageContract["applicationClosure"];
   systemClosure: FrozenImageContract["systemClosure"];
-  nonApplicationAdditionCount: 3;
+  nonApplicationAdditionCount: 6;
   nonApplicationAdditions: readonly RootManifestEntry[];
 }>;
 
@@ -852,6 +867,8 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
       nodeVersion: runtimeProof.nodeVersion,
       proxyVersion: runtimeProof.proxyVersion,
       proxySha256: runtimeProof.proxySha256,
+      caBundle: runtimeProof.caBundle,
+      nodeCaCertificateCount: runtimeProof.nodeCaCertificateCount,
       migrationCount: runtimeProof.migrationCount,
       migrationDigest: runtimeProof.migrationDigest,
       contextManifestDigest: context.manifestDigest,
@@ -1000,7 +1017,17 @@ function verifyRuntimeClosure(
   requireCondition(runtime.proxySha256 === PROXY_SHA256, "PROXY_EXECUTABLE_SHA256");
   requireCondition(runtime.nodeOpenSsl.startsWith("3."), "NODE_OPENSSL");
   requireCondition(runtime.runtimeLibrariesPresent, "RUNTIME_LIBRARIES");
-  requireCondition(runtime.nodeCaCertificateCount > 0, "RUNTIME_CA");
+  requireCondition(runtime.caBundle.path === CA_BUNDLE_PATH, "RUNTIME_GO_CA_PATH");
+  requireCondition(runtime.caBundle.fileUid === 0 && runtime.caBundle.fileGid === 0,
+    "RUNTIME_GO_CA_OWNER");
+  requireCondition(runtime.caBundle.runtimeUid === 65532
+    && runtime.caBundle.runtimeGid === 65532, "RUNTIME_GO_CA_READER");
+  requireCondition(runtime.caBundle.regularFile === true, "RUNTIME_GO_CA_TYPE");
+  requireCondition(runtime.caBundle.readable === true, "RUNTIME_GO_CA_READABLE");
+  requireCondition(runtime.caBundle.size > 0, "RUNTIME_GO_CA_NONEMPTY");
+  requireCondition(isSha256(runtime.caBundle.sha256), "RUNTIME_GO_CA_SHA256");
+  requireCondition(runtime.caBundle.sslCertFile === null
+    && runtime.caBundle.sslCertDir === null, "RUNTIME_GO_CA_OVERRIDE");
 
   const writeProbe = parseWriteProbe(JSON.parse(captureContainer(ownership, [
     "run", "--rm", "--platform", PLATFORM, "--network", "none",
@@ -1017,6 +1044,8 @@ function verifyRuntimeClosure(
     nodeVersion,
     proxyVersion,
     proxySha256: runtime.proxySha256,
+    caBundle: runtime.caBundle,
+    nodeCaCertificateCount: runtime.nodeCaCertificateCount,
     migrationCount: self.migrationCount,
     migrationDigest: self.migrationDigest,
     writeDeniedProbeCount: writeProbe.deniedCount,
@@ -1478,7 +1507,7 @@ export function parseCurrentEximbayImageAuthority(
   requireCondition(isRecord(raw), "CURRENT_IMAGE_AUTHORITY_SHAPE");
   requireCondition(hasExactKeys(raw, [
     "contractVersion", "parentAuthoritySha256", "baselineCommit", "buildContext",
-    "entrypoints", "applicationClosure", "systemClosure",
+    "entrypoints", "systemCaTrust", "applicationClosure", "systemClosure",
     "nonApplicationAdditionCount", "nonApplicationAdditions",
   ]), "CURRENT_IMAGE_AUTHORITY_SHAPE");
   requireCondition(raw.contractVersion === "mira-refund-eximbay-canary-image-policy/v1",
@@ -1498,6 +1527,10 @@ export function parseCurrentEximbayImageAuthority(
   requireCondition(isNonnegativeSafeInteger(raw.buildContext.packagedGraphInputCount),
     "CURRENT_PACKAGED_GRAPH_COUNT");
   const entrypoints = parseCurrentEntrypoints(raw.entrypoints);
+  requireCondition(
+    JSON.stringify(raw.systemCaTrust) === JSON.stringify(SYSTEM_CA_TRUST),
+    "CURRENT_SYSTEM_CA_TRUST",
+  );
   requireCondition(isRecord(raw.applicationClosure), "CURRENT_APPLICATION_SHAPE");
   requireCondition(isRecord(raw.systemClosure), "CURRENT_SYSTEM_SHAPE");
   requireCondition(hasExactKeys(raw.applicationClosure, [
@@ -1519,7 +1552,7 @@ export function parseCurrentEximbayImageAuthority(
     && isSha256(system.changedMetadataContentManifestSha256)
     && isNonnegativeSafeInteger(system.addedEntryCount)
     && isSha256(system.addedMetadataContentManifestSha256), "CURRENT_SYSTEM_CLOSURE");
-  requireCondition(raw.nonApplicationAdditionCount === 3,
+  requireCondition(raw.nonApplicationAdditionCount === 6,
     "CURRENT_NON_APPLICATION_ADDITION_COUNT");
   const nonApplicationAdditions = parseCurrentNonApplicationAdditions(
     raw.nonApplicationAdditions,
@@ -1534,6 +1567,7 @@ export function parseCurrentEximbayImageAuthority(
       packagedGraphInputCount: raw.buildContext.packagedGraphInputCount,
     }),
     entrypoints,
+    systemCaTrust: SYSTEM_CA_TRUST,
     applicationClosure: Object.freeze({
       entryCount: application.entryCount,
       metadataManifestSha256: application.metadataManifestSha256,
@@ -1547,13 +1581,13 @@ export function parseCurrentEximbayImageAuthority(
       addedEntryCount: system.addedEntryCount,
       addedMetadataContentManifestSha256: system.addedMetadataContentManifestSha256,
     }),
-    nonApplicationAdditionCount: 3,
+    nonApplicationAdditionCount: 6,
     nonApplicationAdditions,
   });
 }
 
 function parseCurrentNonApplicationAdditions(value: unknown): readonly RootManifestEntry[] {
-  requireCondition(Array.isArray(value) && value.length === 3,
+  requireCondition(Array.isArray(value) && value.length === 6,
     "CURRENT_NON_APPLICATION_ADDITIONS_SHAPE");
   const entries: RootManifestEntry[] = [];
   for (const entry of value) {
@@ -1629,6 +1663,10 @@ export function enforceCurrentSubject(
     "CURRENT_PARENT_AUTHORITY_BINDING");
   requireCondition(authority.baselineCommit === CURRENT_BASELINE_COMMIT,
     "CURRENT_BASELINE_COMMIT_BINDING");
+  requireCondition(
+    JSON.stringify(authority.systemCaTrust) === JSON.stringify(SYSTEM_CA_TRUST),
+    "CURRENT_SYSTEM_CA_TRUST",
+  );
   requireCondition(authority.buildContext.manifestSha256 === context.manifestDigest,
     "CURRENT_CONTEXT_MANIFEST_BINDING");
   requireCondition(authority.buildContext.fileCount === context.manifestEntries.length,
@@ -1723,6 +1761,10 @@ function runtimeInspectionSource(): string {
     const fs = require("node:fs");
     const crypto = require("node:crypto");
     const proxy = fs.readFileSync("/usr/local/bin/cloud-sql-proxy");
+    const caBundlePath = ${JSON.stringify(CA_BUNDLE_PATH)};
+    fs.accessSync(caBundlePath, fs.constants.R_OK);
+    const caBundleStat = fs.statSync(caBundlePath);
+    const caBundle = fs.readFileSync(caBundlePath);
     const libraries = [
       "/lib/x86_64-linux-gnu/libc.so.6",
       "/lib/x86_64-linux-gnu/libz.so.1",
@@ -1732,6 +1774,20 @@ function runtimeInspectionSource(): string {
       proxySha256: crypto.createHash("sha256").update(proxy).digest("hex"),
       nodeOpenSsl: process.versions.openssl,
       runtimeLibrariesPresent: libraries.every((file) => fs.existsSync(file)),
+      caBundle: {
+        path: caBundlePath,
+        fileUid: caBundleStat.uid,
+        fileGid: caBundleStat.gid,
+        mode: caBundleStat.mode & 0o7777,
+        runtimeUid: process.getuid(),
+        runtimeGid: process.getgid(),
+        regularFile: caBundleStat.isFile(),
+        readable: true,
+        size: caBundle.byteLength,
+        sha256: crypto.createHash("sha256").update(caBundle).digest("hex"),
+        sslCertFile: process.env.SSL_CERT_FILE ?? null,
+        sslCertDir: process.env.SSL_CERT_DIR ?? null
+      },
       nodeCaCertificateCount: require("node:tls").rootCertificates.length
     }));
   `;
@@ -1954,23 +2010,75 @@ function parseSelfCheck(value: unknown): ImageSelfCheck | null {
   });
 }
 
+type RuntimeCaBundleInspection = Readonly<{
+  path: string;
+  fileUid: number;
+  fileGid: number;
+  mode: number;
+  runtimeUid: number;
+  runtimeGid: number;
+  regularFile: boolean;
+  readable: boolean;
+  size: number;
+  sha256: string;
+  sslCertFile: string | null;
+  sslCertDir: string | null;
+}>;
+
 type RuntimeInspection = Readonly<{
   proxySha256: string;
   nodeOpenSsl: string;
   runtimeLibrariesPresent: boolean;
+  caBundle: RuntimeCaBundleInspection;
   nodeCaCertificateCount: number;
 }>;
+
+function isRuntimeCaBundleInspection(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & RuntimeCaBundleInspection {
+  return [
+    typeof value.path === "string",
+    isNonnegativeSafeInteger(value.fileUid),
+    isNonnegativeSafeInteger(value.fileGid),
+    isNonnegativeSafeInteger(value.mode),
+    isNonnegativeSafeInteger(value.runtimeUid),
+    isNonnegativeSafeInteger(value.runtimeGid),
+    typeof value.regularFile === "boolean",
+    typeof value.readable === "boolean",
+    isNonnegativeSafeInteger(value.size),
+    typeof value.sha256 === "string",
+    isNullableString(value.sslCertFile),
+    isNullableString(value.sslCertDir),
+  ].every(Boolean);
+}
 
 function parseRuntimeInspection(value: unknown): RuntimeInspection | null {
   if (!isRecord(value)
     || typeof value.proxySha256 !== "string"
     || typeof value.nodeOpenSsl !== "string"
     || typeof value.runtimeLibrariesPresent !== "boolean"
+    || !isRecord(value.caBundle)
+    || !isRuntimeCaBundleInspection(value.caBundle)
     || !isNonnegativeSafeInteger(value.nodeCaCertificateCount)) return null;
+  const caBundle = value.caBundle;
   return Object.freeze({
     proxySha256: value.proxySha256,
     nodeOpenSsl: value.nodeOpenSsl,
     runtimeLibrariesPresent: value.runtimeLibrariesPresent,
+    caBundle: Object.freeze({
+      path: caBundle.path,
+      fileUid: caBundle.fileUid,
+      fileGid: caBundle.fileGid,
+      mode: caBundle.mode,
+      runtimeUid: caBundle.runtimeUid,
+      runtimeGid: caBundle.runtimeGid,
+      regularFile: caBundle.regularFile,
+      readable: caBundle.readable,
+      size: caBundle.size,
+      sha256: caBundle.sha256,
+      sslCertFile: caBundle.sslCertFile,
+      sslCertDir: caBundle.sslCertDir,
+    }),
     nodeCaCertificateCount: value.nodeCaCertificateCount,
   });
 }

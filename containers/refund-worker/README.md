@@ -24,6 +24,12 @@ repository history and runs as numeric user/group `65532:65532`. System roots, a
 Prisma runtime, migrations, Node, and the proxy remain root-owned and worker-nonwritable. Only
 `/cloudsql` and `/tmp/refund-worker` are owned by the runtime identity and writable.
 
+The final runtime copies the standard `/etc/ssl/certs/ca-certificates.crt` bundle from the
+already-pinned official Cloud SQL Auth Proxy stage. Offline verification requires that exact path
+to be a nonempty root-owned regular file readable by `65532:65532`. Go discovers this standard
+Linux trust location without `SSL_CERT_FILE` or `SSL_CERT_DIR`; custom roots and TLS verification
+bypasses remain prohibited.
+
 The normative nonsecret values are in
 `infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json`. Local builds and OCI
 digest comparisons are provider-free evidence only:

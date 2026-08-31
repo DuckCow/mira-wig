@@ -32,6 +32,7 @@ LABEL org.opencontainers.image.created="${SOURCE_DATE_EPOCH}" \
       mira.refund.release-authority="absent"
 WORKDIR /app
 COPY --link --from=proxy-verified /verified/cloud-sql-proxy /usr/local/bin/cloud-sql-proxy
+COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --link --from=build /build/.refund-worker-build/src ./src
 COPY --link --from=build /build/prisma/migrations ./prisma/migrations
 COPY --link --from=build /build/node_modules/@prisma/client ./node_modules/@prisma/client

@@ -3,7 +3,7 @@
   "parentAuthoritySha256": "4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473",
   "baselineCommit": "518513e0990b6f3e2f0958125cbfa1118d423988",
   "buildContext": {
-    "manifestSha256": "cb0f2165fdfe8f646c5f193b78dbde914d085efa04e3936bdc5edde8c6934437",
+    "manifestSha256": "d24f98c7fd30f79842c860e5ac70baf3ed7dbc7f7f4beed4dfd8ee516d530a07",
     "fileCount": 198,
     "repositoryGraphInputCount": 149,
     "packagedGraphInputCount": 373
@@ -26,6 +26,18 @@
       "runtimePath": "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs"
     }
   ],
+  "systemCaTrust": {
+    "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
+    "sourcePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimeUser": "65532:65532",
+    "requiredType": "REGULAR_FILE",
+    "requiredNonempty": true,
+    "requiredReadable": true,
+    "requiredOwner": "0:0",
+    "sslCertFileOverride": "NONE",
+    "sslCertDirOverride": "NONE"
+  },
   "applicationClosure": {
     "entryCount": 181,
     "metadataManifestSha256": "4bec8a7d93a9babab226860eef9495e9a2a56d0a8fb612d1dadf40e895b58e03",
@@ -36,10 +48,10 @@
     "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
     "changedEntryCount": 3,
     "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
-    "addedEntryCount": 184,
-    "addedMetadataContentManifestSha256": "fe229f2519a2f353a846ccd0e5ac9fd667446fbcb31aa9f08d6cb0edf93afd13"
+    "addedEntryCount": 187,
+    "addedMetadataContentManifestSha256": "07b114e373a53925531a0f67ad76207335ed97cff6d3c66634fdd0530c70df35"
   },
-  "nonApplicationAdditionCount": 3,
+  "nonApplicationAdditionCount": 6,
   "nonApplicationAdditions": [
     {
       "path": "/cloudsql",
@@ -48,6 +60,33 @@
       "uid": 65532,
       "gid": 65532,
       "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs/ca-certificates.crt",
+      "type": "REGULAR_FILE",
+      "mode": 365,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
       "symlinkTarget": null
     },
     {
