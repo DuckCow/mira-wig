@@ -52,7 +52,7 @@ export const SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT = Object.freeze({
     repositoryRoot,
     "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
   ),
-  sha256: "5eace2e79f1b7abd148354e1a0544af7bf443373016713b8f51835a662263674",
+  sha256: "a414e4d5ddf1565e1d27763885c407cffbdc48c03487db8205302cc3c5cab470",
 } satisfies EximbayP3eBootstrapArtifact);
 
 type RuntimeRole = "mira_refund_preflight" | "mira_refund_canary";
@@ -83,6 +83,10 @@ export type EximbayP3eCanaryRoleGrantDependencies = Readonly<{
   ) => Promise<void>;
   verifyExactLedger: (database: Client) => Promise<void>;
   beforePostcondition: (database: Client) => Promise<void>;
+}>;
+
+export type SyntheticSaleMarketPreconditionDependencies = Readonly<{
+  verifyExactLedger: (database: Client) => Promise<void>;
 }>;
 
 export type EximbayP3eDatabaseBootstrapResult = Readonly<{
@@ -120,6 +124,22 @@ export type SyntheticSaleRoleGrantResult = Readonly<{
   postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED";
 }>;
 
+export type SyntheticSaleMarketPreconditionResult = Readonly<{
+  ok: true;
+  code: "SYNTHETIC_SALE_MARKET_PRECONDITION_COMPLETE";
+  disposition: "CREATED" | "ALREADY_EXACT";
+  market: Readonly<{
+    code: "US";
+    currency: "USD";
+    active: true;
+    defaultLocale: "en";
+    shippableCountries: readonly ["US"];
+    taxConfigNull: true;
+    paymentConfigNull: true;
+  }>;
+  postconditionRowCount: 1;
+}>;
+
 export type EximbayP3eDatabaseBootstrapErrorCode =
   | "BOOTSTRAP_NOT_EXPLICITLY_ADMITTED"
   | "BOOTSTRAP_TARGET_INVALID"
@@ -127,6 +147,7 @@ export type EximbayP3eDatabaseBootstrapErrorCode =
   | "HISTORICAL_AUTHORITY_INTEGRITY_FAILURE"
   | "EXIMBAY_DELTA_INTEGRITY_FAILURE"
   | "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
+  | "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT"
   | "HISTORICAL_AUTHORITY_SHAPE_INVALID"
   | "ROLE_AUTHORITY_EXECUTION_FAILED"
   | "ROLE_AUTHORITY_POSTCONDITION_FAILED";
@@ -235,7 +256,7 @@ const SYNTHETIC_SALE_UPDATE_COLUMNS = new Set([
   ...CANARY_ROW_LOCK_UPDATE_COLUMNS,
   ...[...CANARY_TABLE_UPDATE].flatMap((table) => [`${table}.*`]),
   ...[...CANARY_APPROVAL_UPDATE_COLUMNS].map((column) => `EximbayRefundSandboxCanaryApproval.${column}`),
-  "User.id", "Market.code", "WigStyle.id", "CheckoutSessionLine.id",
+  "User.id", "WigStyle.id", "CheckoutSessionLine.id",
   "WigStyleMarket.wigStyleId", "VariantMarketPrice.variantId", "WigVariant.stock",
   "CartItem.quantity", "CheckoutSession.status", "CheckoutSession.completedAt",
   "CheckoutSession.updatedAt", "Payment.status", "Payment.attemptLifecycle",
@@ -343,6 +364,102 @@ export async function restoreCanaryRefundRoleGrants(
     await dependencies.executeArtifact(database, delta, deltaSource);
   }, verifyExactEffectivePrivileges, "CANARY_REFUND_ROLE_GRANTS_RESTORED",
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS);
+}
+
+export async function materializeSyntheticSaleMarketPrecondition(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: SyntheticSaleMarketPreconditionDependencies,
+): Promise<SyntheticSaleMarketPreconditionResult> {
+  requireAdmittedInput(input);
+  let transactionOpen = false;
+  try {
+    await database.query("BEGIN");
+    transactionOpen = true;
+    await requireExactDatabase(database, input.targetDatabaseName);
+    await dependencies.verifyExactLedger(database);
+    const existing = await readSyntheticSaleMarket(database, true);
+    let disposition: SyntheticSaleMarketPreconditionResult["disposition"];
+    if (existing === null) {
+      await database.query(`
+        INSERT INTO "Market" (
+          "code", "currency", "shippableCountries", "defaultLocale", "isActive",
+          "taxConfig", "paymentConfig"
+        ) VALUES ($1, $2, $3::text[], $4, $5, NULL, NULL)
+      `, ["US", "USD", ["US"], "en", true]);
+      disposition = "CREATED";
+    } else {
+      requireExactSyntheticSaleMarket(existing);
+      disposition = "ALREADY_EXACT";
+    }
+    const postcondition = await readSyntheticSaleMarket(database, false);
+    if (postcondition === null) throw new Error("SYNTHETIC_SALE_MARKET_POSTCONDITION_MISSING");
+    requireExactSyntheticSaleMarket(postcondition);
+    await database.query("COMMIT");
+    transactionOpen = false;
+    return marketPreconditionResult(disposition);
+  } catch (error) {
+    if (transactionOpen) await database.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof EximbayP3eDatabaseBootstrapError) throw error;
+    throw new EximbayP3eDatabaseBootstrapError("ROLE_AUTHORITY_EXECUTION_FAILED");
+  }
+}
+
+type SyntheticSaleMarketRow = Readonly<{
+  code: string;
+  currency: string;
+  shippableCountries: string[];
+  defaultLocale: string;
+  isActive: boolean;
+  taxConfig: unknown;
+  paymentConfig: unknown;
+}>;
+
+async function readSyntheticSaleMarket(
+  database: Client,
+  lock: boolean,
+): Promise<SyntheticSaleMarketRow | null> {
+  const result = await database.query<SyntheticSaleMarketRow>(`
+    SELECT "code", "currency", "shippableCountries", "defaultLocale", "isActive",
+      "taxConfig", "paymentConfig"
+    FROM "Market"
+    WHERE "code" = $1
+    ${lock ? "FOR UPDATE" : ""}
+  `, ["US"]);
+  if (result.rows.length > 1) throw new Error("SYNTHETIC_SALE_MARKET_POSTCONDITION_AMBIGUOUS");
+  return result.rows[0] ?? null;
+}
+
+function requireExactSyntheticSaleMarket(row: SyntheticSaleMarketRow): void {
+  if (row.code === "US"
+    && row.currency === "USD"
+    && row.isActive
+    && row.defaultLocale === "en"
+    && row.shippableCountries.length === 1
+    && row.shippableCountries[0] === "US"
+    && row.taxConfig === null
+    && row.paymentConfig === null) return;
+  throw new EximbayP3eDatabaseBootstrapError("SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT");
+}
+
+function marketPreconditionResult(
+  disposition: SyntheticSaleMarketPreconditionResult["disposition"],
+): SyntheticSaleMarketPreconditionResult {
+  return Object.freeze({
+    ok: true,
+    code: "SYNTHETIC_SALE_MARKET_PRECONDITION_COMPLETE",
+    disposition,
+    market: Object.freeze({
+      code: "US",
+      currency: "USD",
+      active: true,
+      defaultLocale: "en",
+      shippableCountries: Object.freeze(["US"] as const),
+      taxConfigNull: true,
+      paymentConfigNull: true,
+    }),
+    postconditionRowCount: 1,
+  });
 }
 
 async function executeRoleGrantTransaction(

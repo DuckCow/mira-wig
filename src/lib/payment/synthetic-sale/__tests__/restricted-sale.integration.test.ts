@@ -27,6 +27,7 @@ import {
   defaultEximbayP3eDatabaseBootstrapDependencies,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+  materializeSyntheticSaleMarketPrecondition,
   restoreCanaryRefundRoleGrants,
 } from "../../../../../scripts/eximbay-p3e-database-bootstrap";
 import { handleEximbayBf4StatusRoute } from "@/lib/payment/eximbay/bf4-status-route";
@@ -132,6 +133,48 @@ describe.sequential("temporary synthetic SALE authority", () => {
     }
   });
 
+  it("creates, no-ops, and rejects conflict through the bootstrap Market owner", async () => {
+    const admin = new Client({ connectionString: databaseUrl });
+    await admin.connect();
+    await admin.query("SELECT pg_advisory_lock(682326912)");
+    try {
+      await admin.query(`DELETE FROM "Market" WHERE code = 'US'`);
+      const created = await materializeSyntheticSaleMarketPrecondition(
+        admin,
+        bootstrapInput,
+        marketPreconditionDependencies(),
+      );
+      expect(created).toMatchObject({
+        code: "SYNTHETIC_SALE_MARKET_PRECONDITION_COMPLETE",
+        disposition: "CREATED",
+        market: exactUsMarketEvidence(),
+        postconditionRowCount: 1,
+      });
+      const beforeExact = await readUsMarket(admin);
+
+      const exact = await materializeSyntheticSaleMarketPrecondition(
+        admin,
+        bootstrapInput,
+        marketPreconditionDependencies(),
+      );
+      expect(exact).toMatchObject({ disposition: "ALREADY_EXACT" });
+      await expect(readUsMarket(admin)).resolves.toEqual(beforeExact);
+
+      await admin.query(`UPDATE "Market" SET currency = 'EUR' WHERE code = 'US'`);
+      const conflicting = await readUsMarket(admin);
+      await expect(materializeSyntheticSaleMarketPrecondition(
+        admin,
+        bootstrapInput,
+        marketPreconditionDependencies(),
+      )).rejects.toMatchObject({ code: "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT" });
+      await expect(readUsMarket(admin)).resolves.toEqual(conflicting);
+    } finally {
+      await admin.query(`DELETE FROM "Market" WHERE code = 'US'`).catch(() => undefined);
+      await admin.query("SELECT pg_advisory_unlock(682326912)").catch(() => undefined);
+      await admin.end();
+    }
+  });
+
   it("runs READY and authoritative BF4 completion only inside the temporary ACL window", async () => {
     const admin = new Client({ connectionString: databaseUrl });
     await admin.connect();
@@ -160,10 +203,17 @@ describe.sequential("temporary synthetic SALE authority", () => {
     vi.stubEnv("EXIMBAY_SANDBOX_MID", MID);
     let restricted: PrismaClient | null = null;
     try {
-      await ensureUsMarket(admin);
+      await materializeSyntheticSaleMarketPrecondition(
+        admin,
+        bootstrapInput,
+        marketPreconditionDependencies(),
+      );
       await restoreCanaryRefundRoleGrants(admin, bootstrapInput, lifecycleDependencies());
       await bootstrapEximbayP3eDatabaseRoles(admin, bootstrapInput);
       await admin.query(`ALTER ROLE mira_refund_canary PASSWORD '${ROLE_PASSWORD}'`);
+      await admin.query(`GRANT SELECT ON TABLE "Market" TO mira_refund_canary`);
+      await admin.query(`GRANT UPDATE ("code") ON TABLE "Market" TO mira_refund_canary`);
+      await expectLegacyMarketUpdateAuthority(databaseUrl);
       await applySyntheticSaleRoleGrants(admin, bootstrapInput, lifecycleDependencies());
       await expectNegativeBoundaries(databaseUrl);
 
@@ -234,6 +284,10 @@ function lifecycleDependencies() {
     ...defaultEximbayP3eDatabaseBootstrapDependencies,
     verifyExactLedger: () => Promise.resolve(),
   };
+}
+
+function marketPreconditionDependencies() {
+  return { verifyExactLedger: () => Promise.resolve() };
 }
 
 function restrictedClient(adminUrl: string): PrismaClient {
@@ -332,10 +386,49 @@ async function expectNegativeBoundaries(adminUrl: string): Promise<void> {
   const client = restrictedPgClient(adminUrl);
   await client.connect();
   try {
+    const before = await client.query(`
+      SELECT code, currency, "shippableCountries", "defaultLocale", "isActive",
+        "taxConfig", "paymentConfig"
+      FROM "Market" WHERE code = 'US'
+    `);
+    expect(before.rows).toEqual([{
+      code: "US",
+      currency: "USD",
+      shippableCountries: ["US"],
+      defaultLocale: "en",
+      isActive: true,
+      taxConfig: null,
+      paymentConfig: null,
+    }]);
+    await expect(client.query(`UPDATE "Market" SET code = 'UX' WHERE code = 'US'`))
+      .rejects.toBeDefined();
+    await expect(client.query(`UPDATE "Market" SET code = code WHERE code = 'US'`))
+      .rejects.toBeDefined();
+    await expect(client.query(`
+      INSERT INTO "Market" (code, currency, "shippableCountries", "defaultLocale", "isActive")
+      VALUES ('ZZ', 'USD', ARRAY['US']::text[], 'en', true)
+    `)).rejects.toBeDefined();
     await expect(client.query("CREATE TABLE synthetic_sale_forbidden(id int)")).rejects.toBeDefined();
     await expect(client.query('TRUNCATE TABLE "User"')).rejects.toBeDefined();
-    await expect(client.query('DELETE FROM "Market"')).rejects.toBeDefined();
+    await expect(client.query(`DELETE FROM "Market" WHERE code = 'US'`)).rejects.toBeDefined();
     await expect(client.query("ALTER ROLE mira_refund_canary CREATEDB")).rejects.toBeDefined();
+    const after = await client.query(`
+      SELECT code, currency, "shippableCountries", "defaultLocale", "isActive",
+        "taxConfig", "paymentConfig"
+      FROM "Market" WHERE code = 'US'
+    `);
+    expect(after.rows).toEqual(before.rows);
+  } finally {
+    await client.end();
+  }
+}
+
+async function expectLegacyMarketUpdateAuthority(adminUrl: string): Promise<void> {
+  const client = restrictedPgClient(adminUrl);
+  await client.connect();
+  try {
+    await expect(client.query(`UPDATE "Market" SET code = code WHERE code = 'US'`))
+      .resolves.toMatchObject({ rowCount: 1 });
   } finally {
     await client.end();
   }
@@ -360,13 +453,34 @@ function restrictedPgClient(adminUrl: string): Client {
   return new Client({ connectionString: url.toString() });
 }
 
-async function ensureUsMarket(admin: Client): Promise<void> {
-  await admin.query(`
-    INSERT INTO "Market" (code, currency, "shippableCountries", "defaultLocale", "isActive")
-    VALUES ('US', 'USD', ARRAY['US']::text[], 'en', true)
-    ON CONFLICT (code) DO UPDATE SET currency='USD', "shippableCountries"=ARRAY['US']::text[],
-      "defaultLocale"='en', "isActive"=true
+function exactUsMarketEvidence() {
+  return {
+    code: "US",
+    currency: "USD",
+    active: true,
+    defaultLocale: "en",
+    shippableCountries: ["US"],
+    taxConfigNull: true,
+    paymentConfigNull: true,
+  };
+}
+
+async function readUsMarket(admin: Client) {
+  const result = await admin.query<{
+    code: string;
+    currency: string;
+    shippableCountries: string[];
+    defaultLocale: string;
+    isActive: boolean;
+    taxConfig: unknown;
+    paymentConfig: unknown;
+    xmin: string;
+  }>(`
+    SELECT code, currency, "shippableCountries", "defaultLocale", "isActive",
+      "taxConfig", "paymentConfig", xmin::text AS xmin
+    FROM "Market" WHERE code = 'US'
   `);
+  return result.rows;
 }
 
 async function cleanupRun(admin: Client, capability: string): Promise<void> {

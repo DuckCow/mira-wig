@@ -24,6 +24,8 @@ import {
   defaultEximbayP3eDatabaseBootstrapDependencies,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+  EximbayP3eDatabaseBootstrapError,
+  materializeSyntheticSaleMarketPrecondition,
   restoreCanaryRefundRoleGrants,
   verifyExactEffectivePrivileges,
 } from
@@ -54,6 +56,8 @@ const READINESS_POLL_MS = 250;
 export const PROXY_DIAGNOSTIC_BYTE_LIMIT = 4_096;
 export const CANARY_ROLE_GRANT_MODE = "apply-canary-role-grants" as const;
 export const SYNTHETIC_SALE_ROLE_GRANT_MODE = "apply-synthetic-sale-role-grants" as const;
+export const SYNTHETIC_SALE_MARKET_PRECONDITION_MODE =
+  "materialize-synthetic-sale-market-precondition" as const;
 export const CANARY_REFUND_ROLE_RESTORE_MODE = "restore-canary-refund-role-grants" as const;
 export const MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE = "materialize-eximbay-canary-target" as const;
 export const ISSUE_EXIMBAY_CANARY_APPROVAL_MODE = "issue-eximbay-canary-approval" as const;
@@ -66,6 +70,7 @@ export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
   "LEDGER_READ_FAILED",
   "LEDGER_REJECTED",
   "RUNTIME_LOCAL_FAILED",
+  "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT",
   "SECRET_METADATA_UNAVAILABLE",
   "SECRET_VERSION_BASELINE_DRIFT",
   "APPLICATION_PASSWORD_TRANSACTION_FAILED",
@@ -156,6 +161,7 @@ class BootstrapStageFailure extends Error {
 export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE
   | typeof CANARY_CREDENTIAL_RECOVERY_MODE | typeof CANARY_ROLE_GRANT_MODE
   | typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE
+  | typeof SYNTHETIC_SALE_MARKET_PRECONDITION_MODE
   | typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
 
 type BootstrapEnvironment = Readonly<Record<string, string | undefined>>;
@@ -259,6 +265,7 @@ function parseMode(args: readonly string[]): BootstrapMode | null {
 function isBootstrapMode(value: string): value is BootstrapMode {
   return [
     "check", "apply", CANARY_ROLE_GRANT_MODE, SYNTHETIC_SALE_ROLE_GRANT_MODE,
+    SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
     CANARY_REFUND_ROLE_RESTORE_MODE, MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE,
     ISSUE_EXIMBAY_CANARY_APPROVAL_MODE, APPLICATION_CREDENTIAL_MODE,
     CANARY_CREDENTIAL_RECOVERY_MODE,
@@ -379,6 +386,12 @@ async function runWithProxy(
   const mode = configuration.mode;
   if (isProducerMode(mode)) {
     return runProxySession(true, () => runProducerMode(configuration, inventory));
+  }
+  if (mode === SYNTHETIC_SALE_MARKET_PRECONDITION_MODE) {
+    return runProxySession(true, () => executeSyntheticSaleMarketPrecondition(
+      configuration.databaseUrl,
+      inventory,
+    ));
   }
   if (isAclLifecycleMode(mode)) {
     return runProxySession(true, () => executeAclLifecycleMode(
@@ -529,6 +542,40 @@ async function executeAclLifecycleMode(
       roleGrantPostcondition: result.postcondition,
       migrationMutation: false,
       businessRowMutation: false,
+      providerEffects: 0,
+    });
+  } finally {
+    await database.end().catch(() => undefined);
+  }
+}
+
+async function executeSyntheticSaleMarketPrecondition(
+  databaseUrlValue: string,
+  inventory: RefundWorkerMigrationInventory,
+): Promise<Readonly<Record<string, unknown>>> {
+  const database = new Client({ connectionString: databaseUrlValue });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const result = await materializeSyntheticSaleMarketPrecondition(database, {
+      admission: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
+      environment: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+      targetDatabaseName: "refund_sandbox",
+    }, {
+      verifyExactLedger: async (transaction) => {
+        const completed = await requireExactMigrationPrefix(transaction, inventory);
+        if (completed !== inventory.migrationCount) ledgerRejected();
+      },
+    });
+    return Object.freeze({
+      code: result.code,
+      mode: SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
+      disposition: result.disposition,
+      market: result.market,
+      postconditionRowCount: result.postconditionRowCount,
+      migrationCount: inventory.migrationCount,
+      completedMigrationCount: inventory.migrationCount,
+      businessRowMutation: result.disposition === "CREATED" ? 1 : 0,
+      secretManagerEffects: 0,
       providerEffects: 0,
     });
   } finally {
@@ -784,6 +831,10 @@ function ledgerRejected(): never {
 
 function safeFailureRecord(error: unknown): SafeFailureRecord {
   if (error instanceof BootstrapStageFailure) return error.record;
+  if (error instanceof EximbayP3eDatabaseBootstrapError
+    && error.code === "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT") {
+    return Object.freeze({ code: error.code });
+  }
   if (error instanceof ApplicationCredentialFailure) {
     return Object.freeze({
       code: error.code,

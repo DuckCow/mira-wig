@@ -381,6 +381,13 @@ Prisma CLI, exact 41-migration corpus, `pg`, and existing hashed role/grant runn
 database authentication is isolated to that image and uses both `--private-ip` and
 `--auto-iam-authn` over `/cloudsql`.
 
+The explicit attended `materialize-synthetic-sale-market-precondition` mode first requires the
+exact migration ledger, then transactionally creates the one exact `US`/`USD` sandbox Market only
+when absent, performs no write when it is already exact, and fails closed on a conflicting row.
+It reports only nonsecret reference-state evidence. This mode is a prerequisite step: bootstrap
+authority must close before the synthetic-sale runtime is materialized, and it must not be run
+concurrently with an active synthetic-sale runtime. The default remains `check`.
+
 Repository definition and a digest input never authorize Job execution. The retained Job image
 still contains its reviewed migration, grant-only, and credential code paths, but the retained service account
 has no desired standing Cloud SQL login or credential-secret IAM authority. Future attended

@@ -11,7 +11,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  initiatePaymentAttemptWithTransientAuthority,
+  initiateSyntheticSalePaymentAttemptWithTransientAuthority,
   PaymentInitiateException,
 } from "@/lib/payment/attempt/initiate";
 import { materializeFreshEximbayReadyHandoffWithClient } from "@/lib/payment/eximbay/sdk-handoff";
@@ -154,7 +154,7 @@ async function executeStart(
     onStage("READY_CONTACT");
     return fetchImpl(input, init);
   };
-  const execution = await initiatePaymentAttemptWithTransientAuthority(client, {
+  const execution = await initiateSyntheticSalePaymentAttemptWithTransientAuthority(client, {
     sessionId: fixture.sessionId,
     userId: fixture.userId,
     adapterContext: syntheticProviderContext(resolution, providerEnv),

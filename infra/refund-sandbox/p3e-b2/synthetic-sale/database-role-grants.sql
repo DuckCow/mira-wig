@@ -13,6 +13,8 @@ BEGIN
 END
 $authority$;
 
+REVOKE UPDATE ("code") ON TABLE "Market" FROM mira_refund_canary;
+
 GRANT SELECT ON TABLE
   "User", "Market", "WigStyle", "WigVariant", "WigStyleMarket",
   "VariantMarketPrice", "CartItem", "CheckoutSession", "CheckoutSessionLine",
@@ -30,7 +32,6 @@ GRANT DELETE ON TABLE "CartItem" TO mira_refund_canary;
 
 GRANT UPDATE ("id") ON TABLE "User", "WigStyle", "CheckoutSessionLine"
   TO mira_refund_canary;
-GRANT UPDATE ("code") ON TABLE "Market" TO mira_refund_canary;
 GRANT UPDATE ("wigStyleId") ON TABLE "WigStyleMarket" TO mira_refund_canary;
 GRANT UPDATE ("variantId") ON TABLE "VariantMarketPrice" TO mira_refund_canary;
 

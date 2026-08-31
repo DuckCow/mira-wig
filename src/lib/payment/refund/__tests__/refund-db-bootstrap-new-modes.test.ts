@@ -5,8 +5,10 @@ import {
   MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE,
   runDatabaseBootstrapEntrypoint,
   SYNTHETIC_SALE_ROLE_GRANT_MODE,
+  SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
   type RuntimeConfiguration,
 } from "../../../../../containers/refund-db-bootstrap/entrypoint";
+import { EximbayP3eDatabaseBootstrapError } from "../../../../../scripts/eximbay-p3e-database-bootstrap";
 
 const COMMIT = "a".repeat(40);
 const DIGEST = "b".repeat(64);
@@ -21,6 +23,7 @@ describe("exact database-bootstrap SALE lifecycle and producer modes", () => {
   it.each([
     SYNTHETIC_SALE_ROLE_GRANT_MODE,
     CANARY_REFUND_ROLE_RESTORE_MODE,
+    SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
   ])("admits the exact attended ACL mode %s", async (mode) => {
     const execute = vi.fn(() => Promise.resolve({ code: "TEST" }));
     await expect(runDatabaseBootstrapEntrypoint([mode], baseEnv(), output(), {
@@ -29,6 +32,30 @@ describe("exact database-bootstrap SALE lifecycle and producer modes", () => {
       execute,
     })).resolves.toBe(0);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ mode }), inventory);
+  });
+
+  it("emits only the stable Market-precondition conflict code", async () => {
+    const stderr: string[] = [];
+    const result = await runDatabaseBootstrapEntrypoint(
+      [SYNTHETIC_SALE_MARKET_PRECONDITION_MODE],
+      baseEnv(),
+      Object.freeze({
+        stdout: Object.freeze({ write: () => true }),
+        stderr: Object.freeze({ write: (value: string) => { stderr.push(value); return true; } }),
+      }),
+      {
+        readSourceCommit: () => Promise.resolve(COMMIT),
+        loadMigrationInventory: () => Promise.resolve(inventory),
+        execute: () => Promise.reject(new EximbayP3eDatabaseBootstrapError(
+          "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT",
+        )),
+      },
+    );
+
+    expect(result).toBe(1);
+    expect(stderr).toEqual([
+      `${JSON.stringify({ ok: false, code: "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT" })}\n`,
+    ]);
   });
 
   it("adapts only exact target-producer inputs", async () => {
