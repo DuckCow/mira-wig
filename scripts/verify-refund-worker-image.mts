@@ -29,7 +29,7 @@ const CURRENT_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
 );
-const CURRENT_BASELINE_COMMIT = "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939";
+const CURRENT_BASELINE_COMMIT = "518513e0990b6f3e2f0958125cbfa1118d423988";
 const CURRENT_ENTRYPOINTS = Object.freeze([
   Object.freeze({ source: "containers/refund-worker/entrypoint.ts", runtimePath: "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs" }),
   Object.freeze({ source: "scripts/eximbay-refund-canary.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-refund-canary.mjs" }),

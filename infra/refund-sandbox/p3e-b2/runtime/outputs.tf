@@ -1,6 +1,6 @@
 output "status" {
   description = "Non-authorizing repository definition status."
-  value       = "RUNTIME_JOB_DEFINITIONS_DEFINED_DORMANT_NOT_PROVISIONED"
+  value       = "PREFLIGHT_RUNTIME_RELEASE_AUTHORIZED_NOT_YET_APPLIED"
 }
 
 output "runtime_root_apply_policy" {
@@ -15,11 +15,10 @@ output "runtime_manifest" {
     resource_graph_sha256    = local.authority_contract.resourceGraph.sortedAddressSha256
     state_prefix             = "p3e-b2/runtime"
     preflight_identity       = google_service_account.preflight.email
-    dormant_canary_identity  = google_service_account.dormant_canary.email
     preflight_job_name       = google_cloud_run_v2_job.preflight.name
-    dormant_canary_job_name  = google_cloud_run_v2_job.dormant_canary.name
-    release_image_digest     = "ABSENT_IN_CURRENT_REAL_CLOUD"
+    release_image_digest     = local.release_image_digest_uri
     runtime_apply_authorized = local.runtime_apply_authorized
+    canary_materialized      = false
     canary_executable        = false
     cloud_authentication     = "NOT_PERFORMED"
   }

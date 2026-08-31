@@ -273,28 +273,23 @@ No Terraform command in R1A or R1B is cloud authorization. Credential-free valid
 formatting, backend-disabled initialization, validation, and provider-mocked tests using Google
 provider 7.40.0.
 
-## R2B1 dormant runtime boundary
+## Provider-free preflight runtime release boundary
 
 `runtime` uses the future state prefix `p3e-b2/runtime` and a partial GCS backend. Its exact
-eight-address graph and sorted digest are frozen in
-`contracts/runtime-authority-v1.json`. Both Jobs use the same exact future repository-qualified
-`@sha256:` image input, but the real release digest remains absent. Each Job reads only its own
-future exact numeric database-secret version and its own secret-level
-`roles/secretmanager.secretAccessor` binding. R2B1 creates neither a payload nor a version.
+four-address graph and sorted digest are frozen in
+`contracts/runtime-authority-v1.json`. The graph contains only the preflight service account, its
+single-instance-conditioned `roles/cloudsql.client` member, its exact-secret
+`roles/secretmanager.secretAccessor` member, and the provider-free preflight Cloud Run Job.
+There is no canary runtime resource and no caller-controlled release flag.
 
-Every production resource declaration has an unconditional lifecycle precondition backed by a
-constant false local. No caller input, handoff, environment, workspace, command mode, or test
-override can admit plan/apply. This constant-false release gate is independent of IAM Deny.
+The Job runs only `sandbox-preflight`, uses preflight database secret version `1`, and consumes one
+separately reviewed repository-qualified `@sha256:` image. It verifies the exact read-only database
+identity (`mira_refund_preflight` on `refund_sandbox`) in addition to the existing PostgreSQL 18,
+41/41 migration, connectivity, and provider-free assertions.
 
-Cloud SQL proxy connection authority is `roles/cloudsql.client` for each dedicated runtime
-identity, with an IAM condition for the exact admitted instance resource and SQL Admin API
-service. The application does not call the Logging API, so no logging role is retained.
-
-The preflight Job runs only `sandbox-preflight`. The dormant canary definition runs
-`worker-once`, but has no provider credential, target, approval, invoker, scheduler, or automatic
-trigger. Both definitions use Gen2 Direct VPC egress, the exact foundation network and subnet,
-`ALL_TRAFFIC`, one task, parallelism one, zero retries, one CPU, 512 MiB, and 300 seconds.
-Each interface has exactly the committed foundation firewall target tag
+The Job uses Gen2 Direct VPC egress, the exact foundation network and subnet, `ALL_TRAFFIC`, one
+task, parallelism one, zero retries, one CPU, 512 MiB, and 300 seconds. Its interface has exactly
+the committed foundation firewall target tag
 `refund-provider-free`; there is no additional tag or connector. The foundation admits proxy
 TCP 3307 only to PSA and Google API HTTPS only to `199.36.153.4/30`, resolves `googleapis.com`
 through a VPC-private restricted zone, and denies all other IPv4 egress.
@@ -302,25 +297,24 @@ The timeout is 120 seconds of proxy readiness plus the existing 150-second exter
 deadline, three seconds of proxy shutdown, and 27 seconds of result/process margin.
 
 ```text
-RUNTIME_IDENTITY_AUTHORITY: DEFINED_NOT_PROVISIONED
-RUNTIME_SECRET_BINDINGS: DEFINED_NOT_APPLIED
-RUNTIME_JOB_DEFINITIONS: DEFINED_DORMANT_NOT_PROVISIONED
-DATABASE_SECRET_VERSION_REFERENCES: DEFINED_EXACT_INPUTS_NOT_CREATED
-RELEASE_IMAGE_DIGEST: ABSENT
-RUNTIME_DEPLOYABLE: FALSE
+RUNTIME_IDENTITY_AUTHORITY: PREFLIGHT_RELEASE_AUTHORIZED_NOT_YET_APPLIED
+RUNTIME_SECRET_BINDINGS: PREFLIGHT_RELEASE_AUTHORIZED_NOT_YET_APPLIED
+RUNTIME_JOB_DEFINITIONS: PREFLIGHT_RELEASE_AUTHORIZED_NOT_YET_APPLIED
+DATABASE_SECRET_VERSION_REFERENCES: PREFLIGHT_VERSION_1_EXACT_INPUT
+RELEASE_IMAGE_DIGEST: EXACT_REVIEWED_REGISTRY_DIGEST_REQUIRED_NOT_YET_PUBLISHED
+RUNTIME_DEPLOYABLE: PENDING_IMAGE_PUBLICATION_AND_APPLY
 CANARY_EXECUTABLE: FALSE
 PROVIDER_EXECUTION: BLOCKED
 SCHEDULED_SANDBOX: BLOCKED
 LIVE: UNREACHABLE
 IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION
-RUNTIME_APPLY_AUTHORIZED: FALSE
-RUNTIME_ROOT_APPLY_POLICY: UNCONDITIONALLY_BLOCKED_IN_R2B1
+RUNTIME_APPLY_AUTHORIZED: TRUE_EXACT_PREFLIGHT_RELEASE_ONLY
+RUNTIME_ROOT_APPLY_POLICY: EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED
 ```
 
-Runtime deployer authority remains deferred because the exact create/read/update provider method
-and permission set has not been independently derived across Cloud Run Job, service-account,
-project IAM, secret IAM, and Artifact Registry. R2B1 defines no
-deployer identity, custom role, or binding.
+The exact attended operator identity and existing permissions remain an external execution fact;
+this root defines no deployer identity, custom role, or binding. Canary materialization, persistent
+invocation authority, provider credentials, and database-bootstrap retirement remain separate.
 
 ## Dormant database-bootstrap runtime boundary
 

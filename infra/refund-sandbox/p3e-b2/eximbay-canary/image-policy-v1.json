@@ -1,9 +1,9 @@
 {
   "contractVersion": "mira-refund-eximbay-canary-image-policy/v1",
   "parentAuthoritySha256": "4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473",
-  "baselineCommit": "dc3682e7d61c1585b6b5cc5daa288ea5f2c2a939",
+  "baselineCommit": "518513e0990b6f3e2f0958125cbfa1118d423988",
   "buildContext": {
-    "manifestSha256": "00591418f2a5bb073e70cff114868520e22d71a49d170d5ea2302c07249fc10e",
+    "manifestSha256": "cb0f2165fdfe8f646c5f193b78dbde914d085efa04e3936bdc5edde8c6934437",
     "fileCount": 198,
     "repositoryGraphInputCount": 149,
     "packagedGraphInputCount": 373
@@ -29,7 +29,7 @@
   "applicationClosure": {
     "entryCount": 181,
     "metadataManifestSha256": "4bec8a7d93a9babab226860eef9495e9a2a56d0a8fb612d1dadf40e895b58e03",
-    "contentManifestSha256": "42729f653a5d2b1da75e721d7b61d55e0aae2bd9ce187471d4c58fc0ace0d30f"
+    "contentManifestSha256": "5405d0d162f6cc39d0551e577f54d6bd7e24050348e5d4e142d96721a7df7008"
   },
   "systemClosure": {
     "removedEntryCount": 2620,
@@ -37,7 +37,7 @@
     "changedEntryCount": 3,
     "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
     "addedEntryCount": 184,
-    "addedMetadataContentManifestSha256": "db122c3d556370d4971d82d1deedaaa6e10525ca660eaeea95f04dd9713c533d"
+    "addedMetadataContentManifestSha256": "fe229f2519a2f353a846ccd0e5ac9fd667446fbcb31aa9f08d6cb0edf93afd13"
   },
   "nonApplicationAdditionCount": 3,
   "nonApplicationAdditions": [

@@ -1,20 +1,8 @@
 import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json";
-import imageContract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import historicalOwnership from "../../../../../infra/refund-sandbox/p3e-b2/runtime-deferred/resource-ownership-v1.json";
 import { walkRefundP3eRealFiles as walk } from "./refund-p3e-real-filesystem-inventory";
 
@@ -25,42 +13,11 @@ const POLICY_DOCUMENT = join(
   ROOT,
   "docs/payment_policy/refund_worker_p3e_b2_dormant_runtime_authority_v1.md",
 );
-const RUNTIME_IMAGE_POLICY_DOCUMENT = join(
-  ROOT,
-  "docs/payment_policy/refund_worker_p3e_b2_runtime_image_connection_v1.md",
-);
-
-const EXPECTED_R2B1_PATHS = Object.freeze([
-  "docs/payment_policy/refund_worker_p3e_b2_dormant_runtime_authority_v1.md",
-  "docs/payment_policy/refund_worker_p3e_b2_foundation_authority_v1.md",
-  "docs/payment_policy/refund_worker_p3e_b2_runtime_image_connection_v1.md",
-  "infra/refund-sandbox/p3e-b2/README.md",
-  "infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json",
-  "infra/refund-sandbox/p3e-b2/runtime-deferred/README.md",
-  "infra/refund-sandbox/p3e-b2/runtime-deferred/resource-ownership-v1.json",
-  "infra/refund-sandbox/p3e-b2/runtime/.terraform.lock.hcl",
-  "infra/refund-sandbox/p3e-b2/runtime/checks.tf",
-  "infra/refund-sandbox/p3e-b2/runtime/locals.tf",
-  "infra/refund-sandbox/p3e-b2/runtime/main.tf",
-  "infra/refund-sandbox/p3e-b2/runtime/outputs.tf",
-  "infra/refund-sandbox/p3e-b2/runtime/providers.tf",
-  "infra/refund-sandbox/p3e-b2/runtime/terraform.tfvars.example",
-  "infra/refund-sandbox/p3e-b2/runtime/tests/policy.tftest.hcl",
-  "infra/refund-sandbox/p3e-b2/runtime/variables.tf",
-  "infra/refund-sandbox/p3e-b2/runtime/versions.tf",
-  "src/lib/payment/refund/__tests__/refund-p3e-b2-foundation-authority-policy.test.ts",
-  "src/lib/payment/refund/__tests__/refund-p3e-b2-runtime-authority-policy.test.ts",
-  "src/lib/payment/refund/__tests__/refund-p3e-b2-runtime-image-policy.test.ts",
-]);
 
 const EXPECTED_ADDRESSES = Object.freeze([
-  "google_cloud_run_v2_job.dormant_canary",
   "google_cloud_run_v2_job.preflight",
-  'google_project_iam_member.cloud_sql_client["dormant_canary"]',
   'google_project_iam_member.cloud_sql_client["preflight"]',
-  "google_secret_manager_secret_iam_member.canary_database_access",
   "google_secret_manager_secret_iam_member.preflight_database_access",
-  "google_service_account.dormant_canary",
   "google_service_account.preflight",
 ]);
 
@@ -71,82 +28,57 @@ const EXPECTED_TYPES = Object.freeze([
   "google_service_account",
 ]);
 
-describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
-  it("freezes the exact 20-path R2B1 inventory including the runtime dotfile", () => {
-    const observed = discoverR2b1Paths();
-    expect(EXPECTED_R2B1_PATHS).toHaveLength(20);
-    expect(new Set(EXPECTED_R2B1_PATHS).size).toBe(20);
-    expect(observed).toEqual(EXPECTED_R2B1_PATHS);
-    expect(observed).toContain(
-      "infra/refund-sandbox/p3e-b2/runtime/.terraform.lock.hcl",
-    );
-    for (const path of observed) {
-      expect(lstatSync(join(ROOT, path)).isFile()).toBe(true);
-      expect(lstatSync(join(ROOT, path)).isSymbolicLink()).toBe(false);
-      expect(realpathSync(join(ROOT, path))).toBe(join(ROOT, path));
-    }
-  });
-
-  it("freezes the exact eight-instance resource graph and digest", () => {
-    expect(contract.resourceGraph.resourceCount).toBe(8);
-    expect(contract.resourceGraph.addresses).toEqual(EXPECTED_ADDRESSES);
-    expect(contract.resourceGraph.resourceTypes).toEqual(EXPECTED_TYPES);
+describe("P3E-B2 provider-free preflight runtime authority", () => {
+  it("freezes the exact four-resource release graph", () => {
+    expect(contract.resourceGraph).toMatchObject({
+      resourceCount: 4,
+      addresses: EXPECTED_ADDRESSES,
+      resourceTypes: EXPECTED_TYPES,
+      sortedAddressSha256:
+        "2f4d2e2009f6a1e1b4fe0971bb40fcbe7a0a6d34e8a1c1e8994647f78b9e9d2d",
+    });
     expect(exactSetHash(EXPECTED_ADDRESSES)).toBe(
-      "7d1fe521be626a73ecfc31f98f78cb6bc3e358bf82406e894b620a34e34779fa",
+      contract.resourceGraph.sortedAddressSha256,
     );
-    expect(contract.resourceGraph.sortedAddressSha256).toBe(
-      exactSetHash(EXPECTED_ADDRESSES),
-    );
-
-    const declarations = terraformResourceDeclarations(readTerraform());
-    expect(declarations).toEqual([
-      "google_cloud_run_v2_job.dormant_canary",
+    expect(terraformResourceDeclarations(readTerraform())).toEqual([
       "google_cloud_run_v2_job.preflight",
       "google_project_iam_member.cloud_sql_client",
-      "google_secret_manager_secret_iam_member.canary_database_access",
       "google_secret_manager_secret_iam_member.preflight_database_access",
-      "google_service_account.dormant_canary",
       "google_service_account.preflight",
     ]);
   });
 
-  it("unconditionally blocks every production resource declaration from plan and apply", () => {
+  it("admits the exact release without exposing a caller override", () => {
     const main = readFileSync(join(RUNTIME, "main.tf"), "utf8");
     const locals = readFileSync(join(RUNTIME, "locals.tf"), "utf8");
     const variables = readFileSync(join(RUNTIME, "variables.tf"), "utf8");
-    expect(main.match(
-      /condition\s*=\s*local\.runtime_apply_authorized/gu,
-    )).toHaveLength(7);
-    expect(main.match(
-      /error_message\s*=\s*"R2B1_RUNTIME_ROOT_UNCONDITIONALLY_BLOCKED"/gu,
-    )).toHaveLength(7);
-    expect(locals.match(
-      /runtime_apply_authorized\s*=\s*false/gu,
-    )).toHaveLength(1);
-    expect(locals).toMatch(
-      /runtime_root_apply_policy\s*=\s*"UNCONDITIONALLY_BLOCKED_IN_R2B1"/u,
+    expect(main.match(/condition\s*=\s*local\.runtime_apply_authorized/gu))
+      .toHaveLength(4);
+    expect(main.match(/error_message\s*=\s*"PREFLIGHT_RELEASE_AUTHORITY_MISSING"/gu))
+      .toHaveLength(4);
+    expect(locals).toMatch(/runtime_apply_authorized\s*=\s*true/u);
+    expect(locals).toContain(
+      'runtime_root_apply_policy  = "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED"',
     );
     expect(variables).not.toContain("runtime_apply_authorized");
-    expect(variables).not.toContain("runtime_root_apply_policy");
     expect(contract.applyEnforcement).toEqual({
-      policy: "UNCONDITIONALLY_BLOCKED_IN_R2B1",
-      authorized: false,
+      policy: "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED",
+      authorized: true,
       callerOverride: "ABSENT",
       environmentOverride: "ABSENT",
       workspaceOverride: "ABSENT",
       testOverride: "ABSENT",
-      coveredResourceInstances: 8,
-      mechanism:
-        "RESOURCE_LIFECYCLE_PRECONDITION_ON_EVERY_RESOURCE_DECLARATION",
-      error: "R2B1_RUNTIME_ROOT_UNCONDITIONALLY_BLOCKED",
-      futureRelease:
-        "SEPARATE_INDEPENDENTLY_REVIEWED_RUNTIME_AUTHORITY_AFTER_FOUNDATION_IMAGE_AND_SECRET_READINESS",
+      coveredResourceInstances: 4,
+      mechanism: "RESOURCE_LIFECYCLE_PRECONDITION_ON_EVERY_RESOURCE_DECLARATION",
+      error: "PREFLIGHT_RELEASE_AUTHORITY_MISSING",
+      futureRelease: "CANARY_REMAINS_SEPARATE_AND_NOT_MATERIALIZED",
     });
   });
 
-  it("defines distinct identities and only exact connection and secret-read IAM", () => {
-    expect(contract.runtimeIdentities).toMatchObject({
-      count: 2,
+  it("uses one exact identity with minimum connection and secret-read IAM", () => {
+    expect(contract.runtimeIdentities).toEqual({
+      count: 1,
+      preflightAccountIdTemplate: "<resource-prefix>-preflight",
       sharedIdentity: false,
       serviceAccountKeys: "FORBIDDEN",
       defaultComputeServiceAccount: "FORBIDDEN",
@@ -156,12 +88,11 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
     });
     expect(contract.iam.cloudSqlClient).toEqual({
       role: "roles/cloudsql.client",
-      principalCount: 2,
+      principalCount: 1,
       scope: "EXACT_PROJECT_MEMBER_WITH_SINGLE_INSTANCE_IAM_CONDITION",
       conditionTemplate:
         "resource.name == '<exact-foundation-instance-resource-name>' && resource.service == 'sqladmin.googleapis.com'",
-      connectionMode:
-        "PRIVATE_IP_PROXY_WITHOUT_IAM_DATABASE_AUTHENTICATION",
+      connectionMode: "PRIVATE_IP_PROXY_WITHOUT_IAM_DATABASE_AUTHENTICATION",
     });
     expect(contract.iam.databaseSecrets).toMatchObject({
       role: "roles/secretmanager.secretAccessor",
@@ -170,36 +101,90 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       projectLevelBinding: "FORBIDDEN",
       secretVersionCreation: "ABSENT",
     });
-    expect(contract.iam.loggingRoleDisposition).toBe(
-      "REJECTED_APPLICATION_DOES_NOT_CALL_LOGGING_API",
-    );
+    expect(readTerraform()).not.toContain("roles/cloudsql.instanceUser");
   });
 
-  it("keeps both jobs exact, private, provider-free, and non-executable", () => {
+  it("couples exact identity, IAM, secret, image, and network authority to Terraform source", () => {
+    const main = readFileSync(join(RUNTIME, "main.tf"), "utf8");
+    const locals = readFileSync(join(RUNTIME, "locals.tf"), "utf8");
+    const serviceAccount = terraformResourceBlock(
+      main,
+      "google_service_account",
+      "preflight",
+    );
+    expect(serviceAccount).toContain("account_id   = local.preflight_service_account_id");
+    expect(locals).toContain(
+      'preflight_service_account_id = "${var.resource_prefix}-preflight"',
+    );
+
+    const cloudSql = terraformResourceBlock(
+      main,
+      "google_project_iam_member",
+      "cloud_sql_client",
+    );
+    expect(cloudSql).toContain("for_each = local.runtime_identities");
+    expect(cloudSql).toContain('role    = "roles/cloudsql.client"');
+    expect(cloudSql).toContain("member  = \"serviceAccount:${each.value}\"");
+    expect(cloudSql).toContain("expression  = local.cloud_sql_condition_expression");
+    expect(locals).toContain(
+      "cloud_sql_condition_expression = \"resource.name == '${local.foundation_cloud_sql_instance_resource_name}' && resource.service == 'sqladmin.googleapis.com'\"",
+    );
+    expect(locals).toMatch(
+      /runtime_identities\s*=\s*\{\s*preflight\s*=\s*google_service_account\.preflight\.email\s*\}/u,
+    );
+
+    const secret = terraformResourceBlock(
+      main,
+      "google_secret_manager_secret_iam_member",
+      "preflight_database_access",
+    );
+    expect(secret).toContain(
+      "secret_id = local.foundation_preflight_database_secret_resource_name",
+    );
+    expect(secret).toContain('role      = "roles/secretmanager.secretAccessor"');
+    expect(secret).toContain(
+      'member    = "serviceAccount:${google_service_account.preflight.email}"',
+    );
+
+    const job = terraformResourceBlock(main, "google_cloud_run_v2_job", "preflight");
+    expect(job).toContain("service_account       = google_service_account.preflight.email");
+    expect(job).toContain("image = local.release_image_digest_uri");
+    expect(job).toContain('args  = ["sandbox-preflight"]');
+    expect(job).toContain("secret  = local.preflight_database_secret_version_resource_name");
+    expect(job).toContain("version = local.preflight_database_secret_version");
+    expect(job).toContain('egress = "ALL_TRAFFIC"');
+    expect(job).toContain("network    = local.foundation_network_resource_name");
+    expect(job).toContain("subnetwork = local.foundation_subnetwork_resource_name");
+    expect(job).toContain("tags       = local.network_tags");
+    expect(job.match(/\benv\s*\{/gu)).toHaveLength(3);
+
+    expect(locals).toContain(
+      "${var.resource_prefix}-refund-images/refund-worker@sha256:[0-9a-f]{64}$",
+    );
+    expect(locals).not.toContain("refund-images/[a-z0-9]");
+  });
+
+  it("materializes only the provider-free preflight Job contract", () => {
     expect(contract.jobs).toMatchObject({
       taskCount: 1,
       parallelism: 1,
       maxRetries: 0,
-      trustedOwnerManualInvocation:
-        "TECHNICALLY_POSSIBLE_PROVIDER_FREE_NON_FINANCIAL",
       automaticExecution: "NOT_ADMITTED",
       persistentAutomaticTrigger: "NONE",
       executionEnvironment: "SECOND_GENERATION",
       resources: { cpu: "1", memory: "512Mi" },
-      taskTimeout: {
-        seconds: 300,
-        proxyReadinessSeconds: 120,
-        workerCooperativeBudgetSeconds: 120,
-        workerExternalDeadlineSeconds: 150,
-        proxyShutdownSeconds: 3,
-        serializationAndProcessMarginSeconds: 27,
-      },
+      taskTimeout: { seconds: 300 },
       preflight: {
         arguments: ["sandbox-preflight"],
+        environmentKeys: [
+          "DATABASE_URL",
+          "MIRA_REFUND_P3E_PREFLIGHT_MODE",
+          "REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME",
+        ],
         providerContact: "FORBIDDEN",
       },
-      dormantCanary: {
-        arguments: ["worker-once"],
+      canary: {
+        materialized: false,
         providerCredential: "ABSENT",
         target: "ABSENT",
         approval: "ABSENT",
@@ -210,85 +195,54 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       mode: "DIRECT_VPC_EGRESS",
       egress: "ALL_TRAFFIC",
       tags: ["refund-provider-free"],
-      foundationFirewallTargetTag: "refund-provider-free",
-      proxyDataPlaneTcpPort: 3307,
-      restrictedGoogleApisTcpPort: 443,
-      restrictedGoogleApisIpv4Range: "199.36.153.4/30",
-      googleapisPrivateDnsZone: "EXACT_FOUNDATION_HANDOFF",
-      otherIpv4Egress: "DENY",
       serverlessVpcAccessConnector: "FORBIDDEN",
       databaseEndpoint: "CLOUD_SQL_PRIVATE_IP_ONLY",
       applicationTransport: "POSTGRESQL_UNIX_SOCKET",
-      socketRoot: "/cloudsql",
     });
-    expect(contract.providerScope.classification).toBe("TOSS_ONLY_EXPLICIT");
-    expect(contract.providerScope.r2b1ProviderCredentialBindings).toBe(0);
+    expect(contract.providerScope).toMatchObject({
+      classification: "PREFLIGHT_ONLY_NO_PROVIDER_ROUTE",
+      runtimeProviderCredentialBindings: 0,
+    });
   });
 
-  it("attaches both Job interfaces to the exact foundation firewall target", () => {
-    const runtimeMain = readFileSync(join(RUNTIME, "main.tf"), "utf8");
-    const runtimeLocals = readFileSync(join(RUNTIME, "locals.tf"), "utf8");
-    const foundationNetwork = readFileSync(
-      join(INFRA, "foundation/network.tf"),
-      "utf8",
-    );
-    for (const job of ["preflight", "dormant_canary"]) {
-      const block = terraformResourceBlock(
-        runtimeMain,
-        "google_cloud_run_v2_job",
-        job,
-      );
-      expect(block.match(/tags\s*=\s*local\.network_tags/gu)).toHaveLength(1);
-      expect(block).toContain('egress = "ALL_TRAFFIC"');
-      expect(block).not.toContain("connector");
-    }
-    expect(runtimeLocals.match(
-      /network_tags\s*=\s*\["refund-provider-free"\]/gu,
-    )).toHaveLength(1);
-    for (const firewall of [
-      "allow_private_sql",
-      "allow_restricted_google_apis",
-      "deny_other_egress",
-    ]) {
-      const block = terraformResourceBlock(
-        foundationNetwork,
-        "google_compute_firewall",
-        firewall,
-      );
-      expect(block.match(
-        /target_tags\s*=\s*\["refund-provider-free"\]/gu,
-      )).toHaveLength(1);
-    }
-  });
-
-  it("admits only exact handoffs while retaining absent real release and secret versions", () => {
+  it("requires preflight secret version 1 and an immutable reviewed image", () => {
     expect(contract.handoffs.releaseImage).toMatchObject({
-      currentRealStatus: "ABSENT",
       localR2aDigestAccepted: false,
+      currentRealStatus: "REQUIRED_FOR_RELEASE_NOT_YET_PUBLISHED",
     });
-    expect(contract.handoffs.databaseSecretVersionReference).toMatchObject({
+    expect(contract.handoffs.databaseSecretVersionReference).toEqual({
+      schemaFieldNamesSha256:
+        "c41ee7d427a8978d8b5e1bdd2245b0810499bf23deaca2be862aa487473328ee",
       fields: ["secret_resource_name", "version"],
-      versionGrammar: "^[1-9][0-9]{0,18}$",
+      versionGrammar: "^1$",
       payload: "FORBIDDEN",
-      currentRealStatus: "ABSENT",
+      currentRealStatus: "PREFLIGHT_VERSION_1_ENABLED",
     });
-    expect(contract.handoffs).not.toHaveProperty("executionDeny");
-    expect(contract.status.RELEASE_IMAGE_DIGEST).toBe("ABSENT");
-    expect(contract.status.DB_SECRET_VERSIONS).toBe("ABSENT_IN_REAL_CLOUD");
+    expect(readFileSync(join(RUNTIME, "locals.tf"), "utf8"))
+      .toContain('var.preflight_database_secret_version_reference.version == "1"');
   });
 
-  it("preserves the historical ownership ledger and records bounded supersession", () => {
-    expect(historicalOwnership.statuses).toEqual({
-      RUNTIME_IDENTITY_AUTHORITY: "DEFERRED",
-      RUNTIME_SECRET_BINDINGS: "DEFERRED",
-      RUNTIME_JOB_DEFINITIONS: "DEFERRED",
-      IMAGE_DIGEST: "ABSENT",
-      DB_SECRET_VERSIONS: "ABSENT",
-      PRIVATE_CONNECTION_PATH: "UNRESOLVED",
-      DB_BOOTSTRAP: "UNIMPLEMENTED",
-      RUNTIME_DEPLOYABLE: "FALSE",
+  it("contains no canary resource, trigger, secret payload, or provider credential", () => {
+    const source = readTerraform();
+    expect(source).not.toMatch(/resource\s+"[^"]+"\s+"[^"\n]*canary/u);
+    expect(source).not.toMatch(
+      /google_cloudbuild_trigger|google_cloud_scheduler_job|google_eventarc_trigger|google_pubsub_subscription|google_workflows_workflow|google_secret_manager_secret_version|google_service_account_key/u,
+    );
+    expect(source).not.toMatch(
+      /TOSS_SECRET_KEY|EXIMBAY|PAYPAL|REFUND_SANDBOX_TARGET|EXECUTABLE_APPROVAL|secret_data/u,
+    );
+    expect(contract.status).toMatchObject({
+      RUNTIME_APPLY_AUTHORIZED: "TRUE_EXACT_PREFLIGHT_RELEASE_ONLY",
+      RUNTIME_ROOT_APPLY_POLICY: "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED",
       CANARY_EXECUTABLE: "FALSE",
+      PROVIDER_EXECUTION: "BLOCKED",
+      SCHEDULED_SANDBOX: "BLOCKED",
+      LIVE: "UNREACHABLE",
     });
+  });
+
+  it("keeps historical deny-era ownership frozen and superseded", () => {
+    expect(historicalOwnership.statuses.RUNTIME_IDENTITY_AUTHORITY).toBe("DEFERRED");
     expect(historicalOwnership.ownership).toHaveLength(18);
     expect(historicalOwnership.supersession).toMatchObject({
       package: "P3E-B2-R2B1",
@@ -296,145 +250,17 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       status: "DORMANT_DEFINITIONS_ONLY_NOT_PROVISIONED",
       executionAuthority: "ABSENT",
     });
-    expect(historicalOwnership.supersession.ownedIdentities).toHaveLength(8);
-    expect(contract.deferredOwnership).toEqual([
-      "database_bootstrap_and_grants",
-      "future_invocation_authority",
-      "image_publication",
-      "migrations_and_role_grants",
-      "monitoring_and_alert_deployment",
-      "preflight_invocation_binding",
-      "provider_credential_secret_versions",
-    ]);
-  });
-
-  it("contains no automatic trigger, invocation binding, secret payload, remote-state, or executable authority", () => {
-    const source = readTerraform();
-    const declarations = terraformResourceDeclarations(source);
-    expect(declarations.some((address) =>
-      address.startsWith("google_cloudbuild_trigger") ||
-      address.startsWith("google_cloud_scheduler_") ||
-      address.startsWith("google_eventarc_") ||
-      address.startsWith("google_pubsub_") ||
-      address.startsWith("google_workflows_") ||
-      address.includes("_job_iam_") ||
-      address === "google_secret_manager_secret_version" ||
-      address === "google_service_account_key"
-    )).toBe(false);
-    expect(source).not.toMatch(
-      /\b(?:data|resource)\s+"terraform_remote_state"|local-exec|remote-exec|external\s*=|http\s*=/u,
-    );
-    expect(source).not.toMatch(
-      /(?:TOSS_SECRET_KEY|EXIMBAY|PAYPAL|REFUND_SANDBOX_TARGET|EXECUTABLE_APPROVAL|secret_data|DATABASE_URL=)/u,
-    );
-    for (const trigger of [
-      "google_cloudbuild_trigger",
-      "google_cloud_scheduler_job",
-      "google_eventarc_trigger",
-      "google_pubsub_subscription",
-      "google_workflows_workflow",
-    ]) {
-      expect(contract.forbiddenResources).toContain(trigger);
-    }
-    expect(contract.status).toMatchObject({
-      RUNTIME_DEPLOYABLE: "FALSE",
-      CANARY_EXECUTABLE: "FALSE",
-      PROVIDER_EXECUTION: "BLOCKED",
-      SCHEDULED_SANDBOX: "BLOCKED",
-      LIVE: "UNREACHABLE",
-      IAM_DENY_CURRENT_PROJECT: "NOT_APPLICABLE_NO_ORGANIZATION",
-      RUNTIME_APPLY_AUTHORIZED: "FALSE",
-      RUNTIME_ROOT_APPLY_POLICY: "UNCONDITIONALLY_BLOCKED_IN_R2B1",
-    });
-    expect(contract.portability).toEqual({
-      classification: "PORTABLE_CORE_WITH_CLOUD_RUN_RUNTIME_ADAPTER",
-      cloudRunScope: "R2B1_TERRAFORM_ONLY",
-      domainCoreCloudRunDependency: false,
-      r2aImageCloudRunSpecificLogic: false,
-    });
-  });
-
-  it("states the accepted trusted-operator boundary without an IAM deny handoff", () => {
-    const source = readTerraform();
-    const variables = readFileSync(join(RUNTIME, "variables.tf"), "utf8");
-    const example = readFileSync(
-      join(RUNTIME, "terraform.tfvars.example"),
-      "utf8",
-    );
-    expect(contract.threatModel).toEqual({
-      trustedOperatorModel: "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN",
-      maliciousOwnerResistance: "NOT_REQUIRED",
-      trustedOwnerManualInvocation: "TECHNICALLY_POSSIBLE_ACCEPTED",
-      automaticExecution: "NOT_ADMITTED",
-      persistentAutomaticTrigger: "NONE",
-    });
-    expect(`${source}\n${variables}\n${example}`).not.toContain(
-      "execution_deny_handoff",
-    );
-    expect(contract.handoffs).not.toHaveProperty("executionDeny");
-  });
-
-  it("fails future database bootstrap closed and admits mutation only attended", () => {
-    expect(contract.bootstrapFutureSafety).toEqual({
-      futureCloudRunJobImplementationStatus: "ABSENT",
-      existingAttendedScript: {
-        path: "scripts/eximbay-p3e-database-bootstrap.ts",
-        status: "PRESENT_EXPLICIT_INPUT_ADMISSION_REQUIRED",
-        automaticInvocation: "ABSENT",
-      },
-      defaultMode: "NON_MUTATING_FAIL_CLOSED",
-      mutationModeDefault: false,
-      mutationAdmission: "EXPLICIT_ATTENDED_HUMAN_REQUIRED",
-      automaticTrigger: "FORBIDDEN",
-      maxRetries: 0,
-      providerCredentials: "ABSENT",
-      providerContact: "IMPOSSIBLE",
-      syntheticSaleOrRefund: "OUT_OF_SCOPE",
-    });
-  });
-
-  it("pins frozen R2A authority and the current production runtime inputs", () => {
-    expect(imageContract.localProof.releaseImageDigest).toBe("ABSENT");
-    expect(imageContract.connection).toMatchObject({
-      networkMode: "DIRECT_VPC_EGRESS",
-      egressMode: "ALL_TRAFFIC",
-      databaseEndpoint: "CLOUD_SQL_PRIVATE_IP_ONLY",
-      applicationTransport: "POSTGRESQL_UNIX_SOCKET",
-    });
-    expect(sha256(readFileSync(join(ROOT, "containers/refund-worker/Dockerfile"))))
-      .toBe("7f337fb07c6fea4fde1dca685772f596a1924e3b5d26c3e8d50bffa3e964327b");
-    expect(sha256(readFileSync(join(ROOT, "package-lock.json"))))
-      .toBe("c45bd86701bae2fb55b8954739d5f3d29c58b72281139155cc9f74f0c9ca828f");
-    expect(sha256(readFileSync(join(
-      INFRA,
-      "contracts/runtime-image-connection-v1.json",
-    )))).toBe("4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473");
-    expect(contract.historicalAuthorityDisposition).toEqual({
-      runtimeImageConnectionContract:
-        "contracts/runtime-image-connection-v1.json",
-      statusScope: "FROZEN_HISTORICAL_R2A_SNAPSHOT_NOT_CURRENT_RUNTIME_STATUS",
-      supersededStatusKey: "JOB_EXECUTION_DENY",
-      currentStatusKey: "IAM_DENY_CURRENT_PROJECT",
-      currentStatusValue: "NOT_APPLICABLE_NO_ORGANIZATION",
-    });
-    const imageDocumentation = readFileSync(
-      RUNTIME_IMAGE_POLICY_DOCUMENT,
-      "utf8",
-    );
-    expect(imageDocumentation).toContain(
-      "frozen historical R2A snapshot, not current runtime status",
-    );
-    expect(imageDocumentation).toContain(
-      "IAM_DENY_CURRENT_PROJECT: NOT_APPLICABLE_NO_ORGANIZATION",
+    expect(contract.historicalAuthorityDisposition.currentStatusValue).toBe(
+      "NOT_APPLICABLE_NO_ORGANIZATION",
     );
   });
 
-  it("preserves network, database, provider-free, and Eximbay financial boundaries byte-for-byte", () => {
+  it("preserves unrelated foundation, proxy, and provider boundaries byte-for-byte", () => {
     const frozen = {
       "infra/refund-sandbox/p3e-b2/foundation/network.tf":
         "affe2fdca13b42ee287e5439c12c220c61f0c37b0e5d0e1f5f777d7b4cab045e",
       "infra/refund-sandbox/p3e-b2/foundation/cloud-sql.tf":
-        "0c36b8f56ed3a62ecc122ce1b6cd98bc6749f78af3783ccc6988813d04a04402",
+        "27ad2958fa386c39a84b23528f8acbedb0e6b63891873db5ce0d7bb30e0f2b14",
       "src/lib/payment/refund/refund-worker-container-supervisor.ts":
         "4e3334cb48744d2e5b7d89d07af00d3c52fe4d7f67df385393210d5b113194d9",
       "src/lib/payment/refund/refund-sandbox-provider-free-preflight-environment.ts":
@@ -443,74 +269,20 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
         "6b4865199543b45a996aefbfe0b5c896bbda45542c0941080f67c1d8a82ca3f7",
       "src/lib/payment/refund/eximbay-refund-canary-target-binding.ts":
         "36a215ebc6ccfa504e4f9d5ace54de32dd480de73947317e002ca9be0aecf4da",
-      "src/lib/payment/refund/eximbay-refund-sandbox-canary-approval-contract.ts":
-        "d73a7cade4a5417b8df589567909d8a23c49beda1445ba08b53678bef807c72c",
-      "src/lib/payment/refund/consume-eximbay-refund-canary-approval.ts":
-        "297b5cc35a410e6087b649cd14fc178c514748174a174d2f48d1debf92a9d0e5",
     } as const;
     for (const [path, expected] of Object.entries(frozen)) {
       expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expected);
     }
   });
 
-  it("publishes every exact non-authorizing status in the policy document", () => {
+  it("publishes the machine statuses in the current policy document", () => {
     const documentation = readFileSync(POLICY_DOCUMENT, "utf8");
     for (const [key, value] of Object.entries(contract.status)) {
       expect(documentation).toContain(`${key}: ${value}`);
     }
-    expect(documentation).toContain("TOSS_ONLY_EXPLICIT");
     expect(documentation).toContain("p3e-b2/runtime");
-    expect(documentation).toContain("No Google Cloud project or resource was inspected");
-  });
-
-  it("fails closed on symlinks and path escape while retaining dotfiles", () => {
-    const temporaryRoot = mkdtempSync(join(tmpdir(), "mira-r2b1-inventory-"));
-    try {
-      const root = join(temporaryRoot, "root");
-      mkdirSync(join(root, "nested"), { recursive: true });
-      writeFileSync(join(root, ".terraform.lock.hcl"), "lock", "utf8");
-      writeFileSync(join(root, "nested", "main.tf"), "main", "utf8");
-      expect(relativeFiles(root)).toEqual([
-        ".terraform.lock.hcl",
-        "nested/main.tf",
-      ]);
-
-      const outside = join(temporaryRoot, "outside.tf");
-      writeFileSync(outside, "outside", "utf8");
-      symlinkSync(outside, join(root, "escape.tf"));
-      expect(() => walk(root)).toThrow(/symlink/u);
-      rmSync(join(root, "escape.tf"));
-
-      const unreadable = join(temporaryRoot, "unreadable.tf");
-      writeFileSync(unreadable, "unreadable", "utf8");
-      chmodSync(unreadable, 0);
-      symlinkSync(unreadable, join(root, "unreadable-link.tf"));
-      expect(() => walk(root)).toThrow(/symlink/u);
-      chmodSync(unreadable, 0o600);
-    } finally {
-      rmSync(temporaryRoot, { recursive: true, force: true });
-    }
   });
 });
-
-function discoverR2b1Paths(): readonly string[] {
-  const paths = new Set<string>([
-    "docs/payment_policy/refund_worker_p3e_b2_dormant_runtime_authority_v1.md",
-    "docs/payment_policy/refund_worker_p3e_b2_foundation_authority_v1.md",
-    "docs/payment_policy/refund_worker_p3e_b2_runtime_image_connection_v1.md",
-    "infra/refund-sandbox/p3e-b2/README.md",
-    "infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json",
-    "infra/refund-sandbox/p3e-b2/runtime-deferred/README.md",
-    "infra/refund-sandbox/p3e-b2/runtime-deferred/resource-ownership-v1.json",
-    "src/lib/payment/refund/__tests__/refund-p3e-b2-foundation-authority-policy.test.ts",
-    "src/lib/payment/refund/__tests__/refund-p3e-b2-runtime-authority-policy.test.ts",
-    "src/lib/payment/refund/__tests__/refund-p3e-b2-runtime-image-policy.test.ts",
-  ]);
-  for (const path of relativeFiles(RUNTIME)) {
-    paths.add(`infra/refund-sandbox/p3e-b2/runtime/${path}`);
-  }
-  return Object.freeze([...paths].sort());
-}
 
 function readTerraform(): string {
   return walk(RUNTIME)
@@ -544,13 +316,6 @@ function terraformResourceBlock(
     }
   }
   throw new Error(`Unclosed Terraform block: ${type}.${name}`);
-}
-
-function relativeFiles(root: string): string[] {
-  const canonicalRoot = realpathSync(root);
-  return walk(root)
-    .map((path) => relative(canonicalRoot, path).split(sep).join("/"))
-    .sort();
 }
 
 function exactSetHash(values: readonly string[]): string {

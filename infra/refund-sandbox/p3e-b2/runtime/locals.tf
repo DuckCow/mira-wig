@@ -3,16 +3,14 @@ locals {
   project_id         = var.project_id
   region             = "asia-northeast3"
 
-  runtime_apply_authorized   = false
-  runtime_root_apply_policy  = "UNCONDITIONALLY_BLOCKED_IN_R2B1"
+  runtime_apply_authorized   = true
+  runtime_root_apply_policy  = "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED"
   network_tags               = ["refund-provider-free"]
   trusted_operator_model     = "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN"
   malicious_owner_resistance = "NOT_REQUIRED"
 
   preflight_service_account_id = "${var.resource_prefix}-preflight"
-  canary_service_account_id    = "${var.resource_prefix}-canary"
   preflight_job_name           = "${var.resource_prefix}-refund-preflight"
-  canary_job_name              = "${var.resource_prefix}-refund-canary"
 
   foundation_cloud_sql_instance_connection_name = try(
     var.foundation_handoff.cloud_sql_instance_connection_name,
@@ -50,20 +48,10 @@ locals {
     var.preflight_database_secret_version_reference.version,
     "",
   )
-  canary_database_secret_version_resource_name = try(
-    var.canary_database_secret_version_reference.secret_resource_name,
-    "",
-  )
-  canary_database_secret_version = try(
-    var.canary_database_secret_version_reference.version,
-    "",
-  )
-
   cloud_sql_condition_expression = "resource.name == '${local.foundation_cloud_sql_instance_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
 
   runtime_identities = {
-    dormant_canary = google_service_account.dormant_canary.email
-    preflight      = google_service_account.preflight.email
+    preflight = google_service_account.preflight.email
   }
 
   task_timeout_seconds = 300
@@ -101,7 +89,7 @@ locals {
     ]) &&
     var.foundation_handoff.contract_version == "mira-refund-p3e-b2-foundation-authority/v1" &&
     var.foundation_handoff.project_id == var.project_id &&
-    can(regex("^[1-9][0-9]{5,19}$", var.foundation_handoff.project_number)) &&
+    var.foundation_handoff.project_number == "925882331349" &&
     var.foundation_handoff.region == "asia-northeast3" &&
     var.foundation_handoff.network_resource_name ==
     "projects/${var.project_id}/global/networks/${var.resource_prefix}-refund-vpc" &&
@@ -150,7 +138,7 @@ locals {
     "mira-refund-worker-runtime-image-connection/v1" &&
     var.release_image_handoff.platform == "linux/amd64" &&
     can(regex(
-      "^asia-northeast3-docker\\.pkg\\.dev/${var.project_id}/${var.resource_prefix}-refund-images/[a-z0-9][a-z0-9._/-]{0,127}@sha256:[0-9a-f]{64}$",
+      "^asia-northeast3-docker\\.pkg\\.dev/${var.project_id}/${var.resource_prefix}-refund-images/refund-worker@sha256:[0-9a-f]{64}$",
       var.release_image_handoff.image_digest_uri,
     )) &&
     var.release_image_handoff.release_authority_status ==
@@ -169,18 +157,7 @@ locals {
     ]) &&
     var.preflight_database_secret_version_reference.secret_resource_name ==
     var.foundation_handoff.preflight_database_secret_resource_name &&
-    can(regex("^[1-9][0-9]{0,18}$", var.preflight_database_secret_version_reference.version)),
-    false,
-  )
-
-  canary_database_secret_version_reference_valid = try(
-    toset(keys(var.canary_database_secret_version_reference)) == toset([
-      "secret_resource_name",
-      "version",
-    ]) &&
-    var.canary_database_secret_version_reference.secret_resource_name ==
-    var.foundation_handoff.canary_database_secret_resource_name &&
-    can(regex("^[1-9][0-9]{0,18}$", var.canary_database_secret_version_reference.version)),
+    var.preflight_database_secret_version_reference.version == "1",
     false,
   )
 }

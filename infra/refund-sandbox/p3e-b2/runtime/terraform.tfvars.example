@@ -1,19 +1,19 @@
 # Synthetic provider-mocked example only. No value is cloud evidence or apply authority.
-project_id      = "mira-refund-sbx-example"
+project_id      = "mira-refund-sandbox-0001"
 resource_prefix = "mira-p3e-sbx"
 
 foundation_handoff = {
   contract_version                         = "mira-refund-p3e-b2-foundation-authority/v1"
-  project_id                               = "mira-refund-sbx-example"
-  project_number                           = "123456789012"
+  project_id                               = "mira-refund-sandbox-0001"
+  project_number                           = "925882331349"
   region                                   = "asia-northeast3"
-  network_resource_name                    = "projects/mira-refund-sbx-example/global/networks/mira-p3e-sbx-refund-vpc"
-  subnetwork_resource_name                 = "projects/mira-refund-sbx-example/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3"
-  cloud_sql_instance_connection_name       = "mira-refund-sbx-example:asia-northeast3:mira-p3e-sbx-refund-pg18"
-  cloud_sql_instance_resource_name         = "projects/mira-refund-sbx-example/instances/mira-p3e-sbx-refund-pg18"
-  preflight_database_secret_resource_name  = "projects/mira-refund-sbx-example/secrets/mira-p3e-sbx-preflight-database-url"
-  canary_database_secret_resource_name     = "projects/mira-refund-sbx-example/secrets/mira-p3e-sbx-canary-database-url"
-  artifact_repository_resource_name        = "projects/mira-refund-sbx-example/locations/asia-northeast3/repositories/mira-p3e-sbx-refund-images"
+  network_resource_name                    = "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc"
+  subnetwork_resource_name                 = "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3"
+  cloud_sql_instance_connection_name       = "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
+  cloud_sql_instance_resource_name         = "projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18"
+  preflight_database_secret_resource_name  = "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-preflight-database-url"
+  canary_database_secret_resource_name     = "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-canary-database-url"
+  artifact_repository_resource_name        = "projects/mira-refund-sandbox-0001/locations/asia-northeast3/repositories/mira-p3e-sbx-refund-images"
   googleapis_private_zone_name              = "mira-p3e-sbx-googleapis"
   restricted_googleapis_ipv4_range          = "199.36.153.4/30"
   foundation_resource_graph_sha256         = "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f"
@@ -29,7 +29,7 @@ foundation_handoff = {
 
 release_image_handoff = {
   contract_version                  = "mira-refund-worker-release-image-handoff/v1"
-  image_digest_uri                  = "asia-northeast3-docker.pkg.dev/mira-refund-sbx-example/mira-p3e-sbx-refund-images/refund-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  image_digest_uri                  = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   image_contract_version            = "mira-refund-worker-runtime-image-connection/v1"
   platform                          = "linux/amd64"
   release_authority_status          = "SEPARATELY_REVIEWED_RELEASE_DIGEST"
@@ -39,11 +39,6 @@ release_image_handoff = {
 }
 
 preflight_database_secret_version_reference = {
-  secret_resource_name = "projects/mira-refund-sbx-example/secrets/mira-p3e-sbx-preflight-database-url"
-  version              = "7"
-}
-
-canary_database_secret_version_reference = {
-  secret_resource_name = "projects/mira-refund-sbx-example/secrets/mira-p3e-sbx-canary-database-url"
-  version              = "11"
+  secret_resource_name = "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-preflight-database-url"
+  version              = "1"
 }

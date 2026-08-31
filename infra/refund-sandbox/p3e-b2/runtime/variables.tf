@@ -1,12 +1,10 @@
 variable "project_id" {
-  description = "Exact dedicated non-production project admitted by the reviewed foundation handoff."
+  description = "Exact dedicated non-production project authorized for the first preflight release."
   type        = string
 
   validation {
-    condition = can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.project_id)) && !can(
-      regex("(^|-)(prod|production|live|default|dev|development|acceptance)(-|$)", lower(var.project_id))
-    )
-    error_message = "project_id must be a bounded dedicated non-production project identifier."
+    condition     = var.project_id == "mira-refund-sandbox-0001"
+    error_message = "project_id must be the exact authorized refund sandbox project."
   }
 }
 
@@ -15,11 +13,8 @@ variable "resource_prefix" {
   type        = string
 
   validation {
-    condition = (
-      can(regex("^[a-z][a-z0-9-]{2,16}[a-z0-9]$", var.resource_prefix)) &&
-      !can(regex("(^|-)(prod|production|live|default|dev|development|acceptance)(-|$)", lower(var.resource_prefix)))
-    )
-    error_message = "resource_prefix must be bounded and non-production."
+    condition     = var.resource_prefix == "mira-p3e-sbx"
+    error_message = "resource_prefix must be the exact authorized refund sandbox prefix."
   }
 }
 
@@ -35,10 +30,5 @@ variable "release_image_handoff" {
 
 variable "preflight_database_secret_version_reference" {
   description = "Exact existing preflight database-secret resource and canonical numeric version reference."
-  type        = any
-}
-
-variable "canary_database_secret_version_reference" {
-  description = "Exact existing canary database-secret resource and canonical numeric version reference."
   type        = any
 }

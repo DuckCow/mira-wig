@@ -1,23 +1,23 @@
 {
   "contractVersion": "mira-refund-p3e-b2-dormant-runtime-authority/v1",
-  "package": "P3E-B2-R2B1",
-  "retrievedAt": "2026-07-26",
+  "package": "P3E-B2-PROVIDER-FREE-PREFLIGHT-MATERIALIZATION",
+  "retrievedAt": "2026-08-31",
   "status": {
-    "RUNTIME_IDENTITY_AUTHORITY": "DEFINED_NOT_PROVISIONED",
-    "RUNTIME_SECRET_BINDINGS": "DEFINED_NOT_APPLIED",
-    "RUNTIME_JOB_DEFINITIONS": "DEFINED_DORMANT_NOT_PROVISIONED",
-    "DATABASE_SECRET_VERSION_REFERENCES": "DEFINED_EXACT_INPUTS_NOT_CREATED",
-    "DB_SECRET_VERSIONS": "ABSENT_IN_REAL_CLOUD",
-    "RELEASE_IMAGE_DIGEST": "ABSENT",
-    "RUNTIME_DEPLOYABLE": "FALSE",
+    "RUNTIME_IDENTITY_AUTHORITY": "PREFLIGHT_RELEASE_AUTHORIZED_NOT_YET_APPLIED",
+    "RUNTIME_SECRET_BINDINGS": "PREFLIGHT_RELEASE_AUTHORIZED_NOT_YET_APPLIED",
+    "RUNTIME_JOB_DEFINITIONS": "PREFLIGHT_RELEASE_AUTHORIZED_NOT_YET_APPLIED",
+    "DATABASE_SECRET_VERSION_REFERENCES": "PREFLIGHT_VERSION_1_EXACT_INPUT",
+    "DB_SECRET_VERSIONS": "PREFLIGHT_VERSION_1_ENABLED_CANARY_NOT_CONSUMED",
+    "RELEASE_IMAGE_DIGEST": "EXACT_REVIEWED_REGISTRY_DIGEST_REQUIRED_NOT_YET_PUBLISHED",
+    "RUNTIME_DEPLOYABLE": "PENDING_IMAGE_PUBLICATION_AND_APPLY",
     "CANARY_EXECUTABLE": "FALSE",
     "PROVIDER_EXECUTION": "BLOCKED",
     "SCHEDULED_SANDBOX": "BLOCKED",
     "LIVE": "UNREACHABLE",
     "IAM_DENY_CURRENT_PROJECT": "NOT_APPLICABLE_NO_ORGANIZATION",
-    "RUNTIME_APPLY_AUTHORIZED": "FALSE",
-    "CLOUD_RUN_API_ACTIVATION": "DEFINED_AS_MANAGED_NOT_YET_CLOUD_APPLIED",
-    "RUNTIME_ROOT_APPLY_POLICY": "UNCONDITIONALLY_BLOCKED_IN_R2B1"
+    "RUNTIME_APPLY_AUTHORIZED": "TRUE_EXACT_PREFLIGHT_RELEASE_ONLY",
+    "CLOUD_RUN_API_ACTIVATION": "ENABLED",
+    "RUNTIME_ROOT_APPLY_POLICY": "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED"
   },
   "state": {
     "backend": "PARTIAL_GCS",
@@ -28,25 +28,25 @@
   "provider": {
     "source": "hashicorp/google",
     "version": "7.40.0",
-    "cloudAuthentication": "NOT_PERFORMED",
-    "cloudLookup": "FORBIDDEN"
+    "cloudAuthentication": "EXTERNAL_ATTENDED_OPERATOR_ONLY",
+    "cloudLookup": "CURRENT_PHASE_READ_PLAN_APPLY_AUTHORIZED"
   },
   "applyEnforcement": {
-    "policy": "UNCONDITIONALLY_BLOCKED_IN_R2B1",
-    "authorized": false,
+    "policy": "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED",
+    "authorized": true,
     "callerOverride": "ABSENT",
     "environmentOverride": "ABSENT",
     "workspaceOverride": "ABSENT",
     "testOverride": "ABSENT",
-    "coveredResourceInstances": 8,
+    "coveredResourceInstances": 4,
     "mechanism": "RESOURCE_LIFECYCLE_PRECONDITION_ON_EVERY_RESOURCE_DECLARATION",
-    "error": "R2B1_RUNTIME_ROOT_UNCONDITIONALLY_BLOCKED",
-    "futureRelease": "SEPARATE_INDEPENDENTLY_REVIEWED_RUNTIME_AUTHORITY_AFTER_FOUNDATION_IMAGE_AND_SECRET_READINESS"
+    "error": "PREFLIGHT_RELEASE_AUTHORITY_MISSING",
+    "futureRelease": "CANARY_REMAINS_SEPARATE_AND_NOT_MATERIALIZED"
   },
   "threatModel": {
     "trustedOperatorModel": "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN",
     "maliciousOwnerResistance": "NOT_REQUIRED",
-    "trustedOwnerManualInvocation": "TECHNICALLY_POSSIBLE_ACCEPTED",
+    "trustedOwnerManualInvocation": "ONE_ATTENDED_PROVIDER_FREE_EXECUTION_AUTHORIZED_AFTER_APPLY",
     "automaticExecution": "NOT_ADMITTED",
     "persistentAutomaticTrigger": "NONE"
   },
@@ -58,15 +58,11 @@
     "currentStatusValue": "NOT_APPLICABLE_NO_ORGANIZATION"
   },
   "resourceGraph": {
-    "resourceCount": 8,
+    "resourceCount": 4,
     "addresses": [
-      "google_cloud_run_v2_job.dormant_canary",
       "google_cloud_run_v2_job.preflight",
-      "google_project_iam_member.cloud_sql_client[\"dormant_canary\"]",
       "google_project_iam_member.cloud_sql_client[\"preflight\"]",
-      "google_secret_manager_secret_iam_member.canary_database_access",
       "google_secret_manager_secret_iam_member.preflight_database_access",
-      "google_service_account.dormant_canary",
       "google_service_account.preflight"
     ],
     "resourceTypes": [
@@ -76,50 +72,34 @@
       "google_service_account"
     ],
     "sortedAddressDigestAlgorithm": "SHA256_OF_UTF8_LF_JOINED_SORTED_ADDRESSES_WITHOUT_FINAL_LF",
-    "sortedAddressSha256": "7d1fe521be626a73ecfc31f98f78cb6bc3e358bf82406e894b620a34e34779fa"
+    "sortedAddressSha256": "2f4d2e2009f6a1e1b4fe0971bb40fcbe7a0a6d34e8a1c1e8994647f78b9e9d2d"
   },
   "ownership": [
     {
       "identity": "preflight_runtime_service_account",
       "address": "google_service_account.preflight",
-      "owner": "P3E_B2_R2B1_RUNTIME_IDENTITY"
-    },
-    {
-      "identity": "dormant_canary_runtime_service_account",
-      "address": "google_service_account.dormant_canary",
-      "owner": "P3E_B2_R2B1_RUNTIME_IDENTITY"
+      "owner": "P3E_B2_PREFLIGHT_RELEASE_RUNTIME_IDENTITY"
     },
     {
       "identity": "runtime_cloud_sql_client_bindings",
       "addresses": [
-        "google_project_iam_member.cloud_sql_client[\"dormant_canary\"]",
         "google_project_iam_member.cloud_sql_client[\"preflight\"]"
       ],
-      "owner": "P3E_B2_R2B1_RUNTIME_IAM"
+      "owner": "P3E_B2_PREFLIGHT_RELEASE_RUNTIME_IAM"
     },
     {
       "identity": "preflight_database_secret_binding",
       "address": "google_secret_manager_secret_iam_member.preflight_database_access",
-      "owner": "P3E_B2_R2B1_RUNTIME_IAM"
-    },
-    {
-      "identity": "canary_database_secret_binding",
-      "address": "google_secret_manager_secret_iam_member.canary_database_access",
-      "owner": "P3E_B2_R2B1_RUNTIME_IAM"
+      "owner": "P3E_B2_PREFLIGHT_RELEASE_RUNTIME_IAM"
     },
     {
       "identity": "preflight_cloud_run_job",
       "address": "google_cloud_run_v2_job.preflight",
-      "owner": "P3E_B2_R2B1_DORMANT_JOB"
-    },
-    {
-      "identity": "dormant_canary_cloud_run_job",
-      "address": "google_cloud_run_v2_job.dormant_canary",
-      "owner": "P3E_B2_R2B1_DORMANT_JOB"
+      "owner": "P3E_B2_PREFLIGHT_RELEASE_JOB"
     },
     {
       "identity": "job_cpu_memory",
-      "owner": "P3E_B2_R2B1_DORMANT_JOB"
+      "owner": "P3E_B2_PREFLIGHT_RELEASE_JOB"
     },
     {
       "identity": "private_ip_proxy_socket_architecture",
@@ -128,23 +108,17 @@
     {
       "identity": "image_digest",
       "owner": "LATER_IMAGE_PUBLICATION",
-      "status": "ABSENT"
+      "status": "REQUIRED_EXACT_IMMUTABLE_DIGEST"
     },
     {
       "identity": "preflight_database_secret_version",
       "owner": "LATER_DATABASE_CREDENTIAL",
-      "status": "REFERENCE_ONLY_NOT_CREATED"
-    },
-    {
-      "identity": "canary_database_secret_version",
-      "owner": "LATER_DATABASE_CREDENTIAL",
-      "status": "REFERENCE_ONLY_NOT_CREATED"
+      "status": "EXISTING_VERSION_1_REFERENCE"
     }
   ],
   "runtimeIdentities": {
-    "count": 2,
+    "count": 1,
     "preflightAccountIdTemplate": "<resource-prefix>-preflight",
-    "dormantCanaryAccountIdTemplate": "<resource-prefix>-canary",
     "sharedIdentity": false,
     "serviceAccountKeys": "FORBIDDEN",
     "defaultComputeServiceAccount": "FORBIDDEN",
@@ -155,7 +129,7 @@
   "iam": {
     "cloudSqlClient": {
       "role": "roles/cloudsql.client",
-      "principalCount": 2,
+      "principalCount": 1,
       "scope": "EXACT_PROJECT_MEMBER_WITH_SINGLE_INSTANCE_IAM_CONDITION",
       "conditionTemplate": "resource.name == '<exact-foundation-instance-resource-name>' && resource.service == 'sqladmin.googleapis.com'",
       "connectionMode": "PRIVATE_IP_PROXY_WITHOUT_IAM_DATABASE_AUTHENTICATION"
@@ -193,9 +167,9 @@
     "releaseImage": {
       "contractVersion": "mira-refund-worker-release-image-handoff/v1",
       "schemaFieldNamesSha256": "f05d9f9e90e1e6210918f16f17604f21eef491984cb871a8762d64b6e901bb32",
-      "uriGrammar": "^asia-northeast3-docker\\\\.pkg\\\\.dev/<project-id>/<repository>/<image>@sha256:[0-9a-f]{64}$",
+      "uriGrammar": "^asia-northeast3-docker\\\\.pkg\\\\.dev/<project-id>/<repository>/refund-worker@sha256:[0-9a-f]{64}$",
       "localR2aDigestAccepted": false,
-      "currentRealStatus": "ABSENT"
+      "currentRealStatus": "REQUIRED_FOR_RELEASE_NOT_YET_PUBLISHED"
     },
     "databaseSecretVersionReference": {
       "schemaFieldNamesSha256": "c41ee7d427a8978d8b5e1bdd2245b0810499bf23deaca2be862aa487473328ee",
@@ -203,16 +177,16 @@
         "secret_resource_name",
         "version"
       ],
-      "versionGrammar": "^[1-9][0-9]{0,18}$",
+      "versionGrammar": "^1$",
       "payload": "FORBIDDEN",
-      "currentRealStatus": "ABSENT"
+      "currentRealStatus": "PREFLIGHT_VERSION_1_ENABLED"
     }
   },
   "jobs": {
     "taskCount": 1,
     "parallelism": 1,
     "maxRetries": 0,
-    "trustedOwnerManualInvocation": "TECHNICALLY_POSSIBLE_PROVIDER_FREE_NON_FINANCIAL",
+    "trustedOwnerManualInvocation": "ONE_ATTENDED_PROVIDER_FREE_NON_FINANCIAL_EXECUTION_AUTHORIZED_AFTER_APPLY",
     "automaticExecution": "NOT_ADMITTED",
     "persistentAutomaticTrigger": "NONE",
     "executionEnvironment": "SECOND_GENERATION",
@@ -240,14 +214,8 @@
       ],
       "providerContact": "FORBIDDEN"
     },
-    "dormantCanary": {
-      "arguments": [
-        "worker-once"
-      ],
-      "environmentKeys": [
-        "DATABASE_URL",
-        "REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME"
-      ],
+    "canary": {
+      "materialized": false,
       "providerCredential": "ABSENT",
       "target": "ABSENT",
       "approval": "ABSENT",
@@ -275,25 +243,25 @@
     "socketRoot": "/cloudsql"
   },
   "providerScope": {
-    "classification": "TOSS_ONLY_EXPLICIT",
+    "classification": "PREFLIGHT_ONLY_NO_PROVIDER_ROUTE",
     "evidence": [
       "src/lib/payment/refund/run-refund-execution-worker-host.ts:10-17",
       "src/lib/payment/refund/run-refund-execution-worker-host.ts:101-102",
       "src/lib/payment/refund/worker-preflight.ts:5-9",
       "src/lib/payment/refund/refund-worker-container-supervisor.ts:18-19"
     ],
-    "r2b1ProviderCredentialBindings": 0,
+    "runtimeProviderCredentialBindings": 0,
     "laterProviderRequirement": "SEPARATE_PROVIDER_SCOPED_SECRET_TARGET_ADMISSION_AND_CANARY_PACKAGE"
   },
   "portability": {
     "classification": "PORTABLE_CORE_WITH_CLOUD_RUN_RUNTIME_ADAPTER",
-    "cloudRunScope": "R2B1_TERRAFORM_ONLY",
+    "cloudRunScope": "EXACT_PREFLIGHT_RELEASE_TERRAFORM_ONLY",
     "domainCoreCloudRunDependency": false,
     "r2aImageCloudRunSpecificLogic": false
   },
   "runtimeDeployer": {
-    "status": "DEFERRED",
-    "reason": "EXACT_PROVIDER_METHOD_AND_PERMISSION_SET_NOT_INDEPENDENTLY_DERIVED_ACROSS_JOB_IAM_SERVICE_ACCOUNT_AND_SECRET_SEPARATION",
+    "status": "EXTERNAL_ATTENDED_OPERATOR_AUTHORIZED_FOR_EXACT_PLAN_AND_APPLY",
+    "reason": "NO_TERRAFORM_MANAGED_DEPLOYER_IDENTITY_ROLE_OR_BINDING",
     "providerLifecycleDerivation": {
       "status": "INCOMPLETE_NOT_ROLE_AUTHORITY",
       "resourceFamilies": [
@@ -341,17 +309,16 @@
         "DELETE_FREE_REPLACEMENT_BEHAVIOR"
       ]
     },
-    "identity": "NOT_SELECTED",
+    "identity": "dlerghzld@gmail.com",
     "role": "NOT_DEFINED",
     "binding": "ABSENT"
   },
   "deferredOwnership": [
     "database_bootstrap_and_grants",
-    "future_invocation_authority",
-    "image_publication",
+    "canary_runtime_materialization",
     "migrations_and_role_grants",
     "monitoring_and_alert_deployment",
-    "preflight_invocation_binding",
+    "preflight_persistent_invocation_binding",
     "provider_credential_secret_versions"
   ],
   "lifecycle": {
@@ -405,5 +372,5 @@
     "jobExecuted": false,
     "automaticTriggerDefined": false
   },
-  "nextPackageBoundary": "IMAGE_PUBLICATION_AND_SECRET_PAYLOAD_CREATION_AND_DATABASE_BOOTSTRAP_AND_SEPARATELY_AUTHORIZED_PREFLIGHT_INVOCATION_REMAIN_DISTINCT_LATER_PACKAGES"
+  "nextPackageBoundary": "CANARY_RUNTIME_PROVIDER_CREDENTIALS_DATABASE_BOOTSTRAP_RETIREMENT_AND_PERSISTENT_INVOCATION_REMAIN_DISTINCT_LATER_PACKAGES"
 }

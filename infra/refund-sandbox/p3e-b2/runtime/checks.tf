@@ -3,7 +3,7 @@ check "machine_contract_alignment" {
     condition = (
       local.authority_contract.contractVersion ==
       "mira-refund-p3e-b2-dormant-runtime-authority/v1" &&
-      local.authority_contract.resourceGraph.resourceCount == 8 &&
+      local.authority_contract.resourceGraph.resourceCount == 4 &&
       local.authority_contract.state.prefix == "p3e-b2/runtime" &&
       local.authority_contract.jobs.taskTimeout.seconds == local.task_timeout_seconds &&
       local.authority_contract.jobs.resources.cpu == local.cpu &&
@@ -24,10 +24,20 @@ check "machine_contract_alignment" {
 check "runtime_root_apply_policy" {
   assert {
     condition = (
-      local.runtime_apply_authorized == false &&
-      local.runtime_root_apply_policy == "UNCONDITIONALLY_BLOCKED_IN_R2B1"
+      local.runtime_apply_authorized == true &&
+      local.runtime_root_apply_policy == "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED"
     )
-    error_message = "R2B1 runtime apply must remain unconditionally blocked."
+    error_message = "The runtime root must remain bounded to the explicit preflight release."
+  }
+}
+
+check "exact_release_target" {
+  assert {
+    condition = (
+      var.project_id == "mira-refund-sandbox-0001" &&
+      var.resource_prefix == "mira-p3e-sbx"
+    )
+    error_message = "The preflight release is authorized only for the exact sandbox project and prefix."
   }
 }
 
@@ -52,21 +62,13 @@ check "preflight_database_secret_version_reference" {
   }
 }
 
-check "canary_database_secret_version_reference" {
-  assert {
-    condition     = local.canary_database_secret_version_reference_valid
-    error_message = "canary database reference must match its exact admitted secret and positive canonical numeric version."
-  }
-}
-
 check "runtime_identity_separation" {
   assert {
     condition = (
-      local.preflight_service_account_id != local.canary_service_account_id &&
-      length(local.preflight_service_account_id) <= 30 &&
-      length(local.canary_service_account_id) <= 30
+      local.preflight_service_account_id == "mira-p3e-sbx-preflight" &&
+      length(local.preflight_service_account_id) <= 30
     )
-    error_message = "Preflight and canary runtime identities must remain distinct and bounded."
+    error_message = "The preflight runtime identity must remain exact and bounded."
   }
 }
 

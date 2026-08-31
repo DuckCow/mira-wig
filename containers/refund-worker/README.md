@@ -7,6 +7,7 @@ Auth Proxy executable into the final Node 22.23.1 Debian slim stage.
 The image has no default worker action. Its exact commands are:
 
 - `image-self-check`
+- `eximbay-canary-once`
 - `sandbox-preflight`
 - `worker-check`
 - `worker-health`
@@ -63,4 +64,6 @@ The verifier removes only that exact invocation tag plus verifier-owned containe
 success or failure. It never removes by raw image ID, overwrites a pre-existing tag, or runs a
 broad Docker prune. Cleanup failure prevents verifier success.
 
-No image publication or Cloud Run Job definition is owned here.
+Image publication and Cloud Run Job ownership remain outside this directory. The provider-free
+preflight release uses the exact `sandbox-preflight` entrypoint; publication does not authorize
+the `eximbay-canary-once` route.

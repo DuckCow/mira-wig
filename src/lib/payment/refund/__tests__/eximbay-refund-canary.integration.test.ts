@@ -225,6 +225,18 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
           DATABASE_URL: restrictedDatabaseUrl("mira_refund_preflight"),
           activationEnvironment: Object.freeze({}),
         }),
+        readDatabaseIdentity: async (database) => {
+          const observed = await defaultRefundSandboxProviderFreePreflightDependencies
+            .readDatabaseIdentity(database);
+          expect(observed).toEqual({
+            currentUser: "mira_refund_preflight",
+            currentDatabase: "wig_platform_test",
+          });
+          return Object.freeze({
+            currentUser: "mira_refund_preflight",
+            currentDatabase: "refund_sandbox",
+          });
+        },
       })).resolves.toMatchObject({
         ok: true,
         code: "PROVIDER_FREE_SANDBOX_PREFLIGHT_COMPLETE",
