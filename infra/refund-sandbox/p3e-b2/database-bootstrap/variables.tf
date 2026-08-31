@@ -18,6 +18,12 @@ variable "resource_prefix" {
   }
 }
 
+variable "temporary_cloud_sql_access_authorized" {
+  description = "Explicit temporary admission for the exact two conditioned bootstrap Cloud SQL IAM bindings."
+  type        = bool
+  default     = false
+}
+
 variable "source_commit" {
   description = "Exact reviewed source commit embedded in the published bootstrap image."
   type        = string

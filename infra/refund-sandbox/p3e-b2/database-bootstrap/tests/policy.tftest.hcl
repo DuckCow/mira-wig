@@ -98,17 +98,75 @@ run "exact_retired_bootstrap_authority_shape" {
     condition = (
       output.bootstrap_manifest.default_mode == "check" &&
       output.bootstrap_manifest.explicit_mutating_mode == "apply" &&
+      output.bootstrap_manifest.grant_only_mode == "apply-canary-role-grants" &&
       output.bootstrap_manifest.credential_materialization_mode == "materialize-application-credentials" &&
       output.bootstrap_manifest.credential_recovery_mode == "recover-canary-application-credential" &&
       output.bootstrap_manifest.automatic_trigger == "NONE" &&
       output.bootstrap_manifest.provider_credentials == "NONE" &&
+      output.bootstrap_manifest.temporary_cloud_sql_access == false &&
       output.bootstrap_manifest.cloud_sql_login_authority == "NONE" &&
       output.bootstrap_manifest.credential_secret_iam_authority == "NONE" &&
       output.bootstrap_manifest.secret_manager_dependencies == "NO_STANDING_AUTHORITY_IMAGE_CAPABILITY_RETAINED" &&
-      output.bootstrap_manifest.future_migration_reentry == "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED" &&
+      output.bootstrap_manifest.future_migration_reentry == "SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED" &&
       output.bootstrap_manifest.execution_status == "RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER"
     )
     error_message = "The retained bootstrap handoff must expose no standing login or secret IAM authority."
+  }
+}
+
+run "exact_temporary_cloud_sql_access_shape" {
+  command = plan
+
+  variables {
+    temporary_cloud_sql_access_authorized = true
+  }
+
+  override_resource {
+    target          = google_service_account.bootstrap
+    override_during = plan
+    values = {
+      email = "mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com"
+    }
+  }
+
+  assert {
+    condition = (
+      length(google_project_iam_member.cloud_sql_access) == 2 &&
+      toset(keys(google_project_iam_member.cloud_sql_access)) ==
+      toset(["client", "instance_user"])
+    )
+    error_message = "Temporary admission must add exactly the two historical Cloud SQL IAM addresses."
+  }
+
+  assert {
+    condition = alltrue([
+      for binding in values(google_project_iam_member.cloud_sql_access) :
+      binding.member == "serviceAccount:mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com" &&
+      binding.condition[0].expression == "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'"
+    ])
+    error_message = "Both temporary bindings must retain the exact bootstrap principal and single-instance/service condition."
+  }
+
+  assert {
+    condition = (
+      google_project_iam_member.cloud_sql_access["client"].role == "roles/cloudsql.client" &&
+      google_project_iam_member.cloud_sql_access["instance_user"].role == "roles/cloudsql.instanceUser"
+    )
+    error_message = "Temporary admission must restore only Cloud SQL Client and Instance User."
+  }
+
+  assert {
+    condition     = length(google_secret_manager_secret_iam_member.credential_materialization) == 0
+    error_message = "Temporary Cloud SQL admission must never restore bootstrap Secret Manager IAM."
+  }
+
+  assert {
+    condition = (
+      output.bootstrap_manifest.temporary_cloud_sql_access == true &&
+      output.bootstrap_manifest.cloud_sql_login_authority == "EXACT_TWO_CONDITIONED_BINDINGS" &&
+      output.bootstrap_manifest.credential_secret_iam_authority == "NONE"
+    )
+    error_message = "The temporary handoff must identify only the exact two conditioned bindings."
   }
 }
 

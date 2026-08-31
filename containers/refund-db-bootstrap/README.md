@@ -2,9 +2,17 @@
 
 This purpose-specific Linux AMD64 image owns only the attended P3E-B2 database bootstrap path.
 Its Docker default is the read-only `check` mode. The mutating `apply`,
+grant-only `apply-canary-role-grants`,
 `materialize-application-credentials`, and exact `(1,0)` partial-state
 `recover-canary-application-credential` modes must be supplied explicitly by separately
 authorized manual Cloud Run Job executions.
+
+`apply-canary-role-grants` is migration-free. After the existing runtime identity gates pass, it
+requires the exact 41/41 repository migration ledger, verifies the frozen canary grant artifact
+bytes, and executes only that artifact inside one transaction. The transaction commits only after
+the existing exhaustive effective-privilege verifier passes; SQL or verifier failure rolls back.
+It does not invoke Prisma, credential materialization, Secret Manager, provider code, or business
+row mutation.
 
 The image contains the exact Prisma 7 CLI/schema/41-migration corpus, the existing hashed role
 and grant runner, `pg`, and the pinned Cloud SQL Auth Proxy. The credential mode first uses private

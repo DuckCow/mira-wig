@@ -7,6 +7,7 @@ import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/datab
 import {
   awaitProxyReadiness,
   BOOTSTRAP_FAILURE_CODES,
+  CANARY_ROLE_GRANT_MODE,
   classifyProxyStructuredLogLine,
   classifyProxyStructuredLogLineDetails,
   consumeProxyDiagnosticStream,
@@ -173,6 +174,24 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     ]);
   });
 
+  it("admits only the exact canary role-grant mode", async () => {
+    const execute = executeMock(Object.freeze({
+      code: "EXIMBAY_P3E_CANARY_ROLE_GRANTS_COMPLETE",
+      mode: CANARY_ROLE_GRANT_MODE,
+    }));
+    const result = await runDatabaseBootstrapEntrypoint(
+      [CANARY_ROLE_GRANT_MODE],
+      VALID_ENV,
+      outputSink(),
+      dependencies(execute),
+    );
+    expect(result).toBe(0);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      mode: "apply-canary-role-grants",
+    });
+  });
+
   it("admits only the exact credential-materialization mode without changing the default", async () => {
     const execute = executeMock(Object.freeze({
       code: "APP_CREDENTIAL_MATERIALIZATION_COMPLETE",
@@ -207,6 +226,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     });
     expect(contract.image.mutatingModes).toEqual([
       "apply",
+      "apply-canary-role-grants",
       "materialize-application-credentials",
       "recover-canary-application-credential",
     ]);
@@ -214,6 +234,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       "materialize-application-credentials",
       "recover-canary-application-credential",
     ]);
+    expect(contract.job.explicitGrantOnlyArgument).toBe("apply-canary-role-grants");
     expect(contract.job.secretVersionProjectRepresentations).toEqual([
       "mira-refund-sandbox-0001",
       "925882331349",
@@ -691,18 +712,22 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(result.stderr).toBe('{"ok":false,"code":"LEDGER_REJECTED"}\n');
   });
 
-  it("keeps check read-only, apply ordering unchanged, and database retries absent", () => {
+  it("keeps check read-only, grant-only migration-free, apply ordering unchanged, and retries absent", () => {
     const source = readFileSync(
       join(ROOT, "containers/refund-db-bootstrap/entrypoint.ts"),
       "utf8",
     );
     const check = source.slice(
       source.indexOf("async function checkDatabase"),
-      source.indexOf("async function applyDatabase"),
+      source.indexOf("async function applyCanaryRoleGrants"),
     );
     const apply = source.slice(
       source.indexOf("async function applyDatabase"),
       source.indexOf("async function requireExactMigrationPrefix"),
+    );
+    const grantOnly = source.slice(
+      source.indexOf("async function applyCanaryRoleGrants"),
+      source.indexOf("async function applyDatabase"),
     );
     expect(check.match(/requireDatabaseConnection/gu)).toHaveLength(1);
     expect(check).not.toMatch(/migrate|ROLE_BOOTSTRAP|INSERT|UPDATE|DELETE/iu);
@@ -713,6 +738,14 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(apply.lastIndexOf("requireExactMigrationPrefix")).toBeLessThan(
       apply.indexOf("ROLE_BOOTSTRAP_EXECUTABLE"),
     );
+    expect(grantOnly).toContain("applyEximbayP3eCanaryRoleGrants");
+    expect(grantOnly).toContain("requireExactMigrationPrefix");
+    expect(grantOnly).not.toMatch(
+      /PRISMA_EXECUTABLE|ROLE_BOOTSTRAP_EXECUTABLE|materializeApplicationCredential|recoverCanaryApplicationCredential|RestSecretMetadataClient/iu,
+    );
+    expect(grantOnly).toContain("businessRowMutation: false");
+    expect(grantOnly).toContain("secretManagerEffects: 0");
+    expect(grantOnly).toContain("providerEffects: 0");
     expect(source).not.toMatch(/retryDatabase|connectWithRetry|databaseRetry/iu);
     const owner = source.slice(
       source.indexOf("export async function retainProxyThroughDatabaseWork"),
@@ -768,14 +801,29 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       ],
       sortedAddressSha256:
         "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22",
+      temporaryAuthorizedResourceCount: 5,
+      temporaryAuthorizedAddresses: [
+        "google_cloud_run_v2_job.bootstrap",
+        'google_project_iam_member.cloud_sql_access["client"]',
+        'google_project_iam_member.cloud_sql_access["instance_user"]',
+        "google_service_account.bootstrap",
+        "google_sql_user.bootstrap",
+      ],
+      temporaryAuthorizedSortedAddressSha256:
+        "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472",
     });
     expect(contract.iam.roles).toEqual([]);
+    expect(contract.iam.temporaryCloudSqlAccessDefault).toBe(false);
+    expect(contract.iam.temporaryAuthorizedRoles).toEqual([
+      "roles/cloudsql.client",
+      "roles/cloudsql.instanceUser",
+    ]);
     expect(contract.iam.credentialSecretScope).toEqual([]);
     expect(contract.iam.credentialSecretRoles).toEqual([]);
     expect(contract.iam.cloudSqlLoginAuthority).toBe("NONE");
     expect(contract.iam.credentialSecretIamAuthority).toBe("NONE");
     expect(contract.iam.futureMigrationReentry).toBe(
-      "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED",
+      "SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED",
     );
     expect(contract.identity.databaseRoles).toEqual(["cloudsqlsuperuser"]);
     expect(contract.job.executionStatus).toBe("RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER");
@@ -787,6 +835,14 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     const main = readFileSync(join(
       ROOT,
       "infra/refund-sandbox/p3e-b2/database-bootstrap/main.tf",
+    ), "utf8");
+    const locals = readFileSync(join(
+      ROOT,
+      "infra/refund-sandbox/p3e-b2/database-bootstrap/locals.tf",
+    ), "utf8");
+    const variables = readFileSync(join(
+      ROOT,
+      "infra/refund-sandbox/p3e-b2/database-bootstrap/variables.tf",
     ), "utf8");
     const cloudSqlIam = main.slice(
       main.indexOf('resource "google_project_iam_member" "cloud_sql_access"'),
@@ -809,6 +865,12 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(main).toMatch(/database_roles\s+=\s+\["cloudsqlsuperuser"\]/u);
     expect(main).toContain('args  = ["check"]');
     expect(main).toContain('max_retries           = 0');
+    expect(locals).toContain(
+      "cloud_sql_roles = var.temporary_cloud_sql_access_authorized ? {",
+    );
+    expect(variables).toMatch(
+      /variable "temporary_cloud_sql_access_authorized"[\s\S]+default\s+= false/u,
+    );
     expect(cloudSqlIam).not.toContain("prevent_destroy");
     expect(serviceAccount).toContain("prevent_destroy = true");
     expect(sqlUser).toContain("prevent_destroy = true");

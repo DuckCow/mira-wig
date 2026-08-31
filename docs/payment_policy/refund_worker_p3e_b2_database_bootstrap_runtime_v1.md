@@ -8,7 +8,7 @@ GUARANTEES:
 - one canonical PostgreSQL IAM service-account user retaining cloudsqlsuperuser;
 - one digest-bound, check-default, zero-retry, untriggered Cloud Run Job;
 - no standing credential-secret Viewer, payload-read or Version Adder authority;
-- exact temporary Cloud SQL IAM re-entry only through a separately authorized migration phase.
+- exact temporary Cloud SQL IAM re-entry only through a separately authorized execution phase.
 
 NON-GOALS:
 - application runtime deployment;
@@ -34,26 +34,26 @@ RESIDUAL RISKS:
 MACHINE-OWNED RESPONSIBILITIES:
 - validate target/source/image/migration/task identities before Proxy spawn;
 - use private automatic IAM authentication and an exact Unix socket;
-- keep check read-only and require explicit apply or credential-materialization modes;
+- keep check read-only and require explicit apply, grant-only, or credential-materialization modes;
 - enforce the initial `(0,0)` secret-version gate, the exact canary-only `(1,0)` recovery gate,
   at-most-once publication and safe ambiguity stop;
 - verify migration prefix and exact postconditions.
 
 HUMAN-OWNED RESPONSIBILITIES:
-- separately authorize and temporarily restore the exact conditioned Cloud SQL Client and
-  Instance User grants for a future migration window;
+- separately authorize the default-false Terraform input and temporarily restore the exact
+  conditioned Cloud SQL Client and Instance User grants for a future execution window;
 - authorize each future Job execution;
 - adjudicate failed or unknown migration state;
 - decide whether a later check may proceed to apply;
-- retire the two temporary Cloud SQL IAM grants after the attended migration window.
+- retire the two temporary Cloud SQL IAM grants after the attended execution window.
 
 SAFE STOP:
 - reject malformed input before Proxy spawn;
 - stop after Proxy, ledger, Prisma or role-grant failure without retry.
 
 BOUNDED RE-ENTRY:
-- a new attended phase first restores only the exact two conditioned Cloud SQL IAM grants, then
-  uses the dormant Job and immutable image digest, and retires those grants again.
+- a new attended phase first enables the one default-false temporary IAM input, then uses the
+  dormant Job and immutable image digest, and retires those two grants again.
 ```
 
 ## Installed source owners
@@ -75,10 +75,11 @@ PostgreSQL uses the canonical suffix-trimmed IAM database username
 `mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam` and no password. Google provider 7.40.0
 creates it as `CLOUD_IAM_SERVICE_ACCOUNT` with `database_roles = ["cloudsqlsuperuser"]`.
 
-The desired root has no Cloud SQL Client or Cloud SQL Instance User member. A future migration
-window must separately authorize both predefined roles with the exact instance condition for
+The desired root defaults to no Cloud SQL Client or Cloud SQL Instance User member. Its single
+boolean `temporary_cloud_sql_access_authorized` input defaults false; only an explicit true value
+materializes both predefined roles with the exact instance condition for
 `projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18` and
-`sqladmin.googleapis.com`, then retire them after the attended execution. No Cloud SQL Admin,
+`sqladmin.googleapis.com`. False returns to the exact three-resource retired graph. No Cloud SQL Admin,
 service-account key, token-creator, invoker, or additional deployer binding is admitted. The
 current deployer is the existing project Owner and the root does not restate that authority.
 
@@ -104,6 +105,12 @@ digest, target, canonical IAM username and migration count/hash are required bef
 start. The Proxy vector includes `--private-ip`, `--auto-iam-authn`, and
 `--unix-socket=/cloudsql`.
 
+The additional `apply-canary-role-grants` mode is grant-only and migration-free. It requires the
+exact 41/41 repository ledger before mutation, executes only the frozen Eximbay canary grant
+artifact, reuses the exhaustive privilege verifier, and commits only when that postcondition
+passes. It does not run Prisma, mutate schema or business rows, access Secret Manager, or enter
+provider code. Every execution and temporary IAM re-entry remains separately human-authorized.
+
 Future `check` connects only after separate human authorization and reads the migration ledger. It
 accepts an empty schema or an exact completed prefix with matching checksums, no unknown entry, no
 unfinished migration and no rollback. Future explicit `apply` rechecks that state, runs exactly
@@ -128,14 +135,14 @@ SecretVersion names are parsed as exact path components and accept only project 
 ```text
 BOOTSTRAP_AUTHORITY_SOURCE: RETIREMENT_TARGET_DEFINED
 BOOTSTRAP_GRAPH: THREE_RETAINED_RESOURCES
-BOOTSTRAP_GCP_SQL_LOGIN_GRANTS: ZERO_DESIRED
+BOOTSTRAP_GCP_SQL_LOGIN_GRANTS: ZERO_BY_DEFAULT_EXACT_TWO_WHEN_SEPARATELY_AUTHORIZED
 BOOTSTRAP_CREDENTIAL_SECRET_IAM_GRANTS: ZERO_DESIRED
 BOOTSTRAP_SQL_IAM_DB_IDENTITY: RETAINED
 CLOUDSQLSUPERUSER_MEMBERSHIP: RETAINED
 BOOTSTRAP_JOB: RETAINED_DORMANT_DEFAULT_CHECK
 BOOTSTRAP_SERVICE_ACCOUNT: RETAINED_DORMANT
 APPLICATION_SECRET_VERSIONS: EXISTING_1_1_UNCHANGED
-FUTURE_MIGRATION_REENTRY: SEPARATELY_AUTHORIZED_TWO_GRANT_RESTORE_REQUIRED
+FUTURE_EXECUTION_REENTRY: SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED
 THIS_PHASE_JOB_EXECUTIONS: 0
 SOURCE_VALIDATION_DATABASE_CONNECTIONS: 0
 SOURCE_VALIDATION_DATABASE_READS_WRITES: 0/0

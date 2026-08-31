@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  applyEximbayP3eCanaryRoleGrants,
   bootstrapEximbayP3eDatabaseRoles,
   defaultEximbayP3eDatabaseBootstrapDependencies,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
@@ -70,6 +71,95 @@ describe("one exact Eximbay P3E database-role bootstrap owner", () => {
         ),
         postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
       });
+    });
+  });
+
+  it("applies only the frozen canary grant delta after the exact ledger gate", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      const applied: string[] = [];
+      const verifyExactLedger = vi.fn(() => Promise.resolve());
+      const result = await applyEximbayP3eCanaryRoleGrants(admin, input, {
+        readArtifact: defaultEximbayP3eDatabaseBootstrapDependencies.readArtifact,
+        executeArtifact: async (database, artifact, sql) => {
+          applied.push(artifact.id);
+          await database.query(sql);
+        },
+        verifyExactLedger,
+        beforePostcondition: () => Promise.resolve(),
+      });
+
+      expect(verifyExactLedger).toHaveBeenCalledOnce();
+      expect(applied).toEqual(["EXIMBAY_CANARY_ROLE_GRANT_DELTA"]);
+      expect(result).toMatchObject({
+        ok: true,
+        code: "EXIMBAY_P3E_CANARY_ROLE_GRANTS_COMPLETE",
+        artifact: { id: "EXIMBAY_CANARY_ROLE_GRANT_DELTA" },
+        postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
+      });
+    });
+  });
+
+  it("rolls back the canary delta when SQL execution fails", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      await admin.query(`
+        REVOKE INSERT ON TABLE "PaymentOutbox" FROM mira_refund_canary
+      `);
+      try {
+        await expect(applyEximbayP3eCanaryRoleGrants(admin, input, {
+          readArtifact: defaultEximbayP3eDatabaseBootstrapDependencies.readArtifact,
+          executeArtifact: async (database, _artifact, sql) => {
+            await database.query(sql);
+            await database.query('SELECT "grant-only-forced-sql-error"');
+          },
+          verifyExactLedger: () => Promise.resolve(),
+          beforePostcondition: () => Promise.resolve(),
+        })).rejects.toMatchObject({ code: "ROLE_AUTHORITY_EXECUTION_FAILED" });
+        await expect(hasTablePrivilege(
+          admin,
+          "mira_refund_canary",
+          "PaymentOutbox",
+          "INSERT",
+        )).resolves.toBe(false);
+      } finally {
+        await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      }
+    });
+  });
+
+  it("rolls back the canary delta when exhaustive privilege verification fails", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      await admin.query(`
+        REVOKE INSERT ON TABLE "PaymentOutbox" FROM mira_refund_canary
+      `);
+      try {
+        await expect(applyEximbayP3eCanaryRoleGrants(admin, input, {
+          readArtifact: defaultEximbayP3eDatabaseBootstrapDependencies.readArtifact,
+          executeArtifact: defaultEximbayP3eDatabaseBootstrapDependencies.executeArtifact,
+          verifyExactLedger: () => Promise.resolve(),
+          beforePostcondition: async (database) => {
+            await database.query(`
+              GRANT DELETE ON TABLE "PaymentOutbox" TO mira_refund_canary
+            `);
+          },
+        })).rejects.toMatchObject({ code: "ROLE_AUTHORITY_POSTCONDITION_FAILED" });
+        await expect(hasTablePrivilege(
+          admin,
+          "mira_refund_canary",
+          "PaymentOutbox",
+          "INSERT",
+        )).resolves.toBe(false);
+        await expect(hasTablePrivilege(
+          admin,
+          "mira_refund_canary",
+          "PaymentOutbox",
+          "DELETE",
+        )).resolves.toBe(false);
+      } finally {
+        await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      }
     });
   });
 
@@ -190,6 +280,19 @@ async function revokeApprovalAuthority(admin: Client): Promise<void> {
     REVOKE ALL PRIVILEGES ON TABLE "EximbayRefundSandboxCanaryApproval"
     FROM mira_refund_preflight, mira_refund_canary
   `);
+}
+
+async function hasTablePrivilege(
+  admin: Client,
+  role: string,
+  table: string,
+  privilege: string,
+): Promise<boolean> {
+  const result = await admin.query<{ allowed: boolean }>(
+    "SELECT has_table_privilege($1, $2, $3) AS allowed",
+    [role, `public."${table}"`, privilege],
+  );
+  return result.rows[0]?.allowed === true;
 }
 
 function requireDisposableDatabaseUrl(value: string | undefined): string {

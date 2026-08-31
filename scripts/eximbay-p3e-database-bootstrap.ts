@@ -63,6 +63,17 @@ export type EximbayP3eDatabaseBootstrapDependencies = Readonly<{
   beforePostcondition: (database: Client) => Promise<void>;
 }>;
 
+export type EximbayP3eCanaryRoleGrantDependencies = Readonly<{
+  readArtifact: (artifact: EximbayP3eBootstrapArtifact) => Promise<string>;
+  executeArtifact: (
+    database: Client,
+    artifact: EximbayP3eBootstrapArtifact,
+    sql: string,
+  ) => Promise<void>;
+  verifyExactLedger: (database: Client) => Promise<void>;
+  beforePostcondition: (database: Client) => Promise<void>;
+}>;
+
 export type EximbayP3eDatabaseBootstrapResult = Readonly<{
   ok: true;
   code: "EXIMBAY_P3E_DATABASE_BOOTSTRAP_COMPLETE";
@@ -72,6 +83,18 @@ export type EximbayP3eDatabaseBootstrapResult = Readonly<{
     repositoryPath: string;
     sha256: string;
   }>[];
+  postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED";
+}>;
+
+export type EximbayP3eCanaryRoleGrantResult = Readonly<{
+  ok: true;
+  code: "EXIMBAY_P3E_CANARY_ROLE_GRANTS_COMPLETE";
+  migration: typeof EXIMBAY_P3E_APPROVAL_MIGRATION;
+  artifact: Readonly<{
+    id: "EXIMBAY_CANARY_ROLE_GRANT_DELTA";
+    repositoryPath: string;
+    sha256: string;
+  }>;
   postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED";
 }>;
 
@@ -169,6 +192,51 @@ const CANARY_ROW_LOCK_UPDATE_COLUMNS = new Set([
   "RefundExecutionEvidence.id",
   "RefundExecutionProviderOperationBinding.id",
 ]);
+
+export async function applyEximbayP3eCanaryRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<EximbayP3eCanaryRoleGrantResult> {
+  requireAdmittedInput(input);
+  const artifact = EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS.find(
+    (candidate) => candidate.id === "EXIMBAY_CANARY_ROLE_GRANT_DELTA",
+  );
+  if (!artifact) {
+    throw new EximbayP3eDatabaseBootstrapError("EXIMBAY_DELTA_INTEGRITY_FAILURE");
+  }
+  const sql = await readAndVerifyArtifact(artifact, dependencies.readArtifact);
+
+  let transactionOpen = false;
+  try {
+    await database.query("BEGIN");
+    transactionOpen = true;
+    await requireExactDatabase(database, input.targetDatabaseName);
+    await dependencies.verifyExactLedger(database);
+    await requireApprovalMigration(database);
+    await dependencies.executeArtifact(database, artifact, sql);
+    await dependencies.beforePostcondition(database);
+    await verifyExactEffectivePrivileges(database);
+    await database.query("COMMIT");
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) await database.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof EximbayP3eDatabaseBootstrapError) throw error;
+    throw new EximbayP3eDatabaseBootstrapError("ROLE_AUTHORITY_EXECUTION_FAILED");
+  }
+
+  return Object.freeze({
+    ok: true,
+    code: "EXIMBAY_P3E_CANARY_ROLE_GRANTS_COMPLETE",
+    migration: EXIMBAY_P3E_APPROVAL_MIGRATION,
+    artifact: Object.freeze({
+      id: artifact.id,
+      repositoryPath: artifact.repositoryPath,
+      sha256: artifact.sha256,
+    }),
+    postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
+  });
+}
 
 export async function bootstrapEximbayP3eDatabaseRoles(
   database: Client,
@@ -272,6 +340,20 @@ async function readAndVerifyArtifacts(
     sources.set(artifact.id, source);
   }
   return sources;
+}
+
+async function readAndVerifyArtifact(
+  artifact: EximbayP3eBootstrapArtifact,
+  readArtifact: EximbayP3eCanaryRoleGrantDependencies["readArtifact"],
+): Promise<string> {
+  let source: string;
+  try {
+    source = await readArtifact(artifact);
+  } catch {
+    throw integrityError(artifact.id);
+  }
+  if (sha256(source) !== artifact.sha256) throw integrityError(artifact.id);
+  return source;
 }
 
 function integrityError(

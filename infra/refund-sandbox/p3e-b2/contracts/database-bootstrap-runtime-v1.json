@@ -17,7 +17,16 @@
       "google_service_account.bootstrap",
       "google_sql_user.bootstrap"
     ],
-    "sortedAddressSha256": "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22"
+    "sortedAddressSha256": "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22",
+    "temporaryAuthorizedResourceCount": 5,
+    "temporaryAuthorizedAddresses": [
+      "google_cloud_run_v2_job.bootstrap",
+      "google_project_iam_member.cloud_sql_access[\"client\"]",
+      "google_project_iam_member.cloud_sql_access[\"instance_user\"]",
+      "google_service_account.bootstrap",
+      "google_sql_user.bootstrap"
+    ],
+    "temporaryAuthorizedSortedAddressSha256": "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472"
   },
   "identity": {
     "serviceAccountId": "mira-p3e-sbx-db-bootstrap",
@@ -33,11 +42,16 @@
     "resourceScope": "NONE_CURRENT_FUTURE_REENTRY_EXACT_INSTANCE_ONLY",
     "condition": "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'",
     "roles": [],
+    "temporaryCloudSqlAccessDefault": false,
+    "temporaryAuthorizedRoles": [
+      "roles/cloudsql.client",
+      "roles/cloudsql.instanceUser"
+    ],
     "credentialSecretScope": [],
     "credentialSecretRoles": [],
     "cloudSqlLoginAuthority": "NONE",
     "credentialSecretIamAuthority": "NONE",
-    "futureMigrationReentry": "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED",
+    "futureMigrationReentry": "SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED",
     "secretPayloadAccess": "NONE",
     "deployerActAsBinding": "NOT_CREATED_EXISTING_PROJECT_OWNER_IS_EFFECTIVE"
   },
@@ -53,6 +67,7 @@
     "defaultMode": "check",
     "mutatingModes": [
       "apply",
+      "apply-canary-role-grants",
       "materialize-application-credentials",
       "recover-canary-application-credential"
     ],
@@ -132,6 +147,7 @@
     "parallelism": 1,
     "maxRetries": 0,
     "defaultArguments": ["check"],
+    "explicitGrantOnlyArgument": "apply-canary-role-grants",
     "explicitCredentialArguments": [
       "materialize-application-credentials",
       "recover-canary-application-credential"

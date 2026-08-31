@@ -14,6 +14,7 @@ output "bootstrap_manifest" {
     job_name                        = google_cloud_run_v2_job.bootstrap.name
     default_mode                    = "check"
     explicit_mutating_mode          = "apply"
+    grant_only_mode                 = "apply-canary-role-grants"
     credential_materialization_mode = "materialize-application-credentials"
     credential_recovery_mode        = "recover-canary-application-credential"
     task_count                      = 1
@@ -25,10 +26,11 @@ output "bootstrap_manifest" {
     migration_count                 = local.migration_count
     migration_sha256                = local.migration_sha256
     provider_credentials            = "NONE"
-    cloud_sql_login_authority       = "NONE"
+    temporary_cloud_sql_access      = var.temporary_cloud_sql_access_authorized
+    cloud_sql_login_authority       = var.temporary_cloud_sql_access_authorized ? "EXACT_TWO_CONDITIONED_BINDINGS" : "NONE"
     credential_secret_iam_authority = "NONE"
     secret_manager_dependencies     = "NO_STANDING_AUTHORITY_IMAGE_CAPABILITY_RETAINED"
-    future_migration_reentry        = "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED"
+    future_migration_reentry        = "SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED"
     execution_status                = "RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER"
   }
 }

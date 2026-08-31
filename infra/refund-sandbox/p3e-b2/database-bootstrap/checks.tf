@@ -31,6 +31,14 @@ check "exact_machine_contract" {
       local.contract.resourceGraph.resourceCount == 3 &&
       local.contract.resourceGraph.sortedAddressSha256 ==
       "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22" &&
+      local.contract.resourceGraph.temporaryAuthorizedResourceCount == 5 &&
+      local.contract.resourceGraph.temporaryAuthorizedSortedAddressSha256 ==
+      "c25d113c45d1bdbf96e30eda1f73914c2291946e0d012cf13d4345aad335a472" &&
+      local.contract.iam.temporaryCloudSqlAccessDefault == false &&
+      local.contract.iam.temporaryAuthorizedRoles == [
+        "roles/cloudsql.client",
+        "roles/cloudsql.instanceUser",
+      ] &&
       length(local.contract.iam.roles) == 0 &&
       length(local.contract.iam.credentialSecretScope) == 0 &&
       length(local.contract.iam.credentialSecretRoles) == 0 &&

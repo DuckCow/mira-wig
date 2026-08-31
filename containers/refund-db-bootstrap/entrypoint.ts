@@ -18,7 +18,13 @@ import {
   type ApplicationCredential,
   type ApplicationRole,
 } from "./application-credentials.js";
-import { verifyExactEffectivePrivileges } from
+import {
+  applyEximbayP3eCanaryRoleGrants,
+  defaultEximbayP3eDatabaseBootstrapDependencies,
+  EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
+  EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+  verifyExactEffectivePrivileges,
+} from
   "../../scripts/eximbay-p3e-database-bootstrap.js";
 import {
   loadRefundWorkerMigrationInventory,
@@ -43,6 +49,7 @@ const READINESS_URL = "http://127.0.0.1:9801/readiness";
 const READINESS_TIMEOUT_MS = 120_000;
 const READINESS_POLL_MS = 250;
 export const PROXY_DIAGNOSTIC_BYTE_LIMIT = 4_096;
+export const CANARY_ROLE_GRANT_MODE = "apply-canary-role-grants" as const;
 
 export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
   "PROXY_START_FAILED",
@@ -140,7 +147,7 @@ class BootstrapStageFailure extends Error {
 }
 
 export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE
-  | typeof CANARY_CREDENTIAL_RECOVERY_MODE;
+  | typeof CANARY_CREDENTIAL_RECOVERY_MODE | typeof CANARY_ROLE_GRANT_MODE;
 
 type BootstrapEnvironment = Readonly<Record<string, string | undefined>>;
 type Output = Readonly<{
@@ -228,6 +235,7 @@ export function proxyArguments(automaticIamAuthentication = true): readonly stri
 function parseMode(args: readonly string[]): BootstrapMode | null {
   if (args.length !== 1) return null;
   if (args[0] === "check" || args[0] === "apply"
+    || args[0] === CANARY_ROLE_GRANT_MODE
     || args[0] === APPLICATION_CREDENTIAL_MODE
     || args[0] === CANARY_CREDENTIAL_RECOVERY_MODE) return args[0];
   return null;
@@ -307,6 +315,12 @@ async function runWithProxy(
   configuration: RuntimeConfiguration,
   inventory: RefundWorkerMigrationInventory,
 ): Promise<Readonly<Record<string, unknown>>> {
+  if (configuration.mode === CANARY_ROLE_GRANT_MODE) {
+    return runProxySession(true, () => applyCanaryRoleGrants(
+      configuration.databaseUrl,
+      inventory,
+    ));
+  }
   if (configuration.mode === CANARY_CREDENTIAL_RECOVERY_MODE) {
     return recoverCanaryApplicationCredential({
       secretManager: new RestSecretMetadataClient(),
@@ -449,6 +463,41 @@ async function checkDatabase(
       migrationCount: inventory.migrationCount,
       completedMigrationCount: completed,
       databaseMutation: false,
+    });
+  } finally {
+    await database.end().catch(() => undefined);
+  }
+}
+
+async function applyCanaryRoleGrants(
+  databaseUrlValue: string,
+  inventory: RefundWorkerMigrationInventory,
+): Promise<Readonly<Record<string, unknown>>> {
+  const database = new Client({ connectionString: databaseUrlValue });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const result = await applyEximbayP3eCanaryRoleGrants(database, {
+      admission: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
+      environment: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+      targetDatabaseName: "refund_sandbox",
+    }, {
+      ...defaultEximbayP3eDatabaseBootstrapDependencies,
+      verifyExactLedger: async (transaction) => {
+        const completed = await requireExactMigrationPrefix(transaction, inventory);
+        if (completed !== inventory.migrationCount) ledgerRejected();
+      },
+    });
+    return Object.freeze({
+      code: result.code,
+      mode: CANARY_ROLE_GRANT_MODE,
+      migrationCount: inventory.migrationCount,
+      completedMigrationCount: inventory.migrationCount,
+      artifact: result.artifact,
+      roleGrantPostcondition: result.postcondition,
+      migrationMutation: false,
+      businessRowMutation: false,
+      secretManagerEffects: 0,
+      providerEffects: 0,
     });
   } finally {
     await database.end().catch(() => undefined);
