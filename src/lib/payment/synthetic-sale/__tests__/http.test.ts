@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import type { EximbayReadyHandoffV1 } from "@/lib/payment/eximbay/sdk-handoff-contract";
 import { parseSyntheticSaleRuntimeConfiguration } from "../contract";
 import { createSyntheticSaleHttpHandler, handleNodeHttpRequest } from "../http";
-import type { SyntheticSaleRunOwner } from "../run";
+import { startFailureEvidence, type SyntheticSaleRunOwner } from "../run";
 
 const CAPABILITY = "a".repeat(64);
 const ORIGIN = "https://mira-p3e-sbx-synthetic-sale-925882331349.asia-northeast3.run.app";
@@ -115,6 +115,29 @@ describe("minimal synthetic SALE HTTP surface", () => {
     const page = await handler(new Request(`${ORIGIN}/synthetic-sale/${CAPABILITY}`));
     expect(page.headers.get("Content-Security-Policy")).toContain("https://api-test.eximbay.com");
     expect(page.headers.get("Content-Security-Policy")).not.toContain("https://api.eximbay.com");
+  });
+
+  it("projects arbitrary start failures into the exact safe evidence shape", () => {
+    const raw = Object.assign(new Error("database-url=forbidden secret@example.test"), {
+      code: "P2002",
+      meta: { target: "private-customer-field" },
+    });
+    const evidence = startFailureEvidence("b".repeat(32), "FIXTURE_MATERIALIZATION", raw);
+
+    expect(evidence).toEqual({
+      ok: false,
+      code: "SYNTHETIC_SALE_START_FAILURE",
+      runId: "b".repeat(32),
+      stage: "FIXTURE_MATERIALIZATION",
+      failureCode: "SYNTHETIC_SALE_UNCLASSIFIED_FAILURE",
+    });
+    expect(Object.keys(evidence).sort()).toEqual([
+      "code", "failureCode", "ok", "runId", "stage",
+    ]);
+    const serialized = JSON.stringify(evidence);
+    for (const forbidden of ["database-url", "secret@example.test", "P2002", "private-customer-field"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 });
 

@@ -34,6 +34,7 @@ import type { EximbayBf4Fetch } from "@/lib/payment/eximbay/bf4-contact";
 import { orderPaidEmailDedupKey } from "@/lib/payment/email/topics";
 import { createEximbayRequestPayController } from "@/lib/payment/eximbay/sdk-invocation";
 import { parseSyntheticSaleRuntimeConfiguration } from "../contract";
+import { createSyntheticSaleHttpHandler } from "../http";
 import { createSyntheticSaleRunOwner } from "../run";
 
 const ROLE_PASSWORD = "synthetic_sale_restricted_test_only";
@@ -52,6 +53,85 @@ beforeAll(() => {
 });
 
 describe.sequential("temporary synthetic SALE authority", () => {
+  it("records a safe pre-provider failure when the migration-only database has no US Market", async () => {
+    const admin = new Client({ connectionString: databaseUrl });
+    await admin.connect();
+    await admin.query("SELECT pg_advisory_lock(682326912)");
+    const capability = randomBytes(32).toString("hex");
+    const configuration = parseSyntheticSaleRuntimeConfiguration({
+      MIRA_SYNTHETIC_SALE_RUN_CAPABILITY: capability,
+      MIRA_SYNTHETIC_SALE_PUBLIC_ORIGIN:
+        "https://mira-p3e-sbx-synthetic-sale-925882331349.asia-northeast3.run.app",
+      MIRA_SYNTHETIC_SALE_PROJECT_ID: "mira-refund-sandbox-0001",
+      MIRA_SYNTHETIC_SALE_PROVIDER: "EXIMBAY",
+      MIRA_SYNTHETIC_SALE_MARKET: "US",
+      MIRA_SYNTHETIC_SALE_CURRENCY: "USD",
+      PAYMENT_MODE: "SANDBOX",
+      EXIMBAY_CHECKOUT_SANDBOX_ENABLED: "ENABLED",
+      EXIMBAY_SANDBOX_API_KEY: API_KEY,
+      EXIMBAY_SANDBOX_MID: MID,
+    });
+    if (!configuration) throw new Error("test configuration rejected");
+    const ready = vi.fn(() => Promise.reject(new Error("provider must remain uncontacted")));
+    const evidence: object[] = [];
+    let restricted: PrismaClient | null = null;
+    try {
+      await admin.query(`DELETE FROM "Market" WHERE code = 'US'`);
+      await restoreCanaryRefundRoleGrants(admin, bootstrapInput, lifecycleDependencies());
+      await bootstrapEximbayP3eDatabaseRoles(admin, bootstrapInput);
+      await admin.query(`ALTER ROLE mira_refund_canary PASSWORD '${ROLE_PASSWORD}'`);
+      await applySyntheticSaleRoleGrants(admin, bootstrapInput, lifecycleDependencies());
+
+      restricted = restrictedClient(databaseUrl);
+      const run = createSyntheticSaleRunOwner(restricted, configuration, ready, (event) => {
+        evidence.push(event);
+      });
+      const handler = createSyntheticSaleHttpHandler(restricted, run, configuration, {
+        browserAsset: "compiled-browser-owner",
+      });
+      const startUrl = `${configuration.publicOrigin}/synthetic-sale/${capability}/start`;
+      const first = await handler(new Request(startUrl, { method: "POST" }));
+      expect(first.status).toBe(409);
+      await expect(first.json()).resolves.toEqual({ ok: false, state: "WAITING" });
+      const duplicate = await handler(new Request(startUrl, { method: "POST" }));
+      expect(duplicate.status).toBe(409);
+      expect(ready).not.toHaveBeenCalled();
+      await expect(run.status()).resolves.toEqual({ state: "WAITING" });
+      const sessions = await admin.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM "CheckoutSession" WHERE "userId" = $1`,
+        [`exsale_user_${run.runIdentity}`],
+      );
+      expect(sessions.rows).toEqual([{ count: "0" }]);
+      expect(evidence).toEqual([
+        {
+          ok: false,
+          code: "SYNTHETIC_SALE_START_FAILURE",
+          runId: run.runIdentity,
+          stage: "FIXTURE_MATERIALIZATION",
+          failureCode: "SYNTHETIC_SALE_MARKET_INVALID",
+        },
+        {
+          ok: false,
+          code: "SYNTHETIC_SALE_START_FAILURE",
+          runId: run.runIdentity,
+          stage: "START_GUARD",
+          failureCode: "SYNTHETIC_SALE_ALREADY_STARTED",
+        },
+      ]);
+      const serialized = JSON.stringify(evidence);
+      for (const forbidden of [capability, API_KEY, "@example.test", "provider must remain uncontacted"]) {
+        expect(serialized).not.toContain(forbidden);
+      }
+    } finally {
+      if (restricted) await restricted.$disconnect().catch(() => undefined);
+      await cleanupRun(admin, capability).catch(() => undefined);
+      await restoreCanaryRefundRoleGrants(admin, bootstrapInput, lifecycleDependencies()).catch(() => undefined);
+      await admin.query("ALTER ROLE mira_refund_canary PASSWORD NULL").catch(() => undefined);
+      await admin.query("SELECT pg_advisory_unlock(682326912)").catch(() => undefined);
+      await admin.end();
+    }
+  });
+
   it("runs READY and authoritative BF4 completion only inside the temporary ACL window", async () => {
     const admin = new Client({ connectionString: databaseUrl });
     await admin.connect();

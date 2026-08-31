@@ -3,7 +3,10 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { db } from "../../src/lib/db.js";
 import { parseSyntheticSaleRuntimeConfiguration } from "../../src/lib/payment/synthetic-sale/contract.js";
-import { createSyntheticSaleRunOwner } from "../../src/lib/payment/synthetic-sale/run.js";
+import {
+  createSyntheticSaleRunOwner,
+  type SyntheticSaleStartFailureEvidence,
+} from "../../src/lib/payment/synthetic-sale/run.js";
 import {
   createSyntheticSaleHttpHandler,
   handleNodeHttpRequest,
@@ -23,7 +26,7 @@ export async function main(env: Readonly<Record<string, string | undefined>> = p
   try {
     await awaitReadiness(proxy);
     const browserAsset = await readFile(BROWSER_ASSET, "utf8");
-    const run = createSyntheticSaleRunOwner(db, configuration);
+    const run = createSyntheticSaleRunOwner(db, configuration, fetch, writeStartFailure);
     const handler = createSyntheticSaleHttpHandler(db, run, configuration, { browserAsset });
     const server = createServer((request, response) => {
       void handleNodeHttpRequest(request, response, handler, configuration.publicOrigin);
@@ -45,6 +48,10 @@ export async function main(env: Readonly<Record<string, string | undefined>> = p
     proxy.kill("SIGTERM");
     await db.$disconnect().catch(() => undefined);
   }
+}
+
+function writeStartFailure(evidence: SyntheticSaleStartFailureEvidence): void {
+  process.stderr.write(`${JSON.stringify(evidence)}\n`);
 }
 
 function startProxy(): ChildProcess {

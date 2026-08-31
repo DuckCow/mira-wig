@@ -24,11 +24,17 @@ export type SyntheticSaleFixture = Readonly<{
   sessionId: string;
 }>;
 
+export type SyntheticSaleFixtureOptions = Readonly<{
+  now?: Date;
+  onCheckoutSessionStart?: () => void;
+}>;
+
 export async function materializeSyntheticSaleFixture(
   client: PrismaClient,
   runIdentity: string,
-  now: Date = new Date(),
+  options: SyntheticSaleFixtureOptions = {},
 ): Promise<SyntheticSaleFixture> {
+  const now = options.now ?? new Date();
   requireRunIdentity(runIdentity);
   const ids = fixtureIds(runIdentity);
   await client.$transaction(async (tx) => {
@@ -91,6 +97,7 @@ export async function materializeSyntheticSaleFixture(
     }, ["id", "userId", "wigStyleId", "variantId", "quantity"]);
   });
 
+  options.onCheckoutSessionStart?.();
   const sessions = await client.checkoutSession.findMany({
     where: { userId: ids.userId },
     select: { id: true },
