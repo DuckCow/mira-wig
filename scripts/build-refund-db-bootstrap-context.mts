@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { build } from "esbuild";
 import { loadRefundWorkerMigrationInventory } from "../src/lib/payment/refund/worker-migration-inventory.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -27,7 +28,14 @@ const exactAssets = Object.freeze([
   "containers/refund-db-bootstrap/package-lock.json",
   "containers/refund-db-bootstrap/package.json",
   "infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql",
+  "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql",
+  "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json",
+  "infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf",
   "prisma.config.ts",
   "prisma/migrations/migration_lock.toml",
   "prisma/schema.prisma",
@@ -63,6 +71,7 @@ Promise<RefundDbBootstrapBuildContext> {
   await mkdir(directory, { recursive: true, mode: 0o755 });
   try {
     for (const path of [...assets].sort(compareUtf8)) await copyExact(path, directory);
+    await writeTargetProducerBundle(directory);
     await normalizeDirectories(directory);
     const manifestEntries = await loadManifestEntries(directory);
     const canonical = JSON.stringify(manifestEntries);
@@ -82,6 +91,27 @@ Promise<RefundDbBootstrapBuildContext> {
     await rm(parent, { recursive: true, force: true });
     throw error;
   }
+}
+
+async function writeTargetProducerBundle(contextDirectory: string): Promise<void> {
+  const result = await build({
+    absWorkingDir: repositoryRoot,
+    entryPoints: ["scripts/eximbay-refund-canary-target-producer.ts"],
+    bundle: true,
+    write: false,
+    platform: "node",
+    target: "node22",
+    format: "esm",
+    conditions: ["react-server"],
+    external: ["@prisma/client", "@prisma/adapter-pg", "pg"],
+    tsconfig: "tsconfig.json",
+  });
+  const output = result.outputFiles[0];
+  if (result.outputFiles.length !== 1 || !output) throw new Error("DB_BOOTSTRAP_PRODUCER_BUNDLE_INVALID");
+  const destination = join(contextDirectory, "dist/eximbay-refund-canary-target-producer.mjs");
+  await mkdir(dirname(destination), { recursive: true, mode: 0o755 });
+  await writeFile(destination, output.contents, { mode: 0o644 });
+  await normalizeTimestamp(destination);
 }
 
 async function copyExact(path: string, contextDirectory: string): Promise<void> {

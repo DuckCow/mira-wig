@@ -95,6 +95,7 @@ describe("EX2B2-S1 source isolation", () => {
       [
         "src/lib/payment/eximbay/ready-config.ts",
         "src/lib/payment/eximbay/ready-contact.ts",
+        "src/lib/payment/synthetic-sale/run.ts",
       ],
     );
   });
@@ -115,7 +116,7 @@ describe("EX2B2-S1 source isolation", () => {
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-handoff.ts"),
-      ["src/app/actions/payment.ts"],
+      ["src/app/actions/payment.ts", "src/lib/payment/synthetic-sale/run.ts"],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-loader.ts"),
@@ -123,7 +124,10 @@ describe("EX2B2-S1 source isolation", () => {
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-invocation.ts"),
-      ["src/app/(shop)/checkout/eximbay-browser-consumer.ts"],
+      [
+        "src/app/(shop)/checkout/eximbay-browser-consumer.ts",
+        "src/lib/payment/synthetic-sale/browser.ts",
+      ],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-handoff-contract.ts"),
@@ -133,6 +137,7 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/eximbay/sdk-invocation.ts",
         "src/lib/payment/eximbay/sdk-loader.ts",
         "src/lib/payment/eximbay/sdk-origins.ts",
+        "src/lib/payment/synthetic-sale/run.ts",
       ],
     );
   }, 30_000);

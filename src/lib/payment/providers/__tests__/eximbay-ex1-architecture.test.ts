@@ -67,6 +67,7 @@ describe("Eximbay customer SANDBOX source capability with default-off activation
     expect(productionPathsContaining(EXIMBAY_CHECKOUT_SANDBOX_ENABLED)).toEqual([
       "src/lib/payment/eximbay/checkout-activation.ts",
       "src/lib/payment/providers/factory.ts",
+      "src/lib/payment/synthetic-sale/contract.ts",
     ]);
     expect(EXIMBAY_SDK_ORIGINS).toEqual({
       SANDBOX: "https://api-test.eximbay.com",

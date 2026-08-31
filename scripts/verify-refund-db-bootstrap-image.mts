@@ -149,7 +149,7 @@ function run(
   args: readonly string[],
   requireSuccess = true,
 ): Readonly<{ status: number | null; stdout: string; stderr: string }> {
-  const result = spawnSync("docker", ["run", "--rm", ...args], {
+  const result = spawnSync("docker", ["run", "--rm", "--platform=linux/amd64", ...args], {
     encoding: "utf8",
     maxBuffer: 262_144,
   });

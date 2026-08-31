@@ -12,7 +12,8 @@ export const EXIMBAY_P3E_APPROVAL_MIGRATION =
 
 export type EximbayP3eBootstrapArtifactId =
   | "FROZEN_HISTORICAL_ROLE_AUTHORITY"
-  | "EXIMBAY_CANARY_ROLE_GRANT_DELTA";
+  | "EXIMBAY_CANARY_ROLE_GRANT_DELTA"
+  | "SYNTHETIC_SALE_ROLE_GRANT_DELTA";
 
 export type EximbayP3eBootstrapArtifact = Readonly<{
   id: EximbayP3eBootstrapArtifactId;
@@ -43,6 +44,16 @@ export const EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS = Object.freeze([
     sha256: "f25de97819786dfc6dc2d4ce462268ab60a3ef82fb583701823f33762f92b790",
   }),
 ] satisfies readonly EximbayP3eBootstrapArtifact[]);
+
+export const SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT = Object.freeze({
+  id: "SYNTHETIC_SALE_ROLE_GRANT_DELTA",
+  repositoryPath: "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
+  absolutePath: resolve(
+    repositoryRoot,
+    "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
+  ),
+  sha256: "5eace2e79f1b7abd148354e1a0544af7bf443373016713b8f51835a662263674",
+} satisfies EximbayP3eBootstrapArtifact);
 
 type RuntimeRole = "mira_refund_preflight" | "mira_refund_canary";
 type AdmittedDatabaseName = "refund_sandbox" | "wig_platform_test";
@@ -98,12 +109,24 @@ export type EximbayP3eCanaryRoleGrantResult = Readonly<{
   postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED";
 }>;
 
+export type SyntheticSaleRoleGrantResult = Readonly<{
+  ok: true;
+  code: "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE" | "CANARY_REFUND_ROLE_GRANTS_RESTORED";
+  artifacts: readonly Readonly<{
+    id: EximbayP3eBootstrapArtifactId;
+    repositoryPath: string;
+    sha256: string;
+  }>[];
+  postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED";
+}>;
+
 export type EximbayP3eDatabaseBootstrapErrorCode =
   | "BOOTSTRAP_NOT_EXPLICITLY_ADMITTED"
   | "BOOTSTRAP_TARGET_INVALID"
   | "REQUIRED_MIGRATION_ABSENT"
   | "HISTORICAL_AUTHORITY_INTEGRITY_FAILURE"
   | "EXIMBAY_DELTA_INTEGRITY_FAILURE"
+  | "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
   | "HISTORICAL_AUTHORITY_SHAPE_INVALID"
   | "ROLE_AUTHORITY_EXECUTION_FAILED"
   | "ROLE_AUTHORITY_POSTCONDITION_FAILED";
@@ -193,6 +216,40 @@ const CANARY_ROW_LOCK_UPDATE_COLUMNS = new Set([
   "RefundExecutionProviderOperationBinding.id",
 ]);
 
+const SYNTHETIC_SALE_SELECT = new Set([
+  ...CANARY_SELECT,
+  "User", "Market", "WigStyle", "WigVariant", "WigStyleMarket",
+  "VariantMarketPrice", "CartItem", "CheckoutSessionLine", "CheckoutSessionShipping",
+  "PaymentEvent", "OrderItem", "OrderShipping",
+]);
+
+const SYNTHETIC_SALE_INSERT = new Set([
+  ...CANARY_INSERT,
+  "User", "WigStyle", "WigVariant", "WigStyleMarket", "VariantMarketPrice",
+  "CartItem", "CheckoutSession", "CheckoutSessionLine", "CheckoutSessionShipping",
+  "Payment", "PaymentEvent", "Order", "OrderItem", "OrderShipping",
+]);
+
+const SYNTHETIC_SALE_DELETE = new Set(["CartItem"]);
+const SYNTHETIC_SALE_UPDATE_COLUMNS = new Set([
+  ...CANARY_ROW_LOCK_UPDATE_COLUMNS,
+  ...[...CANARY_TABLE_UPDATE].flatMap((table) => [`${table}.*`]),
+  ...[...CANARY_APPROVAL_UPDATE_COLUMNS].map((column) => `EximbayRefundSandboxCanaryApproval.${column}`),
+  "User.id", "Market.code", "WigStyle.id", "CheckoutSessionLine.id",
+  "WigStyleMarket.wigStyleId", "VariantMarketPrice.variantId", "WigVariant.stock",
+  "CartItem.quantity", "CheckoutSession.status", "CheckoutSession.completedAt",
+  "CheckoutSession.updatedAt", "Payment.status", "Payment.attemptLifecycle",
+  "Payment.remediationStatus", "Payment.amount", "Payment.currency",
+  "Payment.providerPaymentKey", "Payment.contactStartedAt", "Payment.initiationOutputKind",
+  "Payment.initiationApproveUrl", "Payment.initiationCompletedAt",
+  "Payment.financialSucceededAt", "Payment.errorCode", "Payment.errorMessage",
+  "Payment.supersededAt", "Payment.blockingEndedAt", "Payment.suspendedByPaymentId",
+  "Payment.updatedAt", "PaymentEvent.transmissionId", "PaymentEvent.raw",
+  "PaymentEvent.status", "PaymentEvent.processedAt", "PaymentEvent.failureStage",
+  "PaymentEvent.failureCode", "PaymentEvent.lastError", "PaymentEvent.verifiedMode",
+  "PaymentEvent.verifiedCredentialBinding", "PaymentEvent.providerPaymentKey",
+]);
+
 export async function applyEximbayP3eCanaryRoleGrants(
   database: Client,
   input: EximbayP3eDatabaseBootstrapInput,
@@ -234,6 +291,92 @@ export async function applyEximbayP3eCanaryRoleGrants(
       repositoryPath: artifact.repositoryPath,
       sha256: artifact.sha256,
     }),
+    postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
+  });
+}
+
+export async function applySyntheticSaleRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sql = await readAndVerifyArtifact(
+    SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT,
+    dependencies.readArtifact,
+  );
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await dependencies.executeArtifact(database, SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT, sql);
+  }, verifyExactSyntheticSaleEffectivePrivileges, "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE", [
+    SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT,
+  ]);
+}
+
+export async function restoreCanaryRefundRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sources = await readAndVerifyArtifacts(dependencies);
+  const historical = EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS[0];
+  const delta = EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS[1];
+  if (!historical || !delta) throw new EximbayP3eDatabaseBootstrapError("ROLE_AUTHORITY_EXECUTION_FAILED");
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await database.query(`
+      REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public
+        FROM mira_refund_preflight, mira_refund_canary;
+      REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public
+        FROM mira_refund_preflight, mira_refund_canary;
+      REVOKE CREATE ON SCHEMA public FROM mira_refund_preflight, mira_refund_canary;
+    `);
+    const historicalSource = sources.get(historical.id);
+    const deltaSource = sources.get(delta.id);
+    if (historicalSource === undefined || deltaSource === undefined) {
+      throw new EximbayP3eDatabaseBootstrapError("ROLE_AUTHORITY_EXECUTION_FAILED");
+    }
+    await dependencies.executeArtifact(
+      database,
+      historical,
+      renderHistoricalPrivilegeRestore(historicalSource, input.targetDatabaseName),
+    );
+    await dependencies.executeArtifact(database, delta, deltaSource);
+  }, verifyExactEffectivePrivileges, "CANARY_REFUND_ROLE_GRANTS_RESTORED",
+  EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS);
+}
+
+async function executeRoleGrantTransaction(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+  execute: () => Promise<void>,
+  verify: (database: Pick<Client, "query">) => Promise<void>,
+  code: SyntheticSaleRoleGrantResult["code"],
+  artifacts: readonly EximbayP3eBootstrapArtifact[],
+): Promise<SyntheticSaleRoleGrantResult> {
+  let transactionOpen = false;
+  try {
+    await database.query("BEGIN");
+    transactionOpen = true;
+    await requireExactDatabase(database, input.targetDatabaseName);
+    await dependencies.verifyExactLedger(database);
+    await requireApprovalMigration(database);
+    await execute();
+    await dependencies.beforePostcondition(database);
+    await verify(database);
+    await database.query("COMMIT");
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) await database.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof EximbayP3eDatabaseBootstrapError) throw error;
+    throw new EximbayP3eDatabaseBootstrapError("ROLE_AUTHORITY_EXECUTION_FAILED");
+  }
+  return Object.freeze({
+    ok: true,
+    code,
+    artifacts: Object.freeze(artifacts.map(
+      ({ id, repositoryPath, sha256: digest }) => Object.freeze({ id, repositoryPath, sha256: digest }),
+    )),
     postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
   });
 }
@@ -362,8 +505,21 @@ function integrityError(
   return new EximbayP3eDatabaseBootstrapError(
     artifactId === "FROZEN_HISTORICAL_ROLE_AUTHORITY"
       ? "HISTORICAL_AUTHORITY_INTEGRITY_FAILURE"
-      : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
+      : artifactId === "SYNTHETIC_SALE_ROLE_GRANT_DELTA"
+        ? "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
+        : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
   );
+}
+
+function renderHistoricalPrivilegeRestore(
+  source: string,
+  databaseName: AdmittedDatabaseName,
+): string {
+  const privilegeStart = source.indexOf("GRANT CONNECT ON DATABASE refund_sandbox");
+  if (privilegeStart < 0) {
+    throw new EximbayP3eDatabaseBootstrapError("HISTORICAL_AUTHORITY_SHAPE_INVALID");
+  }
+  return renderHistoricalAuthority(source.slice(privilegeStart), databaseName);
 }
 
 function renderHistoricalAuthority(source: string, databaseName: AdmittedDatabaseName): string {
@@ -377,11 +533,24 @@ function renderHistoricalAuthority(source: string, databaseName: AdmittedDatabas
 export async function verifyExactEffectivePrivileges(
   database: Pick<Client, "query">,
 ): Promise<void> {
-  await verifyRole(database, "mira_refund_preflight");
-  await verifyRole(database, "mira_refund_canary");
+  await verifyRole(database, "mira_refund_preflight", "REFUND_ONLY");
+  await verifyRole(database, "mira_refund_canary", "REFUND_ONLY");
 }
 
-async function verifyRole(database: Pick<Client, "query">, role: RuntimeRole): Promise<void> {
+export async function verifyExactSyntheticSaleEffectivePrivileges(
+  database: Pick<Client, "query">,
+): Promise<void> {
+  await verifyRole(database, "mira_refund_preflight", "REFUND_ONLY");
+  await verifyRole(database, "mira_refund_canary", "SYNTHETIC_SALE");
+}
+
+type PrivilegeProfile = "REFUND_ONLY" | "SYNTHETIC_SALE";
+
+async function verifyRole(
+  database: Pick<Client, "query">,
+  role: RuntimeRole,
+  profile: PrivilegeProfile,
+): Promise<void> {
   const safety = await database.query<RoleSafetyRow>(`
       SELECT
         role.rolcanlogin AS "canLogin",
@@ -445,8 +614,8 @@ async function verifyRole(database: Pick<Client, "query">, role: RuntimeRole): P
     `, [role]);
 
   requireRoleSafety(safety.rows);
-  requireTablePrivileges(role, tables.rows);
-  requireColumnPrivileges(role, columns.rows);
+  requireTablePrivileges(role, profile, tables.rows);
+  requireColumnPrivileges(role, profile, columns.rows);
   requireNoSequencePrivileges(sequences.rows);
 }
 
@@ -489,11 +658,11 @@ const ROLE_SAFETY_KEYS = Object.freeze([
 
 function requireTablePrivileges(
   role: RuntimeRole,
+  profile: PrivilegeProfile,
   rows: readonly TablePrivilegeRow[],
 ): void {
-  const expectedSelect = role === "mira_refund_preflight" ? PRE_FLIGHT_SELECT : CANARY_SELECT;
   for (const row of rows) {
-    const expected = tablePrivilegeExpectation(role, row.tableName, expectedSelect);
+    const expected = tablePrivilegeExpectation(role, profile, row.tableName);
     for (const key of TABLE_PRIVILEGE_KEYS) {
       if (row[key] !== expected[key]) failPostcondition();
     }
@@ -512,15 +681,19 @@ const TABLE_PRIVILEGE_KEYS = Object.freeze([
 
 function tablePrivilegeExpectation(
   role: RuntimeRole,
+  profile: PrivilegeProfile,
   tableName: string,
-  expectedSelect: ReadonlySet<string>,
 ): Omit<TablePrivilegeRow, "tableName"> {
   const canary = role === "mira_refund_canary";
+  const sale = canary && profile === "SYNTHETIC_SALE";
+  const expectedSelect = role === "mira_refund_preflight"
+    ? PRE_FLIGHT_SELECT
+    : sale ? SYNTHETIC_SALE_SELECT : CANARY_SELECT;
   return Object.freeze({
     select: expectedSelect.has(tableName),
-    insert: canary && CANARY_INSERT.has(tableName),
+    insert: canary && (sale ? SYNTHETIC_SALE_INSERT : CANARY_INSERT).has(tableName),
     update: canary && CANARY_TABLE_UPDATE.has(tableName),
-    delete: false,
+    delete: sale && SYNTHETIC_SALE_DELETE.has(tableName),
     truncate: false,
     references: false,
     trigger: false,
@@ -529,14 +702,19 @@ function tablePrivilegeExpectation(
 
 function requireColumnPrivileges(
   role: RuntimeRole,
+  profile: PrivilegeProfile,
   rows: readonly ColumnPrivilegeRow[],
 ): void {
   for (const row of rows) {
-    const expectedUpdate = role === "mira_refund_canary"
-      && (CANARY_TABLE_UPDATE.has(row.tableName)
-        || CANARY_ROW_LOCK_UPDATE_COLUMNS.has(`${row.tableName}.${row.columnName}`)
-        || (row.tableName === "EximbayRefundSandboxCanaryApproval"
-          && CANARY_APPROVAL_UPDATE_COLUMNS.has(row.columnName)));
+    const exactColumn = `${row.tableName}.${row.columnName}`;
+    const saleUpdate = profile === "SYNTHETIC_SALE"
+      && (SYNTHETIC_SALE_UPDATE_COLUMNS.has(exactColumn)
+        || SYNTHETIC_SALE_UPDATE_COLUMNS.has(`${row.tableName}.*`));
+    const canonicalUpdate = CANARY_TABLE_UPDATE.has(row.tableName)
+      || CANARY_ROW_LOCK_UPDATE_COLUMNS.has(exactColumn)
+      || (row.tableName === "EximbayRefundSandboxCanaryApproval"
+        && CANARY_APPROVAL_UPDATE_COLUMNS.has(row.columnName));
+    const expectedUpdate = role === "mira_refund_canary" && (canonicalUpdate || saleUpdate);
     if (row.update !== expectedUpdate) failPostcondition();
   }
 }

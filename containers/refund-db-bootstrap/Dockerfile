@@ -13,8 +13,18 @@ COPY --link prisma.config.ts ./
 COPY --link prisma ./prisma
 COPY --link infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql ./infra/refund-sandbox/p3e-b2/runtime-deferred/
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/eximbay-canary/
-RUN ./node_modules/.bin/esbuild containers/refund-db-bootstrap/entrypoint.ts \
+COPY --link infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/
+COPY --link infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
+COPY --link infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
+COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/
+COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
+COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
+COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
+COPY --link dist/eximbay-refund-canary-target-producer.mjs ./dist/
+RUN ./node_modules/.bin/prisma generate --config ./prisma.config.ts --schema ./prisma/schema.prisma \
+  && ./node_modules/.bin/esbuild containers/refund-db-bootstrap/entrypoint.ts \
       --bundle --platform=node --target=node22 --format=esm --external:pg \
+      --external:@prisma/client --external:@prisma/adapter-pg \
       --outfile=dist/refund-db-bootstrap-entrypoint.mjs \
   && ./node_modules/.bin/esbuild scripts/eximbay-p3e-database-bootstrap.ts \
       --bundle --platform=node --target=node22 --format=esm --external:pg \
@@ -49,6 +59,12 @@ COPY --link --from=build /build/prisma.config.ts ./prisma.config.ts
 COPY --link --from=build /build/prisma ./prisma
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql ./infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/contracts ./infra/refund-sandbox/p3e-b2/contracts
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf
 RUN mkdir -p /cloudsql /tmp/refund-db-bootstrap \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     /opt/yarn* /root/.npm /root/.cache /var/lib/apt/lists/* /var/cache/apt/* \

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { Client } from "pg";
 import {
@@ -20,9 +20,11 @@ import {
 } from "./application-credentials.js";
 import {
   applyEximbayP3eCanaryRoleGrants,
+  applySyntheticSaleRoleGrants,
   defaultEximbayP3eDatabaseBootstrapDependencies,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+  restoreCanaryRefundRoleGrants,
   verifyExactEffectivePrivileges,
 } from
   "../../scripts/eximbay-p3e-database-bootstrap.js";
@@ -43,6 +45,7 @@ const IMAGE_PREFIX = `${REGION}-docker.pkg.dev/${PROJECT_ID}/mira-p3e-sbx-refund
 const SOURCE_COMMIT_FILE = "/bootstrap-source-commit";
 const PROXY_EXECUTABLE = "/usr/local/bin/cloud-sql-proxy";
 const ROLE_BOOTSTRAP_EXECUTABLE = "/app/scripts/eximbay-p3e-database-bootstrap.mjs";
+const TARGET_PRODUCER_EXECUTABLE = "/app/scripts/eximbay-refund-canary-target-producer.mjs";
 const PRISMA_EXECUTABLE = "/app/node_modules/prisma/build/index.js";
 const MIGRATIONS_DIRECTORY = "/app/prisma/migrations";
 const READINESS_URL = "http://127.0.0.1:9801/readiness";
@@ -50,6 +53,10 @@ const READINESS_TIMEOUT_MS = 120_000;
 const READINESS_POLL_MS = 250;
 export const PROXY_DIAGNOSTIC_BYTE_LIMIT = 4_096;
 export const CANARY_ROLE_GRANT_MODE = "apply-canary-role-grants" as const;
+export const SYNTHETIC_SALE_ROLE_GRANT_MODE = "apply-synthetic-sale-role-grants" as const;
+export const CANARY_REFUND_ROLE_RESTORE_MODE = "restore-canary-refund-role-grants" as const;
+export const MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE = "materialize-eximbay-canary-target" as const;
+export const ISSUE_EXIMBAY_CANARY_APPROVAL_MODE = "issue-eximbay-canary-approval" as const;
 
 export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
   "PROXY_START_FAILED",
@@ -147,7 +154,9 @@ class BootstrapStageFailure extends Error {
 }
 
 export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE
-  | typeof CANARY_CREDENTIAL_RECOVERY_MODE | typeof CANARY_ROLE_GRANT_MODE;
+  | typeof CANARY_CREDENTIAL_RECOVERY_MODE | typeof CANARY_ROLE_GRANT_MODE
+  | typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE
+  | typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
 
 type BootstrapEnvironment = Readonly<Record<string, string | undefined>>;
 type Output = Readonly<{
@@ -160,6 +169,14 @@ export type RuntimeConfiguration = Readonly<{
   sourceCommit: string;
   imageDigestUri: string;
   databaseUrl: string;
+  producerInput?: ProducerInput;
+}>;
+
+type ProducerInput = Readonly<{
+  paymentId: string;
+  attestationJson: string;
+  runtimeReadbackJson?: string;
+  issuerPrincipalId?: string;
 }>;
 
 type LedgerRow = Readonly<{
@@ -234,11 +251,18 @@ export function proxyArguments(automaticIamAuthentication = true): readonly stri
 
 function parseMode(args: readonly string[]): BootstrapMode | null {
   if (args.length !== 1) return null;
-  if (args[0] === "check" || args[0] === "apply"
-    || args[0] === CANARY_ROLE_GRANT_MODE
-    || args[0] === APPLICATION_CREDENTIAL_MODE
-    || args[0] === CANARY_CREDENTIAL_RECOVERY_MODE) return args[0];
+  const candidate = args[0];
+  if (candidate && isBootstrapMode(candidate)) return candidate;
   return null;
+}
+
+function isBootstrapMode(value: string): value is BootstrapMode {
+  return [
+    "check", "apply", CANARY_ROLE_GRANT_MODE, SYNTHETIC_SALE_ROLE_GRANT_MODE,
+    CANARY_REFUND_ROLE_RESTORE_MODE, MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE,
+    ISSUE_EXIMBAY_CANARY_APPROVAL_MODE, APPLICATION_CREDENTIAL_MODE,
+    CANARY_CREDENTIAL_RECOVERY_MODE,
+  ].includes(value);
 }
 
 function parseConfiguration(
@@ -254,12 +278,49 @@ function parseConfiguration(
     || !matchesExactSource(sourceCommit, embeddedSourceCommit)
     || !matchesExactImage(imageDigestUri)
     || !matchesExactMigrations(env, inventory)) return null;
+  const producerInput = parseProducerInput(mode, env);
+  if (isProducerMode(mode) && !producerInput) return null;
   return Object.freeze({
     mode,
     sourceCommit,
     imageDigestUri,
     databaseUrl: databaseUrl(),
+    ...(producerInput ? { producerInput } : {}),
   });
+}
+
+function parseProducerInput(mode: BootstrapMode, env: BootstrapEnvironment): ProducerInput | null {
+  if (!isProducerMode(mode)) return null;
+  const paymentId = env.MIRA_DB_BOOTSTRAP_PAYMENT_ID;
+  const attestationJson = boundedJson(env.MIRA_DB_BOOTSTRAP_ATTESTATION_JSON);
+  if (!paymentId || !/^[a-zA-Z0-9_-]{1,128}$/u.test(paymentId) || !attestationJson) return null;
+  if (mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE) {
+    if (env.MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON || env.MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID) return null;
+    return Object.freeze({ paymentId, attestationJson });
+  }
+  return parseApprovalProducerInput(env, paymentId, attestationJson);
+}
+
+function parseApprovalProducerInput(
+  env: BootstrapEnvironment,
+  paymentId: string,
+  attestationJson: string,
+): ProducerInput | null {
+  const runtimeReadbackJson = boundedJson(env.MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON);
+  const issuerPrincipalId = env.MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID;
+  if (!runtimeReadbackJson || !issuerPrincipalId
+    || !/^[A-Za-z0-9@._:-]{1,256}$/u.test(issuerPrincipalId)) return null;
+  return Object.freeze({ paymentId, attestationJson, runtimeReadbackJson, issuerPrincipalId });
+}
+
+function boundedJson(value: string | undefined): string | null {
+  if (!value || Buffer.byteLength(value) < 2 || Buffer.byteLength(value) > 65_536) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function matchesExactTarget(env: BootstrapEnvironment): boolean {
@@ -315,6 +376,17 @@ async function runWithProxy(
   configuration: RuntimeConfiguration,
   inventory: RefundWorkerMigrationInventory,
 ): Promise<Readonly<Record<string, unknown>>> {
+  const mode = configuration.mode;
+  if (isProducerMode(mode)) {
+    return runProxySession(true, () => runProducerMode(configuration, inventory));
+  }
+  if (isAclLifecycleMode(mode)) {
+    return runProxySession(true, () => executeAclLifecycleMode(
+      configuration.databaseUrl,
+      inventory,
+      mode,
+    ));
+  }
   if (configuration.mode === CANARY_ROLE_GRANT_MODE) {
     return runProxySession(true, () => applyCanaryRoleGrants(
       configuration.databaseUrl,
@@ -360,6 +432,108 @@ async function runWithProxy(
   return runProxySession(true, () => configuration.mode === "check"
     ? checkDatabase(configuration.databaseUrl, inventory)
     : applyDatabase(configuration.databaseUrl, inventory));
+}
+
+function isProducerMode(
+  mode: BootstrapMode,
+): mode is typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE {
+  return mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE || mode === ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
+}
+
+async function runProducerMode(
+  configuration: RuntimeConfiguration,
+  inventory: RefundWorkerMigrationInventory,
+): Promise<Readonly<Record<string, unknown>>> {
+  const input = configuration.producerInput;
+  if (!input) throw new Error("BOOTSTRAP_PRODUCER_INPUT_MISSING");
+  const database = new Client({ connectionString: configuration.databaseUrl });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const completed = await requireExactMigrationPrefix(database, inventory);
+    if (completed !== inventory.migrationCount) ledgerRejected();
+  } finally {
+    await database.end().catch(() => undefined);
+  }
+  const attestationPath = "/tmp/refund-db-bootstrap/eximbay-canary-attestation.json";
+  const readbackPath = "/tmp/refund-db-bootstrap/eximbay-canary-runtime-readback.json";
+  try {
+    await writeFile(attestationPath, input.attestationJson, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    const args = configuration.mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE
+      ? ["materialize-target", "--payment-id", input.paymentId, "--attestation", attestationPath]
+      : await approvalProducerArgs(input, attestationPath, readbackPath);
+    await requireSuccessfulChild(TARGET_PRODUCER_EXECUTABLE, args, configuration.databaseUrl);
+    return Object.freeze({
+      code: configuration.mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE
+        ? "EXIMBAY_CANARY_TARGET_MATERIALIZED"
+        : "EXIMBAY_CANARY_APPROVAL_ISSUED",
+      mode: configuration.mode,
+      migrationCount: inventory.migrationCount,
+      completedMigrationCount: inventory.migrationCount,
+      providerEffects: 0,
+    });
+  } finally {
+    await Promise.all([rm(attestationPath, { force: true }), rm(readbackPath, { force: true })]);
+  }
+}
+
+async function approvalProducerArgs(
+  input: ProducerInput,
+  attestationPath: string,
+  readbackPath: string,
+): Promise<readonly string[]> {
+  if (!input.runtimeReadbackJson || !input.issuerPrincipalId) {
+    throw new Error("BOOTSTRAP_PRODUCER_INPUT_MISSING");
+  }
+  await writeFile(readbackPath, input.runtimeReadbackJson, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  return [
+    "issue-approval", "--payment-id", input.paymentId, "--attestation", attestationPath,
+    "--runtime-readback", readbackPath, "--issuer-principal", input.issuerPrincipalId,
+  ];
+}
+
+function isAclLifecycleMode(
+  mode: BootstrapMode,
+): mode is typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE {
+  return mode === SYNTHETIC_SALE_ROLE_GRANT_MODE || mode === CANARY_REFUND_ROLE_RESTORE_MODE;
+}
+
+async function executeAclLifecycleMode(
+  databaseUrlValue: string,
+  inventory: RefundWorkerMigrationInventory,
+  mode: typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE,
+): Promise<Readonly<Record<string, unknown>>> {
+  const database = new Client({ connectionString: databaseUrlValue });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const dependencies = {
+      ...defaultEximbayP3eDatabaseBootstrapDependencies,
+      verifyExactLedger: async (transaction: Client) => {
+        const completed = await requireExactMigrationPrefix(transaction, inventory);
+        if (completed !== inventory.migrationCount) ledgerRejected();
+      },
+    };
+    const input = {
+      admission: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
+      environment: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+      targetDatabaseName: "refund_sandbox" as const,
+    };
+    const result = mode === SYNTHETIC_SALE_ROLE_GRANT_MODE
+      ? await applySyntheticSaleRoleGrants(database, input, dependencies)
+      : await restoreCanaryRefundRoleGrants(database, input, dependencies);
+    return Object.freeze({
+      code: result.code,
+      mode,
+      migrationCount: inventory.migrationCount,
+      completedMigrationCount: inventory.migrationCount,
+      artifacts: result.artifacts,
+      roleGrantPostcondition: result.postcondition,
+      migrationMutation: false,
+      businessRowMutation: false,
+      providerEffects: 0,
+    });
+  } finally {
+    await database.end().catch(() => undefined);
+  }
 }
 
 async function runProxySession<Result>(

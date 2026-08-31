@@ -8,6 +8,7 @@ import {
   PaymentRemediationStatus,
   Prisma,
 } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
 import { decodeEximbayAmount } from "@/lib/payment/providers/eximbay/amount";
 import {
@@ -73,6 +74,14 @@ export async function materializeFreshEximbayReadyHandoff(
   paymentId: string,
   freshAuthority: FreshEximbayReadyAuthority,
 ): Promise<EximbayReadyHandoffV1> {
+  return materializeFreshEximbayReadyHandoffWithClient(db, paymentId, freshAuthority);
+}
+
+export async function materializeFreshEximbayReadyHandoffWithClient(
+  client: Pick<PrismaClient, "$transaction">,
+  paymentId: string,
+  freshAuthority: FreshEximbayReadyAuthority,
+): Promise<EximbayReadyHandoffV1> {
   requirePaymentId(paymentId);
   if (consumedFreshAuthorities.has(freshAuthority)) {
     throw new EximbaySdkHandoffError("FRESH_AUTHORITY_ALREADY_CONSUMED");
@@ -82,7 +91,7 @@ export async function materializeFreshEximbayReadyHandoff(
   try {
     return await consumeFreshEximbayReadyAuthority(
       freshAuthority,
-      (plan, success) => materializeLockedHandoff(paymentId, plan, success),
+      (plan, success) => materializeLockedHandoff(client, paymentId, plan, success),
     );
   } catch (error) {
     if (error instanceof EximbaySdkHandoffError) throw error;
@@ -101,11 +110,12 @@ function requirePaymentId(paymentId: string): void {
 }
 
 async function materializeLockedHandoff(
+  client: Pick<PrismaClient, "$transaction">,
   paymentId: string,
   plan: EximbayReadyContactPlanCore,
   success: TrustedEximbayReadySuccess,
 ): Promise<EximbayReadyHandoffV1> {
-  return db.$transaction(async (tx) => {
+  return client.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<{ id: string }[]>(
       Prisma.sql`SELECT "id" FROM "Payment" WHERE "id" = ${paymentId} FOR UPDATE`,
     );
