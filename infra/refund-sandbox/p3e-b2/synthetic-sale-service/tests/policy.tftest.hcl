@@ -16,6 +16,15 @@ run "exact_temporary_service_graph" {
   command = plan
   assert {
     condition = (
+      output.backend_contract.type == "gcs" &&
+      output.backend_contract.bucket == "mira-refund-sandbox-0001-tfstate-925882331349" &&
+      output.backend_contract.prefix == "p3e-b2/synthetic-sale-service" &&
+      output.backend_contract.impersonate_service_account == "mira-refund-state-runner@mira-refund-sandbox-0001.iam.gserviceaccount.com" &&
+      output.backend_contract.authentication == "IMPERSONATE_EXACT_STATE_RUNNER_ONLY" &&
+      output.backend_contract.persistent_local_state == "FORBIDDEN" &&
+      output.backend_contract.workspace_multiplexing == "FORBIDDEN" &&
+      output.backend_contract.normal_release_migration_or_import == "NOT_PART_OF_NORMAL_RELEASE" &&
+      output.backend_contract.expected_initial_resource_count == 0 &&
       output.resource_manifest.resource_count == 6 &&
       google_project_iam_member.cloud_sql_client.role == "roles/cloudsql.client" &&
       google_project_iam_member.cloud_sql_client.condition[0].expression == "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'" &&

@@ -179,12 +179,19 @@ repository:
 | Runtime definitions | `p3e-b2/runtime` |
 | Database bootstrap | `p3e-b2/database-bootstrap` |
 | Preflight invocation | `p3e-b2/preflight-invocation` |
+| Synthetic sale service | `p3e-b2/synthetic-sale-service` |
 
 Each authority owns one prefix. Workspaces must not multiplex environments, unrelated authorities
 must not share a state file, and no root may use `terraform_remote_state`. Future root handoff must
 use reviewed nonsecret manifests containing only identifiers such as approved project ID, region,
 resource names, immutable image digest, or numeric resource generation. Passwords, connection URLs,
 secret payloads, credentials, targets, and approvals are forbidden in outputs.
+
+The synthetic-sale root keeps its GCS backend partial. A later separately authorized initialization
+must bind the exact bucket and prefix above and set `impersonate_service_account` to
+`mira-refund-state-runner@mira-refund-sandbox-0001.iam.gserviceaccount.com`. Persistent local state,
+workspace multiplexing, human-owned fallback state, and migration/import as part of a normal release
+are forbidden. Its expected first remote state is empty; this source does not claim that state exists.
 
 ## Retired execution deny authority
 
