@@ -10,19 +10,19 @@ const FROZEN_DATABASE_ROLES = join(
 );
 
 describe("dormant Eximbay refund canary Terraform policy", () => {
-  it("keeps every resource behind one source-literal hard-false apply gate", () => {
+  it("keeps every resource behind exact explicit dormant-release authority", () => {
     const main = source("main.tf");
     const locals = source("locals.tf");
     const resourceCount = matches(main, /^resource\s+"/gmu);
     expect(resourceCount).toBe(5);
     expect(matches(main, /condition\s*=\s*local\.runtime_apply_authorized/gmu))
       .toBe(resourceCount);
-    expect(matches(main, /R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED/gmu))
+    expect(matches(main, /EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING/gmu))
       .toBe(resourceCount);
-    expect(locals).toMatch(/runtime_apply_authorized\s*=\s*false/u);
-    expect(allTerraform()).not.toMatch(/variable\s+"runtime_apply_authorized"/u);
+    expect(locals).toContain("var.release_authority.human_authorized == true");
+    expect(allTerraform()).toContain('variable "release_authority"');
     expect(allTerraform()).toContain(
-      'runtime_root_apply_policy = "UNCONDITIONALLY_BLOCKED_IN_R2B1"',
+      'runtime_root_apply_policy      = "EXPLICIT_DORMANT_EXIMBAY_SANDBOX_CANARY_RELEASE"',
     );
   });
 
@@ -35,9 +35,12 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(terraform).toContain('max_retries           = 0');
     expect(terraform).toContain('args  = ["eximbay-canary-once"]');
     expect(terraform).toContain('egress = "PRIVATE_RANGES_ONLY"');
+    expect(terraform).toContain('tags       = ["refund-provider-free"]');
+    expect(terraform).toContain('timeout               = "150s"');
     expect(terraform).not.toMatch(/scheduler|runWithOverrides|roles\/run\.invoker/iu);
     expect(terraform).not.toMatch(/google_service_account_key|roles\/owner|roles\/editor/iu);
-    expect(terraform).not.toMatch(/LIVE|EXIMBAY_LIVE/iu);
+    expect(terraform).not.toContain("EXIMBAY_LIVE");
+    expect(terraform).not.toContain("https://api.eximbay.com");
   });
 
   it("pins numeric secret versions without provider secret payload or broad secret IAM", () => {
@@ -50,13 +53,13 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(terraform).toContain(
       'MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION                   = var.eximbay_api_key_secret_version',
     );
-    expect(terraform).toContain('can(regex("^[1-9][0-9]*$", var.database_url_secret_version))');
-    expect(terraform).toContain('can(regex("^[1-9][0-9]*$", var.eximbay_api_key_secret_version))');
+    expect(terraform).toContain('var.database_url_secret_version == "1"');
+    expect(terraform).toContain('var.eximbay_api_key_secret_version == "1"');
     expect(terraform).not.toMatch(/secret_data|EXIMBAY_SANDBOX_API_KEY\s*=/u);
     expect(terraform).not.toMatch(/google_secret_manager_secret(?:_version)?\s+"/u);
   });
 
-  it("preserves corrected role authority and adds only the exact approval-table delta", () => {
+  it("preserves corrected role authority and adds only the exact canary delta", () => {
     expect(sha256(readFileSync(FROZEN_DATABASE_ROLES))).toBe(
       "a8ddd82fc14f09db4caee476377d15b6584e3c7e9cf4828ad8aed977d924d614",
     );
@@ -70,7 +73,23 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(grants).toMatch(
       /GRANT UPDATE \(\s*"consumedAt",\s*"consumedExecutionId",\s*"consumedExecutionBindingDigest"\s*\) ON TABLE "EximbayRefundSandboxCanaryApproval"\s+TO mira_refund_canary;/u,
     );
-    expect(grants).not.toMatch(/GRANT\s+(?:INSERT|DELETE|TRUNCATE|REFERENCES|TRIGGER)/u);
+    expect(grants).toMatch(
+      /GRANT SELECT ON TABLE "CheckoutSession"\s+TO mira_refund_canary;/u,
+    );
+    expect(grants).toMatch(
+      /GRANT INSERT ON TABLE "PaymentOutbox"\s+TO mira_refund_canary;/u,
+    );
+    expect(grants).toMatch(
+      /GRANT SELECT, INSERT ON TABLE "RefundExecutionEximbayPreflightObservation"\s+TO mira_refund_canary;/u,
+    );
+    expect(grants).not.toMatch(/GRANT\s+(?:DELETE|TRUNCATE|REFERENCES|TRIGGER)/u);
+    expect(grants).not.toMatch(/GRANT INSERT ON TABLE "CheckoutSession"/u);
+    expect(grants).not.toMatch(/GRANT (?:SELECT|UPDATE) ON TABLE "PaymentOutbox"/u);
+    expect(grants).not.toMatch(/GRANT (?:UPDATE|DELETE) ON TABLE "RefundExecutionEximbayPreflightObservation"/u);
+    expect(grants).toMatch(/GRANT UPDATE \("id"\) ON TABLE "Payment"\s+TO mira_refund_canary;/u);
+    expect(grants).toMatch(/GRANT UPDATE \("id"\) ON TABLE "RefundExecutionProviderOperationBinding"\s+TO mira_refund_canary;/u);
+    expect(grants).toMatch(/GRANT UPDATE \("id"\) ON TABLE "RefundExecutionEvidence"\s+TO mira_refund_canary;/u);
+    expect(grants).toMatch(/GRANT UPDATE \("id"\) ON TABLE "RefundExecutionCommandEvent"\s+TO mira_refund_canary;/u);
     expect(grants).not.toMatch(/GRANT\s+(?:ALL|CREATE|USAGE|ALTER|OWNERSHIP)/u);
     expect(grants).not.toMatch(/GRANT UPDATE ON TABLE/u);
   });

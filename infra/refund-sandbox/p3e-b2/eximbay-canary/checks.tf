@@ -1,19 +1,22 @@
-check "permanent_apply_block" {
+check "exact_release_authority" {
   assert {
-    condition = (
-      local.runtime_apply_authorized == false &&
-      local.runtime_root_apply_policy == "UNCONDITIONALLY_BLOCKED_IN_R2B1"
-    )
-    error_message = "R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED"
+    condition     = local.runtime_apply_authorized
+    error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
   }
 }
 
-check "numeric_secret_versions" {
+check "exact_release_handoffs" {
   assert {
     condition = (
-      can(regex("^[1-9][0-9]*$", var.database_url_secret_version)) &&
-      can(regex("^[1-9][0-9]*$", var.eximbay_api_key_secret_version))
+      var.project_id == "mira-refund-sandbox-0001" &&
+      var.cloud_sql_instance_connection_name == "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18" &&
+      var.network_resource_name == "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc" &&
+      var.subnetwork_resource_name == "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3" &&
+      var.database_url_secret_id == "mira-p3e-sbx-canary-database-url" &&
+      var.database_url_secret_version == "1" &&
+      var.eximbay_api_key_secret_id == "mira-p3e-sbx-eximbay-api-key" &&
+      var.eximbay_api_key_secret_version == "1"
     )
-    error_message = "Secret versions must be exact positive numeric versions."
+    error_message = "The exact reviewed canary project, network, database, and secret handoffs are required."
   }
 }

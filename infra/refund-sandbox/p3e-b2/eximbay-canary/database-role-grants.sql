@@ -39,3 +39,32 @@ GRANT UPDATE (
   "consumedExecutionBindingDigest"
 ) ON TABLE "EximbayRefundSandboxCanaryApproval"
   TO mira_refund_canary;
+
+-- The atomic refund-success transaction reads the checkout locale before it
+-- inserts the deduplicated refund-success email intent. Keep these privileges
+-- narrower than the existing refund persistence authority.
+GRANT SELECT ON TABLE "CheckoutSession"
+  TO mira_refund_canary;
+
+GRANT INSERT ON TABLE "PaymentOutbox"
+  TO mira_refund_canary;
+
+-- The admitted Eximbay dispatch records and re-reads one immutable preflight
+-- observation before cancellation. Mutation after insertion remains denied by
+-- the table trigger and by the absence of UPDATE/DELETE grants.
+GRANT SELECT, INSERT ON TABLE "RefundExecutionEximbayPreflightObservation"
+  TO mira_refund_canary;
+
+-- PostgreSQL requires UPDATE table authority for SELECT ... FOR UPDATE. The
+-- Eximbay preflight locks Payment but does not update its columns.
+GRANT UPDATE ("id") ON TABLE "Payment"
+  TO mira_refund_canary;
+
+GRANT UPDATE ("id") ON TABLE "RefundExecutionProviderOperationBinding"
+  TO mira_refund_canary;
+
+GRANT UPDATE ("id") ON TABLE "RefundExecutionEvidence"
+  TO mira_refund_canary;
+
+GRANT UPDATE ("id") ON TABLE "RefundExecutionCommandEvent"
+  TO mira_refund_canary;

@@ -560,6 +560,9 @@ async function cleanupDispatchAuthorities(
     })
   ));
   await collectCleanupMutation(cleanupErrors, () => (
+    deleteEximbayPreflightObservations(bindings.map((binding) => binding.id))
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionProviderOperationBinding.deleteMany({
       where: { id: { in: bindings.map((binding) => binding.id) } },
     })
@@ -597,6 +600,22 @@ async function cleanupDispatchAuthorities(
     db.user.deleteMany({ where: { id: { in: authority.userIds } } })
   ));
   return cleanupErrors;
+}
+
+async function deleteEximbayPreflightObservations(bindingIds: readonly string[]): Promise<void> {
+  if (bindingIds.length === 0) return;
+  await db.$executeRawUnsafe(
+    'ALTER TABLE "RefundExecutionEximbayPreflightObservation" DISABLE TRIGGER "EximbayPreflight_immutable"',
+  );
+  try {
+    await db.refundExecutionEximbayPreflightObservation.deleteMany({
+      where: { bindingId: { in: [...bindingIds] } },
+    });
+  } finally {
+    await db.$executeRawUnsafe(
+      'ALTER TABLE "RefundExecutionEximbayPreflightObservation" ENABLE TRIGGER "EximbayPreflight_immutable"',
+    );
+  }
 }
 
 async function collectCleanupQuery<T>(

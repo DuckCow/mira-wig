@@ -7,7 +7,7 @@ resource "google_service_account" "canary" {
     prevent_destroy = true
     precondition {
       condition     = local.runtime_apply_authorized
-      error_message = "R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED"
+      error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
     }
   }
 }
@@ -18,12 +18,12 @@ resource "google_project_iam_member" "cloud_sql_client" {
   member  = "serviceAccount:${google_service_account.canary.email}"
   condition {
     title      = "exact-refund-cloud-sql-instance"
-    expression = "resource.name == 'projects/${var.project_id}/instances/${element(split(":", var.cloud_sql_instance_connection_name), 2)}'"
+    expression = local.cloud_sql_condition_expression
   }
   lifecycle {
     precondition {
       condition     = local.runtime_apply_authorized
-      error_message = "R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED"
+      error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
     }
   }
 }
@@ -36,7 +36,7 @@ resource "google_secret_manager_secret_iam_member" "database_url" {
   lifecycle {
     precondition {
       condition     = local.runtime_apply_authorized
-      error_message = "R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED"
+      error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
     }
   }
 }
@@ -49,7 +49,7 @@ resource "google_secret_manager_secret_iam_member" "eximbay_api_key" {
   lifecycle {
     precondition {
       condition     = local.runtime_apply_authorized
-      error_message = "R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED"
+      error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
     }
   }
 }
@@ -65,7 +65,7 @@ resource "google_cloud_run_v2_job" "canary" {
     parallelism = 1
     template {
       service_account       = google_service_account.canary.email
-      timeout               = "300s"
+      timeout               = "150s"
       max_retries           = 0
       execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
       containers {
@@ -93,7 +93,7 @@ resource "google_cloud_run_v2_job" "canary" {
         network_interfaces {
           network    = var.network_resource_name
           subnetwork = var.subnetwork_resource_name
-          tags       = ["refund-sandbox"]
+          tags       = ["refund-provider-free"]
         }
       }
     }
@@ -103,7 +103,7 @@ resource "google_cloud_run_v2_job" "canary" {
     prevent_destroy = true
     precondition {
       condition     = local.runtime_apply_authorized
-      error_message = "R2B1_EXIMBAY_CANARY_ROOT_UNCONDITIONALLY_BLOCKED"
+      error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
     }
   }
 }

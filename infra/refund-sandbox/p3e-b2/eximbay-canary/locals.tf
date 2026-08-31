@@ -1,10 +1,18 @@
 locals {
-  runtime_apply_authorized  = false
-  runtime_root_apply_policy = "UNCONDITIONALLY_BLOCKED_IN_R2B1"
-  region                    = "asia-northeast3"
-  service_account_id        = "mira-eximbay-canary"
-  job_name                  = "mira-eximbay-refund-canary"
-  api_key_secret_resource   = "projects/${var.project_id}/secrets/${var.eximbay_api_key_secret_id}"
+  runtime_apply_authorized = (
+    var.release_authority.human_authorized == true &&
+    var.release_authority.release_scope == "DORMANT_EXIMBAY_SANDBOX_CANARY_MATERIALIZATION" &&
+    var.release_authority.provider_contact_authorized == false
+  )
+  runtime_root_apply_policy      = "EXPLICIT_DORMANT_EXIMBAY_SANDBOX_CANARY_RELEASE"
+  backend_bucket_contract        = "mira-refund-sandbox-0001-tfstate-925882331349"
+  backend_prefix_contract        = "p3e-b2/eximbay-canary"
+  region                         = "asia-northeast3"
+  service_account_id             = "mira-eximbay-canary"
+  job_name                       = "mira-eximbay-refund-canary"
+  cloud_sql_instance_resource    = "projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18"
+  api_key_secret_resource        = "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key"
+  cloud_sql_condition_expression = "resource.name == '${local.cloud_sql_instance_resource}' && resource.service == 'sqladmin.googleapis.com'"
   required_activation = {
     REFUND_EXECUTION_WORKER_ENABLED                  = "ENABLED"
     REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED         = "ENABLED"

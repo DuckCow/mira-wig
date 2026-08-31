@@ -1,5 +1,29 @@
 # Refund SANDBOX P3E-B2 authority roots
 
+## Current Eximbay canary release boundary
+
+`eximbay-canary` is a release-capable but uninitialized and unapplied dormant root. Its exact GCS
+backend prefix is `p3e-b2/eximbay-canary`; its graph remains one canary service account, one
+single-instance-and-service-conditioned Cloud SQL Client member, two resource-scoped Secret
+Accessor members, and one deletion-protected Cloud Run v2 Job. Materialization requires explicit
+reviewed dormant-release authority and exact validated project, network, image, secret-version,
+merchant, credential-generation, target, and evidence bindings.
+
+The canary PostgreSQL role is intentionally not read-only. In addition to the installed approval
+and refund-persistence grants, the real restricted path requires `SELECT` on `CheckoutSession`,
+`INSERT` on `PaymentOutbox`, `SELECT`/`INSERT` on the immutable Eximbay preflight observation, and
+column-scoped `UPDATE ("id")` only where PostgreSQL requires update privilege for row locks on
+`Payment`, provider-operation binding, evidence, and command-event rows. It has no update/delete on
+the new success/outbox/observation surfaces. The Job remains one task, one parallelism, zero retries,
+no automatic trigger, `PRIVATE_RANGES_ONLY`, tag `refund-provider-free`, a 150-second task timeout,
+and fixed `eximbay-canary-once` arguments. It records the deduplicated refund-success outbox intent
+but does not dispatch email.
+
+Provider contact remains unreachable now: the Eximbay credential version, fresh synthetic SALE,
+sealed target, durable one-use approval, and materialized Job are absent. This source contract does
+not authorize Terraform initialization/plan/apply, live database grant installation, secret
+materialization, Cloud Run execution, or Eximbay contact.
+
 Status: repository definitions only. No Google Cloud project, bucket, backend, deny policy, role,
 resource, or execution authority has been created or inspected.
 

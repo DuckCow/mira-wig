@@ -5,6 +5,9 @@ import {
   PaymentProvider,
   PrismaClient,
   RefundAttemptActorType,
+  RefundAttemptStatus,
+  RefundExecutionCommandStatus,
+  OrderStatus,
 } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
@@ -335,6 +338,138 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
       await Promise.all([first.$disconnect(), second.$disconnect()]);
     }
   });
+
+  it("commits the exact refund-success transaction under the restricted canary role", async () => {
+    await installRestrictedRoleAuthority();
+    const prepared = await prepareTarget();
+    await createApproval(prepared);
+    const canary = restrictedPrisma("mira_refund_canary");
+    const payment = await db.payment.findUniqueOrThrow({
+      where: { id: prepared.fixture.paymentId },
+      select: { providerOrderId: true },
+    });
+    if (!payment.providerOrderId) throw new Error("PROVIDER_ORDER_ID_REQUIRED");
+    const fetch = providerSuccessFetch(prepared, payment.providerOrderId);
+    let clock = 0;
+    try {
+      await expect(canary.$queryRaw<{ currentUser: string }[]>`
+        SELECT current_user AS "currentUser"
+      `).resolves.toEqual([{ currentUser: "mira_refund_canary" }]);
+      await expect(runEximbayRefundCanaryOnce({
+        ...prepared.env,
+        DATABASE_URL: restrictedDatabaseUrl("mira_refund_canary"),
+      }, {
+        createDatabase: () => canary,
+        disconnectDatabase: () => Promise.resolve(),
+        readSecret: () => Promise.resolve("synthetic-api-key-never-log"),
+        fetch,
+        sleep: () => Promise.resolve(),
+        now: () => { clock += 250; return clock; },
+        timeoutMs: 5_000,
+        runAdmission: (_env, operation) => Promise.resolve({
+          outcome: "ACQUIRED" as const,
+          result: operation(),
+        }).then(async ({ outcome, result }) => ({ outcome, result: await result })),
+      })).resolves.toEqual({
+        ok: true,
+        code: "KNOWN_SUCCESS",
+        preflightRetrieveCount: 1,
+        reconciliationLookupCount: 0,
+        cancellationCount: 1,
+      });
+    } finally {
+      await canary.$disconnect();
+    }
+
+    await expect(db.refundAttempt.findUniqueOrThrow({
+      where: { id: prepared.fixture.refundAttemptId }, select: { status: true },
+    })).resolves.toEqual({ status: RefundAttemptStatus.SUCCEEDED });
+    await expect(db.refundExecutionCommand.findUniqueOrThrow({
+      where: { id: prepared.fixture.commandId }, select: { status: true },
+    })).resolves.toEqual({ status: RefundExecutionCommandStatus.DONE });
+    await expect(db.order.findUniqueOrThrow({
+      where: { id: prepared.fixture.orderId }, select: { status: true },
+    })).resolves.toEqual({ status: OrderStatus.REFUNDED });
+    await expect(db.refundAttemptTransition.count({
+      where: { refundAttemptId: prepared.fixture.refundAttemptId, toStatus: RefundAttemptStatus.SUCCEEDED },
+    })).resolves.toBe(1);
+    await expect(db.refundExecutionEvidence.count({
+      where: { commandId: prepared.fixture.commandId },
+    })).resolves.toBe(1);
+    await expect(db.paymentOutbox.count({
+      where: { dedupKey: `customer-refund-succeeded:v1:${prepared.fixture.refundAttemptId}` },
+    })).resolves.toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails the real success transaction when PaymentOutbox INSERT is absent", async () => {
+    await installRestrictedRoleAuthority();
+    const admin = new Client({ connectionString: databaseUrl });
+    await admin.connect();
+    try {
+      await admin.query('REVOKE INSERT ON TABLE "PaymentOutbox" FROM mira_refund_canary');
+      const prepared = await prepareTarget();
+      await createApproval(prepared);
+      const payment = await db.payment.findUniqueOrThrow({
+        where: { id: prepared.fixture.paymentId }, select: { providerOrderId: true },
+      });
+      if (!payment.providerOrderId) throw new Error("PROVIDER_ORDER_ID_REQUIRED");
+      const canary = restrictedPrisma("mira_refund_canary");
+      let clock = 0;
+      try {
+        const result = await runEximbayRefundCanaryOnce({
+          ...prepared.env,
+          DATABASE_URL: restrictedDatabaseUrl("mira_refund_canary"),
+        }, {
+          createDatabase: () => canary,
+          disconnectDatabase: () => Promise.resolve(),
+          readSecret: () => Promise.resolve("synthetic-api-key-never-log"),
+          fetch: providerSuccessFetch(prepared, payment.providerOrderId),
+          sleep: () => Promise.resolve(),
+          now: () => { clock += 250; return clock; },
+          timeoutMs: 1_000,
+          runAdmission: (_env, operation) => Promise.resolve({
+            outcome: "ACQUIRED" as const,
+            result: operation(),
+          }).then(async ({ outcome, result }) => ({ outcome, result: await result })),
+        });
+        expect(result.ok).toBe(false);
+        expect(result.code).not.toBe("KNOWN_SUCCESS");
+      } finally {
+        await canary.$disconnect();
+      }
+      await expect(db.refundAttempt.findUniqueOrThrow({
+        where: { id: prepared.fixture.refundAttemptId }, select: { status: true },
+      })).resolves.not.toEqual({ status: RefundAttemptStatus.SUCCEEDED });
+      await expect(db.paymentOutbox.count({
+        where: { dedupKey: `customer-refund-succeeded:v1:${prepared.fixture.refundAttemptId}` },
+      })).resolves.toBe(0);
+    } finally {
+      await admin.end();
+      await installRestrictedRoleAuthority();
+    }
+  });
+
+  it("does not broaden the two new table privileges", async () => {
+    await installRestrictedRoleAuthority();
+    const client = await restrictedPg("mira_refund_canary");
+    try {
+      await expect(client.query('SELECT "communicationLocale" FROM "CheckoutSession" WHERE false'))
+        .resolves.toMatchObject({ rowCount: 0 });
+      await expect(client.query(`
+        INSERT INTO "PaymentOutbox" ("id", "topic", "payload", "updatedAt")
+        VALUES ($1, 'synthetic.permission.probe', '{}'::jsonb, now())
+      `, [`permission_probe_${randomUUID()}`])).resolves.toMatchObject({ rowCount: 1 });
+      await expectPermissionDenied(client, 'UPDATE "CheckoutSession" SET "communicationLocale" = "communicationLocale" WHERE false');
+      await expectPermissionDenied(client, 'DELETE FROM "PaymentOutbox" WHERE false');
+      await expectPermissionDenied(client, 'UPDATE "PaymentOutbox" SET "status" = "status" WHERE false');
+      await expectPermissionDenied(client, 'UPDATE "Payment" SET "currency" = "currency" WHERE false');
+      await expectPermissionDenied(client, 'UPDATE "RefundExecutionEvidence" SET "safeMessage" = "safeMessage" WHERE false');
+    } finally {
+      await client.end();
+      await db.paymentOutbox.deleteMany({ where: { topic: "synthetic.permission.probe" } });
+    }
+  });
 });
 
 async function installRestrictedRoleAuthority(): Promise<void> {
@@ -393,6 +528,7 @@ async function prepareTarget(): Promise<PreparedTarget> {
   const fixture = await createDispatchFixture({
     totalAmount: 1_234,
     targetAmount: 1_234,
+    communicationLocale: "ko",
     refundActorType: RefundAttemptActorType.SYSTEM,
     refundActorUserId: null,
   });
@@ -553,4 +689,79 @@ function deferred<T>() {
   let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
   const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
   return { promise, resolve };
+}
+
+function providerSuccessFetch(
+  prepared: PreparedTarget,
+  providerOrderId: string,
+) {
+  return vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.endsWith("/v1/payments/retrieve")) {
+      return Promise.resolve(jsonResponse({
+        rescode: "0000",
+        resmsg: "Success.",
+        mid: prepared.authority.mid,
+        payment: {
+          order_id: providerOrderId,
+          currency: "USD",
+          amount: "12.34",
+          transaction_id: prepared.fixture.providerPaymentKey,
+          status: "SALE",
+          transaction_date: "20260821112233",
+          balance: "12.34",
+        },
+      }));
+    }
+    if (/\/v1\/payments\/[^/]+\/cancel$/u.test(url)) {
+      const refund = parseSyntheticCancelRequest(init?.body);
+      return Promise.resolve(jsonResponse({
+        rescode: "0000",
+        resmsg: "Success.",
+        mid: prepared.authority.mid,
+        refund: {
+          refund_amount: refund.amount,
+          refund_id: refund.id,
+          refund_date: "20260821112233",
+          refund_transaction_id: `synthetic-provider-refund-${randomUUID()}`,
+        },
+        payment: {
+          order_id: providerOrderId,
+          currency: "USD",
+          amount: "12.34",
+          transaction_id: prepared.fixture.providerPaymentKey,
+          balance: "0.00",
+        },
+      }));
+    }
+    throw new Error(`UNEXPECTED_SYNTHETIC_EXIMBAY_URL:${url}`);
+  });
+}
+
+function parseSyntheticCancelRequest(body: BodyInit | null | undefined): Readonly<{
+  id: string;
+  amount: string;
+}> {
+  if (typeof body !== "string") throw new Error("SYNTHETIC_CANCEL_BODY_REQUIRED");
+  const request: unknown = JSON.parse(body);
+  if (!isRecord(request) || !isRecord(request.refund)
+    || typeof request.refund.refund_id !== "string"
+    || typeof request.refund.refund_amount !== "string") {
+    throw new Error("SYNTHETIC_CANCEL_BODY_INVALID");
+  }
+  return Object.freeze({
+    id: request.refund.refund_id,
+    amount: request.refund.refund_amount,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 }

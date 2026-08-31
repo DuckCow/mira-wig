@@ -40,7 +40,7 @@ export const EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS = Object.freeze([
       repositoryRoot,
       "infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql",
     ),
-    sha256: "1b5c132fabd856f4a1fd4fbb635ea56c9c16214e7024c1f042b08cfd58750ce2",
+    sha256: "f25de97819786dfc6dc2d4ce462268ab60a3ef82fb583701823f33762f92b790",
   }),
 ] satisfies readonly EximbayP3eBootstrapArtifact[]);
 
@@ -122,6 +122,7 @@ const PRE_FLIGHT_SELECT = new Set([
 
 const CANARY_SELECT = new Set([
   "_prisma_migrations",
+  "CheckoutSession",
   "Payment",
   "Order",
   "RefundAttempt",
@@ -133,6 +134,7 @@ const CANARY_SELECT = new Set([
   "RefundExecutionProviderEligibilityProof",
   "RefundExecutionProviderContactEligibilityProof",
   "RefundExecutionEvidence",
+  "RefundExecutionEximbayPreflightObservation",
   "EximbayRefundSandboxCanaryApproval",
 ]);
 
@@ -144,6 +146,7 @@ const CANARY_TABLE_UPDATE = new Set([
 ]);
 
 const CANARY_INSERT = new Set([
+  "PaymentOutbox",
   "RefundAttemptTransition",
   "RefundExecutionCommandEvent",
   "RefundExecutionDispatchAttempt",
@@ -151,12 +154,20 @@ const CANARY_INSERT = new Set([
   "RefundExecutionProviderEligibilityProof",
   "RefundExecutionProviderContactEligibilityProof",
   "RefundExecutionEvidence",
+  "RefundExecutionEximbayPreflightObservation",
 ]);
 
 const CANARY_APPROVAL_UPDATE_COLUMNS = new Set([
   "consumedAt",
   "consumedExecutionId",
   "consumedExecutionBindingDigest",
+]);
+
+const CANARY_ROW_LOCK_UPDATE_COLUMNS = new Set([
+  "Payment.id",
+  "RefundExecutionCommandEvent.id",
+  "RefundExecutionEvidence.id",
+  "RefundExecutionProviderOperationBinding.id",
 ]);
 
 export async function bootstrapEximbayP3eDatabaseRoles(
@@ -441,6 +452,7 @@ function requireColumnPrivileges(
   for (const row of rows) {
     const expectedUpdate = role === "mira_refund_canary"
       && (CANARY_TABLE_UPDATE.has(row.tableName)
+        || CANARY_ROW_LOCK_UPDATE_COLUMNS.has(`${row.tableName}.${row.columnName}`)
         || (row.tableName === "EximbayRefundSandboxCanaryApproval"
           && CANARY_APPROVAL_UPDATE_COLUMNS.has(row.columnName)));
     if (row.update !== expectedUpdate) failPostcondition();
