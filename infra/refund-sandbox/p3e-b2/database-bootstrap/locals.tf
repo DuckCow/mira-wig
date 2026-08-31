@@ -14,34 +14,8 @@ locals {
   migration_count           = 41
   migration_sha256          = "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
   cloud_sql_condition       = "resource.name == '${local.cloud_sql_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
-  cloud_sql_roles = {
-    client = {
-      role  = "roles/cloudsql.client"
-      title = "refund-db-bootstrap-client-single-instance"
-    }
-    instance_user = {
-      role  = "roles/cloudsql.instanceUser"
-      title = "refund-db-bootstrap-login-single-instance"
-    }
-  }
-  credential_secret_iam = {
-    canary_adder = {
-      secret_id = "${var.resource_prefix}-canary-database-url"
-      role      = "roles/secretmanager.secretVersionAdder"
-    }
-    canary_viewer = {
-      secret_id = "${var.resource_prefix}-canary-database-url"
-      role      = "roles/secretmanager.viewer"
-    }
-    preflight_adder = {
-      secret_id = "${var.resource_prefix}-preflight-database-url"
-      role      = "roles/secretmanager.secretVersionAdder"
-    }
-    preflight_viewer = {
-      secret_id = "${var.resource_prefix}-preflight-database-url"
-      role      = "roles/secretmanager.viewer"
-    }
-  }
+  cloud_sql_roles           = {}
+  credential_secret_iam     = {}
   job_environment = {
     MIRA_DB_BOOTSTRAP_PROJECT_ID               = var.project_id
     MIRA_DB_BOOTSTRAP_REGION                   = local.region

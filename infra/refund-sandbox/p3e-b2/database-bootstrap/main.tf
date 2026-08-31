@@ -22,10 +22,6 @@ resource "google_project_iam_member" "cloud_sql_access" {
     description = "Restrict the bootstrap identity to the exact refund Cloud SQL instance."
     expression  = local.cloud_sql_condition
   }
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "google_sql_user" "bootstrap" {

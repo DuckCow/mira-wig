@@ -757,27 +757,50 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     });
   });
 
-  it("freezes the exact nine-resource credential-materialization authority", () => {
+  it("freezes the exact three-resource dormant migration identity", () => {
+    expect(contract.status).toBe("SOURCE_DEFINED_AUTHORITY_RETIREMENT_TARGET");
     expect(contract.resourceGraph).toEqual({
-      resourceCount: 9,
+      resourceCount: 3,
       addresses: [
         "google_cloud_run_v2_job.bootstrap",
-        'google_project_iam_member.cloud_sql_access["client"]',
-        'google_project_iam_member.cloud_sql_access["instance_user"]',
-        'google_secret_manager_secret_iam_member.credential_materialization["canary_adder"]',
-        'google_secret_manager_secret_iam_member.credential_materialization["canary_viewer"]',
-        'google_secret_manager_secret_iam_member.credential_materialization["preflight_adder"]',
-        'google_secret_manager_secret_iam_member.credential_materialization["preflight_viewer"]',
         "google_service_account.bootstrap",
         "google_sql_user.bootstrap",
       ],
       sortedAddressSha256:
-        "a47352ee2a2bb7efccaa6278df5a12f7c4a0a21c76e3af9aad4fccdb8022a295",
+        "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22",
+    });
+    expect(contract.iam.roles).toEqual([]);
+    expect(contract.iam.credentialSecretScope).toEqual([]);
+    expect(contract.iam.credentialSecretRoles).toEqual([]);
+    expect(contract.iam.cloudSqlLoginAuthority).toBe("NONE");
+    expect(contract.iam.credentialSecretIamAuthority).toBe("NONE");
+    expect(contract.iam.futureMigrationReentry).toBe(
+      "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED",
+    );
+    expect(contract.identity.databaseRoles).toEqual(["cloudsqlsuperuser"]);
+    expect(contract.job.executionStatus).toBe("RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER");
+    expect(contract.boundaries.secretVersions).toEqual({
+      preflight: 1,
+      canary: 1,
+      mutation: 0,
     });
     const main = readFileSync(join(
       ROOT,
       "infra/refund-sandbox/p3e-b2/database-bootstrap/main.tf",
     ), "utf8");
+    const cloudSqlIam = main.slice(
+      main.indexOf('resource "google_project_iam_member" "cloud_sql_access"'),
+      main.indexOf('resource "google_sql_user" "bootstrap"'),
+    );
+    const sqlUser = main.slice(
+      main.indexOf('resource "google_sql_user" "bootstrap"'),
+      main.indexOf('resource "google_secret_manager_secret_iam_member"'),
+    );
+    const serviceAccount = main.slice(
+      main.indexOf('resource "google_service_account" "bootstrap"'),
+      main.indexOf('resource "google_project_iam_member"'),
+    );
+    const job = main.slice(main.indexOf('resource "google_cloud_run_v2_job" "bootstrap"'));
     expect(main.match(/^resource\s+"/gmu)).toHaveLength(5);
     expect(main).not.toMatch(/service_account_key|run_invoker|scheduler|eventarc/iu);
     expect(main).not.toContain("roles/secretmanager.secretAccessor");
@@ -786,6 +809,10 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(main).toMatch(/database_roles\s+=\s+\["cloudsqlsuperuser"\]/u);
     expect(main).toContain('args  = ["check"]');
     expect(main).toContain('max_retries           = 0');
+    expect(cloudSqlIam).not.toContain("prevent_destroy");
+    expect(serviceAccount).toContain("prevent_destroy = true");
+    expect(sqlUser).toContain("prevent_destroy = true");
+    expect(job).toContain("prevent_destroy = true");
   });
 
   it("keeps the image purpose-specific and provider-credential free", () => {

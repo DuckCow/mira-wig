@@ -24,7 +24,7 @@ variables {
   }
 }
 
-run "exact_dormant_database_bootstrap_shape" {
+run "exact_retired_bootstrap_authority_shape" {
   command = plan
 
   override_resource {
@@ -44,37 +44,13 @@ run "exact_dormant_database_bootstrap_shape" {
   }
 
   assert {
-    condition = (
-      toset(values(google_project_iam_member.cloud_sql_access)[*].role) ==
-      toset(["roles/cloudsql.client", "roles/cloudsql.instanceUser"]) &&
-      alltrue([
-        for grant in values(google_project_iam_member.cloud_sql_access) :
-        grant.member == "serviceAccount:mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com" &&
-        one(grant.condition).expression ==
-        "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'"
-      ])
-    )
-    error_message = "Only the two exact instance-conditioned Cloud SQL grants are admitted."
+    condition     = length(google_project_iam_member.cloud_sql_access) == 0
+    error_message = "The bootstrap identity must have no standing Cloud SQL IAM login grant."
   }
 
   assert {
-    condition = (
-      length(google_secret_manager_secret_iam_member.credential_materialization) == 4 &&
-      toset([
-        for grant in values(google_secret_manager_secret_iam_member.credential_materialization) :
-        "${grant.secret_id}|${grant.role}"
-        ]) == toset([
-        "mira-p3e-sbx-preflight-database-url|roles/secretmanager.secretVersionAdder",
-        "mira-p3e-sbx-preflight-database-url|roles/secretmanager.viewer",
-        "mira-p3e-sbx-canary-database-url|roles/secretmanager.secretVersionAdder",
-        "mira-p3e-sbx-canary-database-url|roles/secretmanager.viewer",
-      ]) &&
-      alltrue([
-        for grant in values(google_secret_manager_secret_iam_member.credential_materialization) :
-        grant.member == "serviceAccount:mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com"
-      ])
-    )
-    error_message = "Only exact-secret metadata and version-add authority is admitted."
+    condition     = length(google_secret_manager_secret_iam_member.credential_materialization) == 0
+    error_message = "The bootstrap identity must have no standing credential-secret IAM grant."
   }
 
   assert {
@@ -126,10 +102,13 @@ run "exact_dormant_database_bootstrap_shape" {
       output.bootstrap_manifest.credential_recovery_mode == "recover-canary-application-credential" &&
       output.bootstrap_manifest.automatic_trigger == "NONE" &&
       output.bootstrap_manifest.provider_credentials == "NONE" &&
-      output.bootstrap_manifest.secret_manager_dependencies == "EXACT_SECRET_METADATA_AND_VERSION_ADD_ONLY" &&
-      output.bootstrap_manifest.execution_status == "DORMANT_NOT_EXECUTED"
+      output.bootstrap_manifest.cloud_sql_login_authority == "NONE" &&
+      output.bootstrap_manifest.credential_secret_iam_authority == "NONE" &&
+      output.bootstrap_manifest.secret_manager_dependencies == "NO_STANDING_AUTHORITY_IMAGE_CAPABILITY_RETAINED" &&
+      output.bootstrap_manifest.future_migration_reentry == "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED" &&
+      output.bootstrap_manifest.execution_status == "RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER"
     )
-    error_message = "The bootstrap handoff must remain dormant and provider/secret free."
+    error_message = "The retained bootstrap handoff must expose no standing login or secret IAM authority."
   }
 }
 

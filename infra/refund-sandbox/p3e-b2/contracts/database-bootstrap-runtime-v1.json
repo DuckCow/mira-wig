@@ -1,6 +1,6 @@
 {
   "contractVersion": "mira-refund-p3e-b2-db-bootstrap-runtime/v1",
-  "status": "SOURCE_DEFINED_NOT_CLOUD_APPLIED",
+  "status": "SOURCE_DEFINED_AUTHORITY_RETIREMENT_TARGET",
   "project": "mira-refund-sandbox-0001",
   "region": "asia-northeast3",
   "terraform": {
@@ -11,19 +11,13 @@
     "providerVersion": "7.40.0"
   },
   "resourceGraph": {
-    "resourceCount": 9,
+    "resourceCount": 3,
     "addresses": [
       "google_cloud_run_v2_job.bootstrap",
-      "google_project_iam_member.cloud_sql_access[\"client\"]",
-      "google_project_iam_member.cloud_sql_access[\"instance_user\"]",
-      "google_secret_manager_secret_iam_member.credential_materialization[\"canary_adder\"]",
-      "google_secret_manager_secret_iam_member.credential_materialization[\"canary_viewer\"]",
-      "google_secret_manager_secret_iam_member.credential_materialization[\"preflight_adder\"]",
-      "google_secret_manager_secret_iam_member.credential_materialization[\"preflight_viewer\"]",
       "google_service_account.bootstrap",
       "google_sql_user.bootstrap"
     ],
-    "sortedAddressSha256": "a47352ee2a2bb7efccaa6278df5a12f7c4a0a21c76e3af9aad4fccdb8022a295"
+    "sortedAddressSha256": "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22"
   },
   "identity": {
     "serviceAccountId": "mira-p3e-sbx-db-bootstrap",
@@ -35,18 +29,15 @@
     "password": "NONE"
   },
   "iam": {
-    "grantContainer": "PROJECT_IAM_POLICY",
-    "resourceScope": "EXACT_CLOUD_SQL_INSTANCE_VIA_IAM_CONDITION",
+    "grantContainer": "PROJECT_IAM_POLICY_NO_CURRENT_MEMBERS",
+    "resourceScope": "NONE_CURRENT_FUTURE_REENTRY_EXACT_INSTANCE_ONLY",
     "condition": "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'",
-    "roles": ["roles/cloudsql.client", "roles/cloudsql.instanceUser"],
-    "credentialSecretScope": [
-      "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-preflight-database-url",
-      "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-canary-database-url"
-    ],
-    "credentialSecretRoles": [
-      "roles/secretmanager.secretVersionAdder",
-      "roles/secretmanager.viewer"
-    ],
+    "roles": [],
+    "credentialSecretScope": [],
+    "credentialSecretRoles": [],
+    "cloudSqlLoginAuthority": "NONE",
+    "credentialSecretIamAuthority": "NONE",
+    "futureMigrationReentry": "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED",
     "secretPayloadAccess": "NONE",
     "deployerActAsBinding": "NOT_CREATED_EXISTING_PROJECT_OWNER_IS_EFFECTIVE"
   },
@@ -66,7 +57,7 @@
       "recover-canary-application-credential"
     ],
     "providerCredentials": "NONE",
-    "secretManagerDependencies": "REST_METADATA_AND_VERSION_ADD",
+    "secretManagerDependencies": "CODE_PATH_RETAINED_NO_STANDING_IAM_AUTHORITY",
     "cloudSqlAuthProxyVersion": "2.22.0",
     "systemCaTrust": {
       "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
@@ -166,14 +157,18 @@
     "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",
     "networkTags": ["refund-provider-free"],
     "egress": "ALL_TRAFFIC",
-    "executionStatus": "DORMANT_NOT_EXECUTED"
+    "executionStatus": "RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER"
   },
   "boundaries": {
     "cloudRunJobInvocation": "NOT_AUTHORIZED_IN_THIS_PHASE",
     "databaseConnection": "NOT_AUTHORIZED_IN_THIS_PHASE",
     "databaseReadWrite": "ZERO",
-    "applicationPasswords": 0,
-    "secretVersions": 0,
+    "applicationPasswords": "EXISTING_UNCHANGED",
+    "secretVersions": {
+      "preflight": 1,
+      "canary": 1,
+      "mutation": 0
+    },
     "providerContact": 0,
     "applicationRuntimeChanges": 0,
     "foundationResourceChanges": 0

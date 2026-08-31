@@ -27,9 +27,14 @@ check "exact_machine_contract" {
   assert {
     condition = (
       local.contract.contractVersion == "mira-refund-p3e-b2-db-bootstrap-runtime/v1" &&
-      local.contract.resourceGraph.resourceCount == 9 &&
+      local.contract.status == "SOURCE_DEFINED_AUTHORITY_RETIREMENT_TARGET" &&
+      local.contract.resourceGraph.resourceCount == 3 &&
       local.contract.resourceGraph.sortedAddressSha256 ==
-      "a47352ee2a2bb7efccaa6278df5a12f7c4a0a21c76e3af9aad4fccdb8022a295" &&
+      "ae5f085000d7a0d7e50380eb3c5451ae473f24c63ab0fce5a7ef1ee21adb9c22" &&
+      length(local.contract.iam.roles) == 0 &&
+      length(local.contract.iam.credentialSecretScope) == 0 &&
+      length(local.contract.iam.credentialSecretRoles) == 0 &&
+      local.contract.identity.databaseRoles == ["cloudsqlsuperuser"] &&
       local.contract.migrations.count == local.migration_count &&
       local.contract.migrations.sha256 == local.migration_sha256
     )

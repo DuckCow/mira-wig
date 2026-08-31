@@ -4,12 +4,11 @@
 
 ```text
 GUARANTEES:
-- one purpose-specific passwordless bootstrap identity;
-- exact instance-conditioned Cloud SQL Client and Instance User grants;
-- one canonical PostgreSQL IAM service-account user with cloudsqlsuperuser;
+- one retained purpose-specific passwordless bootstrap identity with no standing GCP login grant;
+- one canonical PostgreSQL IAM service-account user retaining cloudsqlsuperuser;
 - one digest-bound, check-default, zero-retry, untriggered Cloud Run Job;
-- exact-secret metadata/version-add authority without payload-read authority;
-- an explicit one-shot application-credential mode while the Job default remains `check`.
+- no standing credential-secret Viewer, payload-read or Version Adder authority;
+- exact temporary Cloud SQL IAM re-entry only through a separately authorized migration phase.
 
 NON-GOALS:
 - application runtime deployment;
@@ -29,6 +28,8 @@ TRUSTED ASSUMPTIONS:
 RESIDUAL RISKS:
 - the first later attended check can reveal database ledger drift;
 - a failed Prisma migration requires human adjudication and is never blindly retried.
+- the retained Job image still contains explicit mutating modes, but its service account cannot
+  reach Cloud SQL or credential-secret metadata without separately restored IAM authority.
 
 MACHINE-OWNED RESPONSIBILITIES:
 - validate target/source/image/migration/task identities before Proxy spawn;
@@ -39,16 +40,20 @@ MACHINE-OWNED RESPONSIBILITIES:
 - verify migration prefix and exact postconditions.
 
 HUMAN-OWNED RESPONSIBILITIES:
+- separately authorize and temporarily restore the exact conditioned Cloud SQL Client and
+  Instance User grants for a future migration window;
 - authorize each future Job execution;
 - adjudicate failed or unknown migration state;
-- decide whether a later check may proceed to apply.
+- decide whether a later check may proceed to apply;
+- retire the two temporary Cloud SQL IAM grants after the attended migration window.
 
 SAFE STOP:
 - reject malformed input before Proxy spawn;
 - stop after Proxy, ledger, Prisma or role-grant failure without retry.
 
 BOUNDED RE-ENTRY:
-- a new attended phase begins from the dormant Job and immutable image digest.
+- a new attended phase first restores only the exact two conditioned Cloud SQL IAM grants, then
+  uses the dormant Job and immutable image digest, and retires those grants again.
 ```
 
 ## Installed source owners
@@ -70,17 +75,18 @@ PostgreSQL uses the canonical suffix-trimmed IAM database username
 `mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam` and no password. Google provider 7.40.0
 creates it as `CLOUD_IAM_SERVICE_ACCOUNT` with `database_roles = ["cloudsqlsuperuser"]`.
 
-Cloud SQL Client and Cloud SQL Instance User are predefined project-level roles. Each project IAM
-member carries the same condition for only
+The desired root has no Cloud SQL Client or Cloud SQL Instance User member. A future migration
+window must separately authorize both predefined roles with the exact instance condition for
 `projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18` and
-`sqladmin.googleapis.com`. No Cloud SQL Admin, service-account key, token-creator, invoker, or
-additional deployer binding is admitted. The current deployer is the existing project Owner and
-therefore already has effective `iam.serviceAccounts.actAs`; the root does not restate it.
+`sqladmin.googleapis.com`, then retire them after the attended execution. No Cloud SQL Admin,
+service-account key, token-creator, invoker, or additional deployer binding is admitted. The
+current deployer is the existing project Owner and the root does not restate that authority.
 
-For the credential mode only, the same service account receives
-`roles/secretmanager.secretVersionAdder` and `roles/secretmanager.viewer` on each of the two exact
-existing database-URL secrets. It receives no Secret Accessor, Version Manager or project-level
-Secret Manager role.
+The desired root also has no `roles/secretmanager.secretVersionAdder` or
+`roles/secretmanager.viewer` member for the bootstrap service account on either application
+database-URL secret. Existing secret containers and version 1 on each secret are outside this
+retirement mutation and remain unchanged. No replacement Secret Accessor, Version Manager or
+project-level Secret Manager role is admitted.
 
 ## Image and modes
 
@@ -120,14 +126,21 @@ SecretVersion names are parsed as exact path components and accept only project 
 ## Current source status
 
 ```text
-BOOTSTRAP_CREDENTIAL_SOURCE: DEFINED_NOT_CLOUD_APPLIED
-BOOTSTRAP_CREDENTIAL_IMAGE: DEFINED_NOT_PUBLISHED
-BOOTSTRAP_JOB: EXISTING_DORMANT_DEFAULT_CHECK
+BOOTSTRAP_AUTHORITY_SOURCE: RETIREMENT_TARGET_DEFINED
+BOOTSTRAP_GRAPH: THREE_RETAINED_RESOURCES
+BOOTSTRAP_GCP_SQL_LOGIN_GRANTS: ZERO_DESIRED
+BOOTSTRAP_CREDENTIAL_SECRET_IAM_GRANTS: ZERO_DESIRED
+BOOTSTRAP_SQL_IAM_DB_IDENTITY: RETAINED
+CLOUDSQLSUPERUSER_MEMBERSHIP: RETAINED
+BOOTSTRAP_JOB: RETAINED_DORMANT_DEFAULT_CHECK
+BOOTSTRAP_SERVICE_ACCOUNT: RETAINED_DORMANT
+APPLICATION_SECRET_VERSIONS: EXISTING_1_1_UNCHANGED
+FUTURE_MIGRATION_REENTRY: SEPARATELY_AUTHORIZED_TWO_GRANT_RESTORE_REQUIRED
 THIS_PHASE_JOB_EXECUTIONS: 0
 SOURCE_VALIDATION_DATABASE_CONNECTIONS: 0
 SOURCE_VALIDATION_DATABASE_READS_WRITES: 0/0
-APPLICATION_PASSWORDS: 0
-SECRET_VERSIONS: 0
+APPLICATION_PASSWORDS: EXISTING_UNCHANGED
+SECRET_VERSION_MUTATIONS: 0
 THIS_PHASE_PROVIDER_CONTACTS: 0
 ```
 

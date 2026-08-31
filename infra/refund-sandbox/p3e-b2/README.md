@@ -319,14 +319,13 @@ invocation authority, provider credentials, and database-bootstrap retirement re
 ## Dormant database-bootstrap runtime boundary
 
 `database-bootstrap` is the isolated attended bootstrap Terraform root and uses backend prefix
-`p3e-b2/database-bootstrap`. Its exact nine-address graph is frozen by
-`contracts/database-bootstrap-runtime-v1.json`. The root owns one passwordless bootstrap service
-account, two exact instance-conditioned project IAM members (`roles/cloudsql.client` and
-`roles/cloudsql.instanceUser`), one `CLOUD_IAM_SERVICE_ACCOUNT` Cloud SQL user with only the
-initial `cloudsqlsuperuser` database role, four exact-secret metadata/version-add IAM members, and
-one dormant Cloud Run v2 Job. The secret bindings grant only
-`roles/secretmanager.secretVersionAdder` and `roles/secretmanager.viewer` to the bootstrap service
-account on the two existing application database-URL secrets; payload access is absent.
+`p3e-b2/database-bootstrap`. Its desired exact three-address graph is frozen by
+`contracts/database-bootstrap-runtime-v1.json`. The root retains one passwordless bootstrap
+service account, one `CLOUD_IAM_SERVICE_ACCOUNT` Cloud SQL user with exactly the
+`cloudsqlsuperuser` database role, and one dormant Cloud Run v2 Job. Its desired source contains no
+Cloud SQL Client or Instance User member and no credential-secret Viewer or Version Adder member.
+The six formerly managed IAM members remain historical Git/state evidence; their cloud retirement
+requires the separately reviewed plan and apply for this source target.
 
 The Job has one task, parallelism one, zero retries, digest-only image identity, Direct VPC
 `ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Its default argument is
@@ -338,9 +337,12 @@ Prisma CLI, exact 41-migration corpus, `pg`, and existing hashed role/grant runn
 database authentication is isolated to that image and uses both `--private-ip` and
 `--auto-iam-authn` over `/cloudsql`.
 
-Repository definition and a digest input never authorize Job execution. This source status remains
-`DEFINED_NOT_CLOUD_APPLIED`; authoritative cloud materialization and execution counts require
-separate attended readback.
+Repository definition and a digest input never authorize Job execution. The retained Job image
+still contains its reviewed migration and credential code paths, but the retained service account
+has no desired standing Cloud SQL login or credential-secret IAM authority. Future attended
+migration re-entry requires a separately authorized temporary restoration of only the exact
+instance-conditioned Cloud SQL Client and Instance User members, followed by their retirement.
+Authoritative cloud status and execution counts require separate attended readback.
 
 Exact status:
 

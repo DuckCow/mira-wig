@@ -25,7 +25,10 @@ output "bootstrap_manifest" {
     migration_count                 = local.migration_count
     migration_sha256                = local.migration_sha256
     provider_credentials            = "NONE"
-    secret_manager_dependencies     = "EXACT_SECRET_METADATA_AND_VERSION_ADD_ONLY"
-    execution_status                = "DORMANT_NOT_EXECUTED"
+    cloud_sql_login_authority       = "NONE"
+    credential_secret_iam_authority = "NONE"
+    secret_manager_dependencies     = "NO_STANDING_AUTHORITY_IMAGE_CAPABILITY_RETAINED"
+    future_migration_reentry        = "SEPARATELY_AUTHORIZED_CLOUD_SQL_IAM_REGRANT_REQUIRED"
+    execution_status                = "RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER"
   }
 }
