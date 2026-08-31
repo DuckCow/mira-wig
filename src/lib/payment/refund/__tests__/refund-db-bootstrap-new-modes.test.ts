@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CANARY_REFUND_ROLE_RESTORE_MODE,
+  CONTACTED_RECONCILIATION_ROLE_GRANT_MODE,
   ISSUE_EXIMBAY_CANARY_APPROVAL_MODE,
   MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE,
   runDatabaseBootstrapEntrypoint,
@@ -22,6 +23,7 @@ const inventory = Object.freeze({
 describe("exact database-bootstrap SALE lifecycle and producer modes", () => {
   it.each([
     SYNTHETIC_SALE_ROLE_GRANT_MODE,
+    CONTACTED_RECONCILIATION_ROLE_GRANT_MODE,
     CANARY_REFUND_ROLE_RESTORE_MODE,
     SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
   ])("admits the exact attended ACL mode %s", async (mode) => {

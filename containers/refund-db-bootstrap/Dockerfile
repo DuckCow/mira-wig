@@ -13,6 +13,7 @@ COPY --link prisma.config.ts ./
 COPY --link prisma ./prisma
 COPY --link infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql ./infra/refund-sandbox/p3e-b2/runtime-deferred/
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/eximbay-canary/
+COPY --link infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/contacted-reconciliation/
 COPY --link infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/
 COPY --link infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
 COPY --link infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
@@ -59,6 +60,7 @@ COPY --link --from=build /build/prisma.config.ts ./prisma.config.ts
 COPY --link --from=build /build/prisma ./prisma
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql ./infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/contracts ./infra/refund-sandbox/p3e-b2/contracts
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json

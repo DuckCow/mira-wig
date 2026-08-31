@@ -3,6 +3,7 @@
 This purpose-specific Linux AMD64 image owns only the attended P3E-B2 database bootstrap path.
 Its Docker default is the read-only `check` mode. The mutating `apply`,
 grant-only `apply-canary-role-grants`,
+exact temporary `apply-contacted-reconciliation-role-grants`,
 `materialize-application-credentials`, and exact `(1,0)` partial-state
 `recover-canary-application-credential` modes must be supplied explicitly by separately
 authorized manual Cloud Run Job executions.
@@ -13,6 +14,14 @@ bytes, and executes only that artifact inside one transaction. The transaction c
 the existing exhaustive effective-privilege verifier passes; SQL or verifier failure rolls back.
 It does not invoke Prisma, credential materialization, Secret Manager, provider code, or business
 row mutation.
+
+`apply-contacted-reconciliation-role-grants` is a fixed, migration-free delta for one separately
+authorized Eximbay CONTACTED checkout reconciliation. It grants only `CheckoutSession.id` update,
+`PaymentEvent` select/insert, and the four Payment blocking-release update columns to the existing
+`mira_refund_canary` role. The same exhaustive verifier must pass before commit. The existing
+`restore-canary-refund-role-grants` mode revokes this delta and reconstructs the canonical
+refund-only authority from its hashed source artifacts; neither mode runs reconciliation or
+provider code.
 
 The image contains the exact Prisma 7 CLI/schema/41-migration corpus, the existing hashed role
 and grant runner, `pg`, and the pinned Cloud SQL Auth Proxy. The credential mode first uses private

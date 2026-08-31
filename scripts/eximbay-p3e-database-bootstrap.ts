@@ -13,7 +13,8 @@ export const EXIMBAY_P3E_APPROVAL_MIGRATION =
 export type EximbayP3eBootstrapArtifactId =
   | "FROZEN_HISTORICAL_ROLE_AUTHORITY"
   | "EXIMBAY_CANARY_ROLE_GRANT_DELTA"
-  | "SYNTHETIC_SALE_ROLE_GRANT_DELTA";
+  | "SYNTHETIC_SALE_ROLE_GRANT_DELTA"
+  | "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA";
 
 export type EximbayP3eBootstrapArtifact = Readonly<{
   id: EximbayP3eBootstrapArtifactId;
@@ -53,6 +54,17 @@ export const SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT = Object.freeze({
     "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
   ),
   sha256: "a414e4d5ddf1565e1d27763885c407cffbdc48c03487db8205302cc3c5cab470",
+} satisfies EximbayP3eBootstrapArtifact);
+
+export const CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT = Object.freeze({
+  id: "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA",
+  repositoryPath:
+    "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
+  absolutePath: resolve(
+    repositoryRoot,
+    "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
+  ),
+  sha256: "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
 } satisfies EximbayP3eBootstrapArtifact);
 
 type RuntimeRole = "mira_refund_preflight" | "mira_refund_canary";
@@ -115,7 +127,10 @@ export type EximbayP3eCanaryRoleGrantResult = Readonly<{
 
 export type SyntheticSaleRoleGrantResult = Readonly<{
   ok: true;
-  code: "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE" | "CANARY_REFUND_ROLE_GRANTS_RESTORED";
+  code:
+    | "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE"
+    | "CONTACTED_RECONCILIATION_ROLE_GRANTS_COMPLETE"
+    | "CANARY_REFUND_ROLE_GRANTS_RESTORED";
   artifacts: readonly Readonly<{
     id: EximbayP3eBootstrapArtifactId;
     repositoryPath: string;
@@ -147,6 +162,7 @@ export type EximbayP3eDatabaseBootstrapErrorCode =
   | "HISTORICAL_AUTHORITY_INTEGRITY_FAILURE"
   | "EXIMBAY_DELTA_INTEGRITY_FAILURE"
   | "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
+  | "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE"
   | "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT"
   | "HISTORICAL_AUTHORITY_SHAPE_INVALID"
   | "ROLE_AUTHORITY_EXECUTION_FAILED"
@@ -271,6 +287,24 @@ const SYNTHETIC_SALE_UPDATE_COLUMNS = new Set([
   "PaymentEvent.verifiedCredentialBinding", "PaymentEvent.providerPaymentKey",
 ]);
 
+const CONTACTED_RECONCILIATION_SELECT = new Set([
+  ...CANARY_SELECT,
+  "PaymentEvent",
+]);
+
+const CONTACTED_RECONCILIATION_INSERT = new Set([
+  ...CANARY_INSERT,
+  "PaymentEvent",
+]);
+
+const CONTACTED_RECONCILIATION_UPDATE_COLUMNS = new Set([
+  "CheckoutSession.id",
+  "Payment.blockingEndedAt",
+  "Payment.errorCode",
+  "Payment.errorMessage",
+  "Payment.updatedAt",
+]);
+
 export async function applyEximbayP3eCanaryRoleGrants(
   database: Client,
   input: EximbayP3eDatabaseBootstrapInput,
@@ -330,6 +364,28 @@ export async function applySyntheticSaleRoleGrants(
     await dependencies.executeArtifact(database, SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT, sql);
   }, verifyExactSyntheticSaleEffectivePrivileges, "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE", [
     SYNTHETIC_SALE_ROLE_GRANT_ARTIFACT,
+  ]);
+}
+
+export async function applyContactedReconciliationRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sql = await readAndVerifyArtifact(
+    CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT,
+    dependencies.readArtifact,
+  );
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await dependencies.executeArtifact(
+      database,
+      CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT,
+      sql,
+    );
+  }, verifyExactContactedReconciliationEffectivePrivileges,
+  "CONTACTED_RECONCILIATION_ROLE_GRANTS_COMPLETE", [
+    CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT,
   ]);
 }
 
@@ -624,7 +680,9 @@ function integrityError(
       ? "HISTORICAL_AUTHORITY_INTEGRITY_FAILURE"
       : artifactId === "SYNTHETIC_SALE_ROLE_GRANT_DELTA"
         ? "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
-        : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
+        : artifactId === "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA"
+          ? "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE"
+          : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
   );
 }
 
@@ -661,7 +719,17 @@ export async function verifyExactSyntheticSaleEffectivePrivileges(
   await verifyRole(database, "mira_refund_canary", "SYNTHETIC_SALE");
 }
 
-type PrivilegeProfile = "REFUND_ONLY" | "SYNTHETIC_SALE";
+export async function verifyExactContactedReconciliationEffectivePrivileges(
+  database: Pick<Client, "query">,
+): Promise<void> {
+  await verifyRole(database, "mira_refund_preflight", "REFUND_ONLY");
+  await verifyRole(database, "mira_refund_canary", "CONTACTED_RECONCILIATION");
+}
+
+type PrivilegeProfile =
+  | "REFUND_ONLY"
+  | "SYNTHETIC_SALE"
+  | "CONTACTED_RECONCILIATION";
 
 async function verifyRole(
   database: Pick<Client, "query">,
@@ -803,18 +871,29 @@ function tablePrivilegeExpectation(
 ): Omit<TablePrivilegeRow, "tableName"> {
   const canary = role === "mira_refund_canary";
   const sale = canary && profile === "SYNTHETIC_SALE";
-  const expectedSelect = role === "mira_refund_preflight"
-    ? PRE_FLIGHT_SELECT
-    : sale ? SYNTHETIC_SALE_SELECT : CANARY_SELECT;
+  const expectedSelect = selectPrivileges(role, profile);
   return Object.freeze({
     select: expectedSelect.has(tableName),
-    insert: canary && (sale ? SYNTHETIC_SALE_INSERT : CANARY_INSERT).has(tableName),
+    insert: canary && insertPrivileges(profile).has(tableName),
     update: canary && CANARY_TABLE_UPDATE.has(tableName),
     delete: sale && SYNTHETIC_SALE_DELETE.has(tableName),
     truncate: false,
     references: false,
     trigger: false,
   });
+}
+
+function selectPrivileges(role: RuntimeRole, profile: PrivilegeProfile): ReadonlySet<string> {
+  if (role === "mira_refund_preflight") return PRE_FLIGHT_SELECT;
+  if (profile === "SYNTHETIC_SALE") return SYNTHETIC_SALE_SELECT;
+  if (profile === "CONTACTED_RECONCILIATION") return CONTACTED_RECONCILIATION_SELECT;
+  return CANARY_SELECT;
+}
+
+function insertPrivileges(profile: PrivilegeProfile): ReadonlySet<string> {
+  if (profile === "SYNTHETIC_SALE") return SYNTHETIC_SALE_INSERT;
+  if (profile === "CONTACTED_RECONCILIATION") return CONTACTED_RECONCILIATION_INSERT;
+  return CANARY_INSERT;
 }
 
 function requireColumnPrivileges(
@@ -824,16 +903,28 @@ function requireColumnPrivileges(
 ): void {
   for (const row of rows) {
     const exactColumn = `${row.tableName}.${row.columnName}`;
-    const saleUpdate = profile === "SYNTHETIC_SALE"
-      && (SYNTHETIC_SALE_UPDATE_COLUMNS.has(exactColumn)
-        || SYNTHETIC_SALE_UPDATE_COLUMNS.has(`${row.tableName}.*`));
+    const temporaryUpdate = hasTemporaryColumnUpdate(profile, row.tableName, exactColumn);
     const canonicalUpdate = CANARY_TABLE_UPDATE.has(row.tableName)
       || CANARY_ROW_LOCK_UPDATE_COLUMNS.has(exactColumn)
       || (row.tableName === "EximbayRefundSandboxCanaryApproval"
         && CANARY_APPROVAL_UPDATE_COLUMNS.has(row.columnName));
-    const expectedUpdate = role === "mira_refund_canary" && (canonicalUpdate || saleUpdate);
+    const expectedUpdate = role === "mira_refund_canary"
+      && (canonicalUpdate || temporaryUpdate);
     if (row.update !== expectedUpdate) failPostcondition();
   }
+}
+
+function hasTemporaryColumnUpdate(
+  profile: PrivilegeProfile,
+  tableName: string,
+  exactColumn: string,
+): boolean {
+  if (profile === "CONTACTED_RECONCILIATION") {
+    return CONTACTED_RECONCILIATION_UPDATE_COLUMNS.has(exactColumn);
+  }
+  return profile === "SYNTHETIC_SALE"
+    && (SYNTHETIC_SALE_UPDATE_COLUMNS.has(exactColumn)
+      || SYNTHETIC_SALE_UPDATE_COLUMNS.has(`${tableName}.*`));
 }
 
 function requireNoSequencePrivileges(rows: readonly SequencePrivilegeRow[]): void {

@@ -19,6 +19,7 @@ import {
   type ApplicationRole,
 } from "./application-credentials.js";
 import {
+  applyContactedReconciliationRoleGrants,
   applyEximbayP3eCanaryRoleGrants,
   applySyntheticSaleRoleGrants,
   defaultEximbayP3eDatabaseBootstrapDependencies,
@@ -56,6 +57,8 @@ const READINESS_POLL_MS = 250;
 export const PROXY_DIAGNOSTIC_BYTE_LIMIT = 4_096;
 export const CANARY_ROLE_GRANT_MODE = "apply-canary-role-grants" as const;
 export const SYNTHETIC_SALE_ROLE_GRANT_MODE = "apply-synthetic-sale-role-grants" as const;
+export const CONTACTED_RECONCILIATION_ROLE_GRANT_MODE =
+  "apply-contacted-reconciliation-role-grants" as const;
 export const SYNTHETIC_SALE_MARKET_PRECONDITION_MODE =
   "materialize-synthetic-sale-market-precondition" as const;
 export const CANARY_REFUND_ROLE_RESTORE_MODE = "restore-canary-refund-role-grants" as const;
@@ -161,6 +164,7 @@ class BootstrapStageFailure extends Error {
 export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE
   | typeof CANARY_CREDENTIAL_RECOVERY_MODE | typeof CANARY_ROLE_GRANT_MODE
   | typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE
+  | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
   | typeof SYNTHETIC_SALE_MARKET_PRECONDITION_MODE
   | typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
 
@@ -265,6 +269,7 @@ function parseMode(args: readonly string[]): BootstrapMode | null {
 function isBootstrapMode(value: string): value is BootstrapMode {
   return [
     "check", "apply", CANARY_ROLE_GRANT_MODE, SYNTHETIC_SALE_ROLE_GRANT_MODE,
+    CONTACTED_RECONCILIATION_ROLE_GRANT_MODE,
     SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
     CANARY_REFUND_ROLE_RESTORE_MODE, MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE,
     ISSUE_EXIMBAY_CANARY_APPROVAL_MODE, APPLICATION_CREDENTIAL_MODE,
@@ -506,14 +511,20 @@ async function approvalProducerArgs(
 
 function isAclLifecycleMode(
   mode: BootstrapMode,
-): mode is typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE {
-  return mode === SYNTHETIC_SALE_ROLE_GRANT_MODE || mode === CANARY_REFUND_ROLE_RESTORE_MODE;
+): mode is typeof SYNTHETIC_SALE_ROLE_GRANT_MODE
+  | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
+  | typeof CANARY_REFUND_ROLE_RESTORE_MODE {
+  return mode === SYNTHETIC_SALE_ROLE_GRANT_MODE
+    || mode === CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
+    || mode === CANARY_REFUND_ROLE_RESTORE_MODE;
 }
 
 async function executeAclLifecycleMode(
   databaseUrlValue: string,
   inventory: RefundWorkerMigrationInventory,
-  mode: typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE,
+  mode: typeof SYNTHETIC_SALE_ROLE_GRANT_MODE
+    | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
+    | typeof CANARY_REFUND_ROLE_RESTORE_MODE,
 ): Promise<Readonly<Record<string, unknown>>> {
   const database = new Client({ connectionString: databaseUrlValue });
   try {
@@ -532,7 +543,9 @@ async function executeAclLifecycleMode(
     };
     const result = mode === SYNTHETIC_SALE_ROLE_GRANT_MODE
       ? await applySyntheticSaleRoleGrants(database, input, dependencies)
-      : await restoreCanaryRefundRoleGrants(database, input, dependencies);
+      : mode === CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
+        ? await applyContactedReconciliationRoleGrants(database, input, dependencies)
+        : await restoreCanaryRefundRoleGrants(database, input, dependencies);
     return Object.freeze({
       code: result.code,
       mode,

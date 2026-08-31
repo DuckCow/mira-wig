@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  applyContactedReconciliationRoleGrants,
   applyEximbayP3eCanaryRoleGrants,
   bootstrapEximbayP3eDatabaseRoles,
   defaultEximbayP3eDatabaseBootstrapDependencies,
@@ -9,6 +10,7 @@ import {
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ARTIFACTS,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
   main,
+  restoreCanaryRefundRoleGrants,
   type EximbayP3eBootstrapArtifact,
 } from "../../../../../scripts/eximbay-p3e-database-bootstrap";
 
@@ -97,6 +99,99 @@ describe("one exact Eximbay P3E database-role bootstrap owner", () => {
         artifact: { id: "EXIMBAY_CANARY_ROLE_GRANT_DELTA" },
         postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
       });
+    });
+  });
+
+  it("applies the exact CONTACTED-reconciliation delta and restores zero temporary residue", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      const dependencies = {
+        ...defaultEximbayP3eDatabaseBootstrapDependencies,
+        verifyExactLedger: () => Promise.resolve(),
+      };
+      const result = await applyContactedReconciliationRoleGrants(admin, input, dependencies);
+      expect(result).toMatchObject({
+        ok: true,
+        code: "CONTACTED_RECONCILIATION_ROLE_GRANTS_COMPLETE",
+        artifacts: [{ id: "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA" }],
+        postcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
+      });
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "CheckoutSession", "id", "UPDATE",
+      )).resolves.toBe(true);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "SELECT",
+      )).resolves.toBe(true);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "INSERT",
+      )).resolves.toBe(true);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "UPDATE",
+      )).resolves.toBe(false);
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "Payment", "blockingEndedAt", "UPDATE",
+      )).resolves.toBe(true);
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "Payment", "status", "UPDATE",
+      )).resolves.toBe(false);
+
+      await restoreCanaryRefundRoleGrants(admin, input, dependencies);
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "CheckoutSession", "id", "UPDATE",
+      )).resolves.toBe(false);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "SELECT",
+      )).resolves.toBe(false);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "INSERT",
+      )).resolves.toBe(false);
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "Payment", "blockingEndedAt", "UPDATE",
+      )).resolves.toBe(false);
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "Payment", "id", "UPDATE",
+      )).resolves.toBe(true);
+    });
+  });
+
+  it("rolls back the CONTACTED-reconciliation delta on an exact-verifier mismatch", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      await expect(applyContactedReconciliationRoleGrants(admin, input, {
+        ...defaultEximbayP3eDatabaseBootstrapDependencies,
+        verifyExactLedger: () => Promise.resolve(),
+        beforePostcondition: async (database) => {
+          await database.query('GRANT DELETE ON TABLE "PaymentEvent" TO mira_refund_canary');
+        },
+      })).rejects.toMatchObject({ code: "ROLE_AUTHORITY_POSTCONDITION_FAILED" });
+      await expect(hasColumnPrivilege(
+        admin, "mira_refund_canary", "CheckoutSession", "id", "UPDATE",
+      )).resolves.toBe(false);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "INSERT",
+      )).resolves.toBe(false);
+      await expect(hasTablePrivilege(
+        admin, "mira_refund_canary", "PaymentEvent", "DELETE",
+      )).resolves.toBe(false);
+    });
+  });
+
+  it("rejects a CONTACTED-reconciliation artifact hash mismatch before role SQL", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      const executeArtifact = vi.fn(() => Promise.resolve());
+      await expect(applyContactedReconciliationRoleGrants(admin, input, {
+        ...defaultEximbayP3eDatabaseBootstrapDependencies,
+        readArtifact: (artifact) => readArtifactWithMutation(
+          artifact,
+          "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA",
+        ),
+        executeArtifact,
+        verifyExactLedger: () => Promise.resolve(),
+      })).rejects.toMatchObject({
+        code: "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE",
+      });
+      expect(executeArtifact).not.toHaveBeenCalled();
     });
   });
 
@@ -291,6 +386,20 @@ async function hasTablePrivilege(
   const result = await admin.query<{ allowed: boolean }>(
     "SELECT has_table_privilege($1, $2, $3) AS allowed",
     [role, `public."${table}"`, privilege],
+  );
+  return result.rows[0]?.allowed === true;
+}
+
+async function hasColumnPrivilege(
+  admin: Client,
+  role: string,
+  table: string,
+  column: string,
+  privilege: string,
+): Promise<boolean> {
+  const result = await admin.query<{ allowed: boolean }>(
+    "SELECT has_column_privilege($1, $2, $3, $4) AS allowed",
+    [role, `public."${table}"`, column, privilege],
   );
   return result.rows[0]?.allowed === true;
 }

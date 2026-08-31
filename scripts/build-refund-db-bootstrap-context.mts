@@ -28,6 +28,7 @@ const exactAssets = Object.freeze([
   "containers/refund-db-bootstrap/package-lock.json",
   "containers/refund-db-bootstrap/package.json",
   "infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql",
+  "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql",
   "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json",
