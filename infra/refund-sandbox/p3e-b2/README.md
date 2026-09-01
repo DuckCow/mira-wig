@@ -385,6 +385,28 @@ SQL IAM, apply the fixed reconciliation DB grant delta, execute the Job once, re
 disposition and durable state, restore canonical refund-canary grants, remove temporary bootstrap
 IAM, then set `runtime_materialized` false to retire the reconciliation runtime.
 
+## Default-disabled business-state readback runtime
+
+`business-state-readback` owns the fixed, provider-free readback configuration in the existing
+state bucket `mira-refund-sandbox-0001-tfstate-925882331349` under the exact backend prefix
+`p3e-b2/business-state-readback`. Its partial backend block follows the neighboring-root convention,
+while committed `business-state-readback.gcs.tfbackend` freezes those exact two values without a
+generic backend input. A later first initialization may create the normal initial empty state
+object at that prefix; this source does not create or access it.
+
+The sole lifecycle gate remains `runtime_materialized`, default false. Setting only that gate to
+true selects the source-owned immutable bootstrap successor digest
+`sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
+from source `d908d71b5de5dc4223db77268719ed9e97277253` and materializes exactly five
+purpose-specific resources. Normal operator workflow has no artifact override: compatibility
+inputs accept only those exact current identities, and mutable tags or arbitrary source/image
+values fail closed. Setting the gate false owns zero resources.
+
+Terraform plan/apply can materialize or retire this configuration under separate authority, but
+does not execute the Job or read business state. The fixed target, strict read-only database
+authority, provider-secret absence, one-task/zero-retry shape, and lack of scheduler, trigger,
+invoker, or execution-on-apply hook remain unchanged.
+
 ## Dormant database-bootstrap runtime boundary
 
 `database-bootstrap` is the isolated attended bootstrap Terraform root and uses backend prefix

@@ -1,6 +1,16 @@
 {
   "contractVersion": "mira-refund-p3e-b2-business-state-readback-runtime/v1",
   "status": "SOURCE_DEFINED_DEFAULT_DISABLED",
+  "terraform": {
+    "root": "infra/refund-sandbox/p3e-b2/business-state-readback",
+    "backendConfig": "business-state-readback.gcs.tfbackend",
+    "backendBucket": "mira-refund-sandbox-0001-tfstate-925882331349",
+    "backendPrefix": "p3e-b2/business-state-readback",
+    "backendOverride": "ABSENT_EXACT_COMMITTED_CONFIG_ONLY",
+    "initialStateWhenAbsent": "NORMAL_INITIAL_BACKEND_STATE",
+    "provider": "hashicorp/google",
+    "providerVersion": "7.40.0"
+  },
   "target": {
     "runId": "a764f61f4e4ba799ab16b318a676db65",
     "checkoutSessionId": "cmthg2mzu000001s6iuvx7u5x",
@@ -36,6 +46,9 @@
   "materialization": {
     "variable": "runtime_materialized",
     "default": false,
+    "disabled": "ALL_PURPOSE_SPECIFIC_RESOURCES_ABSENT",
+    "enabled": "EXACT_CURRENT_SUCCESSOR_FIVE_RESOURCE_RUNTIME_WITHOUT_EXECUTION",
+    "artifactOverrideRequired": false,
     "retirement": "RUN_EXACT_ROLE_REVOKE_MODE_THEN_SET_RUNTIME_MATERIALIZED_FALSE_AND_APPLY_UNDER_SEPARATE_AUTHORITIES",
     "roleGrantMode": "apply-business-state-readback-role-grants",
     "roleRevokeMode": "revoke-business-state-readback-role-grants"
@@ -43,6 +56,13 @@
   "resourceGraph": {
     "defaultResourceCount": 0,
     "materializedResourceCount": 5,
+    "materializedAddresses": [
+      "google_cloud_run_v2_job.readback[\"runtime\"]",
+      "google_project_iam_member.cloud_sql_client[\"runtime\"]",
+      "google_project_iam_member.cloud_sql_instance_user[\"runtime\"]",
+      "google_service_account.readback[\"runtime\"]",
+      "google_sql_user.readback[\"runtime\"]"
+    ],
     "materializedSortedAddressSha256": "d96557af0ee0024f51fc0317df774594ea39d858c49f03d26d449c5f68a07285"
   }
 }

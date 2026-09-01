@@ -22,8 +22,8 @@ locals {
   cpu                                = "1"
   memory                             = "512Mi"
   runtime_instances                  = var.runtime_materialized ? { runtime = true } : {}
-  source_commit                      = var.source_commit != null ? var.source_commit : "SOURCE_ONLY_NOT_MATERIALIZED"
-  bootstrap_image_digest_uri         = var.bootstrap_image_digest_uri != null ? var.bootstrap_image_digest_uri : "SOURCE_ONLY_NOT_MATERIALIZED"
+  source_commit                      = var.source_commit
+  bootstrap_image_digest_uri         = var.bootstrap_image_digest_uri
   cloud_sql_condition_expression     = "resource.name == '${local.cloud_sql_instance_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
   fixed_environment = {
     MIRA_DB_BOOTSTRAP_PROJECT_ID                               = local.project_id

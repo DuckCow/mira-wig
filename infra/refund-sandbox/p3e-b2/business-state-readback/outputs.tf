@@ -2,8 +2,13 @@ output "readback_manifest" {
   description = "Nonsecret source authority; never execution evidence or materialization authority."
   value = {
     contract_version       = local.contract.contractVersion
+    backend_bucket         = local.contract.terraform.backendBucket
+    backend_prefix         = local.contract.terraform.backendPrefix
     runtime_owner          = local.contract.runtime.owner
     materialized           = var.runtime_materialized
+    materialization_status = var.runtime_materialized ? "READY" : "DISABLED"
+    managed_resource_count = var.runtime_materialized ? local.contract.resourceGraph.materializedResourceCount : 0
+    managed_addresses      = var.runtime_materialized ? local.contract.resourceGraph.materializedAddresses : []
     default_materialized   = false
     retirement             = local.contract.materialization.retirement
     run_id                 = local.fixed_environment.MIRA_CONTACTED_RECONCILIATION_READBACK_RUN_ID
@@ -14,6 +19,8 @@ output "readback_manifest" {
     database_user          = local.iam_database_username
     job_name               = local.job_name
     command                = local.command
+    source_commit          = local.source_commit
+    image_digest_uri       = local.bootstrap_image_digest_uri
     task_count             = local.task_count
     parallelism            = local.parallelism
     max_retries            = local.max_retries

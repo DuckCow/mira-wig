@@ -87,7 +87,9 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
   });
 
   it("keeps the runtime default-off, exact-target, one-shot, and secret-free", () => {
-    const terraform = ["main.tf", "locals.tf", "variables.tf", "checks.tf", "outputs.tf"]
+    const terraform = [
+      "main.tf", "locals.tf", "variables.tf", "checks.tf", "outputs.tf", "versions.tf",
+    ]
       .map(read)
       .join("\n");
     expect(terraform).toContain("default     = false");
@@ -106,6 +108,41 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
     expect(contract.runtime.executionOnApply).toBe(false);
   });
 
+  it("freezes the exact backend and source-owned successor without an override workflow", () => {
+    const versions = read("versions.tf");
+    const backend = read("business-state-readback.gcs.tfbackend");
+    const variables = read("variables.tf");
+    const locals = read("locals.tf");
+    expect(versions).toContain('backend "gcs" {}');
+    expect(backend).toBe(
+      'bucket = "mira-refund-sandbox-0001-tfstate-925882331349"\n' +
+      'prefix = "p3e-b2/business-state-readback"\n',
+    );
+    expect(contract.terraform).toEqual({
+      root: "infra/refund-sandbox/p3e-b2/business-state-readback",
+      backendConfig: "business-state-readback.gcs.tfbackend",
+      backendBucket: "mira-refund-sandbox-0001-tfstate-925882331349",
+      backendPrefix: "p3e-b2/business-state-readback",
+      backendOverride: "ABSENT_EXACT_COMMITTED_CONFIG_ONLY",
+      initialStateWhenAbsent: "NORMAL_INITIAL_BACKEND_STATE",
+      provider: "hashicorp/google",
+      providerVersion: "7.40.0",
+    });
+    expect(variables).toMatch(
+      /variable "source_commit"[\s\S]*default\s*=\s*"d908d71b5de5dc4223db77268719ed9e97277253"[\s\S]*nullable\s*=\s*false/u,
+    );
+    expect(variables).toMatch(
+      /variable "bootstrap_image_digest_uri"[\s\S]*default\s*=\s*"asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"[\s\S]*nullable\s*=\s*false/u,
+    );
+    expect(variables).not.toMatch(/==\s*null|null\s*\|\|/u);
+    expect(locals).toContain("source_commit                      = var.source_commit");
+    expect(locals).toContain(
+      "bootstrap_image_digest_uri         = var.bootstrap_image_digest_uri",
+    );
+    expect(locals).not.toContain("SOURCE_ONLY_NOT_MATERIALIZED");
+    expect(contract.materialization.artifactOverrideRequired).toBe(false);
+  });
+
   it("freezes the exact five-resource graph", () => {
     const addresses = Object.freeze([
       'google_cloud_run_v2_job.readback["runtime"]',
@@ -116,6 +153,7 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
     ].sort(compareUtf8));
     expect(contract.resourceGraph.defaultResourceCount).toBe(0);
     expect(contract.resourceGraph.materializedResourceCount).toBe(addresses.length);
+    expect(contract.resourceGraph.materializedAddresses).toEqual(addresses);
     expect(sha256(addresses.join("\n"))).toBe(
       contract.resourceGraph.materializedSortedAddressSha256,
     );

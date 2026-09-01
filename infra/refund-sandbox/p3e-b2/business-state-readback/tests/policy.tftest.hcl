@@ -6,6 +6,14 @@ run "default_is_fully_unmaterialized" {
   assert {
     condition = (
       output.readback_manifest.materialized == false &&
+      output.readback_manifest.materialization_status == "DISABLED" &&
+      output.readback_manifest.managed_resource_count == 0 &&
+      length(output.readback_manifest.managed_addresses) == 0 &&
+      length(google_service_account.readback) == 0 &&
+      length(google_project_iam_member.cloud_sql_client) == 0 &&
+      length(google_project_iam_member.cloud_sql_instance_user) == 0 &&
+      length(google_sql_user.readback) == 0 &&
+      length(google_cloud_run_v2_job.readback) == 0 &&
       output.readback_manifest.default_materialized == false &&
       output.readback_manifest.provider_secret_access == "ABSENT" &&
       output.readback_manifest.execution_on_apply == false &&
@@ -19,9 +27,7 @@ run "materialized_shape_is_exact_and_one_shot" {
   command = plan
 
   variables {
-    runtime_materialized       = true
-    source_commit              = "d908d71b5de5dc4223db77268719ed9e97277253"
-    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
+    runtime_materialized = true
   }
 
   assert {
@@ -40,20 +46,43 @@ run "materialized_shape_is_exact_and_one_shot" {
       google_cloud_run_v2_job.readback["runtime"].template[0].template[0].containers[0].image ==
       "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
       google_cloud_run_v2_job.readback["runtime"].template[0].template[0].containers[0].args == tolist(["contacted-reconciliation-business-state-readback"]) &&
-      google_cloud_run_v2_job.readback["runtime"].template[0].template[0].vpc_access[0].network_interfaces[0].tags == tolist(["refund-provider-free"])
+      google_cloud_run_v2_job.readback["runtime"].template[0].template[0].vpc_access[0].network_interfaces[0].tags == tolist(["refund-provider-free"]) &&
+      output.readback_manifest.materialization_status == "READY" &&
+      output.readback_manifest.source_commit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
+      output.readback_manifest.image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
+      output.readback_manifest.managed_resource_count == 5 &&
+      length(output.readback_manifest.managed_addresses) == 5 &&
+      length(google_service_account.readback) +
+      length(google_project_iam_member.cloud_sql_client) +
+      length(google_project_iam_member.cloud_sql_instance_user) +
+      length(google_sql_user.readback) +
+      length(google_cloud_run_v2_job.readback) == 5
     )
     error_message = "The materialized readback identity, IAM DB user, and Job must remain exact."
   }
 }
 
-run "reject_materialization_without_reviewed_image" {
+run "exact_backend_contract_is_frozen" {
+  command = plan
+
+  assert {
+    condition = (
+      output.readback_manifest.backend_bucket == "mira-refund-sandbox-0001-tfstate-925882331349" &&
+      output.readback_manifest.backend_prefix == "p3e-b2/business-state-readback"
+    )
+    error_message = "The business-state readback backend identity must remain exact."
+  }
+}
+
+run "reject_arbitrary_source_commit" {
   command = plan
 
   variables {
     runtime_materialized = true
+    source_commit        = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }
 
-  expect_failures = [check.materialization_gate]
+  expect_failures = [var.source_commit]
 }
 
 run "reject_arbitrary_materialization_image" {
@@ -61,8 +90,18 @@ run "reject_arbitrary_materialization_image" {
 
   variables {
     runtime_materialized       = true
-    source_commit              = "d908d71b5de5dc4223db77268719ed9e97277253"
     bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+
+  expect_failures = [var.bootstrap_image_digest_uri]
+}
+
+run "reject_mutable_materialization_image" {
+  command = plan
+
+  variables {
+    runtime_materialized       = true
+    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap:latest"
   }
 
   expect_failures = [var.bootstrap_image_digest_uri]

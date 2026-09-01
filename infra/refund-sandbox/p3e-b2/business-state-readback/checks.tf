@@ -1,10 +1,10 @@
 check "materialization_gate" {
   assert {
     condition = !var.runtime_materialized || (
-      var.source_commit != null &&
-      var.bootstrap_image_digest_uri != null
+      var.source_commit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
     )
-    error_message = "Materialization requires the reviewed source commit and immutable bootstrap digest."
+    error_message = "Materialization requires the source-owned current successor identity."
   }
 }
 
@@ -13,6 +13,11 @@ check "machine_contract_alignment" {
     condition = (
       local.contract.contractVersion == "mira-refund-p3e-b2-business-state-readback-runtime/v1" &&
       local.contract.status == "SOURCE_DEFINED_DEFAULT_DISABLED" &&
+      local.contract.terraform.root == "infra/refund-sandbox/p3e-b2/business-state-readback" &&
+      local.contract.terraform.backendConfig == "business-state-readback.gcs.tfbackend" &&
+      local.contract.terraform.backendBucket == "mira-refund-sandbox-0001-tfstate-925882331349" &&
+      local.contract.terraform.backendPrefix == "p3e-b2/business-state-readback" &&
+      local.contract.terraform.backendOverride == "ABSENT_EXACT_COMMITTED_CONFIG_ONLY" &&
       local.contract.target.runId == local.fixed_environment.MIRA_CONTACTED_RECONCILIATION_READBACK_RUN_ID &&
       local.contract.target.checkoutSessionId == local.fixed_environment.MIRA_CONTACTED_RECONCILIATION_READBACK_CHECKOUT_SESSION_ID &&
       local.contract.runtime.owner == "DATABASE_BOOTSTRAP_BOUNDED_READBACK" &&
@@ -26,8 +31,17 @@ check "machine_contract_alignment" {
       local.contract.runtime.executionOnApply == false &&
       local.contract.resourceGraph.defaultResourceCount == 0 &&
       local.contract.resourceGraph.materializedResourceCount == 5 &&
+      local.contract.resourceGraph.materializedAddresses == [
+        "google_cloud_run_v2_job.readback[\"runtime\"]",
+        "google_project_iam_member.cloud_sql_client[\"runtime\"]",
+        "google_project_iam_member.cloud_sql_instance_user[\"runtime\"]",
+        "google_service_account.readback[\"runtime\"]",
+        "google_sql_user.readback[\"runtime\"]",
+      ] &&
       local.contract.resourceGraph.materializedSortedAddressSha256 == "d96557af0ee0024f51fc0317df774594ea39d858c49f03d26d449c5f68a07285" &&
       local.contract.materialization.default == false &&
+      local.contract.materialization.enabled == "EXACT_CURRENT_SUCCESSOR_FIVE_RESOURCE_RUNTIME_WITHOUT_EXECUTION" &&
+      local.contract.materialization.artifactOverrideRequired == false &&
       local.contract.materialization.roleGrantMode == "apply-business-state-readback-role-grants" &&
       local.contract.materialization.roleRevokeMode == "revoke-business-state-readback-role-grants"
     )
