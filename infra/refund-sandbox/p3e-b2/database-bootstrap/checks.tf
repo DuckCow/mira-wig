@@ -44,7 +44,16 @@ check "exact_machine_contract" {
       length(local.contract.iam.credentialSecretRoles) == 0 &&
       local.contract.identity.databaseRoles == ["cloudsqlsuperuser"] &&
       local.contract.migrations.count == local.migration_count &&
-      local.contract.migrations.sha256 == local.migration_sha256
+      local.contract.migrations.sha256 == local.migration_sha256 &&
+      local.contract.image.digestUri == var.bootstrap_image_digest_uri &&
+      local.contract.image.configDigest == "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72" &&
+      local.contract.image.sourceCommit == var.source_commit &&
+      contains(local.contract.image.mutatingModes, "apply-contacted-reconciliation-role-grants") &&
+      contains(local.contract.image.mutatingModes, "restore-canary-refund-role-grants") &&
+      local.contract.job.contactedReconciliationArguments == [
+        "apply-contacted-reconciliation-role-grants",
+        "restore-canary-refund-role-grants",
+      ]
     )
     error_message = "The database-bootstrap machine contract drifted."
   }

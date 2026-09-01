@@ -227,8 +227,10 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(contract.image.mutatingModes).toEqual([
       "apply",
       "apply-canary-role-grants",
+      "apply-contacted-reconciliation-role-grants",
       "materialize-application-credentials",
       "recover-canary-application-credential",
+      "restore-canary-refund-role-grants",
     ]);
     expect(contract.job.explicitCredentialArguments).toEqual([
       "materialize-application-credentials",

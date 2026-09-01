@@ -15,6 +15,8 @@ output "bootstrap_manifest" {
     default_mode                    = "check"
     explicit_mutating_mode          = "apply"
     grant_only_mode                 = "apply-canary-role-grants"
+    contacted_reconciliation_grant  = "apply-contacted-reconciliation-role-grants"
+    canonical_refund_grants_restore = "restore-canary-refund-role-grants"
     credential_materialization_mode = "materialize-application-credentials"
     credential_recovery_mode        = "recover-canary-application-credential"
     task_count                      = 1

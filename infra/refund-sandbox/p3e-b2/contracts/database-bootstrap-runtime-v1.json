@@ -64,12 +64,17 @@
   "image": {
     "logicalName": "refund-db-bootstrap",
     "platform": "linux/amd64",
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086",
+    "configDigest": "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72",
+    "sourceCommit": "4a6f2967be6de4526fa7b47d414d1cbaec600783",
     "defaultMode": "check",
     "mutatingModes": [
       "apply",
       "apply-canary-role-grants",
+      "apply-contacted-reconciliation-role-grants",
       "materialize-application-credentials",
-      "recover-canary-application-credential"
+      "recover-canary-application-credential",
+      "restore-canary-refund-role-grants"
     ],
     "providerCredentials": "NONE",
     "secretManagerDependencies": "CODE_PATH_RETAINED_NO_STANDING_IAM_AUTHORITY",
@@ -149,6 +154,10 @@
     "maxRetries": 0,
     "defaultArguments": ["check"],
     "explicitGrantOnlyArgument": "apply-canary-role-grants",
+    "contactedReconciliationArguments": [
+      "apply-contacted-reconciliation-role-grants",
+      "restore-canary-refund-role-grants"
+    ],
     "explicitCredentialArguments": [
       "materialize-application-credentials",
       "recover-canary-application-credential"

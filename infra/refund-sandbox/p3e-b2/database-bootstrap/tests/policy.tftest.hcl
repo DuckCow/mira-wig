@@ -3,8 +3,8 @@ mock_provider "google" {}
 variables {
   project_id                 = "mira-refund-sandbox-0001"
   resource_prefix            = "mira-p3e-sbx"
-  source_commit              = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  source_commit              = "4a6f2967be6de4526fa7b47d414d1cbaec600783"
+  bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086"
 
   foundation_handoff = {
     contract_version                 = "mira-refund-p3e-b2-foundation-authority/v1"
@@ -99,6 +99,8 @@ run "exact_retired_bootstrap_authority_shape" {
       output.bootstrap_manifest.default_mode == "check" &&
       output.bootstrap_manifest.explicit_mutating_mode == "apply" &&
       output.bootstrap_manifest.grant_only_mode == "apply-canary-role-grants" &&
+      output.bootstrap_manifest.contacted_reconciliation_grant == "apply-contacted-reconciliation-role-grants" &&
+      output.bootstrap_manifest.canonical_refund_grants_restore == "restore-canary-refund-role-grants" &&
       output.bootstrap_manifest.credential_materialization_mode == "materialize-application-credentials" &&
       output.bootstrap_manifest.credential_recovery_mode == "recover-canary-application-credential" &&
       output.bootstrap_manifest.automatic_trigger == "NONE" &&

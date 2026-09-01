@@ -27,23 +27,22 @@ variable "temporary_cloud_sql_access_authorized" {
 variable "source_commit" {
   description = "Exact reviewed source commit embedded in the published bootstrap image."
   type        = string
+  default     = "4a6f2967be6de4526fa7b47d414d1cbaec600783"
 
   validation {
-    condition     = can(regex("^[0-9a-f]{40}$", var.source_commit))
-    error_message = "source_commit must be one lowercase full Git SHA."
+    condition     = var.source_commit == "4a6f2967be6de4526fa7b47d414d1cbaec600783"
+    error_message = "source_commit must be the exact reviewed mode-capable bootstrap source commit."
   }
 }
 
 variable "bootstrap_image_digest_uri" {
   description = "Exact immutable published bootstrap image digest URI."
   type        = string
+  default     = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086"
 
   validation {
-    condition = can(regex(
-      "^asia-northeast3-docker\\.pkg\\.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:[0-9a-f]{64}$",
-      var.bootstrap_image_digest_uri,
-    ))
-    error_message = "bootstrap_image_digest_uri must be the exact bootstrap repository digest URI."
+    condition     = var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086"
+    error_message = "bootstrap_image_digest_uri must be the exact published mode-capable bootstrap digest."
   }
 }
 

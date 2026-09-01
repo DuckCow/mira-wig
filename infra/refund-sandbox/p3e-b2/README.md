@@ -180,6 +180,7 @@ repository:
 | Database bootstrap | `p3e-b2/database-bootstrap` |
 | Preflight invocation | `p3e-b2/preflight-invocation` |
 | Synthetic sale service | `p3e-b2/synthetic-sale-service` |
+| CONTACTED reconciliation runtime | `p3e-b2/contacted-reconciliation` |
 
 Each authority owns one prefix. Workspaces must not multiplex environments, unrelated authorities
 must not share a state file, and no root may use `terraform_remote_state`. Future root handoff must
@@ -357,6 +358,33 @@ The exact attended operator identity and existing permissions remain an external
 this root defines no deployer identity, custom role, or binding. Canary materialization, persistent
 invocation authority, provider credentials, and database-bootstrap retirement remain separate.
 
+## Default-disabled CONTACTED reconciliation runtime
+
+`contacted-reconciliation` is the dedicated Terraform owner for the single fixed Eximbay SANDBOX
+CONTACTED reconciliation target. Its isolated backend prefix is
+`p3e-b2/contacted-reconciliation`. The root has one boolean `runtime_materialized` gate that
+defaults false: disabled owns zero resources; a separately authorized true value materializes one
+purpose-specific service account, one exact-instance-conditioned Cloud SQL Client member, two
+resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the gate to false
+retires those five resources through the same Terraform state.
+
+The Job binds only refund-worker digest
+`sha256:4137f0b63724f637f19b139ada7de7d589e2508dd1a5afb805428033b803db2d`
+and command `eximbay-contacted-reconciliation-once`. The run ID
+`a764f61f4e4ba799ab16b318a676db65` and CheckoutSession
+`cmthg2mzu000001s6iuvx7u5x` are fixed in source; payment, provider-order, user, command, argument,
+and environment override inputs are absent. It uses one task, parallelism one, zero retries, one
+CPU, 512 MiB, a 180-second timeout, Gen2 Direct VPC, and `PRIVATE_RANGES_ONLY` so the private Cloud
+SQL path uses the existing VPC/subnet while public Eximbay SANDBOX retrieval uses normal Cloud Run
+egress.
+
+The source contains no execution resource, scheduler, queue, trigger, invoker binding, or
+execution-on-apply hook. Materialization alone is not execution authority. A future separately
+authorized attended lifecycle is: materialize the fixed Job, temporarily enable bootstrap Cloud
+SQL IAM, apply the fixed reconciliation DB grant delta, execute the Job once, read back the bounded
+disposition and durable state, restore canonical refund-canary grants, remove temporary bootstrap
+IAM, then set `runtime_materialized` false to retire the reconciliation runtime.
+
 ## Dormant database-bootstrap runtime boundary
 
 `database-bootstrap` is the isolated attended bootstrap Terraform root and uses backend prefix
@@ -370,9 +398,14 @@ contains no Cloud SQL Client or Instance User instance and no credential-secret 
 Adder member. The six formerly managed IAM members remain historical Git/state evidence; their
 cloud retirement is already complete.
 
-The Job has one task, parallelism one, zero retries, digest-only image identity, Direct VPC
+The Job now binds the published mode-capable bootstrap image at digest
+`sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`
+from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. It has one task, parallelism
+one, zero retries, digest-only image identity, Direct VPC
 `ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Its default argument is
-`check`; its exact migration-free grant mode is `apply-canary-role-grants`, while explicit
+`check`; its exact migration-free grant modes include `apply-canary-role-grants` and
+`apply-contacted-reconciliation-role-grants`, while
+`restore-canary-refund-role-grants` reconstructs the canonical reviewed refund-canary authority. Explicit
 credential modes are the initial `materialize-application-credentials` `(0,0)`
 path and the exact `recover-canary-application-credential` `(1,0)` partial-state path. No scheduler,
 event trigger, invoker binding, embedded database password, Secret Manager version Terraform

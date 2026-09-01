@@ -91,6 +91,12 @@ project-level Secret Manager role is admitted.
 
 ## Image and modes
 
+The retained Job is source-bound to the published mode-capable image
+`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`,
+config digest `sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72`,
+from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. The default Terraform Job
+argument remains `check`; publication and source binding do not authorize execution.
+
 The build context is a normalized temporary allowlist, never the repository root. It contains a
 minimal pinned npm dependency set, Prisma configuration/schema, all 41 exact migrations, the
 existing hashed SQL role/grant inputs and runner, the bootstrap entrypoint, `pg`, and Cloud SQL
@@ -110,6 +116,13 @@ exact 41/41 repository ledger before mutation, executes only the frozen Eximbay 
 artifact, reuses the exhaustive privilege verifier, and commits only when that postcondition
 passes. It does not run Prisma, mutate schema or business rows, access Secret Manager, or enter
 provider code. Every execution and temporary IAM re-entry remains separately human-authorized.
+
+The same published image also admits the exact attended
+`apply-contacted-reconciliation-role-grants` delta and
+`restore-canary-refund-role-grants` canonical restore modes. The former applies only the frozen
+CONTACTED reconciliation privilege artifact; the latter revokes temporary authority and
+reconstructs the reviewed historical plus canary grant sources. Neither mode is a generic SQL or
+command surface, and both retain the exact ledger and exhaustive privilege postconditions.
 
 Future `check` connects only after separate human authorization and reads the migration ledger. It
 accepts an empty schema or an exact completed prefix with matching checksums, no unknown entry, no
@@ -140,6 +153,9 @@ BOOTSTRAP_CREDENTIAL_SECRET_IAM_GRANTS: ZERO_DESIRED
 BOOTSTRAP_SQL_IAM_DB_IDENTITY: RETAINED
 CLOUDSQLSUPERUSER_MEMBERSHIP: RETAINED
 BOOTSTRAP_JOB: RETAINED_DORMANT_DEFAULT_CHECK
+BOOTSTRAP_IMAGE: MODE_CAPABLE_CC1D0E7_EXACT_DIGEST_BOUND
+CONTACTED_RECONCILIATION_GRANT_MODE: AVAILABLE_SEPARATELY_AUTHORIZED
+CANONICAL_REFUND_GRANT_RESTORE_MODE: AVAILABLE_SEPARATELY_AUTHORIZED
 BOOTSTRAP_SERVICE_ACCOUNT: RETAINED_DORMANT
 APPLICATION_SECRET_VERSIONS: EXISTING_1_1_UNCHANGED
 FUTURE_EXECUTION_REENTRY: SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED
