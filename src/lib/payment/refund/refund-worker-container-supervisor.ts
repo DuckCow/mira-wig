@@ -12,6 +12,8 @@ import {
   parseCanonicalRefundCloudSqlDatabaseUrl,
 } from "./refund-sandbox-provider-free-preflight-environment";
 import { parseEximbayRefundCanaryEnvironment } from "./eximbay-refund-canary-environment";
+import { parseEximbayContactedReconciliationEnvironment } from
+  "./eximbay-contacted-reconciliation-environment";
 import {
   TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
   TOSS_REFUND_SANDBOX_MERCHANT_BINDING,
@@ -40,6 +42,9 @@ const PREFLIGHT_BUNDLE = fileURLToPath(
 const EXIMBAY_CANARY_BUNDLE = fileURLToPath(
   new URL("./eximbay-refund-canary.mjs", import.meta.url),
 );
+const EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE = fileURLToPath(
+  new URL("./eximbay-contacted-reconciliation.mjs", import.meta.url),
+);
 const PROXY_EXECUTABLE = "/usr/local/bin/cloud-sql-proxy";
 const SYSTEMIC_FAILURE_LINE = '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n';
 const DATABASE_UNAVAILABLE_LINE = '{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n';
@@ -53,6 +58,7 @@ export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
   "sandbox-preflight",
   "image-self-check",
   "eximbay-canary-once",
+  "eximbay-contacted-reconciliation-once",
 ] as const);
 
 export type RefundWorkerContainerCommand = typeof REFUND_WORKER_CONTAINER_COMMANDS[number];
@@ -94,6 +100,7 @@ export type RefundWorkerContainerSupervisorDependencies = Readonly<{
   workerBundle: string;
   preflightBundle: string;
   eximbayCanaryBundle: string;
+  eximbayContactedReconciliationBundle: string;
   inspectSelf: () => Promise<RefundWorkerImageSelfCheck>;
 }>;
 
@@ -107,6 +114,7 @@ export type RefundWorkerImageSelfCheck = Readonly<{
   workerBundlePresent: true;
   preflightBundlePresent: true;
   eximbayCanaryBundlePresent: true;
+  eximbayContactedReconciliationBundlePresent: true;
   migrationCount: number;
   migrationDigest: string;
   nonRoot: true;
@@ -129,6 +137,7 @@ RefundWorkerContainerSupervisorDependencies = Object.freeze({
   workerBundle: WORKER_BUNDLE,
   preflightBundle: PREFLIGHT_BUNDLE,
   eximbayCanaryBundle: EXIMBAY_CANARY_BUNDLE,
+  eximbayContactedReconciliationBundle: EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE,
   inspectSelf: inspectRefundWorkerImage,
 });
 
@@ -168,7 +177,26 @@ function directCommand(
 ): Promise<number> | null {
   if (command === "image-self-check") return runImageSelfCheck(output, dependencies);
   if (command === "eximbay-canary-once") return runEximbayCanaryOnce(env, output, dependencies);
+  if (command === "eximbay-contacted-reconciliation-once") {
+    return runEximbayContactedReconciliationOnce(env, output, dependencies);
+  }
   return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+}
+
+async function runEximbayContactedReconciliationOnce(
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> {
+  if (!parseEximbayContactedReconciliationEnvironment(env)) {
+    return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
+  }
+  const binding = validateDatabaseBinding(env);
+  if (!binding) return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
+  return runWithProxy(binding, Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([dependencies.eximbayContactedReconciliationBundle]),
+  }), env, output, dependencies);
 }
 
 async function runEximbayCanaryOnce(
@@ -579,6 +607,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     access(WORKER_BUNDLE, fsConstants.R_OK),
     access(PREFLIGHT_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_CANARY_BUNDLE, fsConstants.R_OK),
+    access(EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE, fsConstants.R_OK),
   ]);
   const version = spawnSync(PROXY_EXECUTABLE, ["--version"], {
     encoding: "utf8",
@@ -600,6 +629,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     workerBundlePresent: true,
     preflightBundlePresent: true,
     eximbayCanaryBundlePresent: true,
+    eximbayContactedReconciliationBundlePresent: true,
     migrationCount: migrationProof.migrationCount,
     migrationDigest: migrationProof.migrationDigest,
     nonRoot: true,

@@ -204,6 +204,32 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
   });
 
+  it("supplies the exact five bundle entrypoint sources to the Docker build stage", () => {
+    const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const contextBuilder = readFileSync(
+      join(ROOT, "scripts/build-refund-worker-bundles.mts"),
+      "utf8",
+    );
+    expect(contextBuilder).toContain(`const entryPoints = Object.freeze({
+  "refund-execution-worker": "scripts/refund-execution-worker.ts",
+  "refund-sandbox-provider-free-preflight":
+    "scripts/refund-sandbox-provider-free-preflight.ts",
+  "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
+  "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
+  "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
+});`);
+    expect(dockerfile).toContain(
+      "COPY --link scripts/refund-execution-worker.ts "
+      + "scripts/refund-sandbox-provider-free-preflight.ts "
+      + "scripts/eximbay-refund-canary.ts "
+      + "scripts/eximbay-contacted-reconciliation.ts ./scripts/",
+    );
+    expect(dockerfile).toContain(
+      "COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/",
+    );
+    expect(dockerfile).not.toMatch(/COPY --link scripts\/(?:\*|\.)/u);
+  });
+
   it("generates distinct valid collision-resistant proof-image tags", () => {
     const first = createProofImageTag();
     const second = createProofImageTag();

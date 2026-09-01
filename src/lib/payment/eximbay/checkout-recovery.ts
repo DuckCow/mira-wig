@@ -70,6 +70,7 @@ export interface RecoverEximbayCheckoutInput {
   readonly env?: ProviderEnv;
   readonly transport: EximbayBf4Fetch;
   readonly now?: () => Date;
+  readonly emitDiagnostic?: (line: string) => void;
 }
 
 export class EximbayCheckoutRecoveryConfigError extends Error {
@@ -101,7 +102,11 @@ export async function recoverEximbayCheckout(
     amountWire: encodeAmountWire(initial.payment),
     language: "EN",
   }, input.transport);
-  const providerDisposition = recoveryProviderDisposition(retrieved, initial.payment);
+  const providerDisposition = recoveryProviderDisposition(
+    retrieved,
+    initial.payment,
+    input.emitDiagnostic,
+  );
   if (providerDisposition !== null) return providerDisposition;
 
   const observedAt = input.now?.() ?? new Date();
@@ -141,6 +146,7 @@ function recoveryPreflightResult(
 function recoveryProviderDisposition(
   retrieved: EximbayCheckoutRecoveryRetrieveResult,
   payment: RecoveryPayment,
+  emitDiagnostic: ((line: string) => void) | undefined,
 ): EximbayCheckoutRecoveryResult | null {
   if (retrieved.kind === "transactionObserved") {
     return Object.freeze({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
@@ -150,7 +156,7 @@ function recoveryProviderDisposition(
       checkoutSessionId: payment.checkoutSessionId,
       paymentId: payment.id,
       diagnostic: retrieved.diagnostic,
-    });
+    }, emitDiagnostic);
     return Object.freeze({ kind: "notReleased", reason: "OUTCOME_UNKNOWN" });
   }
   return null;
@@ -160,9 +166,9 @@ function emitOutcomeUnknownDiagnostic(input: Readonly<{
   checkoutSessionId: string;
   paymentId: string;
   diagnostic: EximbayBf4OutcomeUnknownDiagnostic;
-}>): void {
+}>, emit: (line: string) => void = console.warn): void {
   try {
-    console.warn(JSON.stringify(Object.freeze({
+    emit(JSON.stringify(Object.freeze({
       event: EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_LOG_EVENT,
       checkoutSessionId: input.checkoutSessionId,
       paymentId: input.paymentId,

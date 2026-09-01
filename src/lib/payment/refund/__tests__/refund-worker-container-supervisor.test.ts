@@ -28,6 +28,22 @@ const ENABLED_ENV = Object.freeze({
   CLOUD_RUN_TASK_INDEX: "0",
   CLOUD_RUN_TASK_ATTEMPT: "0",
 });
+const CONTACTED_RECONCILIATION_ENV = Object.freeze({
+  REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
+  DATABASE_URL,
+  MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID: "a764f61f4e4ba799ab16b318a676db65",
+  MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID: "cmthg2mzu000001s6iuvx7u5x",
+  EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED: "ENABLED",
+  EXIMBAY_SANDBOX_MID: "MIRA-SBX",
+  MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
+    "projects/mira-sbx1/secrets/eximbay-canary-key",
+  MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: "1",
+  CLOUD_RUN_JOB: "contacted-reconciliation",
+  CLOUD_RUN_EXECUTION: "execution-1",
+  CLOUD_RUN_TASK_COUNT: "1",
+  CLOUD_RUN_TASK_INDEX: "0",
+  CLOUD_RUN_TASK_ATTEMPT: "0",
+});
 
 describe("refund worker container supervisor", () => {
   afterEach(() => {
@@ -136,6 +152,46 @@ describe("refund worker container supervisor", () => {
     expect(proxy.killCalls).toEqual(["SIGTERM"]);
     expect(harness.stdout).toEqual(['{"ok":true,"code":"CYCLE_COMPLETE"}\n']);
     expect(harness.stderr).toEqual([]);
+  });
+
+  it("runs the fixed CONTACTED reconciliation bundle once behind the private proxy", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const terminal = '{"ok":true,"code":"CONTACTED_RECONCILIATION_COMPLETE"}\n';
+    const runner = completedChild(0, terminal, "");
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.spawnCalls).toHaveLength(2);
+    expect(harness.spawnCalls[1]).toMatchObject({
+      executable: process.execPath,
+      args: ["/test/eximbay-contacted-reconciliation.mjs"],
+    });
+    expect(harness.stdout).toEqual([terminal]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("rejects a wrong CONTACTED target before proxy or runner spawn", async () => {
+    const harness = supervisorHarness();
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      { ...CONTACTED_RECONCILIATION_ENV,
+        MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID: "b".repeat(32) },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(78);
+    expect(harness.spawnCalls).toEqual([]);
+    expect(harness.readinessCalls).toBe(0);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"CONFIG_INVALID"}\n']);
   });
 
   it("rejects a canonical socket/instance mismatch before any child starts", async () => {
@@ -443,6 +499,7 @@ function supervisorHarness(
     proxyExecutable: "/test/cloud-sql-proxy",
     workerBundle: "/test/refund-execution-worker.mjs",
     preflightBundle: "/test/refund-sandbox-provider-free-preflight.mjs",
+    eximbayContactedReconciliationBundle: "/test/eximbay-contacted-reconciliation.mjs",
     spawn: (executable, args) => {
       spawnCalls.push(Object.freeze({
         executable,

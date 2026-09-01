@@ -1,0 +1,361 @@
+import {
+  PaymentAttemptLifecycle,
+  PaymentAttemptStatus,
+  PaymentMode,
+  PaymentProvider,
+  PaymentRemediationStatus,
+  PrismaClient,
+} from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { describe, expect, it, vi } from "vitest";
+import { recoverEximbayCheckout } from "@/lib/payment/eximbay/checkout-recovery";
+import { main as reconciliationProcessMain } from
+  "../../../../../scripts/eximbay-contacted-reconciliation";
+import {
+  EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+  EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV,
+  EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+  EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV,
+} from "../eximbay-contacted-reconciliation-environment";
+import {
+  defaultEximbayContactedReconciliationDependencies,
+  runEximbayContactedReconciliationOnce,
+  selectFixedRecoveryTarget,
+  type EximbayContactedReconciliationDependencies,
+} from "../run-eximbay-contacted-reconciliation-once";
+
+const DATABASE = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: "postgresql://fixture:fixture@localhost:5432/fixture" }),
+});
+const PROHIBITED = Object.freeze([
+  "ready",
+  "requestPay",
+  "newPaymentVerify",
+  "sale",
+  "refund",
+  "cancel",
+] as const);
+
+describe("fixed Eximbay CONTACTED reconciliation host", () => {
+  it("keeps the installed recovery owner as the default and surfaces Q004 release once", async () => {
+    expect(defaultEximbayContactedReconciliationDependencies.recover)
+      .toBe(recoverEximbayCheckout);
+    const harness = createHarness(async (_database, input) => {
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      return Object.freeze({
+        kind: "released" as const,
+        paymentId: "payment-1",
+        eventId: "event-1",
+        releasedAt: new Date("2026-09-01T00:00:00.000Z"),
+      });
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(validEnvironment(), harness.dependencies);
+
+    expect(result).toEqual({
+      ok: true,
+      code: "CONTACTED_RECONCILIATION_COMPLETE",
+      terminalClass: "RECONCILIATION_COMPLETED",
+      runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+      checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      disposition: "RELEASED_AFTER_Q004",
+      providerRetrieveCount: 1,
+      durableRelease: "PERFORMED",
+    });
+    expect(harness.recover).toHaveBeenCalledTimes(1);
+    expect(harness.transport).toHaveBeenCalledTimes(1);
+    expect(harness.loadTarget).toHaveBeenCalledTimes(1);
+    expect(harness.loadTarget.mock.calls[0]?.[0]).toBe(DATABASE);
+    expect(harness.loadTarget.mock.calls[0]?.[1])
+      .toBe(EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID);
+    expect(harness.disconnectDatabase).toHaveBeenCalledTimes(1);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("surfaces transaction observation without financial-completion language or another call", async () => {
+    const harness = createHarness(async (_database, input) => {
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      return Object.freeze({ kind: "notReleased" as const, reason: "TRANSACTION_OBSERVED" as const });
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(validEnvironment(), harness.dependencies);
+
+    expect(result).toMatchObject({
+      ok: true,
+      disposition: "TRANSACTION_OBSERVED",
+      providerRetrieveCount: 1,
+      durableRelease: "NOT_REPORTED",
+    });
+    expect(harness.recover).toHaveBeenCalledTimes(1);
+    expect(harness.transport).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toMatch(/PAYMENT_SUCCEEDED|SALE_SUCCEEDED|FRESH_SALE|REFUND/iu);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("terminates transport ambiguity as OUTCOME_UNKNOWN without retry or eligibility claims", async () => {
+    const harness = createHarness(async (_database, input) => {
+      await ignoreSyntheticAmbiguity(
+        input.transport("https://provider.invalid/retrieve", { method: "POST" }),
+      );
+      input.emitDiagnostic?.("SYNTHETIC_REDUNDANT_DIAGNOSTIC");
+      return Object.freeze({ kind: "notReleased" as const, reason: "OUTCOME_UNKNOWN" as const });
+    }, { transport: () => Promise.reject(new Error("SYNTHETIC_TRANSPORT_AMBIGUITY")) });
+
+    const result = await runEximbayContactedReconciliationOnce(validEnvironment(), harness.dependencies);
+
+    expect(result).toMatchObject({
+      ok: true,
+      disposition: "OUTCOME_UNKNOWN",
+      providerRetrieveCount: 1,
+      durableRelease: "NOT_REPORTED",
+    });
+    expect(harness.transport).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toMatch(/FRESH_SALE|FINANCIAL_SUCCESS|REFUND_ELIGIBLE/iu);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("surfaces an installed replay with zero provider contact and no credential read", async () => {
+    const harness = createHarness(() => Promise.resolve(Object.freeze({
+      kind: "replayed" as const,
+      paymentId: "payment-1",
+      eventId: "event-1",
+      releasedAt: new Date("2026-09-01T00:00:00.000Z"),
+    })), { targetKind: "REPLAY" });
+
+    const result = await runEximbayContactedReconciliationOnce(validEnvironment(), harness.dependencies);
+
+    expect(result).toMatchObject({
+      ok: true,
+      disposition: "REPLAYED_ALREADY_RELEASED",
+      providerRetrieveCount: 0,
+      durableRelease: "OBSERVED_EXISTING",
+    });
+    expect(harness.recover).toHaveBeenCalledTimes(1);
+    expect(harness.transport).not.toHaveBeenCalled();
+    expect(harness.readSecret).not.toHaveBeenCalled();
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it.each([
+    ["missing run identity", { [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: undefined }],
+    ["malformed run identity", { [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: "not-a-run" }],
+    ["unexpected run identity", { [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: "b".repeat(32) }],
+    ["missing checkout identity", {
+      [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]: undefined,
+    }],
+    ["malformed checkout identity", {
+      [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]: "not-a-checkout",
+    }],
+    ["unexpected checkout identity", {
+      [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]: "cmwrong0000000000000000000",
+    }],
+    ["wrong task count", { CLOUD_RUN_TASK_COUNT: "2" }],
+    ["retry attempt", { CLOUD_RUN_TASK_ATTEMPT: "1" }],
+    ["missing sandbox gate", { EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED: undefined }],
+    ["live provider surface", { EXIMBAY_LIVE_API_KEY: "forbidden" }],
+  ])("rejects %s before database or provider contact", async (_name, mutation) => {
+    const harness = createHarness();
+    const result = await runEximbayContactedReconciliationOnce(
+      { ...validEnvironment(), ...mutation },
+      harness.dependencies,
+    );
+    expect(result).toMatchObject({ ok: false, code: "CONFIG_INVALID", providerRetrieveCount: 0 });
+    expect(harness.createDatabase).not.toHaveBeenCalled();
+    expect(harness.loadTarget).not.toHaveBeenCalled();
+    expect(harness.readSecret).not.toHaveBeenCalled();
+    expect(harness.recover).not.toHaveBeenCalled();
+    expect(harness.transport).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing MID", { EXIMBAY_SANDBOX_MID: undefined }],
+    ["missing secret resource", { MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE: undefined }],
+    ["missing secret version", { MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: undefined }],
+    ["mutable secret alias", { EXIMBAY_SANDBOX_API_KEY: "forbidden-direct-secret" }],
+  ])("rejects %s before provider contact", async (_name, mutation) => {
+    const harness = createHarness();
+    const result = await runEximbayContactedReconciliationOnce(
+      { ...validEnvironment(), ...mutation },
+      harness.dependencies,
+    );
+    expect(result).toMatchObject({ ok: false, code: "CONFIG_INVALID", providerRetrieveCount: 0 });
+    expect(harness.transport).not.toHaveBeenCalled();
+    expect(harness.recover).not.toHaveBeenCalled();
+  });
+
+  it("rejects multiple candidate payments within the one exact fixed session", () => {
+    const selected = selectFixedRecoveryTarget({
+      id: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      userId: "synthetic-user",
+      payments: [eligiblePayment("payment-1"), eligiblePayment("payment-2")],
+    });
+
+    expect(selected).toBeNull();
+  });
+
+  it("hard-stops a second transport attempt before a second provider call", async () => {
+    const harness = createHarness(async (_database, input) => {
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      return Object.freeze({ kind: "notReleased" as const, reason: "OUTCOME_UNKNOWN" as const });
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(validEnvironment(), harness.dependencies);
+
+    expect(result).toMatchObject({ ok: false, code: "INTERNAL_FAILURE", providerRetrieveCount: 1 });
+    expect(harness.transport).toHaveBeenCalledTimes(1);
+    expect(harness.recover).toHaveBeenCalledTimes(1);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("exits zero for a bounded OUTCOME_UNKNOWN record without claiming financial success", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const run = vi.fn(() => Promise.resolve(Object.freeze({
+      ok: true,
+      code: "CONTACTED_RECONCILIATION_COMPLETE" as const,
+      terminalClass: "RECONCILIATION_COMPLETED" as const,
+      runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+      checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      disposition: "OUTCOME_UNKNOWN" as const,
+      providerRetrieveCount: 1 as const,
+      durableRelease: "NOT_REPORTED" as const,
+    })));
+
+    const exit = await reconciliationProcessMain([], validEnvironment(), output(stdout, stderr), run);
+
+    expect(exit).toBe(0);
+    expect(stderr).toEqual([]);
+    expect(stdout).toHaveLength(1);
+    expect(stdout[0]).toContain('"disposition":"OUTCOME_UNKNOWN"');
+    expect(stdout[0]).not.toMatch(/PAYMENT_SUCCEEDED|SALE_SUCCEEDED|REFUND_SUCCEEDED/iu);
+  });
+
+  it("uses a nonzero config exit and exactly one secret-safe terminal line", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const run = vi.fn(() => Promise.resolve(Object.freeze({
+      ok: false,
+      code: "CONFIG_INVALID" as const,
+      terminalClass: "HOST_FAILURE" as const,
+      runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+      checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      providerRetrieveCount: 0 as const,
+      durableRelease: "NOT_REPORTED" as const,
+    })));
+
+    const exit = await reconciliationProcessMain([], validEnvironment(), output(stdout, stderr), run);
+
+    expect(exit).toBe(78);
+    expect(stdout).toEqual([]);
+    expect(stderr).toHaveLength(1);
+    expect(stderr[0]).not.toMatch(/DATABASE_URL|SYNTHETIC_SECRET|Authorization/iu);
+  });
+});
+
+function createHarness(
+  recovery: EximbayContactedReconciliationDependencies["recover"] = () => Promise.resolve(Object.freeze({
+    kind: "notReleased" as const,
+    reason: "NOT_ELIGIBLE" as const,
+  })),
+  overrides: Readonly<{
+    transport?: EximbayContactedReconciliationDependencies["transport"];
+    targetKind?: "ACTIVE" | "REPLAY";
+    database?: PrismaClient;
+    loadTarget?: EximbayContactedReconciliationDependencies["loadTarget"];
+  }> = {},
+) {
+  const database = overrides.database ?? DATABASE;
+  const createDatabase = vi.fn(() => database);
+  const disconnectDatabase = vi.fn(() => Promise.resolve());
+  const loadTarget = vi.fn(overrides.loadTarget ?? (() => Promise.resolve(Object.freeze({
+    paymentId: "payment-1",
+    authenticatedUserId: "synthetic-user",
+    kind: overrides.targetKind ?? "ACTIVE",
+  }))));
+  const readSecret = vi.fn(() => Promise.resolve("SYNTHETIC_SECRET_NEVER_LOG"));
+  const transport = vi.fn(overrides.transport ?? (() => Promise.resolve(
+    new Response('{"rescode":"Q004","resmsg":"No transaction"}', {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  )));
+  const recover = vi.fn(recovery);
+  const prohibited = Object.fromEntries(PROHIBITED.map((name) => [name, vi.fn()]));
+  return {
+    createDatabase,
+    disconnectDatabase,
+    loadTarget,
+    readSecret,
+    transport,
+    recover,
+    prohibited,
+    dependencies: Object.freeze({
+      createDatabase,
+      disconnectDatabase,
+      loadTarget,
+      readSecret,
+      transport,
+      recover,
+    }) satisfies EximbayContactedReconciliationDependencies,
+  };
+}
+
+function validEnvironment(): Record<string, string> {
+  return {
+    DATABASE_URL: "postgresql://fixture:fixture@localhost:5432/fixture",
+    [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+    [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]:
+      EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+    EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED: "ENABLED",
+    EXIMBAY_SANDBOX_MID: "MIRA-SBX",
+    MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
+      "projects/mira-sbx1/secrets/eximbay-canary-key",
+    MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: "1",
+    CLOUD_RUN_JOB: "contacted-reconciliation",
+    CLOUD_RUN_EXECUTION: "execution-1",
+    CLOUD_RUN_TASK_COUNT: "1",
+    CLOUD_RUN_TASK_INDEX: "0",
+    CLOUD_RUN_TASK_ATTEMPT: "0",
+  };
+}
+
+function eligiblePayment(id: string) {
+  return {
+    id,
+    checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+    provider: PaymentProvider.EXIMBAY,
+    mode: PaymentMode.SANDBOX,
+    status: PaymentAttemptStatus.INITIATED,
+    attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+    remediationStatus: PaymentRemediationStatus.NONE,
+    amount: 1_000,
+    currency: "USD",
+    providerOrderId: `provider-${id}`,
+    providerPaymentKey: null,
+    contactStartedAt: new Date("2026-09-01T00:00:00.000Z"),
+    financialSucceededAt: null,
+    blockingEndedAt: null,
+    suspendedByPaymentId: null,
+    errorCode: null,
+  };
+}
+
+function expectProhibitedCalls(calls: Record<string, ReturnType<typeof vi.fn>>): void {
+  for (const name of PROHIBITED) expect(calls[name]).toHaveBeenCalledTimes(0);
+}
+
+function output(stdout: string[], stderr: string[]) {
+  return Object.freeze({
+    stdout: Object.freeze({ write: (value: string) => stdout.push(value) }),
+    stderr: Object.freeze({ write: (value: string) => stderr.push(value) }),
+  });
+}
+
+async function ignoreSyntheticAmbiguity(promise: Promise<unknown>): Promise<void> {
+  try {
+    await promise;
+  } catch {
+    return;
+  }
+}

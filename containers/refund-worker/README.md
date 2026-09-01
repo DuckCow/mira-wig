@@ -8,6 +8,7 @@ The image has no default worker action. Its exact commands are:
 
 - `image-self-check`
 - `eximbay-canary-once`
+- `eximbay-contacted-reconciliation-once`
 - `sandbox-preflight`
 - `worker-check`
 - `worker-health`
@@ -18,7 +19,7 @@ task identity, DATABASE_URL/socket binding, or starting the proxy. A disabled wo
 returns the existing `FEATURE_DISABLED` process result without starting the proxy.
 
 The build consumes the root `package-lock.json`; TypeScript and esbuild exist only in the build
-stage. The final stage contains the three ESM bundles, generated Prisma runtime, migration SQL,
+stage. The final stage contains the five ESM bundles, generated Prisma runtime, migration SQL,
 Node, and the proxy binary. It has no shell, npm, TypeScript source, Terraform, credentials, or
 repository history and runs as numeric user/group `65532:65532`. System roots, application code,
 Prisma runtime, migrations, Node, and the proxy remain root-owned and worker-nonwritable. Only
@@ -73,3 +74,8 @@ broad Docker prune. Cleanup failure prevents verifier success.
 Image publication and Cloud Run Job ownership remain outside this directory. The provider-free
 preflight release uses the exact `sandbox-preflight` entrypoint; publication does not authorize
 the `eximbay-canary-once` route.
+
+`eximbay-contacted-reconciliation-once` is a private, fixed-target process entrypoint for the
+single deployment-bound synthetic CONTACTED attempt. It has no positional target input, HTTP
+listener, scan, retry loop, or financial-success meaning. Exit 0 means only that the installed
+checkout recovery owner returned one bounded disposition; it does not mean payment success.

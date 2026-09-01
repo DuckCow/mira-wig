@@ -36,6 +36,7 @@ const entryPoints = Object.freeze({
     "scripts/refund-sandbox-provider-free-preflight.ts",
   "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
   "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
+  "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
 });
 const exactContextAssets = Object.freeze([
   "package.json",
@@ -158,6 +159,7 @@ function bundleOptions(overrides: BuildOptions): BuildOptions {
     platform: "node",
     target: "node22",
     format: "esm",
+    conditions: ["react-server"],
     banner: {
       js: "import { createRequire as __miraCreateRequire } from 'node:module'; const require = __miraCreateRequire(import.meta.url);",
     },
