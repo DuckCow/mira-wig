@@ -50,6 +50,16 @@ check "exact_machine_contract" {
       local.contract.image.sourceCommit == var.source_commit &&
       contains(local.contract.image.mutatingModes, "apply-contacted-reconciliation-role-grants") &&
       contains(local.contract.image.mutatingModes, "restore-canary-refund-role-grants") &&
+      local.contract.job.terraformModeSelector.input == "bootstrap_mode" &&
+      local.contract.job.terraformModeSelector.owner == "TERRAFORM" &&
+      local.contract.job.terraformModeSelector.allowedModes == [
+        "check",
+        "apply-contacted-reconciliation-role-grants",
+        "restore-canary-refund-role-grants",
+      ] &&
+      local.contract.job.terraformModeSelector.defaultMode == "check" &&
+      local.contract.job.terraformModeSelector.jobArgumentsBinding == ["var.bootstrap_mode"] &&
+      local.contract.job.terraformModeSelector.executionOverrideSurface == "ABSENT" &&
       local.contract.job.contactedReconciliationArguments == [
         "apply-contacted-reconciliation-role-grants",
         "restore-canary-refund-role-grants",

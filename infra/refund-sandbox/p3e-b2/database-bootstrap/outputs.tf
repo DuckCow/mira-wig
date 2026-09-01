@@ -13,6 +13,8 @@ output "bootstrap_manifest" {
     image_digest_uri                = var.bootstrap_image_digest_uri
     job_name                        = google_cloud_run_v2_job.bootstrap.name
     default_mode                    = "check"
+    selected_mode                   = var.bootstrap_mode
+    allowed_modes                   = local.contract.job.terraformModeSelector.allowedModes
     explicit_mutating_mode          = "apply"
     grant_only_mode                 = "apply-canary-role-grants"
     contacted_reconciliation_grant  = "apply-contacted-reconciliation-role-grants"

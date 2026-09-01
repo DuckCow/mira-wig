@@ -223,13 +223,28 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       "apply-contacted-reconciliation-role-grants",
       "restore-canary-refund-role-grants",
     ]);
+    expect(bootstrapContract.job.terraformModeSelector).toEqual({
+      input: "bootstrap_mode",
+      owner: "TERRAFORM",
+      allowedModes: [
+        "check",
+        "apply-contacted-reconciliation-role-grants",
+        "restore-canary-refund-role-grants",
+      ],
+      defaultMode: "check",
+      jobArgumentsBinding: ["var.bootstrap_mode"],
+      executionOverrideSurface: "ABSENT",
+    });
     expect(variables).toContain(`refund-db-bootstrap@${BOOTSTRAP_DIGEST}`);
     expect(variables).toContain('default     = "4a6f2967be6de4526fa7b47d414d1cbaec600783"');
     expect(variables).toMatch(
       /variable "temporary_cloud_sql_access_authorized"[\s\S]*default\s*=\s*false/u,
     );
-    expect(source).toContain('args  = ["check"]');
-    expect(source).not.toMatch(/variable\s+"(?:mode|command|args)"/iu);
+    expect(source).toContain("args  = [var.bootstrap_mode]");
+    expect(source).not.toMatch(
+      /variable\s+"[^"]*(?:command|args|override|environment)[^"]*"/iu,
+    );
+    expect(variables).not.toMatch(/type\s*=\s*list\(string\)/u);
   });
 
   it("preserves the worker image policy, runtime owners, bootstrap source, and DB grant bytes", () => {

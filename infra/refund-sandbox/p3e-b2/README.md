@@ -402,9 +402,13 @@ The Job now binds the published mode-capable bootstrap image at digest
 `sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`
 from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. It has one task, parallelism
 one, zero retries, digest-only image identity, Direct VPC
-`ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Its default argument is
-`check`; its exact migration-free grant modes include `apply-canary-role-grants` and
-`apply-contacted-reconciliation-role-grants`, while
+`ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Terraform owns a bounded
+`bootstrap_mode` selector: `check` is the safe default, and the only other selectable values are
+`apply-contacted-reconciliation-role-grants` and `restore-canary-refund-role-grants`. The Job's
+sole argument derives from this selector; Cloud Run execution overrides are not its control
+surface, and selecting a mode neither enables the separate default-false temporary Cloud SQL IAM
+gate nor executes the Job. The image itself also retains the non-selectable-by-this-input
+`apply-canary-role-grants` capability, while
 `restore-canary-refund-role-grants` reconstructs the canonical reviewed refund-canary authority. Explicit
 credential modes are the initial `materialize-application-credentials` `(0,0)`
 path and the exact `recover-canary-application-credential` `(1,0)` partial-state path. No scheduler,

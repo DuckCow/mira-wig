@@ -237,6 +237,18 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       "recover-canary-application-credential",
     ]);
     expect(contract.job.explicitGrantOnlyArgument).toBe("apply-canary-role-grants");
+    expect(contract.job.terraformModeSelector).toEqual({
+      input: "bootstrap_mode",
+      owner: "TERRAFORM",
+      allowedModes: [
+        "check",
+        "apply-contacted-reconciliation-role-grants",
+        "restore-canary-refund-role-grants",
+      ],
+      defaultMode: "check",
+      jobArgumentsBinding: ["var.bootstrap_mode"],
+      executionOverrideSurface: "ABSENT",
+    });
     expect(contract.job.secretVersionProjectRepresentations).toEqual([
       "mira-refund-sandbox-0001",
       "925882331349",
@@ -866,7 +878,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(main).toContain("google_secret_manager_secret_iam_member");
     expect(main).not.toContain("roles/cloudsql.admin");
     expect(main).toMatch(/database_roles\s+=\s+\["cloudsqlsuperuser"\]/u);
-    expect(main).toContain('args  = ["check"]');
+    expect(main).toContain("args  = [var.bootstrap_mode]");
     expect(main).toContain('max_retries           = 0');
     expect(locals).toContain(
       "cloud_sql_roles = var.temporary_cloud_sql_access_authorized ? {",
@@ -874,6 +886,15 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(variables).toMatch(
       /variable "temporary_cloud_sql_access_authorized"[\s\S]+default\s+= false/u,
     );
+    expect(variables).toMatch(
+      /variable "bootstrap_mode"[\s\S]+default\s+= "check"[\s\S]+contains\(\[[\s\S]+"check"[\s\S]+"apply-contacted-reconciliation-role-grants"[\s\S]+"restore-canary-refund-role-grants"[\s\S]+\], var\.bootstrap_mode\)/u,
+    );
+    expect(variables).not.toMatch(
+      /variable\s+"[^"]*(?:command|args|override|environment)[^"]*"/iu,
+    );
+    expect(variables).not.toMatch(/type\s*=\s*list\(string\)/u);
+    expect(job).not.toMatch(/\bcommand\s*=/u);
+    expect(main).not.toMatch(/google_cloud_run_v2_job_execution|null_resource|local-exec/iu);
     expect(cloudSqlIam).not.toContain("prevent_destroy");
     expect(serviceAccount).toContain("prevent_destroy = true");
     expect(sqlUser).toContain("prevent_destroy = true");

@@ -153,6 +153,18 @@
     "parallelism": 1,
     "maxRetries": 0,
     "defaultArguments": ["check"],
+    "terraformModeSelector": {
+      "input": "bootstrap_mode",
+      "owner": "TERRAFORM",
+      "allowedModes": [
+        "check",
+        "apply-contacted-reconciliation-role-grants",
+        "restore-canary-refund-role-grants"
+      ],
+      "defaultMode": "check",
+      "jobArgumentsBinding": ["var.bootstrap_mode"],
+      "executionOverrideSurface": "ABSENT"
+    },
     "explicitGrantOnlyArgument": "apply-canary-role-grants",
     "contactedReconciliationArguments": [
       "apply-contacted-reconciliation-role-grants",

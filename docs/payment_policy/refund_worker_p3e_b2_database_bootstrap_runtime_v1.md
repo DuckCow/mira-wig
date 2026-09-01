@@ -94,8 +94,11 @@ project-level Secret Manager role is admitted.
 The retained Job is source-bound to the published mode-capable image
 `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`,
 config digest `sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72`,
-from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. The default Terraform Job
-argument remains `check`; publication and source binding do not authorize execution.
+from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. Terraform owns one bounded
+`bootstrap_mode` selector whose default is `check` and whose only other values are
+`apply-contacted-reconciliation-role-grants` and `restore-canary-refund-role-grants`; the Cloud
+Run Job's sole argument derives directly from that selector. Cloud Run execution overrides are not
+the control surface, and Terraform mode selection does not authorize or execute the Job.
 
 The build context is a normalized temporary allowlist, never the repository root. It contains a
 minimal pinned npm dependency set, Prisma configuration/schema, all 41 exact migrations, the
@@ -122,7 +125,8 @@ The same published image also admits the exact attended
 `restore-canary-refund-role-grants` canonical restore modes. The former applies only the frozen
 CONTACTED reconciliation privilege artifact; the latter revokes temporary authority and
 reconstructs the reviewed historical plus canary grant sources. Neither mode is a generic SQL or
-command surface, and both retain the exact ledger and exhaustive privilege postconditions.
+command surface, and both retain the exact ledger and exhaustive privilege postconditions. Mode
+selection remains independent from the separate default-false temporary Cloud SQL IAM gate.
 
 Future `check` connects only after separate human authorization and reads the migration ledger. It
 accepts an empty schema or an exact completed prefix with matching checksums, no unknown entry, no

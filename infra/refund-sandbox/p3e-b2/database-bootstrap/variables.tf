@@ -24,6 +24,21 @@ variable "temporary_cloud_sql_access_authorized" {
   default     = false
 }
 
+variable "bootstrap_mode" {
+  description = "Terraform-owned exact database-bootstrap Job mode."
+  type        = string
+  default     = "check"
+
+  validation {
+    condition = contains([
+      "check",
+      "apply-contacted-reconciliation-role-grants",
+      "restore-canary-refund-role-grants",
+    ], var.bootstrap_mode)
+    error_message = "bootstrap_mode must be check, apply-contacted-reconciliation-role-grants, or restore-canary-refund-role-grants."
+  }
+}
+
 variable "source_commit" {
   description = "Exact reviewed source commit embedded in the published bootstrap image."
   type        = string

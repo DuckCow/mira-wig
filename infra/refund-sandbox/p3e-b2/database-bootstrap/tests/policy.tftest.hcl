@@ -97,6 +97,12 @@ run "exact_retired_bootstrap_authority_shape" {
   assert {
     condition = (
       output.bootstrap_manifest.default_mode == "check" &&
+      output.bootstrap_manifest.selected_mode == "check" &&
+      output.bootstrap_manifest.allowed_modes == [
+        "check",
+        "apply-contacted-reconciliation-role-grants",
+        "restore-canary-refund-role-grants",
+      ] &&
       output.bootstrap_manifest.explicit_mutating_mode == "apply" &&
       output.bootstrap_manifest.grant_only_mode == "apply-canary-role-grants" &&
       output.bootstrap_manifest.contacted_reconciliation_grant == "apply-contacted-reconciliation-role-grants" &&
@@ -113,6 +119,50 @@ run "exact_retired_bootstrap_authority_shape" {
       output.bootstrap_manifest.execution_status == "RETAINED_DORMANT_NO_AUTOMATIC_TRIGGER"
     )
     error_message = "The retained bootstrap handoff must expose no standing login or secret IAM authority."
+  }
+}
+
+run "bind_contacted_reconciliation_grant_mode_to_job_args" {
+  command = plan
+
+  variables {
+    bootstrap_mode = "apply-contacted-reconciliation-role-grants"
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
+      tolist(["apply-contacted-reconciliation-role-grants"]) &&
+      output.bootstrap_manifest.selected_mode == "apply-contacted-reconciliation-role-grants"
+    )
+    error_message = "The contacted-reconciliation grant mode must be the Job's only argument."
+  }
+
+  assert {
+    condition     = length(google_project_iam_member.cloud_sql_access) == 0
+    error_message = "Selecting the contacted-reconciliation grant mode must not enable temporary Cloud SQL IAM."
+  }
+}
+
+run "bind_canonical_refund_grants_restore_mode_to_job_args" {
+  command = plan
+
+  variables {
+    bootstrap_mode = "restore-canary-refund-role-grants"
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
+      tolist(["restore-canary-refund-role-grants"]) &&
+      output.bootstrap_manifest.selected_mode == "restore-canary-refund-role-grants"
+    )
+    error_message = "The canonical refund-grants restore mode must be the Job's only argument."
+  }
+
+  assert {
+    condition     = length(google_project_iam_member.cloud_sql_access) == 0
+    error_message = "Selecting the canonical restore mode must not enable temporary Cloud SQL IAM."
   }
 }
 
@@ -178,6 +228,14 @@ run "reject_mutable_image_tag" {
     bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap:latest"
   }
   expect_failures = [var.bootstrap_image_digest_uri]
+}
+
+run "reject_arbitrary_bootstrap_mode" {
+  command = plan
+  variables {
+    bootstrap_mode = "shell"
+  }
+  expect_failures = [var.bootstrap_mode]
 }
 
 run "reject_foundation_drift" {
