@@ -1,0 +1,45 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-business-state-readback-runtime/v1",
+  "status": "SOURCE_DEFINED_DEFAULT_DISABLED",
+  "target": {
+    "runId": "a764f61f4e4ba799ab16b318a676db65",
+    "checkoutSessionId": "cmthg2mzu000001s6iuvx7u5x",
+    "historicalExecution": "mira-p3e-sbx-contacted-reconciliation-vnnsq",
+    "historicalExecutionUid": "87d659b0-a6a3-4353-9678-c18f629df434"
+  },
+  "runtime": {
+    "owner": "DATABASE_BOOTSTRAP_BOUNDED_READBACK",
+    "job": "mira-p3e-sbx-contacted-readback",
+    "command": "contacted-reconciliation-business-state-readback",
+    "databaseUser": "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam",
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "timeoutSeconds": 180,
+    "providerSecretAccess": false,
+    "executionOnApply": false
+  },
+  "authority": {
+    "databaseTables": [
+      "CheckoutSession",
+      "Payment",
+      "PaymentEvent",
+      "Order"
+    ],
+    "selectOnly": true,
+    "rowLocks": false,
+    "genericQuery": false
+  },
+  "materialization": {
+    "variable": "runtime_materialized",
+    "default": false,
+    "retirement": "RUN_EXACT_ROLE_REVOKE_MODE_THEN_SET_RUNTIME_MATERIALIZED_FALSE_AND_APPLY_UNDER_SEPARATE_AUTHORITIES",
+    "roleGrantMode": "apply-business-state-readback-role-grants",
+    "roleRevokeMode": "revoke-business-state-readback-role-grants"
+  },
+  "resourceGraph": {
+    "defaultResourceCount": 0,
+    "materializedResourceCount": 5,
+    "materializedSortedAddressSha256": "d96557af0ee0024f51fc0317df774594ea39d858c49f03d26d449c5f68a07285"
+  }
+}

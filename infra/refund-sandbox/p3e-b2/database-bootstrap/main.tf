@@ -66,7 +66,7 @@ resource "google_cloud_run_v2_job" "bootstrap" {
 
       containers {
         name  = "database-bootstrap"
-        image = var.bootstrap_image_digest_uri
+        image = local.job_image_digest_uri
         args  = [var.bootstrap_mode]
 
         resources {

@@ -25,14 +25,28 @@ locals {
     }
   } : {}
   credential_secret_iam = {}
+  readback_role_grant_mode = contains([
+    "apply-business-state-readback-role-grants",
+    "revoke-business-state-readback-role-grants",
+  ], var.bootstrap_mode)
+  job_source_commit = (
+    local.readback_role_grant_mode && var.readback_source_commit != null
+    ? var.readback_source_commit
+    : var.source_commit
+  )
+  job_image_digest_uri = (
+    local.readback_role_grant_mode && var.readback_bootstrap_image_digest_uri != null
+    ? var.readback_bootstrap_image_digest_uri
+    : var.bootstrap_image_digest_uri
+  )
   job_environment = {
     MIRA_DB_BOOTSTRAP_PROJECT_ID               = var.project_id
     MIRA_DB_BOOTSTRAP_REGION                   = local.region
     MIRA_DB_BOOTSTRAP_INSTANCE_CONNECTION_NAME = local.cloud_sql_connection_name
     MIRA_DB_BOOTSTRAP_DATABASE_NAME            = local.database_name
     MIRA_DB_BOOTSTRAP_IAM_DATABASE_USERNAME    = local.iam_database_username
-    MIRA_DB_BOOTSTRAP_SOURCE_COMMIT            = var.source_commit
-    MIRA_DB_BOOTSTRAP_IMAGE_DIGEST_URI         = var.bootstrap_image_digest_uri
+    MIRA_DB_BOOTSTRAP_SOURCE_COMMIT            = local.job_source_commit
+    MIRA_DB_BOOTSTRAP_IMAGE_DIGEST_URI         = local.job_image_digest_uri
     MIRA_DB_BOOTSTRAP_MIGRATION_COUNT          = tostring(local.migration_count)
     MIRA_DB_BOOTSTRAP_MIGRATION_SHA256         = local.migration_sha256
   }

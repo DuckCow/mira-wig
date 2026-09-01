@@ -24,11 +24,14 @@ const exactAssets = Object.freeze([
   "containers/refund-db-bootstrap/Dockerfile",
   "containers/refund-db-bootstrap/README.md",
   "containers/refund-db-bootstrap/application-credentials.ts",
+  "containers/refund-db-bootstrap/contacted-reconciliation-business-state-readback.ts",
   "containers/refund-db-bootstrap/entrypoint.ts",
   "containers/refund-db-bootstrap/package-lock.json",
   "containers/refund-db-bootstrap/package.json",
   "infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
+  "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql",
+  "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql",
   "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql",
   "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json",
@@ -41,6 +44,8 @@ const exactAssets = Object.freeze([
   "prisma/migrations/migration_lock.toml",
   "prisma/schema.prisma",
   "scripts/eximbay-p3e-database-bootstrap.ts",
+  "src/lib/payment/eximbay/checkout-recovery-state.ts",
+  "src/lib/payment/refund/eximbay-contacted-reconciliation-selection.ts",
   "src/lib/payment/refund/worker-migration-inventory.ts",
 ]);
 

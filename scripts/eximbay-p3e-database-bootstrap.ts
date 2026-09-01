@@ -14,7 +14,9 @@ export type EximbayP3eBootstrapArtifactId =
   | "FROZEN_HISTORICAL_ROLE_AUTHORITY"
   | "EXIMBAY_CANARY_ROLE_GRANT_DELTA"
   | "SYNTHETIC_SALE_ROLE_GRANT_DELTA"
-  | "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA";
+  | "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA"
+  | "BUSINESS_STATE_READBACK_ROLE_GRANT_DELTA"
+  | "BUSINESS_STATE_READBACK_ROLE_REVOKE_DELTA";
 
 export type EximbayP3eBootstrapArtifact = Readonly<{
   id: EximbayP3eBootstrapArtifactId;
@@ -65,6 +67,28 @@ export const CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT = Object.freeze({
     "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
   ),
   sha256: "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
+} satisfies EximbayP3eBootstrapArtifact);
+
+export const BUSINESS_STATE_READBACK_ROLE_GRANT_ARTIFACT = Object.freeze({
+  id: "BUSINESS_STATE_READBACK_ROLE_GRANT_DELTA",
+  repositoryPath:
+    "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql",
+  absolutePath: resolve(
+    repositoryRoot,
+    "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql",
+  ),
+  sha256: "a67dab48542dad2fd5f98efaff5264f8ee0cd481874612f070c53a80db3d85d1",
+} satisfies EximbayP3eBootstrapArtifact);
+
+export const BUSINESS_STATE_READBACK_ROLE_REVOKE_ARTIFACT = Object.freeze({
+  id: "BUSINESS_STATE_READBACK_ROLE_REVOKE_DELTA",
+  repositoryPath:
+    "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql",
+  absolutePath: resolve(
+    repositoryRoot,
+    "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql",
+  ),
+  sha256: "e88f8f693be752a31bb5b90a0ebebdbff06c760139f19066d39838b847a5a543",
 } satisfies EximbayP3eBootstrapArtifact);
 
 type RuntimeRole = "mira_refund_preflight" | "mira_refund_canary";
@@ -130,6 +154,8 @@ export type SyntheticSaleRoleGrantResult = Readonly<{
   code:
     | "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE"
     | "CONTACTED_RECONCILIATION_ROLE_GRANTS_COMPLETE"
+    | "BUSINESS_STATE_READBACK_ROLE_GRANTS_COMPLETE"
+    | "BUSINESS_STATE_READBACK_ROLE_REVOKED"
     | "CANARY_REFUND_ROLE_GRANTS_RESTORED";
   artifacts: readonly Readonly<{
     id: EximbayP3eBootstrapArtifactId;
@@ -163,6 +189,8 @@ export type EximbayP3eDatabaseBootstrapErrorCode =
   | "EXIMBAY_DELTA_INTEGRITY_FAILURE"
   | "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
   | "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE"
+  | "BUSINESS_STATE_READBACK_DELTA_INTEGRITY_FAILURE"
+  | "BUSINESS_STATE_READBACK_REVOKE_INTEGRITY_FAILURE"
   | "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT"
   | "HISTORICAL_AUTHORITY_SHAPE_INVALID"
   | "ROLE_AUTHORITY_EXECUTION_FAILED"
@@ -386,6 +414,50 @@ export async function applyContactedReconciliationRoleGrants(
   }, verifyExactContactedReconciliationEffectivePrivileges,
   "CONTACTED_RECONCILIATION_ROLE_GRANTS_COMPLETE", [
     CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT,
+  ]);
+}
+
+export async function applyBusinessStateReadbackRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sql = await readAndVerifyArtifact(
+    BUSINESS_STATE_READBACK_ROLE_GRANT_ARTIFACT,
+    dependencies.readArtifact,
+  );
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await dependencies.executeArtifact(
+      database,
+      BUSINESS_STATE_READBACK_ROLE_GRANT_ARTIFACT,
+      sql,
+    );
+  }, verifyExactBusinessStateReadbackEffectivePrivileges,
+  "BUSINESS_STATE_READBACK_ROLE_GRANTS_COMPLETE", [
+    BUSINESS_STATE_READBACK_ROLE_GRANT_ARTIFACT,
+  ]);
+}
+
+export async function revokeBusinessStateReadbackRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sql = await readAndVerifyArtifact(
+    BUSINESS_STATE_READBACK_ROLE_REVOKE_ARTIFACT,
+    dependencies.readArtifact,
+  );
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await dependencies.executeArtifact(
+      database,
+      BUSINESS_STATE_READBACK_ROLE_REVOKE_ARTIFACT,
+      sql,
+    );
+  }, verifyRetiredBusinessStateReadbackEffectivePrivileges,
+  "BUSINESS_STATE_READBACK_ROLE_REVOKED", [
+    BUSINESS_STATE_READBACK_ROLE_REVOKE_ARTIFACT,
   ]);
 }
 
@@ -680,8 +752,12 @@ function integrityError(
       ? "HISTORICAL_AUTHORITY_INTEGRITY_FAILURE"
       : artifactId === "SYNTHETIC_SALE_ROLE_GRANT_DELTA"
         ? "SYNTHETIC_SALE_DELTA_INTEGRITY_FAILURE"
-        : artifactId === "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA"
-          ? "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE"
+      : artifactId === "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA"
+        ? "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE"
+        : artifactId === "BUSINESS_STATE_READBACK_ROLE_GRANT_DELTA"
+          ? "BUSINESS_STATE_READBACK_DELTA_INTEGRITY_FAILURE"
+          : artifactId === "BUSINESS_STATE_READBACK_ROLE_REVOKE_DELTA"
+            ? "BUSINESS_STATE_READBACK_REVOKE_INTEGRITY_FAILURE"
           : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
   );
 }
@@ -725,6 +801,251 @@ export async function verifyExactContactedReconciliationEffectivePrivileges(
   await verifyRole(database, "mira_refund_preflight", "REFUND_ONLY");
   await verifyRole(database, "mira_refund_canary", "CONTACTED_RECONCILIATION");
 }
+
+export const BUSINESS_STATE_READBACK_DATABASE_ROLE =
+  "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam" as const;
+
+const BUSINESS_STATE_READBACK_SELECT_COLUMNS = new Set([
+  "CheckoutSession.id", "CheckoutSession.status", "CheckoutSession.expiresAt",
+  "CheckoutSession.createdAt", "CheckoutSession.updatedAt",
+  "Payment.id", "Payment.checkoutSessionId", "Payment.provider", "Payment.mode",
+  "Payment.status", "Payment.attemptLifecycle", "Payment.remediationStatus",
+  "Payment.amount", "Payment.currency", "Payment.providerOrderId",
+  "Payment.providerPaymentKey", "Payment.contactStartedAt",
+  "Payment.financialSucceededAt", "Payment.blockingEndedAt",
+  "Payment.suspendedByPaymentId", "Payment.errorCode", "Payment.errorMessage",
+  "Payment.createdAt", "Payment.updatedAt",
+  "PaymentEvent.id", "PaymentEvent.provider", "PaymentEvent.source",
+  "PaymentEvent.transmissionId", "PaymentEvent.eventType", "PaymentEvent.verifiedMode",
+  "PaymentEvent.verifiedCredentialBinding", "PaymentEvent.checkoutSessionId",
+  "PaymentEvent.raw", "PaymentEvent.status", "PaymentEvent.receivedAt",
+  "PaymentEvent.processedAt",
+  "Order.id", "Order.checkoutSessionId", "Order.paymentId", "Order.status",
+  "Order.createdAt", "Order.updatedAt",
+]);
+
+export async function verifyExactBusinessStateReadbackEffectivePrivileges(
+  database: Pick<Client, "query">,
+): Promise<void> {
+  const role = await readBusinessStateReadbackRoleSafety(database);
+  const tables = await readBusinessStateReadbackTablePrivileges(database);
+  const columns = await readBusinessStateReadbackColumnPrivileges(database);
+  const sequences = await readBusinessStateReadbackSequencePrivileges(database);
+  requireBusinessStateReadbackRoleSafety(role);
+  requireNoBusinessStateReadbackTablePrivileges(tables);
+  requireExactBusinessStateReadbackColumnPrivileges(columns);
+  requireNoSequencePrivileges(sequences);
+}
+
+async function readBusinessStateReadbackRoleSafety(
+  database: Pick<Client, "query">,
+): Promise<readonly BusinessStateReadbackRoleSafetyRow[]> {
+  const result = await database.query<BusinessStateReadbackRoleSafetyRow>(`
+    SELECT
+      role.rolcanlogin AS "canLogin",
+      role.rolsuper AS "superuser",
+      role.rolcreatedb AS "createDatabase",
+      role.rolcreaterole AS "createRole",
+      role.rolinherit AS "inherit",
+      role.rolreplication AS "replication",
+      role.rolbypassrls AS "bypassRls",
+      has_database_privilege(role.rolname, current_database(), 'CONNECT') AS "connect",
+      has_database_privilege(role.rolname, current_database(), 'CREATE') AS "databaseCreate",
+      has_schema_privilege(role.rolname, 'public', 'USAGE') AS "schemaUsage",
+      has_schema_privilege(role.rolname, 'public', 'CREATE') AS "schemaCreate",
+      (
+        SELECT count(*)::int FROM pg_auth_members membership
+        WHERE membership.member = role.oid
+      ) AS "membershipCount"
+    FROM pg_roles role
+    WHERE role.rolname = $1
+  `, [BUSINESS_STATE_READBACK_DATABASE_ROLE]);
+  return result.rows;
+}
+
+async function readBusinessStateReadbackTablePrivileges(
+  database: Pick<Client, "query">,
+): Promise<readonly BusinessStateReadbackTablePrivilegeRow[]> {
+  const result = await database.query<BusinessStateReadbackTablePrivilegeRow>(`
+    SELECT
+      relation.relname AS "tableName",
+      has_table_privilege($1, relation.oid, 'SELECT') AS "select",
+      has_table_privilege($1, relation.oid, 'INSERT') AS "insert",
+      has_table_privilege($1, relation.oid, 'UPDATE') AS "update",
+      has_table_privilege($1, relation.oid, 'DELETE') AS "delete",
+      has_table_privilege($1, relation.oid, 'TRUNCATE') AS "truncate",
+      has_table_privilege($1, relation.oid, 'REFERENCES') AS "references",
+      has_table_privilege($1, relation.oid, 'TRIGGER') AS "trigger"
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+    ORDER BY relation.relname
+  `, [BUSINESS_STATE_READBACK_DATABASE_ROLE]);
+  return result.rows;
+}
+
+async function readBusinessStateReadbackColumnPrivileges(
+  database: Pick<Client, "query">,
+): Promise<readonly BusinessStateReadbackColumnPrivilegeRow[]> {
+  const result = await database.query<BusinessStateReadbackColumnPrivilegeRow>(`
+    SELECT
+      relation.relname AS "tableName",
+      attribute.attname AS "columnName",
+      has_column_privilege($1, relation.oid, attribute.attnum, 'SELECT') AS "select",
+      has_column_privilege($1, relation.oid, attribute.attnum, 'INSERT') AS "insert",
+      has_column_privilege($1, relation.oid, attribute.attnum, 'UPDATE') AS "update",
+      has_column_privilege($1, relation.oid, attribute.attnum, 'REFERENCES') AS "references"
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_attribute attribute ON attribute.attrelid = relation.oid
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+    ORDER BY relation.relname, attribute.attnum
+  `, [BUSINESS_STATE_READBACK_DATABASE_ROLE]);
+  return result.rows;
+}
+
+async function readBusinessStateReadbackSequencePrivileges(
+  database: Pick<Client, "query">,
+): Promise<readonly SequencePrivilegeRow[]> {
+  const result = await database.query<SequencePrivilegeRow>(`
+    SELECT
+      relation.relname AS "sequenceName",
+      has_sequence_privilege($1, relation.oid, 'USAGE') AS "usage",
+      has_sequence_privilege($1, relation.oid, 'SELECT') AS "select",
+      has_sequence_privilege($1, relation.oid, 'UPDATE') AS "update"
+    FROM pg_class relation
+    JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public' AND relation.relkind = 'S'
+    ORDER BY relation.relname
+  `, [BUSINESS_STATE_READBACK_DATABASE_ROLE]);
+
+  return result.rows;
+}
+
+export async function verifyRetiredBusinessStateReadbackEffectivePrivileges(
+  database: Pick<Client, "query">,
+): Promise<void> {
+  const role = await readBusinessStateReadbackRoleSafety(database);
+  const tables = await readBusinessStateReadbackTablePrivileges(database);
+  const columns = await readBusinessStateReadbackColumnPrivileges(database);
+  const sequences = await readBusinessStateReadbackSequencePrivileges(database);
+  requireBusinessStateReadbackRetiredRoleSafety(role);
+  requireNoBusinessStateReadbackTablePrivileges(tables);
+  requireNoBusinessStateReadbackColumnPrivileges(columns);
+  requireNoSequencePrivileges(sequences);
+}
+
+function requireBusinessStateReadbackRetiredRoleSafety(
+  rows: readonly BusinessStateReadbackRoleSafetyRow[],
+): void {
+  const safety = rows[0];
+  if (rows.length !== 1 || !safety || !safety.canLogin) failPostcondition();
+  if ([
+    safety.superuser,
+    safety.createDatabase,
+    safety.createRole,
+    safety.replication,
+    safety.bypassRls,
+    safety.databaseCreate,
+    safety.schemaCreate,
+  ].some(Boolean) || safety.membershipCount !== 0) failPostcondition();
+}
+
+export function requireNoBusinessStateReadbackColumnPrivileges(
+  rows: readonly BusinessStateReadbackColumnPrivilegeRow[],
+): void {
+  if (rows.some((row) => [
+    row.select,
+    row.insert,
+    row.update,
+    row.references,
+  ].some(Boolean))) failPostcondition();
+}
+
+export function requireBusinessStateReadbackRoleSafety(
+  rows: readonly BusinessStateReadbackRoleSafetyRow[],
+): void {
+  const safety = rows[0];
+  if (rows.length !== 1 || !safety) failPostcondition();
+  if (!safety.canLogin || safety.connect === false || safety.schemaUsage === false) {
+    failPostcondition();
+  }
+  if ([
+    safety.superuser,
+    safety.createDatabase,
+    safety.createRole,
+    safety.replication,
+    safety.bypassRls,
+    safety.databaseCreate,
+    safety.schemaCreate,
+  ].some(Boolean)) failPostcondition();
+  if (safety.membershipCount !== 0) failPostcondition();
+}
+
+export function requireNoBusinessStateReadbackTablePrivileges(
+  rows: readonly BusinessStateReadbackTablePrivilegeRow[],
+): void {
+  if (rows.some((row) => [
+    row.select,
+    row.insert,
+    row.update,
+    row.delete,
+    row.truncate,
+    row.references,
+    row.trigger,
+  ].some(Boolean))) failPostcondition();
+}
+
+export function requireExactBusinessStateReadbackColumnPrivileges(
+  rows: readonly BusinessStateReadbackColumnPrivilegeRow[],
+): void {
+  for (const row of rows) {
+    const exactColumn = `${row.tableName}.${row.columnName}`;
+    if (row.select !== BUSINESS_STATE_READBACK_SELECT_COLUMNS.has(exactColumn)) failPostcondition();
+    if ([row.insert, row.update, row.references].some(Boolean)) failPostcondition();
+  }
+  if (rows.filter((row) => row.select).length
+    !== BUSINESS_STATE_READBACK_SELECT_COLUMNS.size) failPostcondition();
+}
+
+export type BusinessStateReadbackRoleSafetyRow = Readonly<{
+  canLogin: boolean;
+  superuser: boolean;
+  createDatabase: boolean;
+  createRole: boolean;
+  inherit: boolean;
+  replication: boolean;
+  bypassRls: boolean;
+  connect: boolean;
+  databaseCreate: boolean;
+  schemaUsage: boolean;
+  schemaCreate: boolean;
+  membershipCount: number;
+}>;
+
+export type BusinessStateReadbackTablePrivilegeRow = Readonly<{
+  tableName: string;
+  select: boolean;
+  insert: boolean;
+  update: boolean;
+  delete: boolean;
+  truncate: boolean;
+  references: boolean;
+  trigger: boolean;
+}>;
+
+export type BusinessStateReadbackColumnPrivilegeRow = Readonly<{
+  tableName: string;
+  columnName: string;
+  select: boolean;
+  insert: boolean;
+  update: boolean;
+  references: boolean;
+}>;
 
 type PrivilegeProfile =
   | "REFUND_ONLY"

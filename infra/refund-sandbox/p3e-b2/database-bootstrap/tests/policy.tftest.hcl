@@ -144,6 +144,54 @@ run "bind_contacted_reconciliation_grant_mode_to_job_args" {
   }
 }
 
+run "bind_business_state_readback_grant_reentry_to_reviewed_successor" {
+  command = plan
+
+  variables {
+    bootstrap_mode                     = "apply-business-state-readback-role-grants"
+    temporary_cloud_sql_access_authorized = true
+    readback_source_commit             = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    readback_bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
+      tolist(["apply-business-state-readback-role-grants"]) &&
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
+      var.readback_bootstrap_image_digest_uri &&
+      output.bootstrap_manifest.source_commit == var.readback_source_commit &&
+      output.bootstrap_manifest.business_state_readback_grant ==
+      "apply-business-state-readback-role-grants" &&
+      length(google_project_iam_member.cloud_sql_access) == 2
+    )
+    error_message = "The readback role grant must use only the reviewed successor image/source and explicit temporary Cloud SQL IAM."
+  }
+}
+
+run "bind_business_state_readback_revoke_to_reviewed_successor" {
+  command = plan
+
+  variables {
+    bootstrap_mode                       = "revoke-business-state-readback-role-grants"
+    temporary_cloud_sql_access_authorized = true
+    readback_source_commit               = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    readback_bootstrap_image_digest_uri   = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
+      tolist(["revoke-business-state-readback-role-grants"]) &&
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
+      var.readback_bootstrap_image_digest_uri &&
+      output.bootstrap_manifest.business_state_readback_revoke ==
+      "revoke-business-state-readback-role-grants"
+    )
+    error_message = "The readback role retirement must use only the exact revoke mode and reviewed successor."
+  }
+}
+
 run "bind_canonical_refund_grants_restore_mode_to_job_args" {
   command = plan
 

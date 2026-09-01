@@ -68,3 +68,14 @@ check "exact_machine_contract" {
     error_message = "The database-bootstrap machine contract drifted."
   }
 }
+
+check "business_state_readback_role_grant_reentry" {
+  assert {
+    condition = !local.readback_role_grant_mode || (
+      var.temporary_cloud_sql_access_authorized &&
+      var.readback_source_commit != null &&
+      var.readback_bootstrap_image_digest_uri != null
+    )
+    error_message = "The readback role-grant mode requires explicit temporary Cloud SQL admission and the reviewed readback-capable source/image."
+  }
+}

@@ -33,9 +33,38 @@ variable "bootstrap_mode" {
     condition = contains([
       "check",
       "apply-contacted-reconciliation-role-grants",
+      "apply-business-state-readback-role-grants",
+      "revoke-business-state-readback-role-grants",
       "restore-canary-refund-role-grants",
     ], var.bootstrap_mode)
-    error_message = "bootstrap_mode must be check, apply-contacted-reconciliation-role-grants, or restore-canary-refund-role-grants."
+    error_message = "bootstrap_mode must be check or one exact admitted role-grant lifecycle mode."
+  }
+}
+
+variable "readback_source_commit" {
+  description = "Reviewed readback-capable bootstrap source commit, used only by the exact readback role-grant mode."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.readback_source_commit == null || can(regex("^[0-9a-f]{40}$", var.readback_source_commit))
+    error_message = "readback_source_commit must be null or one lowercase 40-character Git commit."
+  }
+}
+
+variable "readback_bootstrap_image_digest_uri" {
+  description = "Reviewed immutable readback-capable bootstrap image, used only by the exact readback role-grant mode."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = var.readback_bootstrap_image_digest_uri == null || can(regex(
+      "^asia-northeast3-docker\\.pkg\\.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:[0-9a-f]{64}$",
+      var.readback_bootstrap_image_digest_uri,
+    ))
+    error_message = "readback_bootstrap_image_digest_uri must be null or the immutable bootstrap repository digest URI."
   }
 }
 

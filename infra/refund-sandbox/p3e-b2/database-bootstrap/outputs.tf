@@ -2,7 +2,7 @@ output "bootstrap_manifest" {
   description = "Nonsecret exact dormant bootstrap runtime handoff."
   value = {
     contract_version                = local.contract.contractVersion
-    source_commit                   = var.source_commit
+    source_commit                   = local.job_source_commit
     backend_prefix                  = local.backend_prefix
     project_id                      = var.project_id
     region                          = local.region
@@ -10,7 +10,7 @@ output "bootstrap_manifest" {
     iam_database_username           = google_sql_user.bootstrap.name
     cloud_sql_instance_name         = local.cloud_sql_instance_name
     database_name                   = local.database_name
-    image_digest_uri                = var.bootstrap_image_digest_uri
+    image_digest_uri                = local.job_image_digest_uri
     job_name                        = google_cloud_run_v2_job.bootstrap.name
     default_mode                    = "check"
     selected_mode                   = var.bootstrap_mode
@@ -18,6 +18,8 @@ output "bootstrap_manifest" {
     explicit_mutating_mode          = "apply"
     grant_only_mode                 = "apply-canary-role-grants"
     contacted_reconciliation_grant  = "apply-contacted-reconciliation-role-grants"
+    business_state_readback_grant   = "apply-business-state-readback-role-grants"
+    business_state_readback_revoke  = "revoke-business-state-readback-role-grants"
     canonical_refund_grants_restore = "restore-canary-refund-role-grants"
     credential_materialization_mode = "materialize-application-credentials"
     credential_recovery_mode        = "recover-canary-application-credential"

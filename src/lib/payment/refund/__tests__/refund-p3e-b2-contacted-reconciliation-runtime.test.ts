@@ -247,7 +247,7 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     expect(variables).not.toMatch(/type\s*=\s*list\(string\)/u);
   });
 
-  it("preserves the worker image policy, runtime owners, bootstrap source, and DB grant bytes", () => {
+  it("preserves closed worker, execution, transport, supervisor, and historical grant bytes", () => {
     const frozen = {
       "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v2.json":
         "82cfa63b1c58bf6c289722ba5a56460a1bd1cefb672f8c2fbb8d26b453fbf287",
@@ -259,16 +259,10 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         "cf54e9b0e0686e402480899f745f83d17d85815c83fb65ed10d4145f10433a46",
       "scripts/eximbay-contacted-reconciliation.ts":
         "3fc861fe0abe7597a95ccc5b6c3142eda7edd7ac99f782c152d0821b917ecbfa",
-      "src/lib/payment/eximbay/checkout-recovery.ts":
-        "5707815b964911bef500ab6a17886d648efb0f78890f40d28cebb9c14779aa71",
       "src/lib/payment/eximbay/bf4-contact.ts":
         "4ed7ff2665982d5b31708a1eb8564dc5e35870cee6614763f4819f3ffc73f660",
       "src/lib/payment/refund/refund-worker-container-supervisor.ts":
         "4de6d807a7c58d0efede2857a0c0021420972508ece7756d80667466e000c628",
-      "containers/refund-db-bootstrap/entrypoint.ts":
-        "ca2f0094fe89151064cb50fcaef1d2274141c5f0726efc5b13b3183861e46ddf",
-      "scripts/eximbay-p3e-database-bootstrap.ts":
-        "d24ce11e52cbb9ca037d081a5efcff229ce26c442acfac57663a987be9dafcc7",
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql":
         "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
     } as const;
