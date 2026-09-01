@@ -29,25 +29,48 @@ const V1_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
 );
-const CURRENT_AUTHORITY_PATH = resolve(
+const V2_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v2.json",
 );
+const CURRENT_AUTHORITY_PATH = resolve(
+  import.meta.dirname,
+  "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json",
+);
 const V1_AUTHORITY_SHA256 =
   "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876";
+const V2_AUTHORITY_SHA256 =
+  "82cfa63b1c58bf6c289722ba5a56460a1bd1cefb672f8c2fbb8d26b453fbf287";
 const V1_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v1";
-const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v2";
+const V2_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v2";
+const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v3";
 const V1_BASELINE_COMMIT = "518513e0990b6f3e2f0958125cbfa1118d423988";
-const CURRENT_BASELINE_COMMIT = "e5758c2ce812beae6306becad48a2ebc10f2cf4b";
+const V2_BASELINE_COMMIT = "e5758c2ce812beae6306becad48a2ebc10f2cf4b";
+const CURRENT_BASELINE_COMMIT = "7958fb0b228266d502f5e55a14929e8d5510e913";
+const CURRENT_SOURCE_TREE = "edcf50357c49521febd194502c167872a2dead67";
+const CURRENT_SUPERVISOR_SOURCE = Object.freeze({
+  path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+  sha256: "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
+});
 const V1_ENTRYPOINTS = Object.freeze([
   Object.freeze({ source: "containers/refund-worker/entrypoint.ts", runtimePath: "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs" }),
   Object.freeze({ source: "scripts/eximbay-refund-canary.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-refund-canary.mjs" }),
   Object.freeze({ source: "scripts/refund-execution-worker.ts", runtimePath: "/app/src/lib/payment/refund/refund-execution-worker.mjs" }),
   Object.freeze({ source: "scripts/refund-sandbox-provider-free-preflight.ts", runtimePath: "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs" }),
 ]);
-const CURRENT_ENTRYPOINTS = Object.freeze([
+const V2_ENTRYPOINTS = Object.freeze([
   ...V1_ENTRYPOINTS,
   Object.freeze({ source: "scripts/eximbay-contacted-reconciliation.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-contacted-reconciliation.mjs" }),
+]);
+const CURRENT_ENTRYPOINTS = V2_ENTRYPOINTS;
+const CURRENT_COMMAND_ALLOWLIST = Object.freeze([
+  "worker-check",
+  "worker-health",
+  "worker-once",
+  "sandbox-preflight",
+  "image-self-check",
+  "eximbay-canary-once",
+  "eximbay-contacted-reconciliation-once",
 ]);
 const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const SYSTEM_CA_TRUST = Object.freeze({
@@ -259,7 +282,7 @@ export type FrozenImageContract = Readonly<{
   forbiddenRuntimePathPrefixes: readonly string[];
 }>;
 
-export type CurrentEximbayImageAuthority = Readonly<{
+export type HistoricalEximbayImageAuthority = Readonly<{
   parentAuthoritySha256: string;
   baselineCommit: string;
   buildContext: Readonly<{
@@ -274,6 +297,35 @@ export type CurrentEximbayImageAuthority = Readonly<{
   systemClosure: FrozenImageContract["systemClosure"];
   nonApplicationAdditionCount: 6;
   nonApplicationAdditions: readonly RootManifestEntry[];
+}>;
+
+export type CurrentEximbayImageAuthority = HistoricalEximbayImageAuthority & Readonly<{
+  sourceTree: string;
+  supervisorSource: Readonly<{ path: string; sha256: string }>;
+  buildContext: HistoricalEximbayImageAuthority["buildContext"] & Readonly<{
+    entrypointCount: number;
+    migrationCount: number;
+    migrationDigest: string;
+  }>;
+  artifact: Readonly<{
+    manifestDigest: string;
+    manifestSize: number;
+    configDigest: string;
+    platform: "linux/amd64";
+    imageSize: number;
+    layerCount: number;
+    diffIds: readonly string[];
+  }>;
+  imageConfiguration: Readonly<{
+    user: "65532:65532";
+    workdir: "/app";
+    entrypoint: readonly string[];
+    command: readonly string[];
+    exposedPorts: readonly string[];
+    environmentNames: readonly string[];
+    labels: Readonly<Record<string, string>>;
+  }>;
+  commandAllowlist: readonly string[];
 }>;
 
 export type ProofImageDockerResult = Readonly<{
@@ -817,9 +869,10 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
     );
     proveProxyChecksumMismatchFails(context.directory, dockerfile);
 
-    const inspected = enforceCurrentImageConfiguration(
-      JSON.parse(capture("docker", ["image", "inspect", proof.tag])),
+    const rawInspection: unknown = JSON.parse(
+      capture("docker", ["image", "inspect", proof.tag]),
     );
+    const inspected = enforceCurrentImageConfiguration(rawInspection);
 
     const runtimeProof = verifyRuntimeClosure(
       proof.tag,
@@ -848,6 +901,7 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
     if (!captureContract) {
       const current = await readCurrentEximbayImageAuthority();
       enforceCurrentSubject(current, context);
+      enforceCurrentArtifact(current, rawInspection);
       enforceCurrentClosure(filesystem, current);
     }
 
@@ -941,9 +995,10 @@ export async function verifyExistingRefundWorkerImage(
   );
   const context = await assembleRefundWorkerBuildContext();
   try {
-    const inspected = enforceCurrentImageConfiguration(
-      JSON.parse(capture("docker", ["image", "inspect", image])),
+    const rawInspection: unknown = JSON.parse(
+      capture("docker", ["image", "inspect", image]),
     );
+    const inspected = enforceCurrentImageConfiguration(rawInspection);
     const runtimeProof = verifyRuntimeClosure(
       image,
       undefined,
@@ -973,6 +1028,7 @@ export async function verifyExistingRefundWorkerImage(
     );
     const current = await readCurrentEximbayImageAuthority();
     enforceCurrentSubject(current, context);
+    enforceCurrentArtifact(current, rawInspection);
     enforceCurrentClosure(filesystem, current);
 
     return Object.freeze({
@@ -1371,7 +1427,7 @@ export function enforceFrozenClosure(
 
 export function enforceCurrentClosure(
   filesystem: FilesystemInspection,
-  authority: CurrentEximbayImageAuthority,
+  authority: HistoricalEximbayImageAuthority,
 ): void {
   enforceFrozenClosure(filesystem, {
     proofImageInspectionBounds: DOCKER_INSPECTION_LIMITS,
@@ -1589,13 +1645,24 @@ export function parseFrozenImageContract(raw: unknown): FrozenImageContract {
 export async function readCurrentEximbayImageAuthority(
   path: string = CURRENT_AUTHORITY_PATH,
 ): Promise<CurrentEximbayImageAuthority> {
-  await readV1EximbayImageAuthority();
+  await readV2EximbayImageAuthority();
   const raw: unknown = JSON.parse(await readFile(path, "utf8"));
   return parseCurrentEximbayImageAuthority(raw);
 }
 
+export async function readV2EximbayImageAuthority():
+Promise<HistoricalEximbayImageAuthority> {
+  await readV1EximbayImageAuthority();
+  const bytes = await readFile(V2_AUTHORITY_PATH);
+  requireCondition(
+    createHash("sha256").update(bytes).digest("hex") === V2_AUTHORITY_SHA256,
+    "V2_IMAGE_AUTHORITY_SHA256",
+  );
+  return parseV2EximbayImageAuthority(JSON.parse(bytes.toString("utf8")));
+}
+
 export async function readV1EximbayImageAuthority():
-Promise<CurrentEximbayImageAuthority> {
+Promise<HistoricalEximbayImageAuthority> {
   const bytes = await readFile(V1_AUTHORITY_PATH);
   requireCondition(
     createHash("sha256").update(bytes).digest("hex") === V1_AUTHORITY_SHA256,
@@ -1609,17 +1676,69 @@ Promise<CurrentEximbayImageAuthority> {
 export function parseCurrentEximbayImageAuthority(
   raw: unknown,
 ): CurrentEximbayImageAuthority {
-  return parseEximbayImageAuthority(raw, {
+  requireCondition(isRecord(raw) && hasExactKeys(raw, [
+    "contractVersion", "parentAuthoritySha256", "baselineCommit", "sourceTree",
+    "supervisorSource", "buildContext", "artifact", "imageConfiguration",
+    "commandAllowlist", "entrypoints", "systemCaTrust", "applicationClosure",
+    "systemClosure", "nonApplicationAdditionCount", "nonApplicationAdditions",
+  ]), "CURRENT_IMAGE_AUTHORITY_SHAPE");
+  requireCondition(raw.sourceTree === CURRENT_SOURCE_TREE, "CURRENT_SOURCE_TREE_BINDING");
+  requireCondition(
+    JSON.stringify(raw.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),
+    "CURRENT_SUPERVISOR_SOURCE_BINDING",
+  );
+  const successorContext = parseSuccessorBuildContext(raw.buildContext);
+  const base = parseEximbayImageAuthority({
+    contractVersion: raw.contractVersion,
+    parentAuthoritySha256: raw.parentAuthoritySha256,
+    baselineCommit: raw.baselineCommit,
+    buildContext: {
+      manifestSha256: successorContext.manifestSha256,
+      fileCount: successorContext.fileCount,
+      repositoryGraphInputCount: successorContext.repositoryGraphInputCount,
+      packagedGraphInputCount: successorContext.packagedGraphInputCount,
+    },
+    entrypoints: raw.entrypoints,
+    systemCaTrust: raw.systemCaTrust,
+    applicationClosure: raw.applicationClosure,
+    systemClosure: raw.systemClosure,
+    nonApplicationAdditionCount: raw.nonApplicationAdditionCount,
+    nonApplicationAdditions: raw.nonApplicationAdditions,
+  }, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V1_AUTHORITY_SHA256,
+    parentAuthoritySha256: V2_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
+  });
+  requireCondition(
+    JSON.stringify(raw.commandAllowlist) === JSON.stringify(CURRENT_COMMAND_ALLOWLIST),
+    "CURRENT_COMMAND_ALLOWLIST_BINDING",
+  );
+  return Object.freeze({
+    ...base,
+    sourceTree: CURRENT_SOURCE_TREE,
+    supervisorSource: CURRENT_SUPERVISOR_SOURCE,
+    buildContext: successorContext,
+    artifact: parseSuccessorArtifactAuthority(raw.artifact),
+    imageConfiguration: parseSuccessorImageConfiguration(raw.imageConfiguration),
+    commandAllowlist: CURRENT_COMMAND_ALLOWLIST,
+  });
+}
+
+export function parseV2EximbayImageAuthority(
+  raw: unknown,
+): HistoricalEximbayImageAuthority {
+  return parseEximbayImageAuthority(raw, {
+    contractVersion: V2_CONTRACT_VERSION,
+    parentAuthoritySha256: V1_AUTHORITY_SHA256,
+    baselineCommit: V2_BASELINE_COMMIT,
+    entrypoints: V2_ENTRYPOINTS,
   });
 }
 
 export function parseV1EximbayImageAuthority(
   raw: unknown,
-): CurrentEximbayImageAuthority {
+): HistoricalEximbayImageAuthority {
   return parseEximbayImageAuthority(raw, {
     contractVersion: V1_CONTRACT_VERSION,
     parentAuthoritySha256: FROZEN_PARENT_AUTHORITY_SHA256,
@@ -1635,10 +1754,123 @@ type EximbayImageAuthorityIdentity = Readonly<{
   entrypoints: readonly Readonly<{ source: string; runtimePath: string }>[];
 }>;
 
+const CURRENT_IMAGE_LABELS = Object.freeze({
+  "mira.refund.contract": "mira-refund-worker-runtime-image-connection/v1",
+  "mira.refund.release-authority": "absent",
+  "org.opencontainers.image.created": "1784764800",
+  "org.opencontainers.image.title": "mira-refund-worker",
+  "org.opencontainers.image.version": "local-reproducibility-proof",
+});
+const CURRENT_ENVIRONMENT_NAMES = Object.freeze([
+  "PATH", "NODE_VERSION", "YARN_VERSION", "NODE_ENV",
+]);
+const CURRENT_IMAGE_ENTRYPOINT = Object.freeze([
+  "/usr/local/bin/node",
+  "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs",
+]);
+
+function parseSuccessorBuildContext(value: unknown):
+CurrentEximbayImageAuthority["buildContext"] {
+  requireCondition(isRecord(value) && hasExactKeys(value, [
+    "manifestSha256", "fileCount", "repositoryGraphInputCount",
+    "packagedGraphInputCount", "entrypointCount", "migrationCount",
+    "migrationDigest",
+  ]), "CURRENT_BUILD_CONTEXT_SHAPE");
+  requireCondition(isSha256(value.manifestSha256), "CURRENT_CONTEXT_DIGEST");
+  const fileCount = requireNonnegativeSafeInteger(
+    value.fileCount, "CURRENT_CONTEXT_COUNT",
+  );
+  const repositoryGraphInputCount = requireNonnegativeSafeInteger(
+    value.repositoryGraphInputCount, "CURRENT_CONTEXT_COUNT",
+  );
+  const packagedGraphInputCount = requireNonnegativeSafeInteger(
+    value.packagedGraphInputCount, "CURRENT_CONTEXT_COUNT",
+  );
+  const entrypointCount = requireNonnegativeSafeInteger(
+    value.entrypointCount, "CURRENT_CONTEXT_COUNT",
+  );
+  const migrationCount = requireNonnegativeSafeInteger(
+    value.migrationCount, "CURRENT_CONTEXT_COUNT",
+  );
+  requireCondition(isSha256(value.migrationDigest), "CURRENT_MIGRATION_DIGEST");
+  return Object.freeze({
+    manifestSha256: value.manifestSha256,
+    fileCount,
+    repositoryGraphInputCount,
+    packagedGraphInputCount,
+    entrypointCount,
+    migrationCount,
+    migrationDigest: value.migrationDigest,
+  });
+}
+
+function parseSuccessorArtifactAuthority(value: unknown):
+CurrentEximbayImageAuthority["artifact"] {
+  requireCondition(isRecord(value) && hasExactKeys(value, [
+    "manifestDigest", "manifestSize", "configDigest", "platform",
+    "imageSize", "layerCount", "diffIds",
+  ]), "CURRENT_ARTIFACT_SHAPE");
+  requireCondition(isDockerDigest(value.manifestDigest), "CURRENT_MANIFEST_DIGEST");
+  requireCondition(isDockerDigest(value.configDigest), "CURRENT_CONFIG_DIGEST");
+  requireCondition(value.platform === PLATFORM, "CURRENT_ARTIFACT_PLATFORM");
+  const manifestSize = requireNonnegativeSafeInteger(
+    value.manifestSize, "CURRENT_ARTIFACT_COUNT",
+  );
+  const imageSize = requireNonnegativeSafeInteger(
+    value.imageSize, "CURRENT_ARTIFACT_COUNT",
+  );
+  const layerCount = requireNonnegativeSafeInteger(
+    value.layerCount, "CURRENT_ARTIFACT_COUNT",
+  );
+  requireCondition(Array.isArray(value.diffIds)
+    && value.diffIds.length === layerCount
+    && value.diffIds.every(isDockerDigest), "CURRENT_ARTIFACT_DIFF_IDS");
+  return Object.freeze({
+    manifestDigest: value.manifestDigest,
+    manifestSize,
+    configDigest: value.configDigest,
+    platform: PLATFORM,
+    imageSize,
+    layerCount,
+    diffIds: Object.freeze([...value.diffIds]),
+  });
+}
+
+function parseSuccessorImageConfiguration(value: unknown):
+CurrentEximbayImageAuthority["imageConfiguration"] {
+  requireCondition(isRecord(value) && hasExactKeys(value, [
+    "user", "workdir", "entrypoint", "command", "exposedPorts",
+    "environmentNames", "labels",
+  ]), "CURRENT_IMAGE_CONFIGURATION_SHAPE");
+  requireCondition(value.user === "65532:65532" && value.workdir === "/app",
+    "CURRENT_IMAGE_CONFIGURATION_IDENTITY");
+  requireCondition(JSON.stringify(value.entrypoint) === JSON.stringify(CURRENT_IMAGE_ENTRYPOINT)
+    && JSON.stringify(value.command) === "[]"
+    && JSON.stringify(value.exposedPorts) === "[]",
+  "CURRENT_IMAGE_CONFIGURATION_COMMAND");
+  requireCondition(
+    JSON.stringify(value.environmentNames) === JSON.stringify(CURRENT_ENVIRONMENT_NAMES),
+    "CURRENT_IMAGE_CONFIGURATION_ENVIRONMENT",
+  );
+  requireCondition(
+    JSON.stringify(value.labels) === JSON.stringify(CURRENT_IMAGE_LABELS),
+    "CURRENT_IMAGE_CONFIGURATION_LABELS",
+  );
+  return Object.freeze({
+    user: "65532:65532",
+    workdir: "/app",
+    entrypoint: CURRENT_IMAGE_ENTRYPOINT,
+    command: Object.freeze([]),
+    exposedPorts: Object.freeze([]),
+    environmentNames: CURRENT_ENVIRONMENT_NAMES,
+    labels: CURRENT_IMAGE_LABELS,
+  });
+}
+
 function parseEximbayImageAuthority(
   raw: unknown,
   expected: EximbayImageAuthorityIdentity,
-): CurrentEximbayImageAuthority {
+): HistoricalEximbayImageAuthority {
   requireCondition(isRecord(raw), "CURRENT_IMAGE_AUTHORITY_SHAPE");
   requireCondition(hasExactKeys(raw, [
     "contractVersion", "parentAuthoritySha256", "baselineCommit", "buildContext",
@@ -1796,18 +2028,56 @@ export function enforceCurrentSubject(
     manifestEntries: readonly unknown[];
     repositoryGraphInputCount: number;
     packagedGraphInputCount: number;
+    entrypointCount: number;
+    migrationInventory: Readonly<{
+      migrationCount: number;
+      migrationDigest: string;
+    }>;
   }>,
 ): void {
   enforceEximbayImageSubject(authority, context, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V1_AUTHORITY_SHA256,
+    parentAuthoritySha256: V2_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
+  });
+  requireCondition(authority.sourceTree === CURRENT_SOURCE_TREE,
+    "CURRENT_SOURCE_TREE_BINDING");
+  requireCondition(
+    JSON.stringify(authority.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),
+    "CURRENT_SUPERVISOR_SOURCE_BINDING",
+  );
+  requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,
+    "CURRENT_ENTRYPOINT_COUNT_BINDING");
+  requireCondition(
+    authority.buildContext.migrationCount === context.migrationInventory.migrationCount,
+    "CURRENT_MIGRATION_COUNT_BINDING",
+  );
+  requireCondition(
+    authority.buildContext.migrationDigest === context.migrationInventory.migrationDigest,
+    "CURRENT_MIGRATION_DIGEST_BINDING",
+  );
+}
+
+export function enforceV2EximbayImageSubject(
+  authority: HistoricalEximbayImageAuthority,
+  context: Readonly<{
+    manifestDigest: string;
+    manifestEntries: readonly unknown[];
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+  }>,
+): void {
+  enforceEximbayImageSubject(authority, context, {
+    contractVersion: V2_CONTRACT_VERSION,
+    parentAuthoritySha256: V1_AUTHORITY_SHA256,
+    baselineCommit: V2_BASELINE_COMMIT,
+    entrypoints: V2_ENTRYPOINTS,
   });
 }
 
 export function enforceV1EximbayImageSubject(
-  authority: CurrentEximbayImageAuthority,
+  authority: HistoricalEximbayImageAuthority,
   context: Readonly<{
     manifestDigest: string;
     manifestEntries: readonly unknown[];
@@ -1824,7 +2094,7 @@ export function enforceV1EximbayImageSubject(
 }
 
 function enforceEximbayImageSubject(
-  authority: CurrentEximbayImageAuthority,
+  authority: HistoricalEximbayImageAuthority,
   context: Readonly<{
     manifestDigest: string;
     manifestEntries: readonly unknown[];
@@ -2133,9 +2403,42 @@ type ImageInspection = Readonly<{
   os: string;
   architecture: string;
   user: string;
+  workdir: string;
   entrypoint: readonly unknown[];
   command: readonly unknown[];
+  exposedPorts: readonly string[];
+  environmentNames: readonly string[];
+  labels: Readonly<Record<string, string>>;
 }>;
+
+export function enforceCurrentArtifact(
+  authority: CurrentEximbayImageAuthority,
+  value: unknown,
+): void {
+  requireCondition(isUnknownArray(value) && value.length === 1,
+    "CURRENT_ARTIFACT_INSPECTION");
+  const image = value[0];
+  requireCondition(isRecord(image) && isRecord(image.Descriptor)
+    && isRecord(image.Descriptor.annotations) && isRecord(image.RootFS),
+  "CURRENT_ARTIFACT_INSPECTION");
+  const artifact = authority.artifact;
+  requireCondition(image.Id === artifact.manifestDigest
+    && image.Descriptor.digest === artifact.manifestDigest,
+  "CURRENT_MANIFEST_BINDING");
+  requireCondition(image.Descriptor.size === artifact.manifestSize,
+    "CURRENT_MANIFEST_SIZE_BINDING");
+  requireCondition(
+    image.Descriptor.annotations["config.digest"] === artifact.configDigest,
+    "CURRENT_CONFIG_BINDING",
+  );
+  requireCondition(image.Os === "linux" && image.Architecture === "amd64"
+    && artifact.platform === PLATFORM, "CURRENT_ARTIFACT_PLATFORM_BINDING");
+  requireCondition(image.Size === artifact.imageSize, "CURRENT_IMAGE_SIZE_BINDING");
+  requireCondition(Array.isArray(image.RootFS.Layers)
+    && image.RootFS.Layers.length === artifact.layerCount
+    && JSON.stringify(image.RootFS.Layers) === JSON.stringify(artifact.diffIds),
+  "CURRENT_LAYER_BINDING");
+}
 
 export function enforceCurrentImageConfiguration(
   value: unknown,
@@ -2145,14 +2448,15 @@ export function enforceCurrentImageConfiguration(
   requireCondition(inspected.os === "linux", "IMAGE_OS");
   requireCondition(inspected.architecture === "amd64", "IMAGE_ARCHITECTURE");
   requireCondition(inspected.user === "65532:65532", "IMAGE_USER");
-  requireCondition(
-    JSON.stringify(inspected.entrypoint) === JSON.stringify([
-      "/usr/local/bin/node",
-      "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs",
-    ]),
-    "IMAGE_ENTRYPOINT",
-  );
+  requireCondition(inspected.workdir === "/app", "IMAGE_WORKDIR");
+  requireCondition(JSON.stringify(inspected.entrypoint)
+    === JSON.stringify(CURRENT_IMAGE_ENTRYPOINT), "IMAGE_ENTRYPOINT");
   requireCondition(inspected.command.length === 0, "IMAGE_DEFAULT_COMMAND");
+  requireCondition(inspected.exposedPorts.length === 0, "IMAGE_EXPOSED_PORTS");
+  requireCondition(JSON.stringify(inspected.environmentNames)
+    === JSON.stringify(CURRENT_ENVIRONMENT_NAMES), "IMAGE_ENVIRONMENT_NAMES");
+  requireCondition(JSON.stringify(inspected.labels) === JSON.stringify(CURRENT_IMAGE_LABELS),
+    "IMAGE_LABELS");
   return inspected;
 }
 
@@ -2172,15 +2476,45 @@ function parseImageInspection(value: unknown): ImageInspection | null {
 
 function parseImageConfig(
   value: unknown,
-): Pick<ImageInspection, "user" | "entrypoint" | "command"> | null {
-  if (!isRecord(value) || typeof value.User !== "string"
-    || !isUnknownArray(value.Entrypoint)
-    || value.Cmd !== undefined && !isUnknownArray(value.Cmd)) return null;
+): Omit<ImageInspection, "os" | "architecture"> | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.User !== "string" || typeof value.WorkingDir !== "string") return null;
+  if (!isUnknownArray(value.Entrypoint)) return null;
+  const command = optionalUnknownArray(value.Cmd);
+  if (!command) return null;
+  if (!isStringArray(value.Env)) return null;
+  const exposedPorts = optionalRecordKeys(value.ExposedPorts);
+  if (!exposedPorts) return null;
+  const labels = stringRecord(value.Labels);
+  if (!labels) return null;
   return Object.freeze({
     user: value.User,
+    workdir: value.WorkingDir,
     entrypoint: Object.freeze([...value.Entrypoint]),
-    command: Object.freeze(isUnknownArray(value.Cmd) ? [...value.Cmd] : []),
+    command,
+    exposedPorts,
+    environmentNames: Object.freeze(value.Env.map((entry) => entry.split("=", 1)[0] ?? "")),
+    labels,
   });
+}
+
+function optionalUnknownArray(value: unknown): readonly unknown[] | null {
+  if (value === undefined || value === null) return Object.freeze([]);
+  return isUnknownArray(value) ? Object.freeze([...value]) : null;
+}
+
+function optionalRecordKeys(value: unknown): readonly string[] | null {
+  if (value === undefined || value === null) return Object.freeze([]);
+  return isRecord(value) ? Object.freeze(Object.keys(value).sort()) : null;
+}
+
+function stringRecord(value: unknown): Readonly<Record<string, string>> | null {
+  if (!isRecord(value)) return null;
+  const entries = Object.entries(value);
+  if (!entries.every((entry): entry is [string, string] => typeof entry[1] === "string")) {
+    return null;
+  }
+  return Object.freeze(Object.fromEntries(entries));
 }
 
 type ImageSelfCheck = Readonly<{
@@ -2392,6 +2726,11 @@ function isDockerDigest(value: unknown): value is string {
 
 function isNonnegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function requireNonnegativeSafeInteger(value: unknown, code: string): number {
+  requireCondition(isNonnegativeSafeInteger(value), code);
+  return value;
 }
 
 function isStringArray(value: unknown): value is readonly string[] {

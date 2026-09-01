@@ -7,23 +7,30 @@ import historicalPolicy from
   "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import predecessorPolicy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json";
-import currentPolicy from
+import historicalV2Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v2.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json";
 import {
+  enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
   enforceCurrentClosure,
   enforceCurrentSubject,
   enforceFilesystemSafety,
   enforceFrozenClosure,
   enforceV1EximbayImageSubject,
+  enforceV2EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
   parseV1EximbayImageAuthority,
+  parseV2EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
+  readV2EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
   type FilesystemInspection,
   type FrozenImageContract,
+  type HistoricalEximbayImageAuthority,
 } from "../../../../../scripts/verify-refund-worker-image.mjs";
 
 const A_PATH = join(
@@ -34,6 +41,16 @@ const A_PATH = join(
 const V1_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+);
+
+const V2_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v2.json",
+);
+
+const V3_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -48,7 +65,7 @@ describe("immutable four-entrypoint v1 predecessor authority", () => {
   it("accepts the exact v1 subject", () => {
     expect(() => enforceV1EximbayImageSubject(
       authority,
-      currentContext(authority),
+      historicalContext(authority),
     )).not.toThrow();
   });
 
@@ -75,7 +92,7 @@ describe("immutable four-entrypoint v1 predecessor authority", () => {
 
   it("rejects a changed v1 context", () => {
     expect(() => enforceV1EximbayImageSubject(authority, {
-      ...currentContext(authority),
+      ...historicalContext(authority),
       manifestDigest: "0".repeat(64),
     })).toThrow("CURRENT_CONTEXT_MANIFEST_BINDING");
   });
@@ -105,13 +122,98 @@ describe("immutable four-entrypoint v1 predecessor authority", () => {
   });
 });
 
-describe("conjunctive historical A, v1 predecessor, and current v2 authority", () => {
+describe("immutable five-entrypoint v2 predecessor authority", () => {
+  const authority = parseV2EximbayImageAuthority(historicalV2Policy);
+
+  it("keeps the exact v2 bytes and parses its exact historical schema", async () => {
+    expect(createHash("sha256").update(readFileSync(V2_PATH)).digest("hex")).toBe(
+      "82cfa63b1c58bf6c289722ba5a56460a1bd1cefb672f8c2fbb8d26b453fbf287",
+    );
+    await expect(readV2EximbayImageAuthority()).resolves.toEqual(authority);
+  });
+
+  it("accepts only its historical source, context, entrypoints, and closure", () => {
+    expect(() => enforceV2EximbayImageSubject(
+      authority,
+      historicalContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+    expect(() => parseV2EximbayImageAuthority({
+      ...historicalV2Policy,
+      baselineCommit: currentPolicy.baselineCommit,
+    })).toThrow("CURRENT_BASELINE_COMMIT_BINDING");
+    expect(() => enforceCurrentClosure(
+      currentFilesystem(parseCurrentEximbayImageAuthority(currentPolicy)),
+      authority,
+    )).toThrow("SYSTEM_ADDITION_MANIFEST");
+  });
+});
+
+describe("conjunctive historical A, v1/v2 predecessors, and current v3 authority", () => {
   const authority = parseCurrentEximbayImageAuthority(currentPolicy);
 
-  it("accepts exact A bytes, exact B subject, and the exact current closure", () => {
+  it("selects v3 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V3_PATH)).digest("hex")).toBe(
+      "9094297f20d5c2db8e12088d5bb7769da690d9fec29f9309426ff6e6ade56062",
+    );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
+    await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
     expect(() => enforceCurrentSubject(authority, currentContext(authority))).not.toThrow();
+    expect(() => enforceCurrentArtifact(
+      authority,
+      currentArtifactInspection(authority),
+    )).not.toThrow();
     expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+  });
+
+  it("binds the exact successor source tree, supervisor, and command allowlist", () => {
+    expect(authority).toMatchObject({
+      baselineCommit: "7958fb0b228266d502f5e55a14929e8d5510e913",
+      sourceTree: "edcf50357c49521febd194502c167872a2dead67",
+      supervisorSource: {
+        path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+        sha256: "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
+      },
+      commandAllowlist: [
+        "worker-check", "worker-health", "worker-once", "sandbox-preflight",
+        "image-self-check", "eximbay-canary-once",
+        "eximbay-contacted-reconciliation-once",
+      ],
+    });
+    expect(() => parseCurrentEximbayImageAuthority({
+      ...currentPolicy,
+      commandAllowlist: currentPolicy.commandAllowlist.slice(0, 6),
+    })).toThrow("CURRENT_COMMAND_ALLOWLIST_BINDING");
+    expect(() => parseCurrentEximbayImageAuthority({
+      ...currentPolicy,
+      sourceTree: "0".repeat(40),
+    })).toThrow("CURRENT_SOURCE_TREE_BINDING");
+  });
+
+  it("rejects wrong manifest, config, layers, and the historical v2 artifact", () => {
+    for (const [override, error] of [
+      [{ Id: `sha256:${"0".repeat(64)}` }, "CURRENT_MANIFEST_BINDING"],
+      [{ Descriptor: { annotations: { "config.digest": `sha256:${"0".repeat(64)}` } } },
+        "CURRENT_CONFIG_BINDING"],
+      [{ RootFS: { Layers: authority.artifact.diffIds.slice(0, 13) } },
+        "CURRENT_LAYER_BINDING"],
+      [{
+        Id: "sha256:4137f0b63724f637f19b139ada7de7d589e2508dd1a5afb805428033b803db2d",
+        Descriptor: {
+          digest:
+            "sha256:4137f0b63724f637f19b139ada7de7d589e2508dd1a5afb805428033b803db2d",
+          annotations: {
+            "config.digest":
+              "sha256:9d9f9e58ef3d345329ea2bb3a26701f7df4fee19671ba46eabcfd4702ffbbdcc",
+          },
+        },
+      }, "CURRENT_MANIFEST_BINDING"],
+    ] as const) {
+      expect(() => enforceCurrentArtifact(
+        authority,
+        currentArtifactInspection(authority, override),
+      )).toThrow(error);
+    }
   });
 
   it("fails when A bytes change even if the current image exactly matches B", () => {
@@ -296,11 +398,26 @@ function currentImageInspection(
 ): readonly unknown[] {
   const config = {
     User: "65532:65532",
+    WorkingDir: "/app",
     Entrypoint: [
       "/usr/local/bin/node",
       "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs",
     ],
     Cmd: [],
+    ExposedPorts: undefined,
+    Env: [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NODE_VERSION=22.23.1",
+      "YARN_VERSION=1.22.22",
+      "NODE_ENV=production",
+    ],
+    Labels: {
+      "mira.refund.contract": "mira-refund-worker-runtime-image-connection/v1",
+      "mira.refund.release-authority": "absent",
+      "org.opencontainers.image.created": "1784764800",
+      "org.opencontainers.image.title": "mira-refund-worker",
+      "org.opencontainers.image.version": "local-reproducibility-proof",
+    },
     ...(typeof override.Config === "object" && override.Config !== null
       ? override.Config
       : {}),
@@ -313,7 +430,60 @@ function currentImageInspection(
   }];
 }
 
+function currentArtifactInspection(
+  authority: CurrentEximbayImageAuthority,
+  override: Readonly<Record<string, unknown>> = {},
+): readonly unknown[] {
+  const descriptorOverride = typeof override.Descriptor === "object"
+    && override.Descriptor !== null ? override.Descriptor : {};
+  const descriptorAnnotations = "annotations" in descriptorOverride
+    && typeof descriptorOverride.annotations === "object"
+    && descriptorOverride.annotations !== null ? descriptorOverride.annotations : {};
+  const rootFsOverride = typeof override.RootFS === "object"
+    && override.RootFS !== null ? override.RootFS : {};
+  const topLevelOverride = Object.fromEntries(
+    Object.entries(override).filter(([key]) => key !== "Descriptor" && key !== "RootFS"),
+  );
+  return [{
+    Id: authority.artifact.manifestDigest,
+    Size: authority.artifact.imageSize,
+    Os: "linux",
+    Architecture: "amd64",
+    Descriptor: {
+      digest: authority.artifact.manifestDigest,
+      size: authority.artifact.manifestSize,
+      ...descriptorOverride,
+      annotations: {
+        "config.digest": authority.artifact.configDigest,
+        ...descriptorAnnotations,
+      },
+    },
+    RootFS: {
+      Layers: authority.artifact.diffIds,
+      ...rootFsOverride,
+    },
+    ...topLevelOverride,
+  }];
+}
+
 function currentContext(authority: CurrentEximbayImageAuthority) {
+  return Object.freeze({
+    manifestDigest: authority.buildContext.manifestSha256,
+    manifestEntries: Object.freeze(Array.from(
+      { length: authority.buildContext.fileCount },
+      (_, index) => index,
+    )),
+    repositoryGraphInputCount: authority.buildContext.repositoryGraphInputCount,
+    packagedGraphInputCount: authority.buildContext.packagedGraphInputCount,
+    entrypointCount: authority.buildContext.entrypointCount,
+    migrationInventory: Object.freeze({
+      migrationCount: authority.buildContext.migrationCount,
+      migrationDigest: authority.buildContext.migrationDigest,
+    }),
+  });
+}
+
+function historicalContext(authority: HistoricalEximbayImageAuthority) {
   return Object.freeze({
     manifestDigest: authority.buildContext.manifestSha256,
     manifestEntries: Object.freeze(Array.from(
@@ -333,7 +503,7 @@ function changedNonApplicationInventory(
   ));
 }
 
-function currentFilesystem(authority: CurrentEximbayImageAuthority): FilesystemInspection {
+function currentFilesystem(authority: HistoricalEximbayImageAuthority): FilesystemInspection {
   return filesystemFromClosures(
     authority.applicationClosure,
     authority.systemClosure,
