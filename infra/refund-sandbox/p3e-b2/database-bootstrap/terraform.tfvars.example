@@ -1,7 +1,7 @@
 project_id                 = "mira-refund-sandbox-0001"
 resource_prefix            = "mira-p3e-sbx"
-source_commit              = "d908d71b5de5dc4223db77268719ed9e97277253"
-bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
+source_commit              = "81e785448f834f4176cd5153eb3cbdf6d79d936c"
+bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2"
 
 foundation_handoff = {
   contract_version                 = "mira-refund-p3e-b2-foundation-authority/v1"

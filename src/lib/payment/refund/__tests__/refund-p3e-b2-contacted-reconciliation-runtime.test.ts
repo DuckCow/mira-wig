@@ -12,7 +12,7 @@ const BOOTSTRAP = join(INFRA, "database-bootstrap");
 const WORKER_DIGEST =
   "sha256:4137f0b63724f637f19b139ada7de7d589e2508dd1a5afb805428033b803db2d";
 const BOOTSTRAP_DIGEST =
-  "sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086";
+  "sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2";
 const EXPECTED_ADDRESSES = Object.freeze([
   'google_cloud_run_v2_job.reconciliation["runtime"]',
   'google_project_iam_member.cloud_sql_client["runtime"]',
@@ -211,8 +211,8 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       digestUri:
         `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@${BOOTSTRAP_DIGEST}`,
       configDigest:
-        "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72",
-      sourceCommit: "4a6f2967be6de4526fa7b47d414d1cbaec600783",
+        "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a",
+      sourceCommit: "81e785448f834f4176cd5153eb3cbdf6d79d936c",
       defaultMode: "check",
     });
     expect(bootstrapContract.image.mutatingModes).toEqual(expect.arrayContaining([
@@ -228,15 +228,26 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       owner: "TERRAFORM",
       allowedModes: [
         "check",
+        "apply",
+        "apply-canary-role-grants",
+        "apply-synthetic-sale-role-grants",
         "apply-contacted-reconciliation-role-grants",
+        "apply-business-state-readback-role-grants",
+        "revoke-business-state-readback-role-grants",
+        "contacted-reconciliation-business-state-readback",
+        "materialize-synthetic-sale-market-precondition",
         "restore-canary-refund-role-grants",
+        "materialize-eximbay-canary-target",
+        "issue-eximbay-canary-approval",
+        "materialize-application-credentials",
+        "recover-canary-application-credential",
       ],
       defaultMode: "check",
       jobArgumentsBinding: ["var.bootstrap_mode"],
       executionOverrideSurface: "ABSENT",
     });
     expect(variables).toContain(`refund-db-bootstrap@${BOOTSTRAP_DIGEST}`);
-    expect(variables).toContain('default     = "4a6f2967be6de4526fa7b47d414d1cbaec600783"');
+    expect(variables).toContain('default     = "81e785448f834f4176cd5153eb3cbdf6d79d936c"');
     expect(variables).toMatch(
       /variable "temporary_cloud_sql_access_authorized"[\s\S]*default\s*=\s*false/u,
     );

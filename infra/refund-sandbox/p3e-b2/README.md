@@ -396,8 +396,8 @@ object at that prefix; this source does not create or access it.
 
 The sole lifecycle gate remains `runtime_materialized`, default false. Setting only that gate to
 true selects the source-owned immutable bootstrap successor digest
-`sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
-from source `d908d71b5de5dc4223db77268719ed9e97277253` and materializes exactly five
+`sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`
+from source `81e785448f834f4176cd5153eb3cbdf6d79d936c` and materializes exactly five
 purpose-specific resources. Normal operator workflow has no artifact override: compatibility
 inputs accept only those exact current identities, and mutable tags or arbitrary source/image
 values fail closed. Setting the gate false owns zero resources.
@@ -421,8 +421,11 @@ Adder member. The six formerly managed IAM members remain historical Git/state e
 cloud retirement is already complete.
 
 The Job now binds the current published mode-capable bootstrap image at digest
-`sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
-from source commit `d908d71b5de5dc4223db77268719ed9e97277253`. Its predecessor
+`sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`
+from source commit `81e785448f834f4176cd5153eb3cbdf6d79d936c`. The prior verifier-defective
+digest `sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
+from source `d908d71b5de5dc4223db77268719ed9e97277253` is superseded historical evidence
+only. The earlier predecessor
 `sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`
 from source `4a6f2967be6de4526fa7b47d414d1cbaec600783` remains historical provenance
 only. It has one task, parallelism

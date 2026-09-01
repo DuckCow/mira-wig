@@ -92,9 +92,12 @@ project-level Secret Manager role is admitted.
 ## Image and modes
 
 The retained Job is source-bound to the current published mode-capable image
-`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`,
-config digest `sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6`,
-from source commit `d908d71b5de5dc4223db77268719ed9e97277253`. Its historical predecessor is
+`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`,
+config digest `sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a`,
+from source commit `81e785448f834f4176cd5153eb3cbdf6d79d936c`. The prior verifier-defective
+digest `sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
+from source `d908d71b5de5dc4223db77268719ed9e97277253` is superseded historical evidence
+only. The earlier historical predecessor is
 `sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`
 from source `4a6f2967be6de4526fa7b47d414d1cbaec600783`; that identity is provenance only and
 is no longer selectable as the current Job image. Terraform owns one exact bounded

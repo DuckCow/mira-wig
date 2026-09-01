@@ -1,8 +1,8 @@
 check "materialization_gate" {
   assert {
     condition = !var.runtime_materialized || (
-      var.source_commit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
-      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
+      var.source_commit == "81e785448f834f4176cd5153eb3cbdf6d79d936c" &&
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2"
     )
     error_message = "Materialization requires the source-owned current successor identity."
   }
@@ -23,9 +23,9 @@ check "machine_contract_alignment" {
       local.contract.runtime.owner == "DATABASE_BOOTSTRAP_BOUNDED_READBACK" &&
       local.contract.runtime.job == local.job_name &&
       local.contract.runtime.command == local.command &&
-      local.contract.runtime.imageDigestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
-      local.contract.runtime.imageConfigDigest == "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6" &&
-      local.contract.runtime.sourceCommit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
+      local.contract.runtime.imageDigestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      local.contract.runtime.imageConfigDigest == "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a" &&
+      local.contract.runtime.sourceCommit == "81e785448f834f4176cd5153eb3cbdf6d79d936c" &&
       local.contract.runtime.databaseUser == local.iam_database_username &&
       local.contract.runtime.providerSecretAccess == false &&
       local.contract.runtime.executionOnApply == false &&

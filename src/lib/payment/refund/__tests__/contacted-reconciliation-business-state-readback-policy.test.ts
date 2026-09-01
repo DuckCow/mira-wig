@@ -186,10 +186,10 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
       providerVersion: "7.40.0",
     });
     expect(variables).toMatch(
-      /variable "source_commit"[\s\S]*default\s*=\s*"d908d71b5de5dc4223db77268719ed9e97277253"[\s\S]*nullable\s*=\s*false/u,
+      /variable "source_commit"[\s\S]*default\s*=\s*"81e785448f834f4176cd5153eb3cbdf6d79d936c"[\s\S]*nullable\s*=\s*false/u,
     );
     expect(variables).toMatch(
-      /variable "bootstrap_image_digest_uri"[\s\S]*default\s*=\s*"asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"[\s\S]*nullable\s*=\s*false/u,
+      /variable "bootstrap_image_digest_uri"[\s\S]*default\s*=\s*"asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2"[\s\S]*nullable\s*=\s*false/u,
     );
     expect(variables).not.toMatch(/==\s*null|null\s*\|\|/u);
     expect(locals).toContain("source_commit                      = var.source_commit");
@@ -237,9 +237,9 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
     expect(locals).toContain("job_source_commit    = var.source_commit");
     expect(locals).toContain("job_image_digest_uri = var.bootstrap_image_digest_uri");
     expect(checks).toContain("var.temporary_cloud_sql_access_authorized");
-    expect(variables).toContain("d908d71b5de5dc4223db77268719ed9e97277253");
+    expect(variables).toContain("81e785448f834f4176cd5153eb3cbdf6d79d936c");
     expect(variables).toContain(
-      "sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3",
+      "sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2",
     );
     expect(variables).not.toContain('variable "readback_source_commit"');
     expect(variables).not.toContain('variable "readback_bootstrap_image_digest_uri"');

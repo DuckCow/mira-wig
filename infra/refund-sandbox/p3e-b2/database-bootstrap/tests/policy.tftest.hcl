@@ -72,8 +72,8 @@ run "exact_retired_bootstrap_authority_shape" {
       "mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com" &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args == tolist(["check"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
-      output.bootstrap_manifest.source_commit == "d908d71b5de5dc4223db77268719ed9e97277253"
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      output.bootstrap_manifest.source_commit == "81e785448f834f4176cd5153eb3cbdf6d79d936c"
     )
     error_message = "The bootstrap Job must remain one-task, zero-retry, check-default and digest-bound."
   }
@@ -166,8 +166,8 @@ run "bind_business_state_readback_grant_reentry_to_reviewed_successor" {
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
       tolist(["apply-business-state-readback-role-grants"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
-      output.bootstrap_manifest.source_commit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      output.bootstrap_manifest.source_commit == "81e785448f834f4176cd5153eb3cbdf6d79d936c" &&
       output.bootstrap_manifest.business_state_readback_grant ==
       "apply-business-state-readback-role-grants" &&
       length(google_project_iam_member.cloud_sql_access) == 2
@@ -189,7 +189,7 @@ run "bind_business_state_readback_revoke_to_reviewed_successor" {
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
       tolist(["revoke-business-state-readback-role-grants"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
       output.bootstrap_manifest.business_state_readback_revoke ==
       "revoke-business-state-readback-role-grants"
     )
@@ -209,7 +209,7 @@ run "return_to_check_preserves_reviewed_successor" {
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
       tolist(["check"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
       length(google_project_iam_member.cloud_sql_access) == 0
     )
     error_message = "Returning to check must preserve the exact current successor with temporary IAM absent."
@@ -226,7 +226,7 @@ run "readback_mode_alone_does_not_materialize_iam" {
   assert {
     condition = (
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
       length(google_project_iam_member.cloud_sql_access) == 0
     )
     error_message = "Selecting a readback role mode must not implicitly materialize temporary Cloud SQL IAM."
@@ -317,6 +317,14 @@ run "reject_mutable_image_tag" {
   command = plan
   variables {
     bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap:latest"
+  }
+  expect_failures = [var.bootstrap_image_digest_uri]
+}
+
+run "reject_superseded_verifier_defective_image_as_current" {
+  command = plan
+  variables {
+    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
   }
   expect_failures = [var.bootstrap_image_digest_uri]
 }
