@@ -12,6 +12,13 @@ output "runtime_manifest" {
     service_account_email        = local.service_account_email
     job_name                     = local.job_name
     image_digest_uri             = local.worker_image_digest_uri
+    image_config_digest          = local.worker_image_config_digest
+    image_source_commit          = local.worker_image_source_commit
+    image_source_context_sha256  = local.worker_image_source_context_sha256
+    image_policy_path            = local.worker_image_policy_path
+    image_policy_version         = local.worker_image_policy_version
+    image_policy_sha256          = local.worker_image_policy_sha256
+    supervisor_source_sha256     = local.worker_supervisor_source_sha256
     command                      = local.command
     task_count                   = local.task_count
     parallelism                  = local.parallelism

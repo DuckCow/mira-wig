@@ -10,7 +10,13 @@ const INFRA = join(ROOT, "infra/refund-sandbox/p3e-b2");
 const RUNTIME = join(INFRA, "contacted-reconciliation");
 const BOOTSTRAP = join(INFRA, "database-bootstrap");
 const WORKER_DIGEST =
+  "sha256:4d28f12574708ed8e14857eee7dc07d92ab52ff9bc4e56e0c2ce89d8d390fccc";
+const WORKER_CONFIG_DIGEST =
+  "sha256:6daaa4e85e62f3ad7b171ed958ff83b05f5e0f44c9a565f35da4ca0088abb9a9";
+const HISTORICAL_WORKER_DIGEST =
   "sha256:4137f0b63724f637f19b139ada7de7d589e2508dd1a5afb805428033b803db2d";
+const CURRENT_POLICY_SHA256 =
+  "9094297f20d5c2db8e12088d5bb7769da690d9fec29f9309426ff6e6ade56062";
 const BOOTSTRAP_DIGEST =
   "sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2";
 const EXPECTED_ADDRESSES = Object.freeze([
@@ -72,7 +78,33 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       userManagedKeys: 0,
       tokenCreator: "ABSENT",
     });
-    expect(contract.image.digestUri).toContain(WORKER_DIGEST);
+    expect(contract.image).toEqual({
+      digestUri:
+        `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${WORKER_DIGEST}`,
+      configDigest: WORKER_CONFIG_DIGEST,
+      sourceCheckpoint: "7958fb0b228266d502f5e55a14929e8d5510e913",
+      sourceContextSha256:
+        "9bbf7398224f0d669954748a8b34b7a8ce7d81b33281f9b249a579a28ca4f0ac",
+      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json",
+      imagePolicyVersion: "V3",
+      imagePolicySha256: CURRENT_POLICY_SHA256,
+      supervisorSourceSha256:
+        "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
+      predecessor: {
+        digestUri:
+          `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${HISTORICAL_WORKER_DIGEST}`,
+        configDigest:
+          "sha256:9d9f9e58ef3d345329ea2bb3a26701f7df4fee19671ba46eabcfd4702ffbbdcc",
+        sourceCheckpoint: "e5758c2ce812beae6306becad48a2ebc10f2cf4b",
+        sourceContextSha256:
+          "877fc659e02b66a7d99068bbd68f0f8bb5692d18f970e2ef0e5f8295bb3cec86",
+        imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v2.json",
+        imagePolicyVersion: "V2",
+        imagePolicySha256:
+          "82cfa63b1c58bf6c289722ba5a56460a1bd1cefb672f8c2fbb8d26b453fbf287",
+        status: "SUPERSEDED_HISTORICAL_ONLY",
+      },
+    });
     expect(contract.target).toMatchObject({
       runId: "a764f61f4e4ba799ab16b318a676db65",
       checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
@@ -84,10 +116,25 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     expect(source).toContain(`refund-worker@${WORKER_DIGEST}`);
     expect(source).toMatch(/command\s*=\s*"eximbay-contacted-reconciliation-once"/u);
     expect(source).toContain('args  = [local.command]');
+    for (const binding of [
+      "image_config_digest          = local.worker_image_config_digest",
+      "image_source_commit          = local.worker_image_source_commit",
+      "image_source_context_sha256  = local.worker_image_source_context_sha256",
+      "image_policy_path            = local.worker_image_policy_path",
+      "image_policy_version         = local.worker_image_policy_version",
+      "image_policy_sha256          = local.worker_image_policy_sha256",
+      "supervisor_source_sha256     = local.worker_supervisor_source_sha256",
+    ]) expect(source).toContain(binding);
     expect(source).toMatch(/service_account_id\s*=\s*"mira-p3e-sbx-contacted-recon"/u);
     expect(source).not.toMatch(
       /variable\s+"(?:run_id|checkout_session_id|payment_id|provider_order_id|user_id|command|args|environment)"/iu,
     );
+    expect(source).not.toMatch(/variable\s+"[^"]*(?:image|digest|source|policy)[^"]*"/iu);
+    expect(source).not.toMatch(
+      new RegExp(`worker_image_digest_uri\\s*=\\s*"[^"]*@${HISTORICAL_WORKER_DIGEST}"`, "u"),
+    );
+    expect(contract.image.digestUri).not.toMatch(/refund-worker:[^/]+$/u);
+    expect(contract.image.predecessor.status).toBe("SUPERSEDED_HISTORICAL_ONLY");
   });
 
   it("binds only the exact installed environment and two secret authorities", () => {
@@ -260,8 +307,12 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
 
   it("preserves closed worker, execution, transport, supervisor, and historical grant bytes", () => {
     const frozen = {
+      "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json":
+        "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876",
       "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v2.json":
         "82cfa63b1c58bf6c289722ba5a56460a1bd1cefb672f8c2fbb8d26b453fbf287",
+      "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json":
+        CURRENT_POLICY_SHA256,
       "containers/refund-worker/Dockerfile":
         "a72c2c6fb232a6fb1d6e6bb52af546750ba5d728ba8a2164d9153591f96123dc",
       "src/lib/payment/refund/eximbay-contacted-reconciliation-environment.ts":
