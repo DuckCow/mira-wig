@@ -830,6 +830,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       "DB_CONNECT_FAILED",
       "LEDGER_READ_FAILED",
       "LEDGER_REJECTED",
+      "ROLE_AUTHORITY_POSTCONDITION_FAILED",
       "RUNTIME_LOCAL_FAILED",
       "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT",
       "SECRET_METADATA_UNAVAILABLE",
@@ -850,7 +851,7 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       sqlAdminRequestPhase: "INSTANCE_METADATA",
       sqlAdminRequestHost: "sqladmin.googleapis.com",
       proxyTransportClasses: [...PROXY_TRANSPORT_CLASSES],
-      temporarySignal: "OMITTED_UPSTREAM_TYPED_SIGNAL_FLATTENED",
+      temporarySignal: "KNOWN_POSTCONDITION_PRESERVED_OTHER_TYPED_SIGNALS_FLATTENED",
       databaseConnectionRetries: 0,
       stageCodes: [...BOOTSTRAP_FAILURE_CODES],
     });

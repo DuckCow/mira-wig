@@ -804,6 +804,8 @@ export async function verifyExactContactedReconciliationEffectivePrivileges(
 
 export const BUSINESS_STATE_READBACK_DATABASE_ROLE =
   "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam" as const;
+export const BUSINESS_STATE_READBACK_REQUIRED_SYSTEM_MEMBERSHIP =
+  "cloudsqliamserviceaccount" as const;
 
 const BUSINESS_STATE_READBACK_SELECT_COLUMNS = new Set([
   "CheckoutSession.id", "CheckoutSession.status", "CheckoutSession.expiresAt",
@@ -853,10 +855,13 @@ async function readBusinessStateReadbackRoleSafety(
       has_database_privilege(role.rolname, current_database(), 'CREATE') AS "databaseCreate",
       has_schema_privilege(role.rolname, 'public', 'USAGE') AS "schemaUsage",
       has_schema_privilege(role.rolname, 'public', 'CREATE') AS "schemaCreate",
-      (
-        SELECT count(*)::int FROM pg_auth_members membership
+      ARRAY(
+        SELECT granted_role.rolname::text
+        FROM pg_auth_members membership
+        JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
         WHERE membership.member = role.oid
-      ) AS "membershipCount"
+        ORDER BY granted_role.rolname
+      ) AS "membershipRoleNames"
     FROM pg_roles role
     WHERE role.rolname = $1
   `, [BUSINESS_STATE_READBACK_DATABASE_ROLE]);
@@ -939,7 +944,7 @@ export async function verifyRetiredBusinessStateReadbackEffectivePrivileges(
   requireNoSequencePrivileges(sequences);
 }
 
-function requireBusinessStateReadbackRetiredRoleSafety(
+export function requireBusinessStateReadbackRetiredRoleSafety(
   rows: readonly BusinessStateReadbackRoleSafetyRow[],
 ): void {
   const safety = rows[0];
@@ -952,7 +957,8 @@ function requireBusinessStateReadbackRetiredRoleSafety(
     safety.bypassRls,
     safety.databaseCreate,
     safety.schemaCreate,
-  ].some(Boolean) || safety.membershipCount !== 0) failPostcondition();
+  ].some(Boolean)) failPostcondition();
+  requireExactBusinessStateReadbackSystemMembership(safety.membershipRoleNames);
 }
 
 export function requireNoBusinessStateReadbackColumnPrivileges(
@@ -983,7 +989,17 @@ export function requireBusinessStateReadbackRoleSafety(
     safety.databaseCreate,
     safety.schemaCreate,
   ].some(Boolean)) failPostcondition();
-  if (safety.membershipCount !== 0) failPostcondition();
+  requireExactBusinessStateReadbackSystemMembership(safety.membershipRoleNames);
+}
+
+function requireExactBusinessStateReadbackSystemMembership(
+  memberships: readonly string[],
+): void {
+  const normalized = [...memberships].sort();
+  if (normalized.length !== 1
+    || normalized[0] !== BUSINESS_STATE_READBACK_REQUIRED_SYSTEM_MEMBERSHIP) {
+    failPostcondition();
+  }
 }
 
 export function requireNoBusinessStateReadbackTablePrivileges(
@@ -1024,7 +1040,7 @@ export type BusinessStateReadbackRoleSafetyRow = Readonly<{
   databaseCreate: boolean;
   schemaUsage: boolean;
   schemaCreate: boolean;
-  membershipCount: number;
+  membershipRoleNames: readonly string[];
 }>;
 
 export type BusinessStateReadbackTablePrivilegeRow = Readonly<{

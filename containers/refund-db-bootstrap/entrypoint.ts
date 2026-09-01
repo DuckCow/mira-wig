@@ -87,6 +87,7 @@ export const BOOTSTRAP_FAILURE_CODES = Object.freeze([
   "DB_CONNECT_FAILED",
   "LEDGER_READ_FAILED",
   "LEDGER_REJECTED",
+  "ROLE_AUTHORITY_POSTCONDITION_FAILED",
   "RUNTIME_LOCAL_FAILED",
   "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT",
   "SECRET_METADATA_UNAVAILABLE",
@@ -920,7 +921,8 @@ function ledgerRejected(): never {
 function safeFailureRecord(error: unknown): SafeFailureRecord {
   if (error instanceof BootstrapStageFailure) return error.record;
   if (error instanceof EximbayP3eDatabaseBootstrapError
-    && error.code === "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT") {
+    && (error.code === "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT"
+      || error.code === "ROLE_AUTHORITY_POSTCONDITION_FAILED")) {
     return Object.freeze({ code: error.code });
   }
   if (error instanceof ApplicationCredentialFailure) {

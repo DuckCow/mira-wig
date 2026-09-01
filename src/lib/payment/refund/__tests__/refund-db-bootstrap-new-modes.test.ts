@@ -64,6 +64,47 @@ describe("exact database-bootstrap SALE lifecycle and producer modes", () => {
     ]);
   });
 
+  it("preserves the safe authority-postcondition code without exposing details", async () => {
+    const sink = outputSink();
+    const result = await runDatabaseBootstrapEntrypoint(
+      [BUSINESS_STATE_READBACK_ROLE_GRANT_MODE],
+      baseEnv(),
+      sink,
+      {
+        readSourceCommit: () => Promise.resolve(COMMIT),
+        loadMigrationInventory: () => Promise.resolve(inventory),
+        execute: () => Promise.reject(new EximbayP3eDatabaseBootstrapError(
+          "ROLE_AUTHORITY_POSTCONDITION_FAILED",
+        )),
+      },
+    );
+
+    expect(result).toBe(1);
+    expect(sink.stderrLines).toEqual([
+      '{"ok":false,"code":"ROLE_AUTHORITY_POSTCONDITION_FAILED"}\n',
+    ]);
+  });
+
+  it("keeps an unknown local failure generic", async () => {
+    const sink = outputSink();
+    const result = await runDatabaseBootstrapEntrypoint(
+      [BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE],
+      baseEnv(),
+      sink,
+      {
+        readSourceCommit: () => Promise.resolve(COMMIT),
+        loadMigrationInventory: () => Promise.resolve(inventory),
+        execute: () => Promise.reject(new Error("raw sensitive local failure")),
+      },
+    );
+
+    expect(result).toBe(1);
+    expect(sink.stderrLines).toEqual([
+      '{"ok":false,"code":"RUNTIME_LOCAL_FAILED"}\n',
+    ]);
+    expect(sink.stderrLines.join("")).not.toContain("raw sensitive local failure");
+  });
+
   it("adapts only exact target-producer inputs", async () => {
     const configurations: RuntimeConfiguration[] = [];
     const dependencies = {
@@ -152,5 +193,19 @@ function output() {
   return Object.freeze({
     stdout: Object.freeze({ write: () => true }),
     stderr: Object.freeze({ write: () => true }),
+  });
+}
+
+function outputSink() {
+  const stderrLines: string[] = [];
+  return Object.freeze({
+    stderrLines,
+    stdout: Object.freeze({ write: () => true }),
+    stderr: Object.freeze({
+      write: (value: string) => {
+        stderrLines.push(value);
+        return true;
+      },
+    }),
   });
 }
