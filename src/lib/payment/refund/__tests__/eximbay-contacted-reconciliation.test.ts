@@ -208,6 +208,49 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
     expectProhibitedCalls(harness.prohibited);
   });
 
+  it("preserves one attempted retrieve when provider response classification fails", async () => {
+    const harness = createHarness(async (_database, input) => {
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      throw new Error("SYNTHETIC_PROVIDER_RESPONSE_CLASSIFICATION_FAILURE");
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(
+      validEnvironment(),
+      harness.dependencies,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "INTERNAL_FAILURE",
+      providerRetrieveCount: 1,
+      durableRelease: "NOT_REPORTED",
+    });
+    expect(harness.transport).toHaveBeenCalledTimes(1);
+    expect(harness.recover).toHaveBeenCalledTimes(1);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("keeps provider count zero for an internal failure before target selection completes", async () => {
+    const harness = createHarness(undefined, {
+      loadTarget: () => Promise.reject(new Error("SYNTHETIC_PRE_PROVIDER_FAILURE")),
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(
+      validEnvironment(),
+      harness.dependencies,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "INTERNAL_FAILURE",
+      providerRetrieveCount: 0,
+      durableRelease: "NOT_REPORTED",
+    });
+    expect(harness.recover).not.toHaveBeenCalled();
+    expect(harness.transport).not.toHaveBeenCalled();
+    expectProhibitedCalls(harness.prohibited);
+  });
+
   it("exits zero for a bounded OUTCOME_UNKNOWN record without claiming financial success", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];

@@ -273,7 +273,7 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       "src/lib/payment/eximbay/bf4-contact.ts":
         "4ed7ff2665982d5b31708a1eb8564dc5e35870cee6614763f4819f3ffc73f660",
       "src/lib/payment/refund/refund-worker-container-supervisor.ts":
-        "4de6d807a7c58d0efede2857a0c0021420972508ece7756d80667466e000c628",
+        "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql":
         "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
     } as const;

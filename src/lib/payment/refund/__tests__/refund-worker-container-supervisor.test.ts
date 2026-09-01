@@ -156,7 +156,7 @@ describe("refund worker container supervisor", () => {
 
   it("runs the fixed CONTACTED reconciliation bundle once behind the private proxy", async () => {
     const proxy = runningChild({ closeOnTerm: 0 });
-    const terminal = '{"ok":true,"code":"CONTACTED_RECONCILIATION_COMPLETE"}\n';
+    const terminal = contactedReconciliationTerminal(1);
     const runner = completedChild(0, terminal, "");
     const harness = supervisorHarness([proxy, runner], { readiness: true });
 
@@ -175,6 +175,196 @@ describe("refund worker container supervisor", () => {
     });
     expect(harness.stdout).toEqual([terminal]);
     expect(harness.stderr).toEqual([]);
+  });
+
+  it.each([0, 1] as const)(
+    "relays a validated CONTACTED provider count %i after normal proxy cleanup",
+    async (providerRetrieveCount) => {
+      const proxy = runningChild({ closeOnTerm: 0 });
+      const terminal = contactedReconciliationTerminal(providerRetrieveCount);
+      const runner = completedChild(0, terminal, "");
+      const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+      const exit = await runRefundWorkerContainerSupervisor(
+        ["eximbay-contacted-reconciliation-once"],
+        CONTACTED_RECONCILIATION_ENV,
+        harness.output,
+        harness.dependencies,
+      );
+
+      expect(exit).toBe(0);
+      expect(harness.stdout).toEqual([terminal]);
+      expect(harness.stderr).toEqual([]);
+    },
+  );
+
+  it.each([0, 1] as const)(
+    "retains validated CONTACTED provider count %i when proxy cleanup is unconfirmed",
+    async (providerRetrieveCount) => {
+      const proxy = runningChild({ closeOnTerm: null });
+      const runner = completedChild(0, contactedReconciliationTerminal(providerRetrieveCount), "");
+      const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+      const exit = await runRefundWorkerContainerSupervisor(
+        ["eximbay-contacted-reconciliation-once"],
+        CONTACTED_RECONCILIATION_ENV,
+        harness.output,
+        harness.dependencies,
+      );
+
+      expect(exit).toBe(1);
+      expect(proxy.killCalls).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(harness.stdout).toEqual([]);
+      expect(harness.stderr).toEqual([
+        `{"ok":false,"code":"SYSTEMIC_FAILURE","providerRetrieveCount":${providerRetrieveCount}}\n`,
+      ]);
+    },
+  );
+
+  it("retains validated CONTACTED provider evidence after a ready proxy exits during work", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const runner = runningChild({ closeOnTerm: null });
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+    const result = runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+    await harness.spawned(2);
+
+    proxy.close(1, null);
+    runner.stdout.write(contactedReconciliationTerminal(1));
+    runner.close(0, null);
+
+    expect(await result).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual([
+      '{"ok":false,"code":"SYSTEMIC_FAILURE","providerRetrieveCount":1}\n',
+    ]);
+  });
+
+  it("keeps provider evidence unknown when the CONTACTED child cannot be spawned", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness([proxy], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+  });
+
+  it.each([
+    ["missing required terminal fields", '{"providerRetrieveCount":1}\n'],
+    ["unexpected terminal field", contactedReconciliationTerminalValue({
+      providerRetrieveCount: 1,
+      unexpected: "NOT_TRUSTED",
+    })],
+    ["malformed JSON", '{"providerRetrieveCount":1\n'],
+    ["multiple lines", `${contactedReconciliationTerminal(1)}${contactedReconciliationTerminal(1)}`],
+    ["oversized output", `${"x".repeat(64 * 1024)}\n`],
+  ])("does not trust CONTACTED provider evidence from %s", async (_name, terminal) => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const runner = completedChild(0, terminal, "");
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+  });
+
+  it("does not trust CONTACTED evidence when stdout and stderr are both nonempty", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const runner = completedChild(
+      0,
+      contactedReconciliationTerminal(1),
+      "UNTRUSTED_DIAGNOSTIC\n",
+    );
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(JSON.stringify(harness.stderr)).not.toContain("UNTRUSTED_DIAGNOSTIC");
+  });
+
+  it("retains a validated failed-child provider count through proxy cleanup failure", async () => {
+    const proxy = runningChild({ closeOnTerm: null });
+    const runner = completedChild(1, "", contactedReconciliationFailureTerminal(1));
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual([
+      '{"ok":false,"code":"SYSTEMIC_FAILURE","providerRetrieveCount":1}\n',
+    ]);
+  });
+
+  it.each([-1, 2, 1.5, "1", null])(
+    "rejects invalid CONTACTED providerRetrieveCount %j without trusting it",
+    async (providerRetrieveCount) => {
+      const proxy = runningChild({ closeOnTerm: 0 });
+      const runner = completedChild(0, contactedReconciliationTerminalValue({
+        providerRetrieveCount,
+      }), "");
+      const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+      const exit = await runRefundWorkerContainerSupervisor(
+        ["eximbay-contacted-reconciliation-once"],
+        CONTACTED_RECONCILIATION_ENV,
+        harness.output,
+        harness.dependencies,
+      );
+
+      expect(exit).toBe(1);
+      expect(harness.stdout).toEqual([]);
+      expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    },
+  );
+
+  it("does not trust a CONTACTED count when the child is signaled before a terminal", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const runner = runningChild({ closeOnTerm: null });
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+    const result = runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+    await harness.spawned(2);
+
+    runner.close(null, "SIGTERM");
+
+    expect(await result).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
   });
 
   it("rejects a wrong CONTACTED target before proxy or runner spawn", async () => {
@@ -724,4 +914,36 @@ function completedChild(exitCode: number, stdout: string, stderr: string): FakeC
 
 function runningChild(options: Readonly<{ closeOnTerm: number | null }>): FakeChild {
   return new FakeChild(() => undefined, options.closeOnTerm);
+}
+
+function contactedReconciliationTerminal(providerRetrieveCount: 0 | 1): string {
+  return contactedReconciliationTerminalValue({ providerRetrieveCount });
+}
+
+function contactedReconciliationTerminalValue(
+  overrides: Readonly<Record<string, unknown>>,
+): string {
+  return `${JSON.stringify({
+    ok: true,
+    code: "CONTACTED_RECONCILIATION_COMPLETE",
+    terminalClass: "RECONCILIATION_COMPLETED",
+    runId: "a764f61f4e4ba799ab16b318a676db65",
+    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+    disposition: "OUTCOME_UNKNOWN",
+    providerRetrieveCount: overrides.providerRetrieveCount,
+    durableRelease: "NOT_REPORTED",
+    ...overrides,
+  })}\n`;
+}
+
+function contactedReconciliationFailureTerminal(providerRetrieveCount: 0 | 1): string {
+  return `${JSON.stringify({
+    ok: false,
+    code: "INTERNAL_FAILURE",
+    terminalClass: "HOST_FAILURE",
+    runId: "a764f61f4e4ba799ab16b318a676db65",
+    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+    providerRetrieveCount,
+    durableRelease: "NOT_REPORTED",
+  })}\n`;
 }

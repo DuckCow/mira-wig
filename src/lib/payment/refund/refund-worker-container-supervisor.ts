@@ -12,8 +12,15 @@ import {
   parseCanonicalRefundCloudSqlDatabaseUrl,
 } from "./refund-sandbox-provider-free-preflight-environment";
 import { parseEximbayRefundCanaryEnvironment } from "./eximbay-refund-canary-environment";
-import { parseEximbayContactedReconciliationEnvironment } from
-  "./eximbay-contacted-reconciliation-environment";
+import {
+  EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+  EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+  parseEximbayContactedReconciliationEnvironment,
+} from "./eximbay-contacted-reconciliation-environment";
+import type {
+  EximbayContactedReconciliationDisposition,
+  EximbayContactedReconciliationResult,
+} from "./run-eximbay-contacted-reconciliation-once";
 import {
   TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
   TOSS_REFUND_SANDBOX_MERCHANT_BINDING,
@@ -196,6 +203,7 @@ async function runEximbayContactedReconciliationOnce(
   return runWithProxy(binding, Object.freeze({
     executable: process.execPath,
     args: Object.freeze([dependencies.eximbayContactedReconciliationBundle]),
+    resultSchema: "EXIMBAY_CONTACTED_RECONCILIATION",
   }), env, output, dependencies);
 }
 
@@ -284,7 +292,11 @@ function hasConnectionEnvironmentOverride(env: RuntimeEnvironment): boolean {
   ));
 }
 
-type ChildSpecification = Readonly<{ executable: string; args: readonly string[] }>;
+type ChildSpecification = Readonly<{
+  executable: string;
+  args: readonly string[];
+  resultSchema?: "EXIMBAY_CONTACTED_RECONCILIATION";
+}>;
 
 async function runWithProxy(
   binding: DatabaseBinding,
@@ -319,10 +331,47 @@ async function runWithProxy(
   signal.dispose();
   const proxyFailedWhileRunning = proxy.exitCode !== null || proxy.signalCode !== null;
   const proxyStopped = await stopChild(proxy, proxyExit, dependencies);
-  if (!workerResult || proxyFailedWhileRunning || !proxyStopped) {
-    return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
+  return finalizeProxiedChildResult(
+    childSpecification,
+    workerResult,
+    proxyFailedWhileRunning,
+    proxyStopped,
+    output,
+  );
+}
+
+async function finalizeProxiedChildResult(
+  childSpecification: ChildSpecification,
+  workerResult: ChildResult | null,
+  proxyFailedWhileRunning: boolean,
+  proxyStopped: boolean,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+): Promise<number> {
+  const evidence = trustedChildEvidence(childSpecification, workerResult);
+  if (!evidence) return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
+  if (proxyFailedWhileRunning || !proxyStopped) {
+    return writeStatic(output.stderr, systemicFailureLine(evidence.providerRetrieveCount), 1);
   }
-  return relayChildResult(workerResult, output);
+  return relayChildResult(evidence.result, output);
+}
+
+type TrustedChildEvidence = Readonly<{
+  result: ChildResult;
+  providerRetrieveCount: 0 | 1 | null;
+}>;
+
+function trustedChildEvidence(
+  specification: ChildSpecification,
+  result: ChildResult | null,
+): TrustedChildEvidence | null {
+  if (!result) return null;
+  if (specification.resultSchema !== "EXIMBAY_CONTACTED_RECONCILIATION") {
+    return Object.freeze({ result, providerRetrieveCount: null });
+  }
+  const providerRetrieveCount = validatedContactedReconciliationProviderRetrieveCount(result);
+  return providerRetrieveCount === null
+    ? null
+    : Object.freeze({ result, providerRetrieveCount });
 }
 
 function spawnChild(
@@ -430,7 +479,7 @@ async function probeProxyReadiness(
   }
 }
 
-type ChildResult = Readonly<{ line: string; exitCode: number }>;
+type ChildResult = Readonly<{ line: string; exitCode: number; value: unknown }>;
 
 async function captureChildResult(child: SpawnedChild): Promise<ChildResult | null> {
   let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
@@ -454,8 +503,10 @@ async function captureChildResult(child: SpawnedChild): Promise<ChildResult | nu
   if (overflow || exit.signal !== null || exit.code === null) return null;
   const selected = exit.code === 0 ? stdout : stderr;
   const other = exit.code === 0 ? stderr : stdout;
-  const line = exactOneJsonLine(selected, other);
-  return line ? Object.freeze({ line, exitCode: exit.code }) : null;
+  const terminal = exactOneJsonLine(selected, other);
+  return terminal
+    ? Object.freeze({ ...terminal, exitCode: exit.code })
+    : null;
 }
 
 function boundedAppend(
@@ -471,17 +522,165 @@ function boundedAppend(
   return Buffer.concat([existing, bytes]);
 }
 
-function exactOneJsonLine(selected: Buffer, other: Buffer): string | null {
+function exactOneJsonLine(
+  selected: Buffer,
+  other: Buffer,
+): Readonly<{ line: string; value: unknown }> | null {
   if (!hasExactLineTransport(selected, other)) return null;
   const withoutLf = selected.subarray(0, selected.length - 1);
   if (withoutLf.includes(0x0a) || withoutLf.includes(0x0d)) return null;
   const line = selected.toString("utf8");
   try {
     const parsed: unknown = JSON.parse(withoutLf.toString("utf8"));
-    return parsed && typeof parsed === "object" ? line : null;
+    return parsed && typeof parsed === "object"
+      ? Object.freeze({ line, value: parsed })
+      : null;
   } catch {
     return null;
   }
+}
+
+const CONTACTED_RECONCILIATION_SUCCESS_KEYS = Object.freeze([
+  "checkoutSessionId",
+  "code",
+  "disposition",
+  "durableRelease",
+  "ok",
+  "providerRetrieveCount",
+  "runId",
+  "terminalClass",
+]);
+const CONTACTED_RECONCILIATION_FAILURE_KEYS = Object.freeze([
+  "checkoutSessionId",
+  "code",
+  "durableRelease",
+  "ok",
+  "providerRetrieveCount",
+  "runId",
+  "terminalClass",
+]);
+const CONTACTED_RECONCILIATION_DISPOSITIONS = Object.freeze([
+  "RELEASED_AFTER_Q004",
+  "REPLAYED_ALREADY_RELEASED",
+  "TRANSACTION_OBSERVED",
+  "OUTCOME_UNKNOWN",
+  "STALE_OR_NOT_ELIGIBLE",
+  "RECOVERY_DISABLED",
+  "STATE_CHANGED",
+] as const satisfies readonly EximbayContactedReconciliationDisposition[]);
+type ContactedReconciliationFailureCode = Exclude<
+  EximbayContactedReconciliationResult["code"],
+  "CONTACTED_RECONCILIATION_COMPLETE"
+>;
+
+function validatedContactedReconciliationProviderRetrieveCount(
+  terminal: ChildResult,
+): 0 | 1 | null {
+  const value = terminal.value;
+  if (!isPlainRecord(value) || !hasFixedContactedReconciliationIdentity(value)) return null;
+  const providerRetrieveCount = value.providerRetrieveCount;
+  if (!isProviderRetrieveCount(providerRetrieveCount)) return null;
+  if (value.ok === true) {
+    return isValidContactedReconciliationSuccess(value, terminal.exitCode)
+      ? providerRetrieveCount
+      : null;
+  }
+  if (value.ok !== false) return null;
+  return isValidContactedReconciliationFailure(value, terminal.exitCode)
+    ? providerRetrieveCount
+    : null;
+}
+
+function isProviderRetrieveCount(value: unknown): value is 0 | 1 {
+  return Object.is(value, 0) || value === 1;
+}
+
+function isValidContactedReconciliationSuccess(
+  value: Record<string, unknown>,
+  exitCode: number,
+): boolean {
+  if (!isContactedReconciliationDisposition(value.disposition)) return false;
+  return [
+    hasExactKeys(value, CONTACTED_RECONCILIATION_SUCCESS_KEYS),
+    exitCode === 0,
+    value.code === "CONTACTED_RECONCILIATION_COMPLETE",
+    value.terminalClass === "RECONCILIATION_COMPLETED",
+    value.durableRelease === durableReleaseForDisposition(value.disposition),
+  ].every(Boolean);
+}
+
+function isValidContactedReconciliationFailure(
+  value: Record<string, unknown>,
+  exitCode: number,
+): boolean {
+  if (!isContactedReconciliationFailureCode(value.code)) return false;
+  return [
+    hasExactKeys(value, CONTACTED_RECONCILIATION_FAILURE_KEYS),
+    value.terminalClass === "HOST_FAILURE",
+    value.durableRelease === "NOT_REPORTED",
+    exitCode === contactedReconciliationFailureExitCode(value.code),
+  ].every(Boolean);
+}
+
+function contactedReconciliationFailureExitCode(
+  code: ContactedReconciliationFailureCode,
+): 1 | 78 {
+  return code === "CONFIG_INVALID" ? 78 : 1;
+}
+
+function hasFixedContactedReconciliationIdentity(value: Record<string, unknown>): boolean {
+  return value.runId === EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID
+    && value.checkoutSessionId === EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID;
+}
+
+function isContactedReconciliationDisposition(
+  value: unknown,
+): value is typeof CONTACTED_RECONCILIATION_DISPOSITIONS[number] {
+  return typeof value === "string"
+    && CONTACTED_RECONCILIATION_DISPOSITIONS.some((candidate) => candidate === value);
+}
+
+function durableReleaseForDisposition(
+  disposition: typeof CONTACTED_RECONCILIATION_DISPOSITIONS[number],
+): EximbayContactedReconciliationResult["durableRelease"] {
+  if (disposition === "RELEASED_AFTER_Q004") return "PERFORMED";
+  return disposition === "REPLAYED_ALREADY_RELEASED"
+    ? "OBSERVED_EXISTING"
+    : "NOT_REPORTED";
+}
+
+function isContactedReconciliationFailureCode(
+  value: unknown,
+): value is ContactedReconciliationFailureCode {
+  return value === "CONFIG_INVALID"
+    || value === "CREDENTIAL_UNAVAILABLE"
+    || value === "INTERNAL_FAILURE";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && Reflect.getPrototypeOf(value) === Object.prototype;
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length
+    && keys.every((key, index) => key === expected[index]);
+}
+
+function contactedReconciliationSystemicFailureLine(
+  providerRetrieveCount: 0 | 1,
+): string {
+  return `{"ok":false,"code":"SYSTEMIC_FAILURE","providerRetrieveCount":${providerRetrieveCount}}\n`;
+}
+
+function systemicFailureLine(providerRetrieveCount: 0 | 1 | null): string {
+  return providerRetrieveCount === null
+    ? SYSTEMIC_FAILURE_LINE
+    : contactedReconciliationSystemicFailureLine(providerRetrieveCount);
 }
 
 function hasExactLineTransport(selected: Buffer, other: Buffer): boolean {

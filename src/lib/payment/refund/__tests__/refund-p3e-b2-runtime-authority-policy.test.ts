@@ -262,7 +262,7 @@ describe("P3E-B2 provider-free preflight runtime authority", () => {
       "infra/refund-sandbox/p3e-b2/foundation/cloud-sql.tf":
         "27ad2958fa386c39a84b23528f8acbedb0e6b63891873db5ce0d7bb30e0f2b14",
       "src/lib/payment/refund/refund-worker-container-supervisor.ts":
-        "4e3334cb48744d2e5b7d89d07af00d3c52fe4d7f67df385393210d5b113194d9",
+        "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
       "src/lib/payment/refund/refund-sandbox-provider-free-preflight-environment.ts":
         "838e5d1405ba1330d334b4f9006ab753f6dba9c59533e3c1bcc04b9f960ebe27",
       "infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf":
