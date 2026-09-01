@@ -121,7 +121,7 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
     );
   });
 
-  it("admits the new bootstrap image only for the exact role-grant re-entry mode", () => {
+  it("binds the exact current bootstrap image independently of role lifecycle mode", () => {
     const variables = readFileSync(
       join(ROOT, "infra/refund-sandbox/p3e-b2/database-bootstrap/variables.tf"),
       "utf8",
@@ -139,9 +139,15 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
     expect(locals).toContain('"apply-business-state-readback-role-grants",');
     expect(locals).toContain('"revoke-business-state-readback-role-grants",');
     expect(locals).toContain("], var.bootstrap_mode)");
+    expect(locals).toContain("job_source_commit    = var.source_commit");
+    expect(locals).toContain("job_image_digest_uri = var.bootstrap_image_digest_uri");
     expect(checks).toContain("var.temporary_cloud_sql_access_authorized");
-    expect(checks).toContain("var.readback_source_commit != null");
-    expect(checks).toContain("var.readback_bootstrap_image_digest_uri != null");
+    expect(variables).toContain("d908d71b5de5dc4223db77268719ed9e97277253");
+    expect(variables).toContain(
+      "sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3",
+    );
+    expect(variables).not.toContain('variable "readback_source_commit"');
+    expect(variables).not.toContain('variable "readback_bootstrap_image_digest_uri"');
   });
 });
 

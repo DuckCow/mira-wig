@@ -398,17 +398,19 @@ contains no Cloud SQL Client or Instance User instance and no credential-secret 
 Adder member. The six formerly managed IAM members remain historical Git/state evidence; their
 cloud retirement is already complete.
 
-The Job now binds the published mode-capable bootstrap image at digest
+The Job now binds the current published mode-capable bootstrap image at digest
+`sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
+from source commit `d908d71b5de5dc4223db77268719ed9e97277253`. Its predecessor
 `sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`
-from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. It has one task, parallelism
+from source `4a6f2967be6de4526fa7b47d414d1cbaec600783` remains historical provenance
+only. It has one task, parallelism
 one, zero retries, digest-only image identity, Direct VPC
 `ALL_TRAFFIC`, and the existing `refund-provider-free` firewall tag. Terraform owns a bounded
-`bootstrap_mode` selector: `check` is the safe default, and the only other selectable values are
-`apply-contacted-reconciliation-role-grants` and `restore-canary-refund-role-grants`. The Job's
-sole argument derives from this selector; Cloud Run execution overrides are not its control
-surface, and selecting a mode neither enables the separate default-false temporary Cloud SQL IAM
-gate nor executes the Job. The image itself also retains the non-selectable-by-this-input
-`apply-canary-role-grants` capability, while
+`bootstrap_mode` selector: `check` is the safe default and the closed allowlist is synchronized
+with the current image's 14 exact entrypoint modes. Current image identity is independent of mode,
+so mode transitions cannot restore the predecessor. The Job's sole argument derives from this
+selector; Cloud Run execution overrides are not its control surface, and selecting a mode neither
+enables the separate default-false temporary Cloud SQL IAM gate nor executes the Job.
 `restore-canary-refund-role-grants` reconstructs the canonical reviewed refund-canary authority. Explicit
 credential modes are the initial `materialize-application-credentials` `(0,0)`
 path and the exact `recover-canary-application-credential` `(1,0)` partial-state path. No scheduler,

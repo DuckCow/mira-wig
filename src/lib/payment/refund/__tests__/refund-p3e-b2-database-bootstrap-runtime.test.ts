@@ -227,11 +227,32 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(contract.image.mutatingModes).toEqual([
       "apply",
       "apply-canary-role-grants",
+      "apply-synthetic-sale-role-grants",
       "apply-contacted-reconciliation-role-grants",
+      "apply-business-state-readback-role-grants",
+      "revoke-business-state-readback-role-grants",
+      "materialize-synthetic-sale-market-precondition",
+      "restore-canary-refund-role-grants",
+      "materialize-eximbay-canary-target",
+      "issue-eximbay-canary-approval",
       "materialize-application-credentials",
       "recover-canary-application-credential",
-      "restore-canary-refund-role-grants",
     ]);
+    expect(contract.image).toMatchObject({
+      authority: "CURRENT_REVIEWED_EXACT_IMMUTABLE",
+      modeSelection: "INDEPENDENT_OF_BOOTSTRAP_MODE",
+      digestUri:
+        "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3",
+      configDigest: "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6",
+      sourceCommit: "d908d71b5de5dc4223db77268719ed9e97277253",
+      predecessor: {
+        digestUri:
+          "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086",
+        configDigest: "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72",
+        sourceCommit: "4a6f2967be6de4526fa7b47d414d1cbaec600783",
+        status: "HISTORICAL_PROVENANCE_ONLY",
+      },
+    });
     expect(contract.job.explicitCredentialArguments).toEqual([
       "materialize-application-credentials",
       "recover-canary-application-credential",
@@ -242,8 +263,19 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       owner: "TERRAFORM",
       allowedModes: [
         "check",
+        "apply",
+        "apply-canary-role-grants",
+        "apply-synthetic-sale-role-grants",
         "apply-contacted-reconciliation-role-grants",
+        "apply-business-state-readback-role-grants",
+        "revoke-business-state-readback-role-grants",
+        "contacted-reconciliation-business-state-readback",
+        "materialize-synthetic-sale-market-precondition",
         "restore-canary-refund-role-grants",
+        "materialize-eximbay-canary-target",
+        "issue-eximbay-canary-approval",
+        "materialize-application-credentials",
+        "recover-canary-application-credential",
       ],
       defaultMode: "check",
       jobArgumentsBinding: ["var.bootstrap_mode"],
@@ -265,6 +297,25 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       canaryVersionCount: 0,
       preflightPayloadAccess: "NONE",
     });
+  });
+
+  it("keeps the Terraform mode selector exact and execution-free", () => {
+    const variables = readFileSync(
+      join(ROOT, "infra/refund-sandbox/p3e-b2/database-bootstrap/variables.tf"),
+      "utf8",
+    );
+    const main = readFileSync(
+      join(ROOT, "infra/refund-sandbox/p3e-b2/database-bootstrap/main.tf"),
+      "utf8",
+    );
+    const selector = /variable "bootstrap_mode"[\s\S]*?contains\(\[([\s\S]*?)\], var\.bootstrap_mode\)/u
+      .exec(variables)?.[1];
+    expect(selector).toBeDefined();
+    expect([...selector?.matchAll(/"([^"]+)"/gu) ?? []].map((match) => match[1])).toEqual(
+      contract.job.terraformModeSelector.allowedModes,
+    );
+    expect(main).toContain("args  = [var.bootstrap_mode]");
+    expect(main).not.toMatch(/google_cloud_run_v2_job_execution|null_resource|local-exec|remote-exec/iu);
   });
 
   it("freezes the private automatic-IAM proxy vector", () => {

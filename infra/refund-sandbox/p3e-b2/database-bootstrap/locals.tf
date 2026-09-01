@@ -25,20 +25,12 @@ locals {
     }
   } : {}
   credential_secret_iam = {}
-  readback_role_grant_mode = contains([
+  readback_role_lifecycle_mode = contains([
     "apply-business-state-readback-role-grants",
     "revoke-business-state-readback-role-grants",
   ], var.bootstrap_mode)
-  job_source_commit = (
-    local.readback_role_grant_mode && var.readback_source_commit != null
-    ? var.readback_source_commit
-    : var.source_commit
-  )
-  job_image_digest_uri = (
-    local.readback_role_grant_mode && var.readback_bootstrap_image_digest_uri != null
-    ? var.readback_bootstrap_image_digest_uri
-    : var.bootstrap_image_digest_uri
-  )
+  job_source_commit    = var.source_commit
+  job_image_digest_uri = var.bootstrap_image_digest_uri
   job_environment = {
     MIRA_DB_BOOTSTRAP_PROJECT_ID               = var.project_id
     MIRA_DB_BOOTSTRAP_REGION                   = local.region

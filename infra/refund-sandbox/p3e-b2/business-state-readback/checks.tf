@@ -18,6 +18,9 @@ check "machine_contract_alignment" {
       local.contract.runtime.owner == "DATABASE_BOOTSTRAP_BOUNDED_READBACK" &&
       local.contract.runtime.job == local.job_name &&
       local.contract.runtime.command == local.command &&
+      local.contract.runtime.imageDigestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
+      local.contract.runtime.imageConfigDigest == "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6" &&
+      local.contract.runtime.sourceCommit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
       local.contract.runtime.databaseUser == local.iam_database_username &&
       local.contract.runtime.providerSecretAccess == false &&
       local.contract.runtime.executionOnApply == false &&

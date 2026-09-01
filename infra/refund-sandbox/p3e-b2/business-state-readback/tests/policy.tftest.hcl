@@ -20,8 +20,8 @@ run "materialized_shape_is_exact_and_one_shot" {
 
   variables {
     runtime_materialized       = true
-    source_commit              = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    source_commit              = "d908d71b5de5dc4223db77268719ed9e97277253"
+    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
   }
 
   assert {
@@ -37,6 +37,8 @@ run "materialized_shape_is_exact_and_one_shot" {
       google_cloud_run_v2_job.readback["runtime"].template[0].task_count == 1 &&
       google_cloud_run_v2_job.readback["runtime"].template[0].parallelism == 1 &&
       google_cloud_run_v2_job.readback["runtime"].template[0].template[0].max_retries == 0 &&
+      google_cloud_run_v2_job.readback["runtime"].template[0].template[0].containers[0].image ==
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
       google_cloud_run_v2_job.readback["runtime"].template[0].template[0].containers[0].args == tolist(["contacted-reconciliation-business-state-readback"]) &&
       google_cloud_run_v2_job.readback["runtime"].template[0].template[0].vpc_access[0].network_interfaces[0].tags == tolist(["refund-provider-free"])
     )
@@ -52,4 +54,16 @@ run "reject_materialization_without_reviewed_image" {
   }
 
   expect_failures = [check.materialization_gate]
+}
+
+run "reject_arbitrary_materialization_image" {
+  command = plan
+
+  variables {
+    runtime_materialized       = true
+    source_commit              = "d908d71b5de5dc4223db77268719ed9e97277253"
+    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+
+  expect_failures = [var.bootstrap_image_digest_uri]
 }

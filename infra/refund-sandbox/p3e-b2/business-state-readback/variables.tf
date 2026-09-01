@@ -11,8 +11,8 @@ variable "source_commit" {
   nullable    = true
 
   validation {
-    condition     = var.source_commit == null || can(regex("^[0-9a-f]{40}$", var.source_commit))
-    error_message = "source_commit must be null or one lowercase 40-character Git commit."
+    condition     = var.source_commit == null || var.source_commit == "d908d71b5de5dc4223db77268719ed9e97277253"
+    error_message = "source_commit must be null or the exact current reviewed bootstrap source commit."
   }
 }
 
@@ -23,10 +23,10 @@ variable "bootstrap_image_digest_uri" {
   nullable    = true
 
   validation {
-    condition = var.bootstrap_image_digest_uri == null || can(regex(
-      "^asia-northeast3-docker\\.pkg\\.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:[0-9a-f]{64}$",
-      var.bootstrap_image_digest_uri,
-    ))
-    error_message = "bootstrap_image_digest_uri must be null or the exact immutable bootstrap repository digest URI."
+    condition = (
+      var.bootstrap_image_digest_uri == null ||
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3"
+    )
+    error_message = "bootstrap_image_digest_uri must be null or the exact current reviewed bootstrap digest."
   }
 }

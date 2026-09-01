@@ -46,16 +46,45 @@ check "exact_machine_contract" {
       local.contract.migrations.count == local.migration_count &&
       local.contract.migrations.sha256 == local.migration_sha256 &&
       local.contract.image.digestUri == var.bootstrap_image_digest_uri &&
-      local.contract.image.configDigest == "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72" &&
+      local.contract.image.configDigest == "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6" &&
       local.contract.image.sourceCommit == var.source_commit &&
-      contains(local.contract.image.mutatingModes, "apply-contacted-reconciliation-role-grants") &&
-      contains(local.contract.image.mutatingModes, "restore-canary-refund-role-grants") &&
+      local.contract.image.authority == "CURRENT_REVIEWED_EXACT_IMMUTABLE" &&
+      local.contract.image.modeSelection == "INDEPENDENT_OF_BOOTSTRAP_MODE" &&
+      local.contract.image.predecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086" &&
+      local.contract.image.predecessor.configDigest == "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72" &&
+      local.contract.image.predecessor.sourceCommit == "4a6f2967be6de4526fa7b47d414d1cbaec600783" &&
+      local.contract.image.predecessor.status == "HISTORICAL_PROVENANCE_ONLY" &&
+      local.contract.image.mutatingModes == [
+        "apply",
+        "apply-canary-role-grants",
+        "apply-synthetic-sale-role-grants",
+        "apply-contacted-reconciliation-role-grants",
+        "apply-business-state-readback-role-grants",
+        "revoke-business-state-readback-role-grants",
+        "materialize-synthetic-sale-market-precondition",
+        "restore-canary-refund-role-grants",
+        "materialize-eximbay-canary-target",
+        "issue-eximbay-canary-approval",
+        "materialize-application-credentials",
+        "recover-canary-application-credential",
+      ] &&
       local.contract.job.terraformModeSelector.input == "bootstrap_mode" &&
       local.contract.job.terraformModeSelector.owner == "TERRAFORM" &&
       local.contract.job.terraformModeSelector.allowedModes == [
         "check",
+        "apply",
+        "apply-canary-role-grants",
+        "apply-synthetic-sale-role-grants",
         "apply-contacted-reconciliation-role-grants",
+        "apply-business-state-readback-role-grants",
+        "revoke-business-state-readback-role-grants",
+        "contacted-reconciliation-business-state-readback",
+        "materialize-synthetic-sale-market-precondition",
         "restore-canary-refund-role-grants",
+        "materialize-eximbay-canary-target",
+        "issue-eximbay-canary-approval",
+        "materialize-application-credentials",
+        "recover-canary-application-credential",
       ] &&
       local.contract.job.terraformModeSelector.defaultMode == "check" &&
       local.contract.job.terraformModeSelector.jobArgumentsBinding == ["var.bootstrap_mode"] &&
@@ -69,13 +98,9 @@ check "exact_machine_contract" {
   }
 }
 
-check "business_state_readback_role_grant_reentry" {
+check "business_state_readback_role_lifecycle_reentry" {
   assert {
-    condition = !local.readback_role_grant_mode || (
-      var.temporary_cloud_sql_access_authorized &&
-      var.readback_source_commit != null &&
-      var.readback_bootstrap_image_digest_uri != null
-    )
-    error_message = "The readback role-grant mode requires explicit temporary Cloud SQL admission and the reviewed readback-capable source/image."
+    condition     = !local.readback_role_lifecycle_mode || var.temporary_cloud_sql_access_authorized
+    error_message = "The readback role lifecycle requires explicit temporary Cloud SQL admission; the current exact image/source remain mode-independent."
   }
 }

@@ -91,14 +91,18 @@ project-level Secret Manager role is admitted.
 
 ## Image and modes
 
-The retained Job is source-bound to the published mode-capable image
-`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`,
-config digest `sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72`,
-from source commit `4a6f2967be6de4526fa7b47d414d1cbaec600783`. Terraform owns one bounded
-`bootstrap_mode` selector whose default is `check` and whose only other values are
-`apply-contacted-reconciliation-role-grants` and `restore-canary-refund-role-grants`; the Cloud
-Run Job's sole argument derives directly from that selector. Cloud Run execution overrides are not
-the control surface, and Terraform mode selection does not authorize or execute the Job.
+The retained Job is source-bound to the current published mode-capable image
+`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`,
+config digest `sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6`,
+from source commit `d908d71b5de5dc4223db77268719ed9e97277253`. Its historical predecessor is
+`sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086`
+from source `4a6f2967be6de4526fa7b47d414d1cbaec600783`; that identity is provenance only and
+is no longer selectable as the current Job image. Terraform owns one exact bounded
+`bootstrap_mode` selector whose default is `check`. Its allowlist is synchronized with the
+current image's closed 14-mode entrypoint allowlist, while image identity remains independent of
+mode. The Cloud Run Job's sole argument derives directly from that selector. Cloud Run execution
+overrides are not the control surface, and Terraform mode selection does not authorize or execute
+the Job.
 
 The build context is a normalized temporary allowlist, never the repository root. It contains a
 minimal pinned npm dependency set, Prisma configuration/schema, all 41 exact migrations, the
@@ -157,7 +161,8 @@ BOOTSTRAP_CREDENTIAL_SECRET_IAM_GRANTS: ZERO_DESIRED
 BOOTSTRAP_SQL_IAM_DB_IDENTITY: RETAINED
 CLOUDSQLSUPERUSER_MEMBERSHIP: RETAINED
 BOOTSTRAP_JOB: RETAINED_DORMANT_DEFAULT_CHECK
-BOOTSTRAP_IMAGE: MODE_CAPABLE_CC1D0E7_EXACT_DIGEST_BOUND
+BOOTSTRAP_IMAGE: CURRENT_MODE_INDEPENDENT_89BAE2D_EXACT_DIGEST_BOUND
+PREDECESSOR_BOOTSTRAP_IMAGE: HISTORICAL_CC1D0E7_PROVENANCE_ONLY
 CONTACTED_RECONCILIATION_GRANT_MODE: AVAILABLE_SEPARATELY_AUTHORIZED
 CANONICAL_REFUND_GRANT_RESTORE_MODE: AVAILABLE_SEPARATELY_AUTHORIZED
 BOOTSTRAP_SERVICE_ACCOUNT: RETAINED_DORMANT
