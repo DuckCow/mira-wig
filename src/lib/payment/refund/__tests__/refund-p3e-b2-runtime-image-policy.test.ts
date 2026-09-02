@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import currentAuthority from
-  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v5.json";
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v6.json";
 import historicalSourceAuthority from
   "./fixtures/refund-p3e-b2-r2a-historical-source-v1.json";
 import {
@@ -179,10 +179,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      manifestDigest: "cba5eb81b53e9ca8b57386fda4f76a0857719617d5fe85bfc886cb4df4a2bee9",
-      fileCount: 209,
-      repositoryGraphInputCount: 160,
-      packagedGraphInputCount: 374,
+      manifestDigest: currentAuthority.buildContext.manifestSha256,
+      fileCount: currentAuthority.buildContext.fileCount,
+      repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
+      packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
       entrypointCount: 5,
       temporaryContextsRemoved: true,
     });

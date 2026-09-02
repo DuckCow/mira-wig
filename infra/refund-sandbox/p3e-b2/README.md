@@ -368,12 +368,12 @@ purpose-specific service account, one exact-instance-conditioned Cloud SQL Clien
 resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the gate to false
 retires those five resources through the same Terraform state.
 
-The Job binds only the child-terminal-corrected refund-worker digest
-`sha256:e121bdc5bb51cc39b1076dd969a5dae1daed448cd066b9370c24c3386d83afd4`,
-source `820feba705b195d775a071cac0cb6b5c7ab7c377`, and immutable image-policy-v5
-authority `ce703401c5b17cd799a8e6ffb01c9a1337351ddfe180744345e6a551b9eeb398`, plus
+The Job binds only the expiry-deadlock-corrected refund-worker digest
+`sha256:809bffa908adc61dea85f69445e92069781a9a58673ffb912790e692d30d4c1b`,
+source `22d0194c0a8bb4709b97056d68db21cabc65c24e`, and immutable image-policy-v6
+authority `8cb641f5f945ce392d19c7b410824f356e205704c0e90f275821d412b2d5979d`, plus
 command `eximbay-contacted-reconciliation-once`. The superseded
-`sha256:f242ed87bf818e4d61f41bb016bb9b031603e16e1674008515b2020fee00475b`
+`sha256:e121bdc5bb51cc39b1076dd969a5dae1daed448cd066b9370c24c3386d83afd4`
 artifact remains historical provenance only. The run ID
 `a764f61f4e4ba799ab16b318a676db65` and CheckoutSession
 `cmthg2mzu000001s6iuvx7u5x` are fixed in source; payment, provider-order, user, command, argument,
