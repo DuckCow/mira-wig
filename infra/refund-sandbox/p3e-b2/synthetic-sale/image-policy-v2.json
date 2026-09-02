@@ -1,0 +1,157 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-synthetic-sale-image-policy/v2",
+  "status": "CURRENT_SUCCESSOR",
+  "parentAuthority": {
+    "policyPath": "infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v1.json",
+    "contractVersion": "mira-refund-p3e-b2-synthetic-sale-image-policy/v1",
+    "sha256": "78b3bcdc0cc63b2af2f6f242cdd0405b68ef3e40c71b31aa7de9d4b6c90e130f",
+    "status": "HISTORICAL_DEFECTIVE_AUTHORITY",
+    "mismatchClass": "POLICY_METADATA_DEFECT",
+    "defectiveField": "artifact.manifestSize",
+    "defectiveValue": 2700,
+    "measurementSemantics": "COMPACT_JSON_RESERIALIZATION_BYTE_LENGTH",
+    "measurementSha256": "bc21b94e3a011e690838e98125664e3d980346dde504136c801be4ac7bc8d4bb"
+  },
+  "predecessorArtifact": {
+    "manifestDigest": "sha256:2ee808d3ea1ba247c860262f56a7fe64cdca66b6a97594c6e9265dbcfebbe60e",
+    "sourceCommit": "88f4e1b2ef1e2ec6cc038c253befb673baabe7a4"
+  },
+  "sourceAuthority": {
+    "commit": "061b04b4969533a0f28a27dba75102842462d848",
+    "tree": "f24a70c9432c2d0c9db37ddbcb676ffcd5a13ea9",
+    "parent": "938671b254c7ca304404da859922771b3ab29b2e"
+  },
+  "buildContext": {
+    "manifestSha256": "99aaf88cd93dd42686db216f3990135f0fb331d9586b1a6dcd2ec122a3d7eaf3",
+    "fileCount": 9,
+    "canonicalGenerationCount": 1
+  },
+  "artifact": {
+    "manifestDigest": "sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e",
+    "manifestRawByteLength": 3251,
+    "configDigest": "sha256:26ffb63bde180a20e9028a257897ad3d3fc731d961e13c77f5c066a0ede3d8c7",
+    "configSize": 11689,
+    "platform": "linux/amd64",
+    "imageSize": 206472973,
+    "compressedLayerBytes": 206458033,
+    "layerCount": 15,
+    "layerDigests": [
+      "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+      "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+      "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+      "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+      "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+      "sha256:91cba110f2a75c6e30050c0b40be27bb4a2f930e37aa5153267ae52af2b67746",
+      "sha256:8c08af7cf92051ffb1489d284616f94d72f98e570aa94da83a84a70bbabc646e",
+      "sha256:50a718994d16a649f3c098725e59978cdf84902f0c680ee22965f3bf5cebc5fd",
+      "sha256:8ff22972365d7f2f4bfe55a5c85d7e8fdbebd7792146566c4205f9ef121ca5af",
+      "sha256:bd7095539d33c77720b67055b05bdf91fe9190f8222b8a6d375b5dd8e01e6c48",
+      "sha256:4c28ac694cbbb9f47c38addcd8eec6d14eb513284cfd7a97266aaef31e24106f",
+      "sha256:6d2d60cad7105b0b71cfb647757fdcc57fc777c4d12fca65674afda9a15721ff",
+      "sha256:17771265c59d7a296ca9b1cd6d318410887d96766a5ab40e5c162323bc14aa5e",
+      "sha256:4a161c56c82f9cb7a8f3ef2d3a603b38e73f02e7b2bfad4f9426b970b6ce1aec",
+      "sha256:6bd4a4d59d69f1cd7f0467ba5ce94fb27d8874c6ee3570a54d0067e5996df00e"
+    ],
+    "layerSizes": [
+      28232643,
+      3311,
+      49937657,
+      1712633,
+      446,
+      137,
+      93,
+      16264777,
+      129490,
+      93848571,
+      286,
+      57630,
+      4013,
+      470,
+      16265876
+    ],
+    "diffIds": [
+      "sha256:81f823b9617547261c907396f63f770deaa554748ff739bedfa650e3bb74595a",
+      "sha256:aa7bf5b94b92bc0951fa6a85f909392c3e1ed27b4c2fa82bc77fa84122a08416",
+      "sha256:96a9284da7b47faab75998a33dc2e56874756555b92480d023585ff8a6d153fd",
+      "sha256:a4bc3d2a20bafc5e6c89c5e2285579f620f118f81b5413c62edee3d2380bdaa2",
+      "sha256:f7d704e9049824a8bb8860609b030e2cfd2c380484325cda609bb4d578d0db3a",
+      "sha256:d515e9b305e167609fd8e5eb5231dceb421b5df4de02f713459a53e3e901d665",
+      "sha256:0ddafaa40b2af67d965e49d88699af0ba8a07bd1b547f9236548aa5aa58854a7",
+      "sha256:431b89f29d331d9b3ce1eba8aedf41820e17e27f907c9c275628b82d53a0a5c1",
+      "sha256:748f8da893d32f1ab09a7816ef8107a65740ed503a13f8cf123c86fa2728ebdb",
+      "sha256:31388b2c23bc380a5d946392b6e6758608a2cdd6c6de53c6649da5d2707edb3f",
+      "sha256:6eb5e7b27a0351f55258da362ef2d078477b04c1a3cf0743986e4d87eb08ea0f",
+      "sha256:5a131fd631fc5c92227df688386a066dc58893566e7762a1d8830951adc2cbb0",
+      "sha256:55dfa173cd4500942799564cd2ae7a2afed0783383530b9407177eb98e306bfc",
+      "sha256:bbb4c925b67a7cf63c7a8bc8f1721dda30cdb168be12f5eb1050de3a6f049539",
+      "sha256:d390940f3b1836360e4fa8db997c01f55a449017ea2512450bf1002c3dda5e41"
+    ]
+  },
+  "imageConfiguration": {
+    "user": "65532:65532",
+    "workdir": "/app",
+    "entrypoint": [
+      "/usr/local/bin/node",
+      "/app/server/synthetic-sale-server.mjs"
+    ],
+    "command": [],
+    "environmentNames": [
+      "PATH",
+      "NODE_VERSION",
+      "YARN_VERSION",
+      "NODE_ENV"
+    ],
+    "labels": {
+      "mira.refund.contract": "mira-refund-p3e-b2-synthetic-sale-service/v1",
+      "org.opencontainers.image.created": "1788130800",
+      "org.opencontainers.image.revision": "061b04b4969533a0f28a27dba75102842462d848",
+      "org.opencontainers.image.title": "mira-synthetic-sale"
+    }
+  },
+  "applicationClosure": {
+    "server": {
+      "path": "/app/server/synthetic-sale-server.mjs",
+      "size": 273147,
+      "sha256": "b30234171821309db6b7e9bacc60cfca7eee93c0cf0dd92c6a63a04bdf050578"
+    },
+    "browser": {
+      "path": "/app/browser/synthetic-sale-client.js",
+      "sha256": "ff6a63554a096e3c4478993a1c815a30c6236aab283e08e8b397d537174a48d5"
+    },
+    "serviceContract": {
+      "path": "/app/contracts/synthetic-sale-service-v1.json",
+      "sha256": "0be3627ee4026b5bb4aab70dc7af7bdd5b0f1809f8dee4c832a707316215b5ef"
+    },
+    "cloudSqlProxy": {
+      "path": "/usr/local/bin/cloud-sql-proxy",
+      "sha256": "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb"
+    }
+  },
+  "statusReadback": {
+    "operationIdentitySource": "CAPABILITY_DERIVED_RUN_IDENTITY",
+    "callerSuppliedCheckoutSessionId": "NOT_ADMITTED_BY_STATUS_ROUTE",
+    "transactionIsolation": "REPEATABLE_READ",
+    "providerCalls": 0,
+    "businessRowMutations": 0,
+    "arbitraryDatabaseReadAuthority": false,
+    "refundTargetIdentifiers": [
+      "checkoutSessionId",
+      "paymentId",
+      "providerOrderId",
+      "orderId"
+    ],
+    "duplicateGates": [
+      "PAYMENT_CARDINALITY",
+      "ORDER_CARDINALITY",
+      "AUDIT_CARDINALITY"
+    ],
+    "coherenceGate": "AMOUNT_CURRENCY_MISMATCH",
+    "providerPaymentKeyDisclosure": "PRESENCE_BOOLEAN_ONLY",
+    "secretValueDisclosure": "ABSENT"
+  },
+  "publication": {
+    "repository": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale",
+    "tag": "p3e-b2-061b04b49695",
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
+  }
+}

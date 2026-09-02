@@ -26,9 +26,10 @@ run "exact_temporary_service_graph" {
       output.backend_contract.normal_release_migration_or_import == "NOT_PART_OF_NORMAL_RELEASE" &&
       output.backend_contract.expected_initial_resource_count == 0 &&
       output.resource_manifest.resource_count == 6 &&
-      output.image_authority.policy_version == "V1" &&
-      output.image_authority.policy_sha256 == "78b3bcdc0cc63b2af2f6f242cdd0405b68ef3e40c71b31aa7de9d4b6c90e130f" &&
+      output.image_authority.policy_version == "V2" &&
+      output.image_authority.policy_sha256 == "727106ce002e3e69599704813040c5ebf865716dd7ece987877f1a323f9fb11a" &&
       output.image_authority.manifest_digest == "sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e" &&
+      output.image_authority.manifest_raw_bytes == 3251 &&
       output.image_authority.config_digest == "sha256:26ffb63bde180a20e9028a257897ad3d3fc731d961e13c77f5c066a0ede3d8c7" &&
       output.image_authority.arbitrary_db_query == false &&
       output.image_authority.business_mutations == 0 &&

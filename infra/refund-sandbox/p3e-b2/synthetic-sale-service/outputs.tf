@@ -35,6 +35,7 @@ output "image_authority" {
     source_tree        = local.current_source_tree
     context_sha256     = local.current_context_manifest_sha256
     manifest_digest    = local.current_manifest_digest
+    manifest_raw_bytes = local.current_manifest_raw_byte_length
     config_digest      = local.current_config_digest
     release_image      = local.current_release_image_digest_uri
     status_readback    = "EXACT_PROVIDER_FREE_REFUND_TARGET"
