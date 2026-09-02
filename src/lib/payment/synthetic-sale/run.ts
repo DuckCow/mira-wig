@@ -1,13 +1,8 @@
 import "server-only";
 
 import {
-  CheckoutSessionStatus,
-  OrderStatus,
-  PaymentAttemptLifecycle,
-  PaymentAttemptStatus,
   PaymentMode,
   PaymentProvider,
-  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import {
@@ -38,8 +33,11 @@ import {
 } from "./contract";
 import { materializeSyntheticSaleFixture, type SyntheticSaleFixture } from "./fixture";
 import { SessionException } from "@/lib/payment/session/types";
+import {
+  readSyntheticSaleStatus,
+  type SyntheticSaleStatusResult,
+} from "./status-readback";
 
-export type SyntheticSaleStatus = "WAITING" | "CONTACTED" | "SUCCEEDED" | "FAILED" | "AMBIGUOUS";
 type RuntimePhase = "READY" | "STARTING" | "CONTACTED";
 
 export type SyntheticSaleStartFailureStage =
@@ -76,7 +74,7 @@ export interface SyntheticSaleRunOwner {
   readonly capability: string;
   readonly runIdentity: string;
   start(): Promise<EximbayReadyHandoffV1>;
-  status(sessionId?: string): Promise<Readonly<{ state: SyntheticSaleStatus; sessionId?: string }>>;
+  status(sessionId?: string): Promise<SyntheticSaleStatusResult>;
 }
 
 export function createSyntheticSaleRunOwner(
@@ -115,7 +113,12 @@ export function createSyntheticSaleRunOwner(
     capability: configuration.capability,
     runIdentity,
     start,
-    status: (sessionId?: string) => readStatus(client, runIdentity, fixture, sessionId),
+    status: (sessionId?: string) => readSyntheticSaleStatus(
+      client,
+      runIdentity,
+      fixture?.sessionId,
+      sessionId,
+    ),
   });
 }
 
@@ -127,7 +130,7 @@ async function executeStart(
   onStage: (stage: SyntheticSaleStartFailureStage) => void,
 ): Promise<Readonly<{ fixture: SyntheticSaleFixture; handoff: EximbayReadyHandoffV1 }>> {
   onStage("DURABLE_PREFLIGHT");
-  const existing = await readStatus(client, runIdentity, null);
+  const existing = await readSyntheticSaleStatus(client, runIdentity);
   if (existing.state !== "WAITING" || existing.sessionId) {
     throw new Error("SYNTHETIC_SALE_ALREADY_STARTED");
   }
@@ -241,80 +244,4 @@ function isExactRouting(resolution: Readonly<{
   return resolution.selectedProvider === PaymentProvider.EXIMBAY
     && resolution.ruleId === SYNTHETIC_SALE_ROUTING_RULE
     && resolution.mode === PaymentMode.SANDBOX;
-}
-
-async function readStatus(
-  client: PrismaClient,
-  runIdentity: string,
-  knownFixture: SyntheticSaleFixture | null,
-  requestedSessionId?: string,
-): Promise<Readonly<{ state: SyntheticSaleStatus; sessionId?: string }>> {
-  const userId = `exsale_user_${runIdentity}`;
-  const sessions = await client.checkoutSession.findMany({
-    where: { userId },
-    orderBy: { createdAt: "asc" },
-    take: 2,
-    include: { payments: { orderBy: { createdAt: "asc" }, take: 2 }, order: true },
-  });
-  if (sessions.length === 0) return status("WAITING");
-  if (sessions.length !== 1) return status("AMBIGUOUS");
-  const session = sessions[0];
-  if (!session) return status("AMBIGUOUS");
-  return classifySession(session, requestedSessionId, knownFixture);
-}
-
-type StatusSession = Prisma.CheckoutSessionGetPayload<{
-  include: { payments: true; order: true };
-}>;
-
-function classifySession(
-  session: StatusSession,
-  requestedSessionId: string | undefined,
-  knownFixture: SyntheticSaleFixture | null,
-): Readonly<{ state: SyntheticSaleStatus; sessionId?: string }> {
-  if (invalidSessionIdentity(session.id, requestedSessionId, knownFixture)
-    || session.payments.length > 1) return status("AMBIGUOUS");
-  const payment = session.payments[0];
-  if (!payment) return status("WAITING", session.id);
-  return classifyPayment(session, payment);
-}
-
-function classifyPayment(
-  session: StatusSession,
-  payment: StatusSession["payments"][number],
-): Readonly<{ state: SyntheticSaleStatus; sessionId?: string }> {
-  if (payment.provider !== PaymentProvider.EXIMBAY || payment.mode !== PaymentMode.SANDBOX) {
-    return status("AMBIGUOUS", session.id);
-  }
-  if (isSucceeded(session, payment)) return status("SUCCEEDED", session.id);
-  if (payment.attemptLifecycle === PaymentAttemptLifecycle.OUTCOME_UNKNOWN) {
-    return status("AMBIGUOUS", session.id);
-  }
-  return status(payment.status === PaymentAttemptStatus.FAILED ? "FAILED" : "CONTACTED", session.id);
-}
-
-function invalidSessionIdentity(
-  sessionId: string,
-  requestedSessionId: string | undefined,
-  knownFixture: SyntheticSaleFixture | null,
-): boolean {
-  return (requestedSessionId !== undefined && requestedSessionId !== sessionId)
-    || (knownFixture !== null && knownFixture.sessionId !== sessionId);
-}
-
-function isSucceeded(
-  session: Readonly<{ status: CheckoutSessionStatus; order: null | Readonly<{ status: OrderStatus }> }>,
-  payment: Readonly<{ status: PaymentAttemptStatus; attemptLifecycle: PaymentAttemptLifecycle }>,
-): boolean {
-  return payment.status === PaymentAttemptStatus.SUCCEEDED
-    && payment.attemptLifecycle === PaymentAttemptLifecycle.FINALIZED
-    && session.status === CheckoutSessionStatus.COMPLETED
-    && session.order?.status === OrderStatus.PAID;
-}
-
-function status(
-  state: SyntheticSaleStatus,
-  sessionId?: string,
-): Readonly<{ state: SyntheticSaleStatus; sessionId?: string }> {
-  return Object.freeze(sessionId ? { state, sessionId } : { state });
 }

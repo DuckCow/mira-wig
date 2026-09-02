@@ -261,7 +261,44 @@ describe.sequential("temporary synthetic SALE authority", () => {
       await expect(bf4.text()).resolves.toBe("rescode=0000&resmsg=Success");
       expect(transport).toHaveBeenCalledTimes(2);
       await expectPositivePostconditions(restricted, run.runIdentity);
-      await expect(run.status()).resolves.toMatchObject({ state: "SUCCEEDED" });
+      const beforeReadback = await businessRowVersions(admin, run.runIdentity);
+      const exactStatus = await run.status();
+      expect(exactStatus).toMatchObject({
+        state: "SUCCEEDED",
+        exactReadback: {
+          checkoutSession: { status: "COMPLETED", amount: 100, currency: "USD" },
+          payment: {
+            count: 1,
+            provider: "EXIMBAY",
+            mode: "SANDBOX",
+            status: "SUCCEEDED",
+            providerPaymentKeyPresent: true,
+            financialSucceededAtPresent: true,
+          },
+          order: { count: 1, status: "PAID", amount: 100, currency: "USD" },
+          audit: { eximbayStatusEventCount: 1, processedEximbayStatusEventCount: 1 },
+          amountCurrencyCoherence: "EXACT",
+          refundTargetReady: true,
+          refundTargetReason: "READY",
+        },
+      });
+      expect(exactStatus.exactReadback?.checkoutSession.id).toBeTruthy();
+      expect(exactStatus.exactReadback?.payment.id).toBeTruthy();
+      expect(exactStatus.exactReadback?.payment.providerOrderId).toBeTruthy();
+      expect(exactStatus.exactReadback?.order.id).toBeTruthy();
+      expect(transport).toHaveBeenCalledTimes(2);
+      expect(ready).toHaveBeenCalledTimes(1);
+      expect(browserSdk.requestPay).toHaveBeenCalledTimes(1);
+      await expect(businessRowVersions(admin, run.runIdentity)).resolves.toEqual(beforeReadback);
+      const serializedStatus = JSON.stringify(exactStatus);
+      for (const forbidden of [
+        "synthetic-sale-fgkey",
+        transactionId,
+        API_KEY,
+        ROLE_PASSWORD,
+        databaseUrl,
+        "status-only-not-ready",
+      ]) expect(serializedStatus).not.toContain(forbidden);
 
       await restricted.$disconnect();
       restricted = null;
@@ -380,6 +417,29 @@ async function expectPositivePostconditions(client: PrismaClient, runIdentity: s
     select: { stock: true },
   })).resolves.toEqual({ stock: 0 });
   await expect(client.cartItem.count({ where: { userId } })).resolves.toBe(0);
+}
+
+async function businessRowVersions(admin: Client, runIdentity: string) {
+  const userId = `exsale_user_${runIdentity}`;
+  const result = await admin.query<{
+    tableName: string;
+    id: string;
+    rowVersion: string;
+  }>(`
+    SELECT 'CheckoutSession' AS "tableName", id, xmin::text AS "rowVersion"
+    FROM "CheckoutSession" WHERE "userId" = $1
+    UNION ALL
+    SELECT 'Payment', id, xmin::text FROM "Payment"
+    WHERE "checkoutSessionId" IN (SELECT id FROM "CheckoutSession" WHERE "userId" = $1)
+    UNION ALL
+    SELECT 'Order', id, xmin::text FROM "Order"
+    WHERE "checkoutSessionId" IN (SELECT id FROM "CheckoutSession" WHERE "userId" = $1)
+    UNION ALL
+    SELECT 'PaymentEvent', id, xmin::text FROM "PaymentEvent"
+    WHERE "checkoutSessionId" IN (SELECT id FROM "CheckoutSession" WHERE "userId" = $1)
+    ORDER BY "tableName", id
+  `, [userId]);
+  return result.rows;
 }
 
 async function expectNegativeBoundaries(adminUrl: string): Promise<void> {

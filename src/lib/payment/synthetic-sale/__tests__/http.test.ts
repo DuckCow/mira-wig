@@ -5,6 +5,7 @@ import type { EximbayReadyHandoffV1 } from "@/lib/payment/eximbay/sdk-handoff-co
 import { parseSyntheticSaleRuntimeConfiguration } from "../contract";
 import { createSyntheticSaleHttpHandler, handleNodeHttpRequest } from "../http";
 import { startFailureEvidence, type SyntheticSaleRunOwner } from "../run";
+import type { SyntheticSaleStatusResult } from "../status-readback";
 
 const CAPABILITY = "a".repeat(64);
 const ORIGIN = "https://mira-p3e-sbx-synthetic-sale-925882331349.asia-northeast3.run.app";
@@ -28,6 +29,34 @@ const HANDOFF: EximbayReadyHandoffV1 = Object.freeze({
     url: Object.freeze({ return_url: `${ORIGIN}/checkout/return/session`, status_url: `${ORIGIN}/api/payments/eximbay/status` }),
   }),
 });
+const EXACT_STATUS = Object.freeze({
+  state: "SUCCEEDED",
+  sessionId: "session-exact",
+  exactReadback: Object.freeze({
+    checkoutSession: Object.freeze({ id: "session-exact", status: "COMPLETED", amount: 100, currency: "USD" }),
+    payment: Object.freeze({
+      id: "payment-exact",
+      count: 1,
+      provider: "EXIMBAY",
+      mode: "SANDBOX",
+      status: "SUCCEEDED",
+      providerOrderId: "provider-order-exact",
+      providerPaymentKeyPresent: true,
+      financialSucceededAtPresent: true,
+    }),
+    order: Object.freeze({
+      id: "order-exact",
+      count: 1,
+      status: "PAID",
+      amount: 100,
+      currency: "USD",
+    }),
+    audit: Object.freeze({ eximbayStatusEventCount: 1, processedEximbayStatusEventCount: 1 }),
+    amountCurrencyCoherence: "EXACT",
+    refundTargetReady: true,
+    refundTargetReason: "READY",
+  }),
+}) satisfies SyntheticSaleStatusResult;
 
 describe("minimal synthetic SALE HTTP surface", () => {
   it("rejects project, provider, market, currency, MID, and LIVE drift", () => {
@@ -117,6 +146,18 @@ describe("minimal synthetic SALE HTTP surface", () => {
     expect(page.headers.get("Content-Security-Policy")).not.toContain("https://api.eximbay.com");
   });
 
+  it("serializes the exact bounded status representation without provider secrets", async () => {
+    const { handler } = fixture(EXACT_STATUS);
+    const response = await handler(new Request(`${ORIGIN}/synthetic-sale/${CAPABILITY}/status`));
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    expect(body).toEqual(EXACT_STATUS);
+    const serialized = JSON.stringify(body);
+    for (const forbidden of ["fgkey", "providerPaymentKeyValue", "unit-key", "DATABASE_URL"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
   it("projects arbitrary start failures into the exact safe evidence shape", () => {
     const raw = Object.assign(new Error("database-url=forbidden secret@example.test"), {
       code: "P2002",
@@ -141,7 +182,10 @@ describe("minimal synthetic SALE HTTP surface", () => {
   });
 });
 
-function fixture() {
+function fixture(statusResult: SyntheticSaleStatusResult = Object.freeze({
+  state: "WAITING",
+  sessionId: "session",
+})) {
   const configuration = parseSyntheticSaleRuntimeConfiguration(runtimeEnvironment());
   if (!configuration) throw new Error("configuration rejected");
   let invocation = 0;
@@ -149,7 +193,7 @@ function fixture() {
     invocation += 1;
     return invocation === 1 ? Promise.resolve(HANDOFF) : Promise.reject(new Error("already"));
   });
-  const status = vi.fn(() => Promise.resolve(Object.freeze({ state: "WAITING" as const, sessionId: "session" })));
+  const status = vi.fn(() => Promise.resolve(statusResult));
   const run: SyntheticSaleRunOwner = Object.freeze({
     capability: CAPABILITY,
     runIdentity: "b".repeat(32),
