@@ -194,6 +194,27 @@ must bind the exact bucket and prefix above and set `impersonate_service_account
 workspace multiplexing, human-owned fallback state, and migration/import as part of a normal release
 are forbidden. Its expected first remote state is empty; this source does not claim that state exists.
 
+Cloud Run/IAM readiness alone is not synthetic-sale live authority. The purpose-specific operator
+owner is `scripts/refund-p3e-b2-synthetic-sale-authority-lifecycle.ts`, governed by
+`contracts/synthetic-sale-authority-lifecycle-v1.json`. It requires this exact attended order:
+
+```text
+materialize-synthetic-sale-market-precondition
+-> apply-synthetic-sale-role-grants
+-> SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE / EXACT_EFFECTIVE_PRIVILEGES_VERIFIED
+-> materialize and read back mira-p3e-sbx-synthetic-sale as exact and Ready
+-> separately confirmed human Pay boundary
+-> retire the Service and purpose IAM
+-> restore-canary-refund-role-grants / EXACT_EFFECTIVE_PRIVILEGES_VERIFIED
+```
+
+Market remains bootstrap-owned reference state and runtime-read-only. A Market or synthetic-grant
+failure cannot reach Service materialization. Any failure after the synthetic grant, a human stop
+before Pay, or a terminal/uncertain sale outcome must retire the runtime before canonical refund
+authority is restored. Failure to prove runtime retirement blocks database restoration and requires
+safe-state recovery. The coordinator has no payment callback, provider transport, automatic click,
+or retry surface, and it introduces no Terraform state coupling or durable workflow state.
+
 ## Synthetic-sale image publication tag
 
 `scripts/build-synthetic-sale-image.mts` separately owns the immutable Artifact Registry publication

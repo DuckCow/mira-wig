@@ -1,0 +1,75 @@
+{
+  "schema": "mira-refund-p3e-b2-synthetic-sale-authority-lifecycle/v1",
+  "owner": "scripts/refund-p3e-b2-synthetic-sale-authority-lifecycle.ts",
+  "operationBinding": "EXACT_SYNTHETIC_RUN_ID_IN_PROCESS_NO_DURABLE_WORKFLOW_STATE",
+  "phases": [
+    {
+      "phase": "MARKET_PRECONDITION",
+      "mode": "materialize-synthetic-sale-market-precondition",
+      "requiredCode": "SYNTHETIC_SALE_MARKET_PRECONDITION_COMPLETE",
+      "requiredPostconditionRowCount": 1
+    },
+    {
+      "phase": "SYNTHETIC_DATABASE_AUTHORITY",
+      "mode": "apply-synthetic-sale-role-grants",
+      "requiredCode": "SYNTHETIC_SALE_ROLE_GRANTS_COMPLETE",
+      "requiredPostcondition": "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED"
+    },
+    {
+      "phase": "CLOUD_RUNTIME_AUTHORITY",
+      "service": "mira-p3e-sbx-synthetic-sale",
+      "requiredAuthority": "EXACT",
+      "requiredReady": true
+    },
+    {
+      "phase": "HUMAN_PAYMENT_BOUNDARY",
+      "authority": "HUMAN_CONFIRMATION_REQUIRED",
+      "automaticPaymentActions": 0
+    },
+    {
+      "phase": "CANONICAL_SAFE_STATE",
+      "order": [
+        "RETIRE_SYNTHETIC_RUNTIME_AND_PURPOSE_IAM",
+        "restore-canary-refund-role-grants"
+      ],
+      "requiredRestoreCode": "CANARY_REFUND_ROLE_GRANTS_RESTORED",
+      "requiredPostcondition": "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED"
+    }
+  ],
+  "liveAuthorityInvariant": {
+    "cloudRuntimeAuthorityAloneSufficient": false,
+    "databaseRuntimeAuthority": "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
+    "cloudRuntimeAuthority": "EXACT_AND_READY",
+    "combinedAuthority": "EXACT_ONLY_WHEN_DATABASE_AND_CLOUD_ARE_EXACT"
+  },
+  "safeStop": {
+    "marketPreconditionFailure": "NO_DATABASE_GRANT_NO_RUNTIME",
+    "databaseGrantFailure": "NO_RUNTIME",
+    "postGrantRuntimeFailure": "RETIRE_RUNTIME_THEN_RESTORE_CANONICAL_DATABASE_AUTHORITY",
+    "humanStopBeforePay": "RETIRE_RUNTIME_THEN_RESTORE_CANONICAL_DATABASE_AUTHORITY",
+    "uncertainSaleOutcome": "NO_PAYMENT_RETRY_RETIRE_RUNTIME_THEN_RESTORE_CANONICAL_DATABASE_AUTHORITY",
+    "restoreBeforeRuntimeRetirement": "FORBIDDEN"
+  },
+  "databasePrivilegeAuthority": {
+    "artifact": "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
+    "artifactSha256": "a414e4d5ddf1565e1d27763885c407cffbdc48c03487db8205302cc3c5cab470",
+    "newPrivilegesAdded": 0,
+    "market": {
+      "select": true,
+      "insert": false,
+      "update": false,
+      "delete": false
+    }
+  },
+  "terraformOwnership": {
+    "stateRootsRemainSeparate": true,
+    "syntheticServiceRootDatabaseResources": 0,
+    "crossRootTerraformCoupling": false
+  },
+  "providerBoundary": {
+    "readyCalls": 0,
+    "requestPayCalls": 0,
+    "saleCalls": 0,
+    "automaticRetries": 0
+  }
+}
