@@ -41,6 +41,8 @@ export const PROXY_READINESS_POLL_INTERVAL_MS = 250;
 const CHILD_OUTPUT_LIMIT_BYTES = 64 * 1024;
 const PROXY_STOP_BUDGET_MS = 2_000;
 const PROXY_KILL_BUDGET_MS = 1_000;
+const CONTACTED_SUPERVISOR_FAILURE_EVENT =
+  "CONTACTED_RECONCILIATION_SUPERVISOR_FAILURE";
 const INSTANCE_ENV_KEY = "REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME";
 const WORKER_BUNDLE = fileURLToPath(new URL("./refund-execution-worker.mjs", import.meta.url));
 const PREFLIGHT_BUNDLE = fileURLToPath(
@@ -323,17 +325,29 @@ async function runWithProxy(
   }
   const worker = spawnChild(childSpecification, env, dependencies);
   if (!worker) {
-    await stopChild(proxy, proxyExit, dependencies);
+    const proxyFailedWhileRunning = proxy.exitCode !== null || proxy.signalCode !== null;
+    const proxyStopped = await stopChild(proxy, proxyExit, dependencies);
+    if (childSpecification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION") {
+      return writeContactedSystemicFailure(
+        output.stderr,
+        contactedSupervisorFailureDiagnostic(
+          null,
+          "NOT_ATTEMPTED",
+          proxyLifecycle(proxyFailedWhileRunning, proxyStopped),
+        ),
+        null,
+      );
+    }
     return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
   }
   const signal = forwardTerminationSignals(worker);
-  const workerResult = await captureChildResult(worker);
+  const workerCapture = await captureChildResult(worker);
   signal.dispose();
   const proxyFailedWhileRunning = proxy.exitCode !== null || proxy.signalCode !== null;
   const proxyStopped = await stopChild(proxy, proxyExit, dependencies);
   return finalizeProxiedChildResult(
     childSpecification,
-    workerResult,
+    workerCapture,
     proxyFailedWhileRunning,
     proxyStopped,
     output,
@@ -342,17 +356,40 @@ async function runWithProxy(
 
 async function finalizeProxiedChildResult(
   childSpecification: ChildSpecification,
-  workerResult: ChildResult | null,
+  workerCapture: ChildCapture,
   proxyFailedWhileRunning: boolean,
   proxyStopped: boolean,
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
 ): Promise<number> {
-  const evidence = trustedChildEvidence(childSpecification, workerResult);
-  if (!evidence) return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
-  if (proxyFailedWhileRunning || !proxyStopped) {
-    return writeStatic(output.stderr, systemicFailureLine(evidence.providerRetrieveCount), 1);
+  const assessment = trustedChildEvidence(childSpecification, workerCapture);
+  const lifecycle = proxyLifecycle(proxyFailedWhileRunning, proxyStopped);
+  if (!assessment.evidence) {
+    return childSpecification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION"
+      ? writeContactedSystemicFailure(
+        output.stderr,
+        contactedSupervisorFailureDiagnostic(
+          workerCapture,
+          assessment.validation,
+          lifecycle,
+        ),
+        null,
+      )
+      : writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
   }
-  return relayChildResult(evidence.result, output);
+  if (proxyFailedWhileRunning || !proxyStopped) {
+    return childSpecification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION"
+      ? writeContactedSystemicFailure(
+        output.stderr,
+        contactedSupervisorFailureDiagnostic(workerCapture, assessment.validation, lifecycle),
+        assessment.evidence.providerRetrieveCount,
+      )
+      : writeStatic(
+        output.stderr,
+        systemicFailureLine(assessment.evidence.providerRetrieveCount),
+        1,
+      );
+  }
+  return relayChildResult(assessment.evidence.result, output);
 }
 
 type TrustedChildEvidence = Readonly<{
@@ -362,16 +399,26 @@ type TrustedChildEvidence = Readonly<{
 
 function trustedChildEvidence(
   specification: ChildSpecification,
-  result: ChildResult | null,
-): TrustedChildEvidence | null {
-  if (!result) return null;
+  capture: ChildCapture,
+): Readonly<{
+  evidence: TrustedChildEvidence | null;
+  validation: ChildValidationState;
+}> {
+  const result = capture.result;
+  if (!result) return Object.freeze({ evidence: null, validation: capture.validation });
   if (specification.resultSchema !== "EXIMBAY_CONTACTED_RECONCILIATION") {
-    return Object.freeze({ result, providerRetrieveCount: null });
+    return Object.freeze({
+      evidence: Object.freeze({ result, providerRetrieveCount: null }),
+      validation: "TRUSTED",
+    });
   }
-  const providerRetrieveCount = validatedContactedReconciliationProviderRetrieveCount(result);
-  return providerRetrieveCount === null
-    ? null
-    : Object.freeze({ result, providerRetrieveCount });
+  const validation = validateContactedReconciliationTerminal(result);
+  return validation.state === "TRUSTED"
+    ? Object.freeze({
+      evidence: Object.freeze({ result, providerRetrieveCount: validation.providerRetrieveCount }),
+      validation: validation.state,
+    })
+    : Object.freeze({ evidence: null, validation: validation.state });
 }
 
 function spawnChild(
@@ -403,10 +450,10 @@ async function runStandaloneChild(
       childEnvironment(env),
     );
     const signal = forwardTerminationSignals(child);
-    const result = await captureChildResult(child);
+    const capture = await captureChildResult(child);
     signal.dispose();
-    return result
-      ? relayChildResult(result, output)
+    return capture.result
+      ? relayChildResult(capture.result, output)
       : writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
   } catch {
     return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
@@ -480,17 +527,66 @@ async function probeProxyReadiness(
 }
 
 type ChildResult = Readonly<{ line: string; exitCode: number; value: unknown }>;
+type ChildProcessState = "NORMAL_EXIT" | "SIGNAL_TERMINATION" | "CLOSE_STATE_UNAVAILABLE";
+type ChildStreamState = "NOT_CAPTURED" | "EMPTY" | "STDOUT_ONLY" | "STDERR_ONLY" | "BOTH";
+type ProxyLifecycleState =
+  | "READY_CLEANUP_CONFIRMED"
+  | "READY_PREMATURE_EXIT"
+  | "READY_CLEANUP_UNCONFIRMED";
+type ChildValidationState =
+  | "NOT_ATTEMPTED"
+  | "TRUSTED"
+  | "OUTPUT_OVERFLOW"
+  | "SIGNAL_TERMINATION"
+  | "CLOSE_STATE_UNAVAILABLE"
+  | "MISSING_TERMINAL"
+  | "STREAM_CONTRACT_VIOLATION"
+  | "LINE_CONTRACT_VIOLATION"
+  | "INVALID_JSON"
+  | "NON_OBJECT_JSON"
+  | "INVALID_RECORD"
+  | "FIXED_IDENTITY_MISMATCH"
+  | "INVALID_PROVIDER_RETRIEVE_COUNT"
+  | "INVALID_OK"
+  | "SUCCESS_DISPOSITION_INVALID"
+  | "SUCCESS_KEY_SET_MISMATCH"
+  | "SUCCESS_EXIT_CODE_MISMATCH"
+  | "SUCCESS_CODE_MISMATCH"
+  | "SUCCESS_TERMINAL_CLASS_MISMATCH"
+  | "SUCCESS_DURABLE_RELEASE_MISMATCH"
+  | "FAILURE_CODE_INVALID"
+  | "FAILURE_KEY_SET_MISMATCH"
+  | "FAILURE_TERMINAL_CLASS_MISMATCH"
+  | "FAILURE_DURABLE_RELEASE_MISMATCH"
+  | "FAILURE_EXIT_CODE_MISMATCH";
+type ChildCapture = Readonly<{
+  processState: ChildProcessState;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  streamState: ChildStreamState;
+  outputOverflow: boolean;
+  result: ChildResult | null;
+  validation: ChildValidationState;
+}>;
+type TerminalCapture = Readonly<{
+  terminal: Readonly<{ line: string; value: unknown }> | null;
+  validation: ChildValidationState;
+}>;
 
-async function captureChildResult(child: SpawnedChild): Promise<ChildResult | null> {
+async function captureChildResult(child: SpawnedChild): Promise<ChildCapture> {
   let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let overflow = false;
+  let stdoutSeen = false;
+  let stderrSeen = false;
   const appendStdout = (chunk: Buffer | string) => {
+    stdoutSeen = true;
     stdout = boundedAppend(stdout, chunk, () => {
       overflow = true;
     });
   };
   const appendStderr = (chunk: Buffer | string) => {
+    stderrSeen = true;
     stderr = boundedAppend(stderr, chunk, () => {
       overflow = true;
     });
@@ -500,13 +596,62 @@ async function captureChildResult(child: SpawnedChild): Promise<ChildResult | nu
   const exit = await observeExit(child);
   child.stdout.removeListener("data", appendStdout);
   child.stderr.removeListener("data", appendStderr);
-  if (overflow || exit.signal !== null || exit.code === null) return null;
+  const processState = childProcessState(exit);
+  const streams = childStreamState(stdoutSeen, stderrSeen);
+  if (overflow) {
+    return childCapture(processState, exit, streams, true, null, "OUTPUT_OVERFLOW");
+  }
+  if (exit.signal !== null) {
+    return childCapture(processState, exit, streams, false, null, "SIGNAL_TERMINATION");
+  }
+  if (exit.code === null) {
+    return childCapture(processState, exit, streams, false, null, "CLOSE_STATE_UNAVAILABLE");
+  }
   const selected = exit.code === 0 ? stdout : stderr;
   const other = exit.code === 0 ? stderr : stdout;
   const terminal = exactOneJsonLine(selected, other);
-  return terminal
-    ? Object.freeze({ ...terminal, exitCode: exit.code })
-    : null;
+  return terminal.terminal
+    ? childCapture(
+      processState,
+      exit,
+      streams,
+      false,
+      Object.freeze({ ...terminal.terminal, exitCode: exit.code }),
+      "TRUSTED",
+    )
+    : childCapture(processState, exit, streams, false, null, terminal.validation);
+}
+
+function childCapture(
+  processState: ChildProcessState,
+  exit: Readonly<{ code: number | null; signal: NodeJS.Signals | null }>,
+  streamState: ChildStreamState,
+  outputOverflow: boolean,
+  result: ChildResult | null,
+  validation: ChildValidationState,
+): ChildCapture {
+  return Object.freeze({
+    processState,
+    exitCode: exit.code,
+    signal: exit.signal,
+    streamState,
+    outputOverflow,
+    result,
+    validation,
+  });
+}
+
+function childProcessState(
+  exit: Readonly<{ code: number | null; signal: NodeJS.Signals | null }>,
+): ChildProcessState {
+  if (exit.signal !== null) return "SIGNAL_TERMINATION";
+  return exit.code === null ? "CLOSE_STATE_UNAVAILABLE" : "NORMAL_EXIT";
+}
+
+function childStreamState(stdoutSeen: boolean, stderrSeen: boolean): ChildStreamState {
+  if (stdoutSeen && stderrSeen) return "BOTH";
+  if (stdoutSeen) return "STDOUT_ONLY";
+  return stderrSeen ? "STDERR_ONLY" : "EMPTY";
 }
 
 function boundedAppend(
@@ -525,19 +670,34 @@ function boundedAppend(
 function exactOneJsonLine(
   selected: Buffer,
   other: Buffer,
-): Readonly<{ line: string; value: unknown }> | null {
-  if (!hasExactLineTransport(selected, other)) return null;
+): TerminalCapture {
+  const transportFailure = terminalTransportFailure(selected, other);
+  if (transportFailure) return transportFailure;
   const withoutLf = selected.subarray(0, selected.length - 1);
-  if (withoutLf.includes(0x0a) || withoutLf.includes(0x0d)) return null;
+  if (withoutLf.includes(0x0a) || withoutLf.includes(0x0d)) {
+    return Object.freeze({ terminal: null, validation: "LINE_CONTRACT_VIOLATION" });
+  }
   const line = selected.toString("utf8");
   try {
     const parsed: unknown = JSON.parse(withoutLf.toString("utf8"));
     return parsed && typeof parsed === "object"
-      ? Object.freeze({ line, value: parsed })
-      : null;
+      ? Object.freeze({ terminal: Object.freeze({ line, value: parsed }), validation: "TRUSTED" })
+      : Object.freeze({ terminal: null, validation: "NON_OBJECT_JSON" });
   } catch {
-    return null;
+    return Object.freeze({ terminal: null, validation: "INVALID_JSON" });
   }
+}
+
+function terminalTransportFailure(selected: Buffer, other: Buffer): TerminalCapture | null {
+  if (other.length > 0) {
+    return Object.freeze({ terminal: null, validation: "STREAM_CONTRACT_VIOLATION" });
+  }
+  if (selected.length === 0) {
+    return Object.freeze({ terminal: null, validation: "MISSING_TERMINAL" });
+  }
+  return hasExactLineTransport(selected)
+    ? null
+    : Object.freeze({ terminal: null, validation: "LINE_CONTRACT_VIOLATION" });
 }
 
 const CONTACTED_RECONCILIATION_SUCCESS_KEYS = Object.freeze([
@@ -573,53 +733,77 @@ type ContactedReconciliationFailureCode = Exclude<
   "CONTACTED_RECONCILIATION_COMPLETE"
 >;
 
-function validatedContactedReconciliationProviderRetrieveCount(
+type ChildValidationFailureState = Exclude<ChildValidationState, "TRUSTED">;
+type ContactedTerminalValidation =
+  | Readonly<{ state: "TRUSTED"; providerRetrieveCount: 0 | 1 }>
+  | Readonly<{ state: ChildValidationFailureState }>;
+
+function validateContactedReconciliationTerminal(
   terminal: ChildResult,
-): 0 | 1 | null {
+): ContactedTerminalValidation {
   const value = terminal.value;
-  if (!isPlainRecord(value) || !hasFixedContactedReconciliationIdentity(value)) return null;
-  const providerRetrieveCount = value.providerRetrieveCount;
-  if (!isProviderRetrieveCount(providerRetrieveCount)) return null;
-  if (value.ok === true) {
-    return isValidContactedReconciliationSuccess(value, terminal.exitCode)
-      ? providerRetrieveCount
-      : null;
+  if (!isPlainRecord(value)) return validationFailure("INVALID_RECORD");
+  if (!hasFixedContactedReconciliationIdentity(value)) {
+    return validationFailure("FIXED_IDENTITY_MISMATCH");
   }
-  if (value.ok !== false) return null;
-  return isValidContactedReconciliationFailure(value, terminal.exitCode)
-    ? providerRetrieveCount
-    : null;
+  const providerRetrieveCount = value.providerRetrieveCount;
+  if (!isProviderRetrieveCount(providerRetrieveCount)) {
+    return validationFailure("INVALID_PROVIDER_RETRIEVE_COUNT");
+  }
+  if (value.ok === true) {
+    const state = validateContactedReconciliationSuccess(value, terminal.exitCode);
+    return state === "TRUSTED"
+      ? Object.freeze({ state, providerRetrieveCount })
+      : validationFailure(state);
+  }
+  if (value.ok !== false) return validationFailure("INVALID_OK");
+  const state = validateContactedReconciliationFailure(value, terminal.exitCode);
+  return state === "TRUSTED"
+    ? Object.freeze({ state, providerRetrieveCount })
+    : validationFailure(state);
+}
+
+function validationFailure(state: ChildValidationFailureState): ContactedTerminalValidation {
+  return Object.freeze({ state });
 }
 
 function isProviderRetrieveCount(value: unknown): value is 0 | 1 {
   return Object.is(value, 0) || value === 1;
 }
 
-function isValidContactedReconciliationSuccess(
+function validateContactedReconciliationSuccess(
   value: Record<string, unknown>,
   exitCode: number,
-): boolean {
-  if (!isContactedReconciliationDisposition(value.disposition)) return false;
-  return [
-    hasExactKeys(value, CONTACTED_RECONCILIATION_SUCCESS_KEYS),
-    exitCode === 0,
-    value.code === "CONTACTED_RECONCILIATION_COMPLETE",
-    value.terminalClass === "RECONCILIATION_COMPLETED",
-    value.durableRelease === durableReleaseForDisposition(value.disposition),
-  ].every(Boolean);
+): ChildValidationState {
+  if (!isContactedReconciliationDisposition(value.disposition)) {
+    return "SUCCESS_DISPOSITION_INVALID";
+  }
+  if (!hasExactKeys(value, CONTACTED_RECONCILIATION_SUCCESS_KEYS)) {
+    return "SUCCESS_KEY_SET_MISMATCH";
+  }
+  if (exitCode !== 0) return "SUCCESS_EXIT_CODE_MISMATCH";
+  if (value.code !== "CONTACTED_RECONCILIATION_COMPLETE") return "SUCCESS_CODE_MISMATCH";
+  if (value.terminalClass !== "RECONCILIATION_COMPLETED") {
+    return "SUCCESS_TERMINAL_CLASS_MISMATCH";
+  }
+  return value.durableRelease === durableReleaseForDisposition(value.disposition)
+    ? "TRUSTED"
+    : "SUCCESS_DURABLE_RELEASE_MISMATCH";
 }
 
-function isValidContactedReconciliationFailure(
+function validateContactedReconciliationFailure(
   value: Record<string, unknown>,
   exitCode: number,
-): boolean {
-  if (!isContactedReconciliationFailureCode(value.code)) return false;
-  return [
-    hasExactKeys(value, CONTACTED_RECONCILIATION_FAILURE_KEYS),
-    value.terminalClass === "HOST_FAILURE",
-    value.durableRelease === "NOT_REPORTED",
-    exitCode === contactedReconciliationFailureExitCode(value.code),
-  ].every(Boolean);
+): ChildValidationState {
+  if (!isContactedReconciliationFailureCode(value.code)) return "FAILURE_CODE_INVALID";
+  if (!hasExactKeys(value, CONTACTED_RECONCILIATION_FAILURE_KEYS)) {
+    return "FAILURE_KEY_SET_MISMATCH";
+  }
+  if (value.terminalClass !== "HOST_FAILURE") return "FAILURE_TERMINAL_CLASS_MISMATCH";
+  if (value.durableRelease !== "NOT_REPORTED") return "FAILURE_DURABLE_RELEASE_MISMATCH";
+  return exitCode === contactedReconciliationFailureExitCode(value.code)
+    ? "TRUSTED"
+    : "FAILURE_EXIT_CODE_MISMATCH";
 }
 
 function contactedReconciliationFailureExitCode(
@@ -671,6 +855,66 @@ function hasExactKeys(
     && keys.every((key, index) => key === expected[index]);
 }
 
+type ContactedSupervisorFailureDiagnostic = Readonly<{
+  event: typeof CONTACTED_SUPERVISOR_FAILURE_EVENT;
+  childSpawnState: "FAILED" | "SUCCEEDED";
+  childProcessState: "NOT_STARTED" | ChildProcessState;
+  childExitCode: number | null;
+  childSignal: NodeJS.Signals | null;
+  childStreamState: ChildStreamState;
+  childOutputOverflow: boolean;
+  childValidation: ChildValidationState;
+  proxyLifecycle: ProxyLifecycleState;
+}>;
+
+function contactedSupervisorFailureDiagnostic(
+  capture: ChildCapture | null,
+  validation: ChildValidationState,
+  lifecycle: ProxyLifecycleState,
+): ContactedSupervisorFailureDiagnostic {
+  if (!capture) {
+    return Object.freeze({
+      event: CONTACTED_SUPERVISOR_FAILURE_EVENT,
+      childSpawnState: "FAILED",
+      childProcessState: "NOT_STARTED",
+      childExitCode: null,
+      childSignal: null,
+      childStreamState: "NOT_CAPTURED",
+      childOutputOverflow: false,
+      childValidation: validation,
+      proxyLifecycle: lifecycle,
+    });
+  }
+  return Object.freeze({
+    event: CONTACTED_SUPERVISOR_FAILURE_EVENT,
+    childSpawnState: "SUCCEEDED",
+    childProcessState: capture.processState,
+    childExitCode: capture.exitCode,
+    childSignal: capture.signal,
+    childStreamState: capture.streamState,
+    childOutputOverflow: capture.outputOverflow,
+    childValidation: validation,
+    proxyLifecycle: lifecycle,
+  });
+}
+
+function proxyLifecycle(
+  failedWhileRunning: boolean,
+  stopped: boolean,
+): ProxyLifecycleState {
+  if (failedWhileRunning) return "READY_PREMATURE_EXIT";
+  return stopped ? "READY_CLEANUP_CONFIRMED" : "READY_CLEANUP_UNCONFIRMED";
+}
+
+function writeContactedSystemicFailure(
+  writer: OutputWriter,
+  diagnostic: ContactedSupervisorFailureDiagnostic,
+  providerRetrieveCount: 0 | 1 | null,
+): Promise<number> {
+  const output = `${JSON.stringify(diagnostic)}\n${systemicFailureLine(providerRetrieveCount)}`;
+  return writeStatic(writer, output, 1);
+}
+
 function contactedReconciliationSystemicFailureLine(
   providerRetrieveCount: 0 | 1,
 ): string {
@@ -683,9 +927,8 @@ function systemicFailureLine(providerRetrieveCount: 0 | 1 | null): string {
     : contactedReconciliationSystemicFailureLine(providerRetrieveCount);
 }
 
-function hasExactLineTransport(selected: Buffer, other: Buffer): boolean {
-  return other.length === 0
-    && selected.length >= 3
+function hasExactLineTransport(selected: Buffer): boolean {
+  return selected.length >= 3
     && selected[selected.length - 1] === 0x0a;
 }
 

@@ -305,7 +305,7 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     expect(variables).not.toMatch(/type\s*=\s*list\(string\)/u);
   });
 
-  it("preserves closed worker, execution, transport, supervisor, and historical grant bytes", () => {
+  it("preserves published worker bytes while admitting the unpublished supervisor correction", () => {
     const frozen = {
       "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json":
         "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876",
@@ -323,14 +323,23 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         "3fc861fe0abe7597a95ccc5b6c3142eda7edd7ac99f782c152d0821b917ecbfa",
       "src/lib/payment/eximbay/bf4-contact.ts":
         "4ed7ff2665982d5b31708a1eb8564dc5e35870cee6614763f4819f3ffc73f660",
-      "src/lib/payment/refund/refund-worker-container-supervisor.ts":
-        "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql":
         "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
     } as const;
     for (const [path, expected] of Object.entries(frozen)) {
       expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expected);
     }
+    expect(contract.image.supervisorSourceSha256).toBe(
+      "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
+    );
+    const currentSupervisorSha256 = sha256(readFileSync(join(
+      ROOT,
+      "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+    )));
+    expect(currentSupervisorSha256).toBe(
+      "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711",
+    );
+    expect(currentSupervisorSha256).not.toBe(contract.image.supervisorSourceSha256);
   });
 });
 
