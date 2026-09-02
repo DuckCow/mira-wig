@@ -59,7 +59,7 @@ describe("P3E-B2 synthetic-sale backend authority", () => {
     expect(createHash("sha256").update(read("main.tf")).digest("hex"))
       .toBe("b431cdbbc7a7a6dc3ffcbb1d93c8a9c6e3593efe109dd56869c51f30dc4ded6a");
     expect(createHash("sha256").update(read("variables.tf")).digest("hex"))
-      .toBe("8ee9d64f3433be64493533f53417c649d764617cea6eceb52a692c9299b7030c");
+      .toBe("9ef8e2bf292152373bd5887e51027f6f3e6d0e0150103748f9bd8782bfb8ba38");
   });
 
   it("preserves the fixed runtime, IAM, network, secret, and public-invocation model", () => {

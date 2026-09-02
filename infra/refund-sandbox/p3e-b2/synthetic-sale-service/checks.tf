@@ -8,6 +8,23 @@ check "temporary_lifecycle" {
   }
 }
 
+check "current_image_authority" {
+  assert {
+    condition = (
+      local.current_image_policy.contractVersion == "mira-refund-p3e-b2-synthetic-sale-image-policy/v1" &&
+      local.current_image_policy.status == "CURRENT_SUCCESSOR" &&
+      local.current_image_policy.sourceAuthority.commit == local.current_source_commit &&
+      local.current_image_policy.sourceAuthority.tree == local.current_source_tree &&
+      local.current_image_policy.buildContext.manifestSha256 == local.current_context_manifest_sha256 &&
+      local.current_image_policy.artifact.manifestDigest == local.current_manifest_digest &&
+      local.current_image_policy.artifact.configDigest == local.current_config_digest &&
+      filesha256("${path.module}/../synthetic-sale/image-policy-v1.json") == local.current_image_policy_sha256 &&
+      var.release_image_digest_uri == local.current_release_image_digest_uri
+    )
+    error_message = "Synthetic-sale image policy, source, artifact, or runtime binding drifted."
+  }
+}
+
 check "backend_authority" {
   assert {
     condition = (

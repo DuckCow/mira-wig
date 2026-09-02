@@ -7,7 +7,7 @@ variables {
     provider_contact_execution_authorized = false
   }
   project_id               = "mira-refund-sandbox-0001"
-  release_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  release_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
   public_origin            = "https://mira-p3e-sbx-synthetic-sale-925882331349.asia-northeast3.run.app"
   run_capability           = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
@@ -26,6 +26,13 @@ run "exact_temporary_service_graph" {
       output.backend_contract.normal_release_migration_or_import == "NOT_PART_OF_NORMAL_RELEASE" &&
       output.backend_contract.expected_initial_resource_count == 0 &&
       output.resource_manifest.resource_count == 6 &&
+      output.image_authority.policy_version == "V1" &&
+      output.image_authority.policy_sha256 == "78b3bcdc0cc63b2af2f6f242cdd0405b68ef3e40c71b31aa7de9d4b6c90e130f" &&
+      output.image_authority.manifest_digest == "sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e" &&
+      output.image_authority.config_digest == "sha256:26ffb63bde180a20e9028a257897ad3d3fc731d961e13c77f5c066a0ede3d8c7" &&
+      output.image_authority.arbitrary_db_query == false &&
+      output.image_authority.business_mutations == 0 &&
+      output.image_authority.provider_calls == 0 &&
       google_project_iam_member.cloud_sql_client.role == "roles/cloudsql.client" &&
       google_project_iam_member.cloud_sql_client.condition[0].expression == "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'" &&
       google_secret_manager_secret_iam_member.database_url.secret_id == "mira-p3e-sbx-canary-database-url" &&
@@ -51,5 +58,13 @@ run "reject_execution_authority" {
 run "reject_latest_image" {
   command = plan
   variables { release_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale:latest" }
+  expect_failures = [var.release_image_digest_uri]
+}
+
+run "reject_other_digest" {
+  command = plan
+  variables {
+    release_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:2ee808d3ea1ba247c860262f56a7fe64cdca66b6a97594c6e9265dbcfebbe60e"
+  }
   expect_failures = [var.release_image_digest_uri]
 }

@@ -25,3 +25,21 @@ output "resource_manifest" {
     provider_contact_execution_authorized = false
   }
 }
+
+output "image_authority" {
+  value = {
+    policy_path        = local.current_image_policy_path
+    policy_version     = local.current_image_policy_version
+    policy_sha256      = local.current_image_policy_sha256
+    source_commit      = local.current_source_commit
+    source_tree        = local.current_source_tree
+    context_sha256     = local.current_context_manifest_sha256
+    manifest_digest    = local.current_manifest_digest
+    config_digest      = local.current_config_digest
+    release_image      = local.current_release_image_digest_uri
+    status_readback    = "EXACT_PROVIDER_FREE_REFUND_TARGET"
+    arbitrary_db_query = false
+    business_mutations = 0
+    provider_calls     = 0
+  }
+}

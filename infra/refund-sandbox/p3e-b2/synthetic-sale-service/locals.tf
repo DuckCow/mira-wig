@@ -1,4 +1,14 @@
 locals {
+  current_image_policy                   = jsondecode(file("${path.module}/../synthetic-sale/image-policy-v1.json"))
+  current_image_policy_path              = "infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v1.json"
+  current_image_policy_version           = "V1"
+  current_image_policy_sha256            = "78b3bcdc0cc63b2af2f6f242cdd0405b68ef3e40c71b31aa7de9d4b6c90e130f"
+  current_source_commit                  = "061b04b4969533a0f28a27dba75102842462d848"
+  current_source_tree                    = "f24a70c9432c2d0c9db37ddbcb676ffcd5a13ea9"
+  current_context_manifest_sha256        = "99aaf88cd93dd42686db216f3990135f0fb331d9586b1a6dcd2ec122a3d7eaf3"
+  current_manifest_digest                = "sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
+  current_config_digest                  = "sha256:26ffb63bde180a20e9028a257897ad3d3fc731d961e13c77f5c066a0ede3d8c7"
+  current_release_image_digest_uri       = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@${local.current_manifest_digest}"
   backend_type_contract                  = "gcs"
   backend_bucket_contract                = "mira-refund-sandbox-0001-tfstate-925882331349"
   backend_prefix_contract                = "p3e-b2/synthetic-sale-service"
