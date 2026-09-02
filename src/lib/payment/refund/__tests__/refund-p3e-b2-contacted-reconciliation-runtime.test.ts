@@ -10,13 +10,13 @@ const INFRA = join(ROOT, "infra/refund-sandbox/p3e-b2");
 const RUNTIME = join(INFRA, "contacted-reconciliation");
 const BOOTSTRAP = join(INFRA, "database-bootstrap");
 const WORKER_DIGEST =
-  "sha256:f242ed87bf818e4d61f41bb016bb9b031603e16e1674008515b2020fee00475b";
+  "sha256:e121bdc5bb51cc39b1076dd969a5dae1daed448cd066b9370c24c3386d83afd4";
 const WORKER_CONFIG_DIGEST =
-  "sha256:76121af3acdb615b9613ce0bb8e219367dd15c45cc133052bd3be1903a27f660";
+  "sha256:005bd1f756c5a80f1cac6c1cd4f621eeb56cbe1dd0db5e1133c01a736b78bbe2";
 const HISTORICAL_WORKER_DIGEST =
-  "sha256:4d28f12574708ed8e14857eee7dc07d92ab52ff9bc4e56e0c2ce89d8d390fccc";
+  "sha256:f242ed87bf818e4d61f41bb016bb9b031603e16e1674008515b2020fee00475b";
 const CURRENT_POLICY_SHA256 =
-  "e9ffcb71011465099280e199d94b1156ef40b7ea1b90b3a10cef573aba291408";
+  "ce703401c5b17cd799a8e6ffb01c9a1337351ddfe180744345e6a551b9eeb398";
 const BOOTSTRAP_DIGEST =
   "sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2";
 const EXPECTED_ADDRESSES = Object.freeze([
@@ -82,11 +82,11 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       digestUri:
         `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${WORKER_DIGEST}`,
       configDigest: WORKER_CONFIG_DIGEST,
-      sourceCheckpoint: "733dcab3bf58d49ec69929a5db33e259e94fe970",
+      sourceCheckpoint: "820feba705b195d775a071cac0cb6b5c7ab7c377",
       sourceContextSha256:
-        "90dbe286b1826192e6cce6c08494666439161a034cfaec7667b692d1154a9bc4",
-      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v4.json",
-      imagePolicyVersion: "V4",
+        "4140d54595466a0457db4740ad1a5bc884f4b607c4a922af048f116b72be955c",
+      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v5.json",
+      imagePolicyVersion: "V5",
       imagePolicySha256: CURRENT_POLICY_SHA256,
       supervisorSourceSha256:
         "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711",
@@ -94,14 +94,14 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         digestUri:
           `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${HISTORICAL_WORKER_DIGEST}`,
         configDigest:
-          "sha256:6daaa4e85e62f3ad7b171ed958ff83b05f5e0f44c9a565f35da4ca0088abb9a9",
-        sourceCheckpoint: "7958fb0b228266d502f5e55a14929e8d5510e913",
+          "sha256:76121af3acdb615b9613ce0bb8e219367dd15c45cc133052bd3be1903a27f660",
+        sourceCheckpoint: "733dcab3bf58d49ec69929a5db33e259e94fe970",
         sourceContextSha256:
-          "9bbf7398224f0d669954748a8b34b7a8ce7d81b33281f9b249a579a28ca4f0ac",
-        imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json",
-        imagePolicyVersion: "V3",
+          "90dbe286b1826192e6cce6c08494666439161a034cfaec7667b692d1154a9bc4",
+        imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v4.json",
+        imagePolicyVersion: "V4",
         imagePolicySha256:
-          "9094297f20d5c2db8e12088d5bb7769da690d9fec29f9309426ff6e6ade56062",
+          "e9ffcb71011465099280e199d94b1156ef40b7ea1b90b3a10cef573aba291408",
         status: "SUPERSEDED_HISTORICAL_ONLY",
       },
     });
@@ -314,6 +314,8 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json":
         "9094297f20d5c2db8e12088d5bb7769da690d9fec29f9309426ff6e6ade56062",
       "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v4.json":
+        "e9ffcb71011465099280e199d94b1156ef40b7ea1b90b3a10cef573aba291408",
+      "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v5.json":
         CURRENT_POLICY_SHA256,
       "containers/refund-worker/Dockerfile":
         "a72c2c6fb232a6fb1d6e6bb52af546750ba5d728ba8a2164d9153591f96123dc",

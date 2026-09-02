@@ -22,13 +22,13 @@ check "exact_runtime_authority" {
       local.region == "asia-northeast3" &&
       local.service_account_id == "mira-p3e-sbx-contacted-recon" &&
       local.job_name == "mira-p3e-sbx-contacted-reconciliation" &&
-      local.worker_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f242ed87bf818e4d61f41bb016bb9b031603e16e1674008515b2020fee00475b" &&
-      local.worker_image_config_digest == "sha256:76121af3acdb615b9613ce0bb8e219367dd15c45cc133052bd3be1903a27f660" &&
-      local.worker_image_source_commit == "733dcab3bf58d49ec69929a5db33e259e94fe970" &&
-      local.worker_image_source_context_sha256 == "90dbe286b1826192e6cce6c08494666439161a034cfaec7667b692d1154a9bc4" &&
-      local.worker_image_policy_path == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v4.json" &&
-      local.worker_image_policy_version == "V4" &&
-      local.worker_image_policy_sha256 == "e9ffcb71011465099280e199d94b1156ef40b7ea1b90b3a10cef573aba291408" &&
+      local.worker_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:e121bdc5bb51cc39b1076dd969a5dae1daed448cd066b9370c24c3386d83afd4" &&
+      local.worker_image_config_digest == "sha256:005bd1f756c5a80f1cac6c1cd4f621eeb56cbe1dd0db5e1133c01a736b78bbe2" &&
+      local.worker_image_source_commit == "820feba705b195d775a071cac0cb6b5c7ab7c377" &&
+      local.worker_image_source_context_sha256 == "4140d54595466a0457db4740ad1a5bc884f4b607c4a922af048f116b72be955c" &&
+      local.worker_image_policy_path == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v5.json" &&
+      local.worker_image_policy_version == "V5" &&
+      local.worker_image_policy_sha256 == "ce703401c5b17cd799a8e6ffb01c9a1337351ddfe180744345e6a551b9eeb398" &&
       local.worker_supervisor_source_sha256 == "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711" &&
       local.contract.image.digestUri == local.worker_image_digest_uri &&
       local.contract.image.configDigest == local.worker_image_config_digest &&
@@ -38,13 +38,13 @@ check "exact_runtime_authority" {
       local.contract.image.imagePolicyVersion == local.worker_image_policy_version &&
       local.contract.image.imagePolicySha256 == local.worker_image_policy_sha256 &&
       local.contract.image.supervisorSourceSha256 == local.worker_supervisor_source_sha256 &&
-      local.contract.image.predecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:4d28f12574708ed8e14857eee7dc07d92ab52ff9bc4e56e0c2ce89d8d390fccc" &&
-      local.contract.image.predecessor.configDigest == "sha256:6daaa4e85e62f3ad7b171ed958ff83b05f5e0f44c9a565f35da4ca0088abb9a9" &&
-      local.contract.image.predecessor.sourceCheckpoint == "7958fb0b228266d502f5e55a14929e8d5510e913" &&
-      local.contract.image.predecessor.sourceContextSha256 == "9bbf7398224f0d669954748a8b34b7a8ce7d81b33281f9b249a579a28ca4f0ac" &&
-      local.contract.image.predecessor.imagePolicyPath == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v3.json" &&
-      local.contract.image.predecessor.imagePolicyVersion == "V3" &&
-      local.contract.image.predecessor.imagePolicySha256 == "9094297f20d5c2db8e12088d5bb7769da690d9fec29f9309426ff6e6ade56062" &&
+      local.contract.image.predecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f242ed87bf818e4d61f41bb016bb9b031603e16e1674008515b2020fee00475b" &&
+      local.contract.image.predecessor.configDigest == "sha256:76121af3acdb615b9613ce0bb8e219367dd15c45cc133052bd3be1903a27f660" &&
+      local.contract.image.predecessor.sourceCheckpoint == "733dcab3bf58d49ec69929a5db33e259e94fe970" &&
+      local.contract.image.predecessor.sourceContextSha256 == "90dbe286b1826192e6cce6c08494666439161a034cfaec7667b692d1154a9bc4" &&
+      local.contract.image.predecessor.imagePolicyPath == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v4.json" &&
+      local.contract.image.predecessor.imagePolicyVersion == "V4" &&
+      local.contract.image.predecessor.imagePolicySha256 == "e9ffcb71011465099280e199d94b1156ef40b7ea1b90b3a10cef573aba291408" &&
       local.contract.image.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
       local.command == "eximbay-contacted-reconciliation-once"
     )
