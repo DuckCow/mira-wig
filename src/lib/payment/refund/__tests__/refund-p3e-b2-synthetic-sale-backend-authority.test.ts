@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v3.json";
+import historicalPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v2.json";
 
 const ROOT = process.cwd();
 const SALE_ROOT = join(ROOT, "infra/refund-sandbox/p3e-b2/synthetic-sale-service");
@@ -58,7 +62,11 @@ describe("P3E-B2 synthetic-sale backend authority", () => {
       .toBe("f9f0914c5b8ada8313604ec56821b9bc6bcbc22cd9619447d3b299082fb0fcf5");
     expect(createHash("sha256").update(read("main.tf")).digest("hex"))
       .toBe("b431cdbbc7a7a6dc3ffcbb1d93c8a9c6e3593efe109dd56869c51f30dc4ded6a");
-    expect(createHash("sha256").update(read("variables.tf")).digest("hex"))
+    // The image binding advances; every other baseline variable byte stays fixed.
+    const baselineVariables = read("variables.tf").replaceAll(
+      currentPolicy.publication.digestUri, historicalPolicy.publication.digestUri,
+    );
+    expect(createHash("sha256").update(baselineVariables).digest("hex"))
       .toBe("9ef8e2bf292152373bd5887e51027f6f3e6d0e0150103748f9bd8782bfb8ba38");
   });
 

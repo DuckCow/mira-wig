@@ -24,9 +24,9 @@ variable "project_id" {
 
 variable "release_image_digest_uri" {
   type    = string
-  default = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
+  default = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:60a80d5ce9a03ab061f86a27241630e269ecbf0e184085e5152e35639bf83880"
   validation {
-    condition     = var.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
+    condition     = var.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:60a80d5ce9a03ab061f86a27241630e269ecbf0e184085e5152e35639bf83880"
     error_message = "The exact current synthetic-sale image-policy digest is required."
   }
 }

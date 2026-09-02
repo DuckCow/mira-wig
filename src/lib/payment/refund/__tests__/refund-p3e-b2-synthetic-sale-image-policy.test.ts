@@ -7,6 +7,8 @@ import policyV1 from
   "../../../../../infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v1.json";
 import policy from
   "../../../../../infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v2.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v3.json";
 import { deriveSyntheticSalePublicationTarget } from
   "../../../../../scripts/build-synthetic-sale-image.mjs";
 import { verifySyntheticSaleRawManifest } from
@@ -134,10 +136,10 @@ describe("P3E-B2 synthetic-sale image policy v2", () => {
     expect(statusSource).not.toMatch(/fetch\(|requestPay|\.create\(|\.update\(|\.upsert\(|\.delete\(/u);
   });
 
-  it("selects only v2 as current Terraform authority without changing the image", () => {
+  it("selects only the CSP successor as current Terraform authority", () => {
     const policyFiles = readdirSync(join(ROOT, "infra/refund-sandbox/p3e-b2/synthetic-sale"))
       .filter((name) => /^image-policy-v\d+\.json$/u.test(name));
-    expect(policyFiles).toEqual(["image-policy-v1.json", "image-policy-v2.json"]);
+    expect(policyFiles).toEqual(["image-policy-v1.json", "image-policy-v2.json", "image-policy-v3.json"]);
     const locals = readFileSync(
       join(ROOT, "infra/refund-sandbox/p3e-b2/synthetic-sale-service/locals.tf"),
       "utf8",
@@ -146,13 +148,48 @@ describe("P3E-B2 synthetic-sale image policy v2", () => {
       join(ROOT, "infra/refund-sandbox/p3e-b2/synthetic-sale-service/variables.tf"),
       "utf8",
     );
-    expect(locals).toContain(`current_image_policy_path              = "${POLICY_PATH}"`);
-    expect(locals).toContain('current_image_policy_version           = "V2"');
-    expect(locals).toContain(`current_image_policy_sha256            = "${POLICY_SHA256}"`);
-    expect(locals).toContain(`current_manifest_digest                = "${MANIFEST}"`);
-    expect(locals).toContain(`current_config_digest                  = "${CONFIG}"`);
-    expect(variables).toContain(policy.publication.digestUri);
+    const currentPath = "infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v3.json";
+    const currentSha256 = createHash("sha256").update(readFileSync(join(ROOT, currentPath))).digest("hex");
+    expect(locals).toContain(`current_image_policy_path              = "${currentPath}"`);
+    expect(locals).toContain('current_image_policy_version           = "V3"');
+    expect(locals).toContain(`current_image_policy_sha256            = "${currentSha256}"`);
+    expect(locals).toContain(`current_manifest_digest                = "${currentPolicy.artifact.manifestDigest}"`);
+    expect(locals).toContain(`current_config_digest                  = "${currentPolicy.artifact.configDigest}"`);
+    expect(variables).toContain(currentPolicy.publication.digestUri);
+    expect(variables).not.toContain(policy.publication.digestUri);
     expect(policy.publication.digestUri).toBe(policyV1.publication.digestUri);
+  });
+
+  it("preserves v2 history while binding the corrected source and exact successor bytes", () => {
+    expect(currentPolicy.parentAuthority).toEqual({
+      policyPath: POLICY_PATH,
+      contractVersion: policy.contractVersion,
+      sha256: POLICY_SHA256,
+      status: "HISTORICAL_PREDECESSOR",
+      replacementReason: "SYNTHETIC_EXIMBAY_CONNECT_SRC_AND_FORM_ACTION_CSP_DEFECT",
+    });
+    expect(currentPolicy.sourceAuthority.parent).toBe("d087f4aa29a567dc36aa462973c1d401c9a01fdc");
+    expect(execFileSync("git", ["rev-parse", `${currentPolicy.sourceAuthority.commit}^{tree}`], {
+      cwd: ROOT, encoding: "utf8",
+    }).trim()).toBe(currentPolicy.sourceAuthority.tree);
+    const raw = Buffer.from(readFileSync(join(ROOT,
+      "src/lib/payment/refund/__tests__/fixtures/synthetic-sale-manifest-60a80d5c.base64"), "utf8").trim(), "base64");
+    expect(verifySyntheticSaleRawManifest(raw, currentPolicy)).toEqual({
+      digest: currentPolicy.artifact.manifestDigest,
+      rawByteLength: currentPolicy.artifact.manifestRawByteLength,
+      mediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      configDigest: currentPolicy.artifact.configDigest,
+      orderedLayerDescriptorCount: currentPolicy.artifact.layerCount,
+    });
+    expect(currentPolicy.statusReadback).toEqual(policy.statusReadback);
+    expect(currentPolicy.applicationClosure.browser).toEqual(policy.applicationClosure.browser);
+    expect(currentPolicy.applicationClosure.serviceContract).toEqual(policy.applicationClosure.serviceContract);
+    expect(currentPolicy.applicationClosure.cloudSqlProxy).toEqual(policy.applicationClosure.cloudSqlProxy);
+    expect(currentPolicy.imageConfiguration).toEqual({ ...policy.imageConfiguration,
+      labels: { ...policy.imageConfiguration.labels, "org.opencontainers.image.revision": currentPolicy.sourceAuthority.commit },
+    });
+    expect(deriveSyntheticSalePublicationTarget(currentPolicy.sourceAuthority.commit).tag)
+      .toBe(currentPolicy.publication.tag);
   });
 
   it("derives the unchanged immutable publication target", () => {

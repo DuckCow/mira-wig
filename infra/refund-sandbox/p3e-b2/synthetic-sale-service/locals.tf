@@ -1,15 +1,15 @@
 locals {
-  current_image_policy                   = jsondecode(file("${path.module}/../synthetic-sale/image-policy-v2.json"))
-  current_image_policy_path              = "infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v2.json"
-  current_image_policy_version           = "V2"
-  current_image_policy_sha256            = "727106ce002e3e69599704813040c5ebf865716dd7ece987877f1a323f9fb11a"
-  current_parent_image_policy_sha256     = "78b3bcdc0cc63b2af2f6f242cdd0405b68ef3e40c71b31aa7de9d4b6c90e130f"
-  current_source_commit                  = "061b04b4969533a0f28a27dba75102842462d848"
-  current_source_tree                    = "f24a70c9432c2d0c9db37ddbcb676ffcd5a13ea9"
-  current_context_manifest_sha256        = "99aaf88cd93dd42686db216f3990135f0fb331d9586b1a6dcd2ec122a3d7eaf3"
-  current_manifest_digest                = "sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
+  current_image_policy                   = jsondecode(file("${path.module}/../synthetic-sale/image-policy-v3.json"))
+  current_image_policy_path              = "infra/refund-sandbox/p3e-b2/synthetic-sale/image-policy-v3.json"
+  current_image_policy_version           = "V3"
+  current_image_policy_sha256            = "af088e5f870d45de3d7a53e35ccaca7e46fa7bcaf2a896a5eaa22aaf14cb49c8"
+  current_parent_image_policy_sha256     = "727106ce002e3e69599704813040c5ebf865716dd7ece987877f1a323f9fb11a"
+  current_source_commit                  = "e1dd7fd2bbc01bd21e858f7148d0f12c6ec8335b"
+  current_source_tree                    = "ee3f7c1c98986ba402966f5dd2e05ecd15803f82"
+  current_context_manifest_sha256        = "5dc4dbe8746e0ab15237ae28a8adb08517f5b873bb726c6f9dbfff770bdf53b8"
+  current_manifest_digest                = "sha256:60a80d5ce9a03ab061f86a27241630e269ecbf0e184085e5152e35639bf83880"
   current_manifest_raw_byte_length       = 3251
-  current_config_digest                  = "sha256:26ffb63bde180a20e9028a257897ad3d3fc731d961e13c77f5c066a0ede3d8c7"
+  current_config_digest                  = "sha256:d519553275ced514bf7243f474ee3495dee1bf56a6d08dce43d2e6add9f84132"
   current_release_image_digest_uri       = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@${local.current_manifest_digest}"
   backend_type_contract                  = "gcs"
   backend_bucket_contract                = "mira-refund-sandbox-0001-tfstate-925882331349"

@@ -49,7 +49,8 @@ export function verifySyntheticSaleRawManifest(
     "SYNTHETIC_MANIFEST_RAW_SIZE_INVALID");
   requireCondition(isRecord(policyValue), "SYNTHETIC_POLICY_INVALID");
   requireCondition(
-    policyValue.contractVersion === "mira-refund-p3e-b2-synthetic-sale-image-policy/v2"
+    (policyValue.contractVersion === "mira-refund-p3e-b2-synthetic-sale-image-policy/v2"
+      || policyValue.contractVersion === "mira-refund-p3e-b2-synthetic-sale-image-policy/v3")
       && policyValue.status === "CURRENT_SUCCESSOR",
     "SYNTHETIC_POLICY_VERSION_INVALID",
   );

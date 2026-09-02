@@ -7,7 +7,7 @@ variables {
     provider_contact_execution_authorized = false
   }
   project_id               = "mira-refund-sandbox-0001"
-  release_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e"
+  release_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/synthetic-sale@sha256:60a80d5ce9a03ab061f86a27241630e269ecbf0e184085e5152e35639bf83880"
   public_origin            = "https://mira-p3e-sbx-synthetic-sale-925882331349.asia-northeast3.run.app"
   run_capability           = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 }
@@ -26,11 +26,11 @@ run "exact_temporary_service_graph" {
       output.backend_contract.normal_release_migration_or_import == "NOT_PART_OF_NORMAL_RELEASE" &&
       output.backend_contract.expected_initial_resource_count == 0 &&
       output.resource_manifest.resource_count == 6 &&
-      output.image_authority.policy_version == "V2" &&
-      output.image_authority.policy_sha256 == "727106ce002e3e69599704813040c5ebf865716dd7ece987877f1a323f9fb11a" &&
-      output.image_authority.manifest_digest == "sha256:b83bfc2af27c4440d8b09602d01c7bf668025106129cef23658756ca6a88642e" &&
+      output.image_authority.policy_version == "V3" &&
+      output.image_authority.policy_sha256 == "af088e5f870d45de3d7a53e35ccaca7e46fa7bcaf2a896a5eaa22aaf14cb49c8" &&
+      output.image_authority.manifest_digest == "sha256:60a80d5ce9a03ab061f86a27241630e269ecbf0e184085e5152e35639bf83880" &&
       output.image_authority.manifest_raw_bytes == 3251 &&
-      output.image_authority.config_digest == "sha256:26ffb63bde180a20e9028a257897ad3d3fc731d961e13c77f5c066a0ede3d8c7" &&
+      output.image_authority.config_digest == "sha256:d519553275ced514bf7243f474ee3495dee1bf56a6d08dce43d2e6add9f84132" &&
       output.image_authority.arbitrary_db_query == false &&
       output.image_authority.business_mutations == 0 &&
       output.image_authority.provider_calls == 0 &&
