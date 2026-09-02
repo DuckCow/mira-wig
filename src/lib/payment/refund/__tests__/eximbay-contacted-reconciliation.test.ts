@@ -47,19 +47,33 @@ const PROHIBITED = Object.freeze([
 ] as const);
 
 describe("fixed Eximbay CONTACTED reconciliation host", () => {
-  it("selects only the second fresh-sale successor and preserves both historical targets", () => {
+  it("selects only the latest fresh-sale successor and preserves all historical targets", () => {
     expect(EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID)
-      .toBe("89682c544f42d4debb260f5e3186087a");
+      .toBe("4c5c9b039f18037c6f3356c903df1372");
     expect(EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID)
-      .toBe("cmtjsiiqw000001s6uimkjhj5");
+      .toBe("cmtk62h80000001s626b90f9y");
     expect(EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_RUN_ID)
-      .toBe("da7783b013d20713d6db207c7657b559");
+      .toBe("89682c544f42d4debb260f5e3186087a");
     expect(EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID)
-      .toBe("cmtjnvso1000001s60xfg0tyu");
+      .toBe("cmtjsiiqw000001s6uimkjhj5");
     expect(EXIMBAY_CONTACTED_RECONCILIATION_ORIGINAL_HISTORICAL_RUN_ID)
       .toBe("a764f61f4e4ba799ab16b318a676db65");
     expect(EXIMBAY_CONTACTED_RECONCILIATION_ORIGINAL_HISTORICAL_CHECKOUT_SESSION_ID)
       .toBe("cmthg2mzu000001s6iuvx7u5x");
+    expect(selectFixedRecoveryTarget({
+      id: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      userId: "current-user",
+      payments: [eligiblePayment("payment-current")],
+    })).toEqual({
+      paymentId: "payment-current",
+      authenticatedUserId: "current-user",
+      kind: "ACTIVE",
+    });
+    expect(selectFixedRecoveryTarget({
+      id: EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID,
+      userId: "predecessor-user",
+      payments: [eligiblePayment("payment-predecessor")],
+    })).toBeNull();
     expect(selectFixedRecoveryTarget({
       id: EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID,
       userId: "predecessor-user",
