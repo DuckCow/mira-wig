@@ -202,7 +202,7 @@ function htmlResponse(body: string): Response {
     status: 200,
     headers: {
       ...SECURITY_HEADERS,
-      "Content-Security-Policy": "default-src 'none'; script-src 'self' https://api-test.eximbay.com; connect-src 'self'; style-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "Content-Security-Policy": "default-src 'none'; script-src 'self' https://api-test.eximbay.com; connect-src 'self' https://api-test.eximbay.com; style-src 'none'; img-src 'none'; base-uri 'none'; form-action https://secureapi.test.eximbay.com; frame-ancestors 'none'",
       "Content-Type": "text/html; charset=utf-8",
     },
   });

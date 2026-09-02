@@ -142,8 +142,9 @@ describe("minimal synthetic SALE HTTP surface", () => {
     const asset = await handler(new Request(`${ORIGIN}/synthetic-sale/${CAPABILITY}/client.js`));
     expect(await asset.text()).toBe("compiled-browser-owner");
     const page = await handler(new Request(`${ORIGIN}/synthetic-sale/${CAPABILITY}`));
-    expect(page.headers.get("Content-Security-Policy")).toContain("https://api-test.eximbay.com");
-    expect(page.headers.get("Content-Security-Policy")).not.toContain("https://api.eximbay.com");
+    expect(page.headers.get("Content-Security-Policy")).toBe(
+      "default-src 'none'; script-src 'self' https://api-test.eximbay.com; connect-src 'self' https://api-test.eximbay.com; style-src 'none'; img-src 'none'; base-uri 'none'; form-action https://secureapi.test.eximbay.com; frame-ancestors 'none'",
+    );
   });
 
   it("serializes the exact bounded status representation without provider secrets", async () => {
