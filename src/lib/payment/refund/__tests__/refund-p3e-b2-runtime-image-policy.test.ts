@@ -179,10 +179,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      manifestDigest: currentAuthority.buildContext.manifestSha256,
-      fileCount: currentAuthority.buildContext.fileCount,
-      repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
-      packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
+      manifestDigest: "cba5eb81b53e9ca8b57386fda4f76a0857719617d5fe85bfc886cb4df4a2bee9",
+      fileCount: 209,
+      repositoryGraphInputCount: 160,
+      packagedGraphInputCount: 374,
       entrypointCount: 5,
       temporaryContextsRemoved: true,
     });
@@ -260,21 +260,55 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       || path === "scripts/eximbay-refund-canary.ts"
       || path === "scripts/eximbay-contacted-reconciliation.ts"
     ));
-    expect(requiredSources).toHaveLength(170);
+    expect(requiredSources).toHaveLength(161);
     expect(missingBuildStageSources(dockerfile, requiredSources)).toEqual([]);
 
-    const withoutOrderAdmission = dockerfile.replace(
-      REFUND_WORKER_ORDER_SOURCE_COPY,
+    const withoutMarketAdmission = dockerfile.replace(
+      REFUND_WORKER_MARKET_SOURCE_COPY,
       "",
     );
     expect(missingBuildStageSources(
-      withoutOrderAdmission,
+      withoutMarketAdmission,
       requiredSources,
     )).toEqual([
-      "src/lib/order/address-config.ts",
-      "src/lib/order/snapshot.ts",
-      "src/lib/order/validation.ts",
+      "src/lib/market/locale.ts",
+      "src/lib/market/types.ts",
     ]);
+  });
+
+  it("rejects repository-context COPY operands outside canonical context", () => {
+    const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const proof = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "scripts/build-refund-worker-bundles.mts", "--verify-context"],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: {
+          NODE_ENV: "test",
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+        },
+        timeout: 30_000,
+      },
+    );
+    expect(proof.status).toBe(0);
+    expect(proof.stderr).toBe("");
+    const observed: unknown = JSON.parse(proof.stdout);
+    expect(isRecordWithStringArray(observed, "paths")).toBe(true);
+    if (!isRecordWithStringArray(observed, "paths")) return;
+
+    expect(nonCanonicalBuildStageSources(dockerfile, observed.paths)).toEqual([]);
+
+    const withStaleAdmission = dockerfile.replace(
+      "RUN ./node_modules/.bin/prisma generate",
+      "COPY --link src/lib/stale-refund-input.ts ./src/lib/\n"
+      + "RUN ./node_modules/.bin/prisma generate",
+    );
+    expect(nonCanonicalBuildStageSources(
+      withStaleAdmission,
+      observed.paths,
+    )).toEqual(["src/lib/stale-refund-input.ts"]);
   });
 
   it("generates distinct valid collision-resistant proof-image tags", () => {
@@ -1586,67 +1620,48 @@ function repositoryRelativeFiles(root: string): string[] {
     .sort();
 }
 
-const REFUND_WORKER_SCRIPT_SOURCE_COPY =
-  "COPY --link scripts/refund-execution-worker.ts "
-  + "scripts/refund-sandbox-provider-free-preflight.ts "
-  + "scripts/eximbay-refund-canary.ts "
-  + "scripts/eximbay-contacted-reconciliation.ts ./scripts/";
-const REFUND_WORKER_ORDER_SOURCE_COPY =
-  "COPY --link src/lib/order/address-config.ts src/lib/order/snapshot.ts "
-  + "src/lib/order/validation.ts ./src/lib/order/";
+const REFUND_WORKER_MARKET_SOURCE_COPY =
+  "COPY --link src/lib/market/locale.ts src/lib/market/types.ts ./src/lib/market/";
 
 function missingBuildStageSources(
   dockerfile: string,
   requiredSources: readonly string[],
 ): string[] {
-  const admitted = new Set<string>();
-  const exactAdmissions = [
-    {
-      instruction: REFUND_WORKER_SCRIPT_SOURCE_COPY,
-      paths: [
-        "scripts/refund-execution-worker.ts",
-        "scripts/refund-sandbox-provider-free-preflight.ts",
-        "scripts/eximbay-refund-canary.ts",
-        "scripts/eximbay-contacted-reconciliation.ts",
-      ],
-    },
-    {
-      instruction: "COPY --link scripts/build-refund-worker-bundles.mts ./scripts/",
-      paths: ["scripts/build-refund-worker-bundles.mts"],
-    },
-    {
-      instruction:
-        "COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/",
-      paths: ["containers/refund-worker/entrypoint.ts"],
-    },
-    {
-      instruction:
-        "COPY --link src/lib/market/locale.ts src/lib/market/types.ts ./src/lib/market/",
-      paths: ["src/lib/market/locale.ts", "src/lib/market/types.ts"],
-    },
-    {
-      instruction: REFUND_WORKER_ORDER_SOURCE_COPY,
-      paths: [
-        "src/lib/order/address-config.ts",
-        "src/lib/order/snapshot.ts",
-        "src/lib/order/validation.ts",
-      ],
-    },
-    {
-      instruction: "COPY --link src/lib/commerce-integrity.ts ./src/lib/",
-      paths: ["src/lib/commerce-integrity.ts"],
-    },
-  ] as const;
-  for (const admission of exactAdmissions) {
-    if (!dockerfile.includes(admission.instruction)) continue;
-    for (const path of admission.paths) admitted.add(path);
-  }
-  if (dockerfile.includes("COPY --link src/lib/payment ./src/lib/payment")) {
-    for (const path of requiredSources) {
-      if (path.startsWith("src/lib/payment/")) admitted.add(path);
+  const operands = repositoryContextCopyOperands(dockerfile);
+  return requiredSources.filter((path) => !operands.some(
+    (operand) => path === operand || path.startsWith(`${operand}/`),
+  ));
+}
+
+function nonCanonicalBuildStageSources(
+  dockerfile: string,
+  canonicalContextPaths: readonly string[],
+): string[] {
+  return repositoryContextCopyOperands(dockerfile).filter(
+    (operand) => !canonicalContextPaths.some(
+      (path) => path === operand || path.startsWith(`${operand}/`),
+    ),
+  );
+}
+
+function repositoryContextCopyOperands(dockerfile: string): string[] {
+  const instructions = dockerfile.replace(/\\\r?\n\s*/gu, " ").split(/\r?\n/gu);
+  const operands: string[] = [];
+  for (const instruction of instructions) {
+    const tokens = instruction.trim().split(/\s+/u);
+    if (tokens[0]?.toUpperCase() !== "COPY") continue;
+    const argumentsOnly = tokens.slice(1);
+    if (argumentsOnly.some((token) => token.startsWith("--from="))) continue;
+    const paths = argumentsOnly.filter((token) => !token.startsWith("--"));
+    if (paths.length < 2 || paths.some((path) => path.startsWith("["))) {
+      throw new Error("REFUND_WORKER_DOCKERFILE_COPY_UNSUPPORTED");
+    }
+    for (const source of paths.slice(0, -1)) {
+      const normalized = source.replace(/^\.\//u, "").replace(/\/$/u, "");
+      operands.push(normalized);
     }
   }
-  return requiredSources.filter((path) => !admitted.has(path));
+  return operands;
 }
 
 function migrationRuntimeDigest(

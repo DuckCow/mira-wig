@@ -12,8 +12,6 @@ COPY --link scripts/build-refund-worker-bundles.mts ./scripts/
 COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/
 COPY --link src/lib/payment ./src/lib/payment
 COPY --link src/lib/market/locale.ts src/lib/market/types.ts ./src/lib/market/
-COPY --link src/lib/order/address-config.ts src/lib/order/snapshot.ts src/lib/order/validation.ts ./src/lib/order/
-COPY --link src/lib/commerce-integrity.ts ./src/lib/
 RUN ./node_modules/.bin/prisma generate
 RUN node --import tsx scripts/build-refund-worker-bundles.mts
 
