@@ -93,9 +93,6 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
       disconnectDatabase: () => Promise.resolve(),
       readSecret,
       fetch,
-      sleep: () => Promise.resolve(),
-      now: () => 0,
-      timeoutMs: 1,
       runAdmission: (env, operation) => runWithRefundProviderContactAdmission(env, operation),
     });
     expect(result.code).toBe("OVERLAP_SKIPPED");
@@ -117,9 +114,6 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
       disconnectDatabase: () => Promise.resolve(),
       readSecret,
       fetch,
-      sleep: () => Promise.resolve(),
-      now: () => 0,
-      timeoutMs: 1,
       runAdmission: (env, operation) => runWithRefundProviderContactAdmission(env, operation),
     });
     expect(result.code).toBe("CREDENTIAL_UNAVAILABLE");
@@ -350,7 +344,6 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
     });
     if (!payment.providerOrderId) throw new Error("PROVIDER_ORDER_ID_REQUIRED");
     const fetch = providerSuccessFetch(prepared, payment.providerOrderId);
-    let clock = 0;
     try {
       await expect(canary.$queryRaw<{ currentUser: string }[]>`
         SELECT current_user AS "currentUser"
@@ -363,9 +356,6 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
         disconnectDatabase: () => Promise.resolve(),
         readSecret: () => Promise.resolve("synthetic-api-key-never-log"),
         fetch,
-        sleep: () => Promise.resolve(),
-        now: () => { clock += 250; return clock; },
-        timeoutMs: 5_000,
         runAdmission: (_env, operation) => Promise.resolve({
           outcome: "ACQUIRED" as const,
           result: operation(),
@@ -402,6 +392,64 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it.each(["ineligible", "retrieve failure", "refund uncertainty", "refund transport failure"] as const)(
+    "stops after one pass for %s with no recovery or second refund",
+    async (scenario) => {
+      const prepared = await prepareTarget();
+      await createApproval(prepared);
+      const payment = await db.payment.findUniqueOrThrow({
+        where: { id: prepared.fixture.paymentId }, select: { providerOrderId: true },
+      });
+      if (!payment.providerOrderId) throw new Error("PROVIDER_ORDER_ID_REQUIRED");
+      const success = providerSuccessFetch(prepared, payment.providerOrderId);
+      const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/retrieve")) {
+          if (scenario === "retrieve failure") return Promise.reject(new Error("SYNTHETIC_FAILURE"));
+          if (scenario === "ineligible") return Promise.resolve(jsonResponse({ rescode: "9999" }));
+          return success(input, init);
+        }
+        if (scenario === "refund transport failure") return Promise.reject(new Error("SYNTHETIC_FAILURE"));
+        return Promise.resolve(jsonResponse({ rescode: "9999" }));
+      });
+      const dependencies = {
+        createDatabase: () => db,
+        disconnectDatabase: () => Promise.resolve(),
+        readSecret: () => Promise.resolve("synthetic-api-key-never-log"),
+        fetch,
+        runAdmission: async (_env: Readonly<Record<string, string | undefined>>, operation: () => ReturnType<typeof runEximbayRefundCanaryOnce>) => ({
+          outcome: "ACQUIRED" as const, result: await operation(),
+        }),
+      };
+      const refundExpected = scenario.startsWith("refund") ? 1 : 0;
+      const result = await runEximbayRefundCanaryOnce(prepared.env, dependencies);
+      expect(result).toMatchObject({
+        ok: false,
+        preflightRetrieveCount: 1,
+        reconciliationLookupCount: 0,
+        cancellationCount: refundExpected,
+        reentry: "SEPARATE_RECONCILIATION_AUTHORITY_REQUIRED",
+      });
+      expect(fetch).toHaveBeenCalledTimes(1 + refundExpected);
+      const command = await db.refundExecutionCommand.findUniqueOrThrow({
+        where: { id: prepared.fixture.commandId },
+      });
+      expect(command.dispatchAttempt).toBe(refundExpected);
+      if (refundExpected === 1) {
+        expect(result.code).toBe("CANCEL_CONTACT_MAY_HAVE_OCCURRED");
+        expect(command.status).toBe("WAITING_EVIDENCE");
+      }
+      expect(await selectExactEximbayRefundCanaryCandidate(db, prepared.fixture.commandId)).toBeNull();
+      expect(await db.paymentOutbox.count({
+        where: { dedupKey: `customer-refund-succeeded:v1:${prepared.fixture.refundAttemptId}` },
+      })).toBe(0);
+      await expect(runEximbayRefundCanaryOnce(prepared.env, dependencies)).resolves.toMatchObject({
+        code: "APPROVAL_ALREADY_CONSUMED", cancellationCount: 0, preflightRetrieveCount: 0,
+      });
+      expect(fetch).toHaveBeenCalledTimes(1 + refundExpected);
+    },
+  );
+
   it("fails the real success transaction when PaymentOutbox INSERT is absent", async () => {
     await installRestrictedRoleAuthority();
     const admin = new Client({ connectionString: databaseUrl });
@@ -415,7 +463,6 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
       });
       if (!payment.providerOrderId) throw new Error("PROVIDER_ORDER_ID_REQUIRED");
       const canary = restrictedPrisma("mira_refund_canary");
-      let clock = 0;
       try {
         const result = await runEximbayRefundCanaryOnce({
           ...prepared.env,
@@ -425,9 +472,6 @@ describe("exact Eximbay refund canary authority against disposable PostgreSQL", 
           disconnectDatabase: () => Promise.resolve(),
           readSecret: () => Promise.resolve("synthetic-api-key-never-log"),
           fetch: providerSuccessFetch(prepared, payment.providerOrderId),
-          sleep: () => Promise.resolve(),
-          now: () => { clock += 250; return clock; },
-          timeoutMs: 1_000,
           runAdmission: (_env, operation) => Promise.resolve({
             outcome: "ACQUIRED" as const,
             result: operation(),

@@ -4,7 +4,6 @@ resource "google_service_account" "canary" {
   display_name = "Dormant Eximbay refund sandbox canary"
 
   lifecycle {
-    prevent_destroy = true
     precondition {
       condition     = local.runtime_apply_authorized
       error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"
@@ -58,7 +57,7 @@ resource "google_cloud_run_v2_job" "canary" {
   project             = var.project_id
   location            = local.region
   name                = local.job_name
-  deletion_protection = true
+  deletion_protection = false
 
   template {
     task_count  = 1
@@ -100,7 +99,6 @@ resource "google_cloud_run_v2_job" "canary" {
   }
 
   lifecycle {
-    prevent_destroy = true
     precondition {
       condition     = local.runtime_apply_authorized
       error_message = "EXIMBAY_CANARY_RELEASE_AUTHORITY_MISSING"

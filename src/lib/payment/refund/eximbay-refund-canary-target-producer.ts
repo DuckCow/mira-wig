@@ -351,7 +351,7 @@ function inspectAggregate(
   phase: InspectionPhase,
 ) {
   requireSaleIdentity(aggregate);
-  requireFreshness(aggregate, capturedAt);
+  requireEximbayCanarySaleFreshness(aggregate, capturedAt);
   requireSyntheticContact(aggregate);
   const target = requireRefundState(aggregate, phase);
   const merchantAccountBindingId = deriveEximbayCanaryMerchantAccountBindingId(attestation);
@@ -408,7 +408,14 @@ function requireSaleIdentity(aggregate: Aggregate): void {
   if (!valid) throw new EximbayCanaryProducerError("PAYMENT_NOT_ELIGIBLE");
 }
 
-function requireFreshness(aggregate: Aggregate, capturedAt: Date): void {
+export function requireEximbayCanarySaleFreshness(
+  aggregate: Readonly<{
+    financialSucceededAt: Aggregate["financialSucceededAt"];
+    session: Pick<Aggregate["session"], "completedAt">;
+    order: Pick<Aggregate["order"], "paidAt">;
+  }>,
+  capturedAt: Date,
+): void {
   const succeededAt = aggregate.financialSucceededAt;
   const completedAt = aggregate.session.completedAt;
   if (!(succeededAt instanceof Date) || !(completedAt instanceof Date)) {

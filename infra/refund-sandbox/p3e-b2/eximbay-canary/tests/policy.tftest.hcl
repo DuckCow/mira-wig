@@ -47,6 +47,7 @@ run "admit_exact_dormant_canary_release" {
       google_project_iam_member.cloud_sql_client.condition[0].expression == "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'" &&
       google_secret_manager_secret_iam_member.database_url.secret_id == "mira-p3e-sbx-canary-database-url" &&
       google_secret_manager_secret_iam_member.eximbay_api_key.secret_id == "mira-p3e-sbx-eximbay-api-key" &&
+      google_cloud_run_v2_job.canary.deletion_protection == false &&
       google_cloud_run_v2_job.canary.template[0].task_count == 1 &&
       google_cloud_run_v2_job.canary.template[0].parallelism == 1 &&
       google_cloud_run_v2_job.canary.template[0].template[0].max_retries == 0 &&

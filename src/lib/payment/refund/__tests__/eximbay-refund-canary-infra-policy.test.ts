@@ -43,6 +43,14 @@ describe("dormant Eximbay refund canary Terraform policy", () => {
     expect(terraform).not.toContain("https://api.eximbay.com");
   });
 
+  it("allows retirement only of its purpose-specific five-resource root", () => {
+    const terraform = allTerraform();
+    expect(terraform).not.toMatch(/prevent_destroy\s*=\s*true/u);
+    expect(terraform).toContain("deletion_protection = false");
+    expect(terraform).not.toMatch(/resource\s+"google_(?:sql_database|compute_network|secret_manager_secret)"/u);
+    expect(terraform).not.toMatch(/data\s+"terraform_remote_state"/u);
+  });
+
   it("pins numeric secret versions without provider secret payload or broad secret IAM", () => {
     const terraform = allTerraform();
     expect(terraform).toContain('role      = "roles/secretmanager.secretAccessor"');

@@ -75,9 +75,6 @@ describe("Eximbay refund sandbox canary authority boundaries", () => {
       disconnectDatabase: vi.fn(),
       readSecret,
       fetch,
-      sleep: vi.fn(),
-      now: vi.fn(() => 0),
-      timeoutMs: 1,
       runAdmission: defaultEximbayRefundCanaryDependencies.runAdmission,
     })).resolves.toMatchObject({ code: "CONFIG_MISMATCH" });
     expect(createDatabase).not.toHaveBeenCalled();
