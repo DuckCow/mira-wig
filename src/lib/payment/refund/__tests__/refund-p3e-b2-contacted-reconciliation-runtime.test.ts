@@ -152,6 +152,45 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     expect(contract.image.predecessor.status).toBe("SUPERSEDED_HISTORICAL_ONLY");
   });
 
+  it("keeps the Terraform check aligned with the complete immutable target chain", () => {
+    const checks = readFileSync(join(RUNTIME, "checks.tf"), "utf8");
+    const expected = [
+      { depth: 0, field: "runId", value: "4c5c9b039f18037c6f3356c903df1372" },
+      { depth: 0, field: "checkoutSessionId", value: "cmtk62h80000001s626b90f9y" },
+      { depth: 1, field: "runId", value: "89682c544f42d4debb260f5e3186087a" },
+      { depth: 1, field: "checkoutSessionId", value: "cmtjsiiqw000001s6uimkjhj5" },
+      { depth: 1, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
+      { depth: 2, field: "runId", value: "da7783b013d20713d6db207c7657b559" },
+      { depth: 2, field: "checkoutSessionId", value: "cmtjnvso1000001s60xfg0tyu" },
+      { depth: 2, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
+      { depth: 3, field: "runId", value: "a764f61f4e4ba799ab16b318a676db65" },
+      { depth: 3, field: "checkoutSessionId", value: "cmthg2mzu000001s6iuvx7u5x" },
+      { depth: 3, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
+    ] as const;
+
+    expect(() => assertExactContactedTargetChain(checks, expected)).not.toThrow();
+
+    const omittedPredecessor = checks
+      .replace(
+        /^[ \t]*local\.contract\.target\.predecessor\.predecessor\.predecessor\.(?:runId|checkoutSessionId|status)[ \t]*==[ \t]*"[^"]+" &&\n/gmu,
+        "",
+      )
+      .replace("da7783b013d20713d6db207c7657b559", "a764f61f4e4ba799ab16b318a676db65")
+      .replace("cmtjnvso1000001s60xfg0tyu", "cmthg2mzu000001s6iuvx7u5x");
+    const missingPredecessor = checks.replace(
+      /^[ \t]*local\.contract\.target\.predecessor(?:\.predecessor)*\.(?:runId|checkoutSessionId|status)[ \t]*==[ \t]*"[^"]+" &&\n/gmu,
+      "",
+    );
+    const wrongPredecessor = checks.replace(
+      "da7783b013d20713d6db207c7657b559",
+      "00000000000000000000000000000000",
+    );
+    for (const mutant of [omittedPredecessor, missingPredecessor, wrongPredecessor]) {
+      expect(() => assertExactContactedTargetChain(mutant, expected))
+        .toThrow("CONTACTED_TERRAFORM_TARGET_CHAIN_NOT_EXACT");
+    }
+  });
+
   it("binds only the exact installed environment and two secret authorities", () => {
     const source = readTerraform(RUNTIME);
     expect(contract.environment).toEqual({
@@ -380,6 +419,43 @@ function readTerraform(root: string): string {
     .sort()
     .map((name) => readFileSync(join(root, name), "utf8"))
     .join("\n");
+}
+
+type ContactedTargetAssertion = Readonly<{
+  depth: number;
+  field: "runId" | "checkoutSessionId" | "status";
+  value: string;
+}>;
+
+function assertExactContactedTargetChain(
+  source: string,
+  expected: readonly ContactedTargetAssertion[],
+): void {
+  if (JSON.stringify(parseContactedTargetAssertions(source)) !== JSON.stringify(expected)) {
+    throw new Error("CONTACTED_TERRAFORM_TARGET_CHAIN_NOT_EXACT");
+  }
+}
+
+function parseContactedTargetAssertions(source: string): ContactedTargetAssertion[] {
+  const start = source.indexOf('check "exact_runtime_authority"');
+  const end = source.indexOf('check "one_shot_runtime_shape"', start);
+  if (start < 0 || end < 0) throw new Error("CONTACTED_TERRAFORM_CHECK_MISSING");
+  const block = source.slice(start, end);
+  return [...block.matchAll(
+    /local\.contract\.target((?:\.predecessor)*)\.(runId|checkoutSessionId|status)\s*==\s*"([^"]+)"/gu,
+  )].map((match) => {
+    const field = match[2];
+    const value = match[3];
+    if (field !== "runId" && field !== "checkoutSessionId" && field !== "status") {
+      throw new Error("CONTACTED_TERRAFORM_TARGET_FIELD_INVALID");
+    }
+    if (value === undefined) throw new Error("CONTACTED_TERRAFORM_TARGET_VALUE_MISSING");
+    return {
+      depth: (match[1]?.match(/\.predecessor/gu) ?? []).length,
+      field,
+      value,
+    };
+  });
 }
 
 function terraformResourceDeclarations(source: string): string[] {

@@ -51,9 +51,12 @@ check "exact_runtime_authority" {
       local.contract.target.predecessor.runId == "89682c544f42d4debb260f5e3186087a" &&
       local.contract.target.predecessor.checkoutSessionId == "cmtjsiiqw000001s6uimkjhj5" &&
       local.contract.target.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.runId == "a764f61f4e4ba799ab16b318a676db65" &&
-      local.contract.target.predecessor.predecessor.checkoutSessionId == "cmthg2mzu000001s6iuvx7u5x" &&
+      local.contract.target.predecessor.predecessor.runId == "da7783b013d20713d6db207c7657b559" &&
+      local.contract.target.predecessor.predecessor.checkoutSessionId == "cmtjnvso1000001s60xfg0tyu" &&
       local.contract.target.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
+      local.contract.target.predecessor.predecessor.predecessor.runId == "a764f61f4e4ba799ab16b318a676db65" &&
+      local.contract.target.predecessor.predecessor.predecessor.checkoutSessionId == "cmthg2mzu000001s6iuvx7u5x" &&
+      local.contract.target.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
       local.fixed_environment.MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID == local.contract.target.runId &&
       local.fixed_environment.MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID == local.contract.target.checkoutSessionId &&
       local.command == "eximbay-contacted-reconciliation-once"
