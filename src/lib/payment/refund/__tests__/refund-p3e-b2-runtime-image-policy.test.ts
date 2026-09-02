@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import currentAuthority from
-  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v7.json";
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v8.json";
 import historicalSourceAuthority from
   "./fixtures/refund-p3e-b2-r2a-historical-source-v1.json";
 import {
@@ -110,7 +110,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(144);
+    expect(completeInfra).toHaveLength(145);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",

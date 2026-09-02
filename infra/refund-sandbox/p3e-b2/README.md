@@ -390,21 +390,23 @@ resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the
 retires those five resources through the same Terraform state.
 
 The Job binds only the expiry-deadlock-corrected refund-worker digest
-`sha256:b89e88124fd8832982cd8186317e09a03cbfb8fb52e006d3cd82ad76ab1b994b`,
-source `a39ec21275fba6fa1dc2e89aa9450ad0e430a490`, and immutable image-policy-v7
-authority `6c54d36686b9fbbc41daf1d5023a8ec857b0afec34122c2c71d455b5485f5af8`, plus
+`sha256:95b1d7fb170e7af503aab8ad8c6758fa43b5f63afad510c4004b58275dff5662`,
+source `5ff10b135efdc4e8efcc0599c9f74a738be7cc35`, and immutable image-policy-v8
+authority `edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a`, plus
 command `eximbay-contacted-reconciliation-once`. The superseded
-`sha256:809bffa908adc61dea85f69445e92069781a9a58673ffb912790e692d30d4c1b`
+`sha256:b89e88124fd8832982cd8186317e09a03cbfb8fb52e006d3cd82ad76ab1b994b`
 artifact remains historical provenance only. The run ID
-`da7783b013d20713d6db207c7657b559` and CheckoutSession
-`cmtjnvso1000001s60xfg0tyu` are fixed in source; payment, provider-order, user, command, argument,
+`89682c544f42d4debb260f5e3186087a` and CheckoutSession
+`cmtjsiiqw000001s6uimkjhj5` are fixed in source; payment, provider-order, user, command, argument,
 and environment override inputs are absent. It uses one task, parallelism one, zero retries, one
 CPU, 512 MiB, a 180-second timeout, Gen2 Direct VPC, and `PRIVATE_RANGES_ONLY` so the private Cloud
 SQL path uses the existing VPC/subnet while public Eximbay SANDBOX retrieval uses normal Cloud Run
 egress.
 
-The predecessor run `a764f61f4e4ba799ab16b318a676db65` and CheckoutSession
-`cmthg2mzu000001s6iuvx7u5x` remain immutable historical-only provenance and are not selectable by
+The immediate predecessor run `da7783b013d20713d6db207c7657b559` and CheckoutSession
+`cmtjnvso1000001s60xfg0tyu`, plus original historical run
+`a764f61f4e4ba799ab16b318a676db65` and CheckoutSession
+`cmthg2mzu000001s6iuvx7u5x`, remain immutable historical-only provenance and are not selectable by
 the current runtime.
 
 The source contains no execution resource, scheduler, queue, trigger, invoker binding, or

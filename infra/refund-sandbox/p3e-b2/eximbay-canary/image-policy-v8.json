@@ -1,0 +1,179 @@
+{
+  "contractVersion": "mira-refund-eximbay-canary-image-policy/v8",
+  "parentAuthoritySha256": "6c54d36686b9fbbc41daf1d5023a8ec857b0afec34122c2c71d455b5485f5af8",
+  "baselineCommit": "5ff10b135efdc4e8efcc0599c9f74a738be7cc35",
+  "sourceTree": "1ff00a67da9bb12d0499c3b2ad716b538d375c7a",
+  "supervisorSource": {
+    "path": "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+    "sha256": "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711"
+  },
+  "buildContext": {
+    "manifestSha256": "5e3261cc4882b39faadfca628b096c536d4afa40ec8257d16f2c22d888772075",
+    "fileCount": 209,
+    "repositoryGraphInputCount": 160,
+    "packagedGraphInputCount": 374,
+    "entrypointCount": 5,
+    "migrationCount": 41,
+    "migrationDigest": "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
+  },
+  "artifact": {
+    "manifestDigest": "sha256:95b1d7fb170e7af503aab8ad8c6758fa43b5f63afad510c4004b58275dff5662",
+    "manifestSize": 3066,
+    "configDigest": "sha256:40a4b24105208ceab415ad6d198ac0b4a2dd655ed3737f21c7d7f4a47b1a0d97",
+    "platform": "linux/amd64",
+    "imageSize": 145703874,
+    "layerCount": 14,
+    "diffIds": [
+      "sha256:81f823b9617547261c907396f63f770deaa554748ff739bedfa650e3bb74595a",
+      "sha256:aa7bf5b94b92bc0951fa6a85f909392c3e1ed27b4c2fa82bc77fa84122a08416",
+      "sha256:96a9284da7b47faab75998a33dc2e56874756555b92480d023585ff8a6d153fd",
+      "sha256:a4bc3d2a20bafc5e6c89c5e2285579f620f118f81b5413c62edee3d2380bdaa2",
+      "sha256:f7d704e9049824a8bb8860609b030e2cfd2c380484325cda609bb4d578d0db3a",
+      "sha256:d67b6c10286ad1b8feb203890fe95767c6f6c84b0cf2bc75efe8edb04e87255e",
+      "sha256:0d429f62d1149df5f9b699a804f3624ab172c218639601ee82acaf28a2db6425",
+      "sha256:0e290b739143ec6d90e288d5d1b6beb3b93942b9378ec475bcf4d903fbbae25c",
+      "sha256:badb3355284865d3d843789242f7663962dfe66de6f30a926fded34e9c92cc53",
+      "sha256:7d83effb4ad054248a80edcd3ca22586234c0860bf949d004f463b6dddad22c2",
+      "sha256:9aace72b6010f2ae181fd6fcfd46aa3febad594a38703ae3db79ca432d815acd",
+      "sha256:b34255c951391887442a08bd8c0ea4427f21cff162d5c40117f38e99da0b41be",
+      "sha256:1f5daa7882839ee2537f4f0a1b5ec3df0c62e43d44cb1715e3e62ae10dfa7aa2",
+      "sha256:1c82ec924f884b1c81a87da9dd62cf74445653f9f89755b4ea63a7ca08aa40ab"
+    ]
+  },
+  "imageConfiguration": {
+    "user": "65532:65532",
+    "workdir": "/app",
+    "entrypoint": [
+      "/usr/local/bin/node",
+      "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs"
+    ],
+    "command": [],
+    "exposedPorts": [],
+    "environmentNames": [
+      "PATH",
+      "NODE_VERSION",
+      "YARN_VERSION",
+      "NODE_ENV"
+    ],
+    "labels": {
+      "mira.refund.contract": "mira-refund-worker-runtime-image-connection/v1",
+      "mira.refund.release-authority": "absent",
+      "org.opencontainers.image.created": "1784764800",
+      "org.opencontainers.image.title": "mira-refund-worker",
+      "org.opencontainers.image.version": "local-reproducibility-proof"
+    }
+  },
+  "commandAllowlist": [
+    "worker-check",
+    "worker-health",
+    "worker-once",
+    "sandbox-preflight",
+    "image-self-check",
+    "eximbay-canary-once",
+    "eximbay-contacted-reconciliation-once"
+  ],
+  "entrypoints": [
+    {
+      "source": "containers/refund-worker/entrypoint.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs"
+    },
+    {
+      "source": "scripts/eximbay-refund-canary.ts",
+      "runtimePath": "/app/src/lib/payment/refund/eximbay-refund-canary.mjs"
+    },
+    {
+      "source": "scripts/refund-execution-worker.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-execution-worker.mjs"
+    },
+    {
+      "source": "scripts/refund-sandbox-provider-free-preflight.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs"
+    },
+    {
+      "source": "scripts/eximbay-contacted-reconciliation.ts",
+      "runtimePath": "/app/src/lib/payment/refund/eximbay-contacted-reconciliation.mjs"
+    }
+  ],
+  "systemCaTrust": {
+    "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
+    "sourcePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimeUser": "65532:65532",
+    "requiredType": "REGULAR_FILE",
+    "requiredNonempty": true,
+    "requiredReadable": true,
+    "requiredOwner": "0:0",
+    "sslCertFileOverride": "NONE",
+    "sslCertDirOverride": "NONE"
+  },
+  "applicationClosure": {
+    "entryCount": 182,
+    "metadataManifestSha256": "7c4f5e79693a89fc25232e1ed13cb7b499e5265064be01c8317b7e00f362fbf3",
+    "contentManifestSha256": "b37e2f5fb820de50f4016c221de5793dc4d9db6b61f043f1f6af54037318fc96"
+  },
+  "systemClosure": {
+    "removedEntryCount": 2620,
+    "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
+    "changedEntryCount": 3,
+    "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
+    "addedEntryCount": 188,
+    "addedMetadataContentManifestSha256": "f161829188321dd25f13ead71cede8f1d0ff7e98e8072b9449a61bea26488c2a"
+  },
+  "nonApplicationAdditionCount": 6,
+  "nonApplicationAdditions": [
+    {
+      "path": "/cloudsql",
+      "type": "DIRECTORY",
+      "mode": 448,
+      "uid": 65532,
+      "gid": 65532,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs/ca-certificates.crt",
+      "type": "REGULAR_FILE",
+      "mode": 365,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+      "symlinkTarget": null
+    },
+    {
+      "path": "/tmp/refund-worker",
+      "type": "DIRECTORY",
+      "mode": 448,
+      "uid": 65532,
+      "gid": 65532,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/usr/local/bin/cloud-sql-proxy",
+      "type": "REGULAR_FILE",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb",
+      "symlinkTarget": null
+    }
+  ]
+}

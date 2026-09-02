@@ -10,13 +10,13 @@ locals {
   service_account_id                   = "mira-p3e-sbx-contacted-recon"
   service_account_email                = "${local.service_account_id}@${local.project_id}.iam.gserviceaccount.com"
   job_name                             = "mira-p3e-sbx-contacted-reconciliation"
-  worker_image_digest_uri              = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:b89e88124fd8832982cd8186317e09a03cbfb8fb52e006d3cd82ad76ab1b994b"
-  worker_image_config_digest           = "sha256:80d28a01bbdd10945ea38b4a6bdf14244c5db8e22f45e46deb08f2959831208e"
-  worker_image_source_commit           = "a39ec21275fba6fa1dc2e89aa9450ad0e430a490"
-  worker_image_source_context_sha256   = "a02e4e3587fc4e5eaf68ffe04a33eb9e85c5b9969442893fc14194bee3faca4e"
-  worker_image_policy_path             = "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v7.json"
-  worker_image_policy_version          = "V7"
-  worker_image_policy_sha256           = "6c54d36686b9fbbc41daf1d5023a8ec857b0afec34122c2c71d455b5485f5af8"
+  worker_image_digest_uri              = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:95b1d7fb170e7af503aab8ad8c6758fa43b5f63afad510c4004b58275dff5662"
+  worker_image_config_digest           = "sha256:40a4b24105208ceab415ad6d198ac0b4a2dd655ed3737f21c7d7f4a47b1a0d97"
+  worker_image_source_commit           = "5ff10b135efdc4e8efcc0599c9f74a738be7cc35"
+  worker_image_source_context_sha256   = "5e3261cc4882b39faadfca628b096c536d4afa40ec8257d16f2c22d888772075"
+  worker_image_policy_path             = "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v8.json"
+  worker_image_policy_version          = "V8"
+  worker_image_policy_sha256           = "edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a"
   worker_supervisor_source_sha256      = "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711"
   command                              = "eximbay-contacted-reconciliation-once"
   cloud_sql_instance_connection_name   = "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
@@ -45,8 +45,8 @@ locals {
     eximbay_api_key = local.eximbay_api_key_secret_id
   } : {}
   fixed_environment = {
-    MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID              = "da7783b013d20713d6db207c7657b559"
-    MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID = "cmtjnvso1000001s60xfg0tyu"
+    MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID              = "89682c544f42d4debb260f5e3186087a"
+    MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID = "cmtjsiiqw000001s6uimkjhj5"
     EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED                 = "ENABLED"
     EXIMBAY_SANDBOX_MID                                       = "1849705C64"
     MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE                = local.eximbay_api_key_secret_resource_name
