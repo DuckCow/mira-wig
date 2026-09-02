@@ -26,7 +26,7 @@ variable "project_id" {
 variable "release_image_digest_uri" {
   type = string
   validation {
-    condition     = var.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:8e167a2a9eeeabe82feef0488c69f3b527a00cb0b8497d2d3c20289c72633baf"
+    condition     = var.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691"
     error_message = "The exact reviewed refund-worker image digest is required."
   }
 }

@@ -18,12 +18,12 @@ import {
 describe("Eximbay canary producer canonical authority", () => {
   it("reads only the exact committed runtime contract bytes", async () => {
     await expect(loadEximbayCanaryCommittedContractDigests(process.cwd())).resolves.toEqual({
-      runtimeContractSha256: "9c0735317a2d7222c384cf7241858c24e6a4939fce18fd1d4a83922d8ad32703",
-      imagePolicySha256: "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876",
+      runtimeContractSha256: "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41",
+      imagePolicySha256: "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf",
       preflightContractSha256: "c954c44e399f02121a95e99353f7eadf75377a1c425480249caa95695a737611",
       terraformMainSha256: "cf999dee26d30492a4ccc50ef6c7f09319189a71164f12dffedc2726d76424f9",
       terraformLocalsSha256: "f6350470adbf97e92c7d39e79483ed7b623a7b183e9a00802bd71231ab11ad62",
-      terraformVariablesSha256: "609a8553cbdb5a541126778d7e0725c188c9f148d38a4fcae7481e7f2fac3339",
+      terraformVariablesSha256: "7877c59acc0aa6841e2bf5f2b610375a530ff01cf1409deb502d7bbf59c1cebf",
     });
   });
 
@@ -191,7 +191,7 @@ function runtimeReadback(authority: ReturnType<typeof deriveEximbayCanaryRuntime
     jobUid: "12345678-1234-1234-1234-123456789abc",
     jobGeneration: "1",
     serviceAccountEmail: "mira-eximbay-canary@mira-refund-sandbox-0001.iam.gserviceaccount.com",
-    imageDigestUri: "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:8e167a2a9eeeabe82feef0488c69f3b527a00cb0b8497d2d3c20289c72633baf",
+    imageDigestUri: "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691",
     arguments: Object.freeze(["eximbay-canary-once"]),
     taskCount: 1,
     parallelism: 1,

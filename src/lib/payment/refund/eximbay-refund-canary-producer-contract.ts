@@ -18,7 +18,7 @@ export const EXIMBAY_CANARY_EXACT_JOB = "mira-eximbay-refund-canary";
 export const EXIMBAY_CANARY_EXACT_SERVICE_ACCOUNT =
   "mira-eximbay-canary@mira-refund-sandbox-0001.iam.gserviceaccount.com";
 export const EXIMBAY_CANARY_EXACT_IMAGE =
-  "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:8e167a2a9eeeabe82feef0488c69f3b527a00cb0b8497d2d3c20289c72633baf";
+  "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691";
 export const EXIMBAY_CANARY_EXACT_DATABASE_SECRET = "mira-p3e-sbx-canary-database-url";
 export const EXIMBAY_CANARY_EXACT_DATABASE_SECRET_VERSION = "1";
 export const EXIMBAY_CANARY_EXACT_CLOUD_SQL_CONDITION =
@@ -40,12 +40,12 @@ export const EXIMBAY_CANARY_EXACT_SYNTHETIC_ADDRESS = "1 Synthetic Avenue";
 export const EXIMBAY_CANARY_SYNTHETIC_EMAIL =
   /^mira-eximbay-canary\+[A-Za-z0-9._-]{1,64}@example\.test$/u;
 export const EXIMBAY_CANARY_EXACT_CONTRACT_DIGESTS = Object.freeze({
-  runtimeContractSha256: "9c0735317a2d7222c384cf7241858c24e6a4939fce18fd1d4a83922d8ad32703",
-  imagePolicySha256: "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876",
+  runtimeContractSha256: "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41",
+  imagePolicySha256: "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf",
   preflightContractSha256: "c954c44e399f02121a95e99353f7eadf75377a1c425480249caa95695a737611",
   terraformMainSha256: "cf999dee26d30492a4ccc50ef6c7f09319189a71164f12dffedc2726d76424f9",
   terraformLocalsSha256: "f6350470adbf97e92c7d39e79483ed7b623a7b183e9a00802bd71231ab11ad62",
-  terraformVariablesSha256: "609a8553cbdb5a541126778d7e0725c188c9f148d38a4fcae7481e7f2fac3339",
+  terraformVariablesSha256: "7877c59acc0aa6841e2bf5f2b610375a530ff01cf1409deb502d7bbf59c1cebf",
 });
 
 const RELEASE_BINDING_VERSION = "mira-refund-eximbay-canary-release/v1";
@@ -261,9 +261,9 @@ export function deriveEximbayCanaryRuntimeBindings(
   const imageBindingDigest = digest([
     IMAGE_BINDING_VERSION,
     EXIMBAY_CANARY_EXACT_IMAGE,
-    "d24f98c7fd30f79842c860e5ac70baf3ed7dbc7f7f4beed4dfd8ee516d530a07",
-    198,
-    4,
+    "bbebe719f5b34a224c0b78159872fe7a6d8a7495f4540087356b2dde84777bbd",
+    209,
+    5,
     contracts.imagePolicySha256,
   ]);
   const preflightJobBindingDigest = digest([

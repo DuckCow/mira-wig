@@ -9,11 +9,11 @@ import {
 
 const CONTRACTS = Object.freeze({
   runtimeContractSha256: Object.freeze({
-    path: "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json",
+    path: "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json",
     sha256: EXIMBAY_CANARY_EXACT_CONTRACT_DIGESTS.runtimeContractSha256,
   }),
   imagePolicySha256: Object.freeze({
-    path: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+    path: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json",
     sha256: EXIMBAY_CANARY_EXACT_CONTRACT_DIGESTS.imagePolicySha256,
   }),
   preflightContractSha256: Object.freeze({

@@ -1,0 +1,118 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-eximbay-canary-runtime/v2",
+  "status": "RELEASE_CAPABLE_DORMANT_NOT_APPLIED",
+  "projectId": "mira-refund-sandbox-0001",
+  "region": "asia-northeast3",
+  "backend": {
+    "type": "gcs",
+    "bucket": "mira-refund-sandbox-0001-tfstate-925882331349",
+    "prefix": "p3e-b2/eximbay-canary"
+  },
+  "resourceGraph": {
+    "resourceCount": 5,
+    "addresses": [
+      "google_cloud_run_v2_job.canary",
+      "google_project_iam_member.cloud_sql_client",
+      "google_secret_manager_secret_iam_member.database_url",
+      "google_secret_manager_secret_iam_member.eximbay_api_key",
+      "google_service_account.canary"
+    ],
+    "sortedAddressSha256": "833b4caedde774886cc25f2ca28fe996f37c4ee5345b0158c3a749517f65409b"
+  },
+  "identity": {
+    "serviceAccountEmail": "mira-eximbay-canary@mira-refund-sandbox-0001.iam.gserviceaccount.com",
+    "secondProviderIdentity": false
+  },
+  "iam": {
+    "cloudSqlRole": "roles/cloudsql.client",
+    "cloudSqlInstanceUser": false,
+    "cloudSqlCondition": "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'",
+    "databaseSecretRole": "roles/secretmanager.secretAccessor",
+    "providerSecretRole": "roles/secretmanager.secretAccessor",
+    "scope": "EXACT_RESOURCE"
+  },
+  "secrets": {
+    "database": {
+      "resource": "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-canary-database-url",
+      "version": "1"
+    },
+    "provider": {
+      "resource": "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key",
+      "version": "1"
+    }
+  },
+  "image": {
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691",
+    "imagePolicyPath": "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json",
+    "imagePolicySha256": "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf",
+    "sourceCommit": "6f7398e5bae6909e5d2bb52c9ef0717277d97df4",
+    "sourceTree": "51dabe922b2033fbdb0c9f54277646eca49f5648",
+    "contextSha256": "bbebe719f5b34a224c0b78159872fe7a6d8a7495f4540087356b2dde84777bbd",
+    "contextFiles": 209,
+    "entrypoints": 5
+  },
+  "network": {
+    "mode": "DIRECT_VPC",
+    "egress": "PRIVATE_RANGES_ONLY",
+    "network": "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc",
+    "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",
+    "tags": [
+      "refund-provider-free"
+    ]
+  },
+  "job": {
+    "name": "mira-eximbay-refund-canary",
+    "arguments": [
+      "eximbay-canary-once"
+    ],
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "taskTimeoutSeconds": 150,
+    "automaticTrigger": false,
+    "argumentOverride": "FORBIDDEN_BY_RUNTIME",
+    "executionPassLimit": 1
+  },
+  "databaseRole": {
+    "name": "mira_refund_canary",
+    "successTransactionDelta": [
+      "SELECT public.\"CheckoutSession\"",
+      "INSERT public.\"PaymentOutbox\"",
+      "SELECT public.\"RefundExecutionEximbayPreflightObservation\"",
+      "INSERT public.\"RefundExecutionEximbayPreflightObservation\"",
+      "UPDATE public.\"Payment\".\"id\" (row-lock authority only)",
+      "UPDATE public.\"RefundExecutionProviderOperationBinding\".\"id\" (row-lock authority only)",
+      "UPDATE public.\"RefundExecutionEvidence\".\"id\" (row-lock authority only)",
+      "UPDATE public.\"RefundExecutionCommandEvent\".\"id\" (row-lock authority only)"
+    ]
+  },
+  "providerContact": {
+    "default": "DENIED",
+    "endpoint": "https://api-test.eximbay.com",
+    "credentialReadTiming": "AFTER_DURABLE_APPROVAL_CONSUMPTION",
+    "requiredPrerequisites": [
+      "EXIMBAY_SECRET_VERSION_1",
+      "FRESH_SYNTHETIC_SALE_TARGET",
+      "SEALED_TARGET",
+      "DURABLE_ONE_USE_APPROVAL",
+      "MATERIALIZED_RUNTIME"
+    ],
+    "effectCaps": {
+      "preRefundRetrieve": 1,
+      "refundRequest": 1,
+      "postRefundRetrieve": 0,
+      "recoveryRetrieve": 0,
+      "secondRefundRequest": 0,
+      "automaticRetry": 0
+    },
+    "uncertainOutcome": "STOP_SEPARATE_RECONCILIATION_AUTHORITY_REQUIRED"
+  },
+  "emailBoundary": "PAYMENT_OUTBOX_INTENT_ONLY_NO_DISPATCH",
+  "lifecycle": {
+    "default": "ABSENT",
+    "materialization": "EXPLICIT_HUMAN_AUTHORITY",
+    "retirement": "EXPLICIT_HUMAN_AUTHORITY",
+    "preventDestroy": false,
+    "deletionProtection": false
+  }
+}

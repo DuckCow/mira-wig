@@ -7,7 +7,7 @@ variables {
     provider_contact_authorized = false
   }
   project_id                         = "mira-refund-sandbox-0001"
-  release_image_digest_uri           = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:8e167a2a9eeeabe82feef0488c69f3b527a00cb0b8497d2d3c20289c72633baf"
+  release_image_digest_uri           = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691"
   cloud_sql_instance_connection_name = "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
   network_resource_name              = "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc"
   subnetwork_resource_name           = "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3"

@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json";
+import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json";
+
+import imagePolicy from "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json";
+import {
+  EXIMBAY_CANARY_EXACT_CONTRACT_DIGESTS,
+  EXIMBAY_CANARY_EXACT_IMAGE,
+  EXIMBAY_CANARY_FRESH_SALE_MAX_AGE_MS,
+} from "../eximbay-refund-canary-producer-contract";
 
 const ROOT = process.cwd();
 const CANARY = join(ROOT, "infra/refund-sandbox/p3e-b2/eximbay-canary");
@@ -18,6 +25,58 @@ const addresses = [
 ].sort();
 
 describe("P3E-B2 dormant Eximbay canary release authority", () => {
+  it("binds the single-shot image and runtime to the exact immutable successor", () => {
+    expect(imagePolicy.contractVersion).toBe("mira-refund-eximbay-canary-image-policy/v9");
+    expect(imagePolicy.baselineCommit).toBe("6f7398e5bae6909e5d2bb52c9ef0717277d97df4");
+    expect(imagePolicy.sourceTree).toBe("51dabe922b2033fbdb0c9f54277646eca49f5648");
+    expect(contract.image.sourceCommit).toBe(imagePolicy.baselineCommit);
+    expect(contract.image.sourceTree).toBe(imagePolicy.sourceTree);
+    expect(contract.image.digestUri).toBe(EXIMBAY_CANARY_EXACT_IMAGE);
+    expect(contract.image.digestUri.endsWith(`@${imagePolicy.artifact.manifestDigest}`)).toBe(true);
+    expect(contract.image.contextSha256).toBe(imagePolicy.buildContext.manifestSha256);
+    expect(contract.image.contextFiles).toBe(imagePolicy.buildContext.fileCount);
+    expect(contract.image.entrypoints).toBe(imagePolicy.buildContext.entrypointCount);
+    const policyHash = createHash("sha256").update(read("image-policy-v9.json")).digest("hex");
+    expect(contract.image.imagePolicySha256).toBe(policyHash);
+    expect(EXIMBAY_CANARY_EXACT_CONTRACT_DIGESTS.imagePolicySha256).toBe(policyHash);
+    expect(imagePolicy.artifact.orderedLayers.map((layer) => layer.diffId))
+      .toEqual(imagePolicy.artifact.diffIds);
+    expect(imagePolicy.artifact.orderedLayers).toHaveLength(imagePolicy.artifact.layerCount);
+  });
+
+  it("preserves source effect ceilings, freshness, and explicit retirement", () => {
+    const caps = { preRefundRetrieve: 1, refundRequest: 1, postRefundRetrieve: 0,
+      recoveryRetrieve: 0, secondRefundRequest: 0, automaticRetry: 0 };
+    expect(imagePolicy.canaryExecution).toMatchObject({ ...caps,
+      command: "eximbay-canary-once", mode: "SANDBOX",
+      targetFreshnessMaxAgeMs: EXIMBAY_CANARY_FRESH_SALE_MAX_AGE_MS,
+      uncertainOutcome: "STOP_SEPARATE_RECONCILIATION_AUTHORITY_REQUIRED",
+    });
+    expect(contract.providerContact.effectCaps).toEqual(caps);
+    expect(contract.job).toMatchObject({ taskCount: 1, parallelism: 1, maxRetries: 0,
+      automaticTrigger: false, executionPassLimit: 1 });
+    expect(contract.lifecycle).toEqual({ default: "ABSENT",
+      materialization: "EXPLICIT_HUMAN_AUTHORITY", retirement: "EXPLICIT_HUMAN_AUTHORITY",
+      preventDestroy: false, deletionProtection: false });
+    for (const source of imagePolicy.canaryExecution.sourceFiles) {
+      expect(createHash("sha256").update(readFileSync(join(ROOT, source.path))).digest("hex"))
+        .toBe(source.sha256);
+    }
+  });
+
+  it("preserves the old canary policy and contacted-reconciliation authority", () => {
+    expect(createHash("sha256").update(read("image-policy-v1.json")).digest("hex"))
+      .toBe("5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876");
+    expect(createHash("sha256").update(read("image-policy-v8.json")).digest("hex"))
+      .toBe("edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a");
+    expect(readFileSync(join(ROOT,
+      "infra/refund-sandbox/p3e-b2/contacted-reconciliation/locals.tf"), "utf8"))
+      .toContain("eximbay-canary/image-policy-v8.json");
+    expect(imagePolicy.commandAllowlist).toEqual(["worker-check", "worker-health",
+      "worker-once", "sandbox-preflight", "image-self-check", "eximbay-canary-once",
+      "eximbay-contacted-reconciliation-once"]);
+  });
+
   it("freezes the exact five-resource graph and backend boundary", () => {
     const source = terraform();
     expect(source.match(/resource\s+"[^"]+"\s+"[^"]+"/gu)).toHaveLength(5);
