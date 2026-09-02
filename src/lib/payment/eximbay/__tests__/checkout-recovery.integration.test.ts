@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  CheckoutSessionStatus,
   FulfillmentType,
   PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
@@ -22,7 +23,7 @@ import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import { PaymentMethod } from "@/lib/payment/providers/routing";
 import type { PaymentInitiationProvider } from "@/lib/payment/providers/types";
 import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
-import { createCheckoutSession, readCheckoutSessionResume } from "@/lib/payment/session";
+import { createCheckoutSession, isUsable, readCheckoutSessionResume } from "@/lib/payment/session";
 import type { EximbayBf4Fetch } from "../bf4-contact";
 import { processEximbayBf4Status } from "../bf4-engine";
 import type { EximbayReadyFetch } from "../ready-http";
@@ -164,6 +165,27 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
     await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
     await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
       .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });
+  });
+
+  it("recovers an expired SUBMITTED session only through its exact contacted blocker", async () => {
+    const expiresAt = new Date(RECOVERY_AT.getTime() - 1);
+    const session = await db.checkoutSession.update({
+      where: { id: fixture.sessionId },
+      data: { expiresAt },
+      select: { status: true, expiresAt: true },
+    });
+    expect(isUsable(session, RECOVERY_AT)).toBe(false);
+
+    const transport = q004Transport();
+    await expect(recoverEximbayCheckout(db, recoveryInput(fixture, transport)))
+      .resolves.toMatchObject({ kind: "released", paymentId: fixture.paymentId });
+    expect(transport).toHaveBeenCalledTimes(1);
+    await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+      .resolves.toMatchObject({
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        blockingEndedAt: RECOVERY_AT,
+        errorCode: "EXIMBAY_NO_TRANSACTION_OBSERVED",
+      });
   });
 
   it("logs one bounded redacted diagnostic while keeping provider outcome unknown fail closed", async () => {
@@ -352,18 +374,21 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
       }
       expect(ambiguousTransport).toHaveBeenCalledTimes(1);
 
-      const staleFixture = await createFixture();
-      additionalFixtures.push(staleFixture);
+      const ineligibleFixture = await createFixture();
+      additionalFixtures.push(ineligibleFixture);
       await db.checkoutSession.update({
-        where: { id: staleFixture.sessionId },
-        data: { expiresAt: new Date(RECOVERY_AT.getTime() - 1) },
+        where: { id: ineligibleFixture.sessionId },
+        data: {
+          status: CheckoutSessionStatus.EXPIRED,
+          expiresAt: new Date(RECOVERY_AT.getTime() - 1),
+        },
       });
-      const staleTransport = vi.fn<EximbayBf4Fetch>();
+      const ineligibleTransport = vi.fn<EximbayBf4Fetch>();
       await expect(recoverEximbayCheckout(
         restricted,
-        recoveryInput(staleFixture, staleTransport),
+        recoveryInput(ineligibleFixture, ineligibleTransport),
       )).resolves.toEqual({ kind: "notReleased", reason: "NOT_ELIGIBLE" });
-      expect(staleTransport).not.toHaveBeenCalled();
+      expect(ineligibleTransport).not.toHaveBeenCalled();
 
       await expect(db.payment.findUniqueOrThrow({ where: { id: observedFixture.paymentId } }))
         .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });

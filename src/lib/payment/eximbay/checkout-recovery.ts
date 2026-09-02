@@ -12,7 +12,6 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { isUsable } from "@/lib/payment/session";
 import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
 import type { ProviderEnv } from "@/lib/payment/providers/credentials";
 import {
@@ -124,7 +123,7 @@ async function checkoutRecoveryPreflight(
   const replay = await loadExactReplay(client, owned.payment);
   if (replay.kind === "replayed") return Object.freeze({ kind: "result", result: replay });
   if (replay.kind === "split") throw new Error("EXIMBAY_CHECKOUT_RECOVERY_SPLIT_EVIDENCE");
-  const eligible = await isEligibleBeforeContact(client, owned, input.now?.() ?? new Date());
+  const eligible = await isEligibleBeforeContact(client, owned);
   return eligible
     ? Object.freeze({ kind: "eligible", owned })
     : recoveryPreflightResult("NOT_ELIGIBLE");
@@ -188,7 +187,7 @@ async function releaseAfterQ004(
   const replay = await loadExactReplay(tx, current.payment);
   if (replay.kind === "replayed") return replay;
   if (replay.kind === "split") throw new Error("EXIMBAY_CHECKOUT_RECOVERY_SPLIT_EVIDENCE");
-  if (!await isEligibleBeforeContact(tx, current, input.observedAt)) {
+  if (!await isEligibleBeforeContact(tx, current)) {
     return Object.freeze({ kind: "notReleased", reason: "STATE_CHANGED" });
   }
   if (await hasClaimedCallback(tx, current.payment)) {
@@ -235,7 +234,6 @@ type OwnedPayment = Readonly<{
     id: string;
     userId: string;
     status: CheckoutSessionStatus;
-    expiresAt: Date;
     order: { id: string } | null;
   }>;
 }>;
@@ -246,7 +244,7 @@ async function loadOwnedPayment(
 ): Promise<OwnedPayment | null> {
   const session = await client.checkoutSession.findFirst({
     where: { id: input.checkoutSessionId, userId: input.authenticatedUserId },
-    select: { id: true, userId: true, status: true, expiresAt: true, order: { select: { id: true } } },
+    select: { id: true, userId: true, status: true, order: { select: { id: true } } },
   });
   if (!session) return null;
   const payment = await client.payment.findFirst({
@@ -259,15 +257,18 @@ async function loadOwnedPayment(
 async function isEligibleBeforeContact(
   client: Pick<PrismaClient, "payment"> | Prisma.TransactionClient,
   owned: OwnedPayment,
-  now: Date,
 ): Promise<boolean> {
-  if (owned.session.order !== null || !isUsable(owned.session, now)) return false;
+  if (!isEligibleContactedRecoverySession(owned.session)) return false;
   if (!isExactRecoverableBlocker(owned.payment)) return false;
   if (await hasUnresolvedSessionExposure(client, owned.payment.checkoutSessionId)) return false;
   const blockers = await client.payment.count({
     where: { checkoutSessionId: owned.payment.checkoutSessionId, blockingEndedAt: null },
   });
   return blockers === 1;
+}
+
+function isEligibleContactedRecoverySession(session: OwnedPayment["session"]): boolean {
+  return session.status === CheckoutSessionStatus.SUBMITTED && session.order === null;
 }
 
 type ReplayRead =
