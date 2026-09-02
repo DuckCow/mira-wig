@@ -53,9 +53,17 @@ const V7_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v7.json",
 );
-const CURRENT_AUTHORITY_PATH = resolve(
+const V8_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v8.json",
+);
+const V9_AUTHORITY_PATH = resolve(
+  import.meta.dirname,
+  "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json",
+);
+const CURRENT_AUTHORITY_PATH = resolve(
+  import.meta.dirname,
+  "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v10.json",
 );
 const V1_AUTHORITY_SHA256 =
   "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876";
@@ -71,6 +79,10 @@ const V6_AUTHORITY_SHA256 =
   "8cb641f5f945ce392d19c7b410824f356e205704c0e90f275821d412b2d5979d";
 const V7_AUTHORITY_SHA256 =
   "6c54d36686b9fbbc41daf1d5023a8ec857b0afec34122c2c71d455b5485f5af8";
+const V8_AUTHORITY_SHA256 =
+  "edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a";
+const V9_AUTHORITY_SHA256 =
+  "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf";
 const V1_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v1";
 const V2_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v2";
 const V3_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v3";
@@ -78,7 +90,9 @@ const V4_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v4";
 const V5_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v5";
 const V6_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v6";
 const V7_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v7";
-const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v8";
+const V8_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v8";
+const V9_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v9";
+const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v10";
 const V1_BASELINE_COMMIT = "518513e0990b6f3e2f0958125cbfa1118d423988";
 const V2_BASELINE_COMMIT = "e5758c2ce812beae6306becad48a2ebc10f2cf4b";
 const V3_BASELINE_COMMIT = "7958fb0b228266d502f5e55a14929e8d5510e913";
@@ -86,13 +100,17 @@ const V4_BASELINE_COMMIT = "733dcab3bf58d49ec69929a5db33e259e94fe970";
 const V5_BASELINE_COMMIT = "820feba705b195d775a071cac0cb6b5c7ab7c377";
 const V6_BASELINE_COMMIT = "22d0194c0a8bb4709b97056d68db21cabc65c24e";
 const V7_BASELINE_COMMIT = "a39ec21275fba6fa1dc2e89aa9450ad0e430a490";
-const CURRENT_BASELINE_COMMIT = "5ff10b135efdc4e8efcc0599c9f74a738be7cc35";
+const V8_BASELINE_COMMIT = "5ff10b135efdc4e8efcc0599c9f74a738be7cc35";
+const V9_BASELINE_COMMIT = "6f7398e5bae6909e5d2bb52c9ef0717277d97df4";
+const CURRENT_BASELINE_COMMIT = "6e1aaa32b66876252dcce40296970ea23d592d64";
 const V3_SOURCE_TREE = "edcf50357c49521febd194502c167872a2dead67";
 const V4_SOURCE_TREE = "5cdacc1c1c32c163b7675f8fe9453b91e7c15f6d";
 const V5_SOURCE_TREE = "d5fde2249103d263b1dab1b126027c419d18f1aa";
 const V6_SOURCE_TREE = "e334b5ef6fe337d72aad4af5def14882f70ee6bd";
 const V7_SOURCE_TREE = "db72f700ea7dda4f0ac7029c6ff0d03830ca6ae1";
-const CURRENT_SOURCE_TREE = "1ff00a67da9bb12d0499c3b2ad716b538d375c7a";
+const V8_SOURCE_TREE = "1ff00a67da9bb12d0499c3b2ad716b538d375c7a";
+const V9_SOURCE_TREE = "51dabe922b2033fbdb0c9f54277646eca49f5648";
+const CURRENT_SOURCE_TREE = "97ea29321bef86e9b2f38abceef5f0b86a7795df";
 const V3_SUPERVISOR_SOURCE = Object.freeze({
   path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
   sha256: "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
@@ -119,7 +137,9 @@ const V4_ENTRYPOINTS = V3_ENTRYPOINTS;
 const V5_ENTRYPOINTS = V4_ENTRYPOINTS;
 const V6_ENTRYPOINTS = V5_ENTRYPOINTS;
 const V7_ENTRYPOINTS = V6_ENTRYPOINTS;
-const CURRENT_ENTRYPOINTS = V7_ENTRYPOINTS;
+const V8_ENTRYPOINTS = V7_ENTRYPOINTS;
+const V9_ENTRYPOINTS = V8_ENTRYPOINTS;
+const CURRENT_ENTRYPOINTS = V9_ENTRYPOINTS;
 const V3_COMMAND_ALLOWLIST = Object.freeze([
   "worker-check",
   "worker-health",
@@ -133,7 +153,9 @@ const V4_COMMAND_ALLOWLIST = V3_COMMAND_ALLOWLIST;
 const V5_COMMAND_ALLOWLIST = V4_COMMAND_ALLOWLIST;
 const V6_COMMAND_ALLOWLIST = V5_COMMAND_ALLOWLIST;
 const V7_COMMAND_ALLOWLIST = V6_COMMAND_ALLOWLIST;
-const CURRENT_COMMAND_ALLOWLIST = V7_COMMAND_ALLOWLIST;
+const V8_COMMAND_ALLOWLIST = V7_COMMAND_ALLOWLIST;
+const V9_COMMAND_ALLOWLIST = V8_COMMAND_ALLOWLIST;
+const CURRENT_COMMAND_ALLOWLIST = V9_COMMAND_ALLOWLIST;
 const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const SYSTEM_CA_TRUST = Object.freeze({
   sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
@@ -1706,9 +1728,31 @@ export function parseFrozenImageContract(raw: unknown): FrozenImageContract {
 
 export async function readCurrentEximbayImageAuthority():
 Promise<CurrentEximbayImageAuthority> {
-  await readV7EximbayImageAuthority();
+  await readV9EximbayImageAuthority();
   const raw: unknown = JSON.parse(await readFile(CURRENT_AUTHORITY_PATH, "utf8"));
   return parseCurrentEximbayImageAuthority(raw);
+}
+
+export async function readV9EximbayImageAuthority():
+Promise<CurrentEximbayImageAuthority> {
+  await readV8EximbayImageAuthority();
+  const bytes = await readFile(V9_AUTHORITY_PATH);
+  requireCondition(
+    createHash("sha256").update(bytes).digest("hex") === V9_AUTHORITY_SHA256,
+    "V9_IMAGE_AUTHORITY_SHA256",
+  );
+  return parseV9EximbayImageAuthority(JSON.parse(bytes.toString("utf8")));
+}
+
+export async function readV8EximbayImageAuthority():
+Promise<CurrentEximbayImageAuthority> {
+  await readV7EximbayImageAuthority();
+  const bytes = await readFile(V8_AUTHORITY_PATH);
+  requireCondition(
+    createHash("sha256").update(bytes).digest("hex") === V8_AUTHORITY_SHA256,
+    "V8_IMAGE_AUTHORITY_SHA256",
+  );
+  return parseV8EximbayImageAuthority(JSON.parse(bytes.toString("utf8")));
 }
 
 export async function readV7EximbayImageAuthority():
@@ -1794,10 +1838,34 @@ export function parseCurrentEximbayImageAuthority(
 ): CurrentEximbayImageAuthority {
   return parseSuccessorEximbayImageAuthority(raw, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V7_AUTHORITY_SHA256,
+    parentAuthoritySha256: V9_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
-  }, CURRENT_SOURCE_TREE, CURRENT_SUPERVISOR_SOURCE, CURRENT_COMMAND_ALLOWLIST);
+  }, CURRENT_SOURCE_TREE, CURRENT_SUPERVISOR_SOURCE, CURRENT_COMMAND_ALLOWLIST,
+  ["filesystemAuthority", "canaryExecution", "contactedReconciliation"], true);
+}
+
+export function parseV9EximbayImageAuthority(
+  raw: unknown,
+): CurrentEximbayImageAuthority {
+  return parseSuccessorEximbayImageAuthority(raw, {
+    contractVersion: V9_CONTRACT_VERSION,
+    parentAuthoritySha256: V8_AUTHORITY_SHA256,
+    baselineCommit: V9_BASELINE_COMMIT,
+    entrypoints: V9_ENTRYPOINTS,
+  }, V9_SOURCE_TREE, CURRENT_SUPERVISOR_SOURCE, V9_COMMAND_ALLOWLIST,
+  ["filesystemAuthority", "canaryExecution"], true);
+}
+
+export function parseV8EximbayImageAuthority(
+  raw: unknown,
+): CurrentEximbayImageAuthority {
+  return parseSuccessorEximbayImageAuthority(raw, {
+    contractVersion: V8_CONTRACT_VERSION,
+    parentAuthoritySha256: V7_AUTHORITY_SHA256,
+    baselineCommit: V8_BASELINE_COMMIT,
+    entrypoints: V8_ENTRYPOINTS,
+  }, V8_SOURCE_TREE, CURRENT_SUPERVISOR_SOURCE, V8_COMMAND_ALLOWLIST);
 }
 
 export function parseV7EximbayImageAuthority(
@@ -1861,13 +1929,17 @@ function parseSuccessorEximbayImageAuthority(
   sourceTree: string,
   supervisorSource: CurrentEximbayImageAuthority["supervisorSource"],
   commandAllowlist: readonly string[],
+  extensionKeys: readonly string[] = [],
+  orderedLayers = false,
 ): CurrentEximbayImageAuthority {
   requireCondition(isRecord(raw) && hasExactKeys(raw, [
     "contractVersion", "parentAuthoritySha256", "baselineCommit", "sourceTree",
     "supervisorSource", "buildContext", "artifact", "imageConfiguration",
     "commandAllowlist", "entrypoints", "systemCaTrust", "applicationClosure",
     "systemClosure", "nonApplicationAdditionCount", "nonApplicationAdditions",
+    ...extensionKeys,
   ]), "CURRENT_IMAGE_AUTHORITY_SHAPE");
+  validateSuccessorAuthorityExtensions(raw, extensionKeys);
   requireCondition(raw.sourceTree === sourceTree, "CURRENT_SOURCE_TREE_BINDING");
   requireCondition(
     JSON.stringify(raw.supervisorSource) === JSON.stringify(supervisorSource),
@@ -1900,10 +1972,210 @@ function parseSuccessorEximbayImageAuthority(
     sourceTree,
     supervisorSource,
     buildContext: successorContext,
-    artifact: parseSuccessorArtifactAuthority(raw.artifact),
+    artifact: parseSuccessorArtifactAuthority(raw.artifact, orderedLayers),
     imageConfiguration: parseSuccessorImageConfiguration(raw.imageConfiguration),
     commandAllowlist: Object.freeze([...commandAllowlist]),
   });
+}
+
+function validateSuccessorAuthorityExtensions(
+  raw: Readonly<Record<string, unknown>>,
+  extensionKeys: readonly string[],
+): void {
+  const extensions = new Set(extensionKeys);
+  if (extensions.has("filesystemAuthority")) {
+    requireCondition(
+      raw.filesystemAuthority === "OFFLINE_DOCKER_IMAGE_SAVE_VERIFIED_LAYERS",
+      "CURRENT_FILESYSTEM_AUTHORITY",
+    );
+  }
+  if (extensions.has("canaryExecution")) {
+    validateCanaryExecutionAuthority(raw.canaryExecution);
+  }
+  if (extensions.has("contactedReconciliation")) {
+    validateContactedReconciliationAuthority(raw.contactedReconciliation);
+  }
+}
+
+function requireExtensionRecord(
+  value: unknown,
+  keys: readonly string[],
+  code: string,
+): Readonly<Record<string, unknown>> {
+  requireCondition(isRecord(value), code);
+  requireCondition(hasExactKeys(value, keys), code);
+  return value;
+}
+
+function requireExtensionValue(
+  actual: unknown,
+  expected: unknown,
+  code: string,
+): void {
+  requireCondition(actual === expected, code);
+}
+
+function validateCanaryExecutionAuthority(value: unknown): void {
+  const canary = requireExtensionRecord(value, [
+    "command", "predecessorCanaryPolicySha256", "mode", "targetFreshnessMaxAgeMs",
+    "preRefundRetrieve", "refundRequest", "postRefundRetrieve", "recoveryRetrieve",
+    "secondRefundRequest", "automaticRetry", "uncertainOutcome", "sourceFiles",
+    "packagedCanarySha256", "packagedSupervisorSha256",
+  ], "CURRENT_CANARY_EXECUTION_SHAPE");
+  requireExtensionValue(canary.command, "eximbay-canary-once", "CURRENT_CANARY_EXECUTION_BINDING");
+  requireExtensionValue(canary.predecessorCanaryPolicySha256, V1_AUTHORITY_SHA256,
+    "CURRENT_CANARY_EXECUTION_BINDING");
+  requireExtensionValue(canary.mode, "SANDBOX", "CURRENT_CANARY_EXECUTION_BINDING");
+  requireExtensionValue(canary.targetFreshnessMaxAgeMs, 1_800_000,
+    "CURRENT_CANARY_EXECUTION_BINDING");
+  requireExtensionValue(canary.preRefundRetrieve, 1, "CURRENT_CANARY_EXECUTION_CAPS");
+  requireExtensionValue(canary.refundRequest, 1, "CURRENT_CANARY_EXECUTION_CAPS");
+  requireExtensionValue(canary.postRefundRetrieve, 0, "CURRENT_CANARY_EXECUTION_CAPS");
+  requireExtensionValue(canary.recoveryRetrieve, 0, "CURRENT_CANARY_EXECUTION_CAPS");
+  requireExtensionValue(canary.secondRefundRequest, 0, "CURRENT_CANARY_EXECUTION_CAPS");
+  requireExtensionValue(canary.automaticRetry, 0, "CURRENT_CANARY_EXECUTION_CAPS");
+  requireExtensionValue(canary.uncertainOutcome,
+    "STOP_SEPARATE_RECONCILIATION_AUTHORITY_REQUIRED", "CURRENT_CANARY_EXECUTION_BINDING");
+  requireCondition(Array.isArray(canary.sourceFiles), "CURRENT_CANARY_EXECUTION_SOURCES");
+  requireCondition(canary.sourceFiles.length === 4, "CURRENT_CANARY_EXECUTION_SOURCES");
+  for (const source of canary.sourceFiles) {
+    const sourceRecord = requireExtensionRecord(source, ["path", "sha256"],
+      "CURRENT_CANARY_EXECUTION_SOURCES");
+    requireCondition(typeof sourceRecord.path === "string", "CURRENT_CANARY_EXECUTION_SOURCES");
+    requireCondition(isSha256(sourceRecord.sha256), "CURRENT_CANARY_EXECUTION_SOURCES");
+  }
+  requireCondition(isSha256(canary.packagedCanarySha256), "CURRENT_CANARY_EXECUTION_PACKAGED");
+  requireCondition(isSha256(canary.packagedSupervisorSha256), "CURRENT_CANARY_EXECUTION_PACKAGED");
+}
+
+function validateContactedReconciliationAuthority(value: unknown): void {
+  const contacted = requireExtensionRecord(value, [
+    "command", "mode", "target", "paymentBinding", "providerOrderIdBinding",
+    "arbitraryTargetAuthority", "previousTargetCurrent", "eligiblePaymentCardinality",
+    "providerEffectCaps", "recoverySemantics", "runtime", "sourceFiles",
+    "packagedContactedSha256",
+  ], "CURRENT_CONTACTED_RECONCILIATION_SHAPE");
+  requireExtensionValue(contacted.command, "eximbay-contacted-reconciliation-once",
+    "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  requireExtensionValue(contacted.mode, "SANDBOX", "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  validateContactedTargetAuthority(contacted.target);
+  requireExtensionValue(contacted.paymentBinding, "APPLICATION_DERIVED",
+    "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  requireExtensionValue(contacted.providerOrderIdBinding, "APPLICATION_DERIVED",
+    "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  requireExtensionValue(contacted.arbitraryTargetAuthority, "ABSENT",
+    "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  requireExtensionValue(contacted.previousTargetCurrent, "NO",
+    "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  requireExtensionValue(contacted.eligiblePaymentCardinality, "EXACTLY_ONE",
+    "CURRENT_CONTACTED_RECONCILIATION_BINDING");
+  const caps = requireExtensionRecord(contacted.providerEffectCaps, [
+      "maxProviderRetrieveAttemptsPerExecution", "automaticProviderRetry",
+      "cloudRunTaskRetry",
+  ], "CURRENT_CONTACTED_RECONCILIATION_CAPS");
+  requireExtensionValue(caps.maxProviderRetrieveAttemptsPerExecution, 1,
+    "CURRENT_CONTACTED_RECONCILIATION_CAPS");
+  requireExtensionValue(caps.automaticProviderRetry, 0, "CURRENT_CONTACTED_RECONCILIATION_CAPS");
+  requireExtensionValue(caps.cloudRunTaskRetry, 0, "CURRENT_CONTACTED_RECONCILIATION_CAPS");
+  const semantics = requireExtensionRecord(contacted.recoverySemantics, [
+    "attemptLifecycle", "remediationStatus", "providerOrderId", "providerPaymentKey",
+    "financialSucceededAt", "blockingEndedAt", "order", "q004ReplayProtection",
+    "singleActiveBlocker", "expiredAlreadyContacted", "expiredBeforeFreshContact",
+  ], "CURRENT_CONTACTED_RECONCILIATION_SEMANTICS");
+  const semanticValues: readonly [string, unknown][] = [
+    ["attemptLifecycle", "CONTACTED"], ["remediationStatus", "NONE"],
+    ["providerOrderId", "REQUIRED"], ["providerPaymentKey", "ABSENT"],
+    ["financialSucceededAt", "NULL"], ["blockingEndedAt", "NULL"],
+    ["order", "ABSENT"], ["q004ReplayProtection", "REQUIRED"],
+    ["singleActiveBlocker", "REQUIRED"], ["expiredAlreadyContacted", "RECOVERABLE"],
+    ["expiredBeforeFreshContact", "NOT_USABLE"],
+  ];
+  for (const [field, expected] of semanticValues) {
+    requireExtensionValue(semantics[field], expected, "CURRENT_CONTACTED_RECONCILIATION_SEMANTICS");
+  }
+  const runtime = requireExtensionRecord(contacted.runtime, [
+    "default", "taskCount", "parallelism", "maxRetries", "timeoutSeconds",
+    "automaticExecution",
+  ], "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireExtensionValue(runtime.default, "OFF", "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireExtensionValue(runtime.taskCount, 1, "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireExtensionValue(runtime.parallelism, 1, "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireExtensionValue(runtime.maxRetries, 0, "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireExtensionValue(runtime.timeoutSeconds, 180, "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireExtensionValue(runtime.automaticExecution, "NONE", "CURRENT_CONTACTED_RECONCILIATION_RUNTIME");
+  requireCondition(Array.isArray(contacted.sourceFiles), "CURRENT_CONTACTED_RECONCILIATION_SOURCES");
+  requireCondition(contacted.sourceFiles.length === 4, "CURRENT_CONTACTED_RECONCILIATION_SOURCES");
+  for (const source of contacted.sourceFiles) {
+    const sourceRecord = requireExtensionRecord(source, ["path", "sha256"],
+      "CURRENT_CONTACTED_RECONCILIATION_SOURCES");
+    requireCondition(typeof sourceRecord.path === "string", "CURRENT_CONTACTED_RECONCILIATION_SOURCES");
+    requireCondition(isSha256(sourceRecord.sha256), "CURRENT_CONTACTED_RECONCILIATION_SOURCES");
+  }
+  requireCondition(isSha256(contacted.packagedContactedSha256),
+    "CURRENT_CONTACTED_RECONCILIATION_PACKAGED");
+}
+
+function validateContactedTargetAuthority(value: unknown): void {
+  const target = requireExtensionRecord(value, [
+    "runId", "checkoutSessionId", "paymentId", "providerOrderId",
+    "authenticatedUserId", "operatorTargetInputs", "predecessor",
+  ], "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(target.runId, "4c5c9b039f18037c6f3356c903df1372",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(target.checkoutSessionId, "cmtk62h80000001s626b90f9y",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(target.paymentId, "DERIVED_BY_APPLICATION",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(target.providerOrderId, "DERIVED_BY_APPLICATION",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(target.authenticatedUserId, "DERIVED_BY_APPLICATION",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(target.operatorTargetInputs, 0, "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  validateContactedHistoricalTarget(target.predecessor, {
+    runId: "89682c544f42d4debb260f5e3186087a",
+    checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+  }, {
+    runId: "da7783b013d20713d6db207c7657b559",
+    checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+  }, {
+    runId: "a764f61f4e4ba799ab16b318a676db65",
+    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+  });
+}
+
+function validateContactedHistoricalTarget(
+  value: unknown,
+  current: Readonly<{ runId: string; checkoutSessionId: string }>,
+  predecessor: Readonly<{ runId: string; checkoutSessionId: string }>,
+  original: Readonly<{ runId: string; checkoutSessionId: string }>,
+): void {
+  const currentRecord = requireExtensionRecord(value, [
+    "runId", "checkoutSessionId", "status", "predecessor",
+  ], "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(currentRecord.runId, current.runId,
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(currentRecord.checkoutSessionId, current.checkoutSessionId,
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(currentRecord.status, "SUPERSEDED_HISTORICAL_ONLY",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  const predecessorRecord = requireExtensionRecord(currentRecord.predecessor, [
+    "runId", "checkoutSessionId", "status", "predecessor",
+  ], "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(predecessorRecord.runId, predecessor.runId,
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(predecessorRecord.checkoutSessionId, predecessor.checkoutSessionId,
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(predecessorRecord.status, "SUPERSEDED_HISTORICAL_ONLY",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  const originalRecord = requireExtensionRecord(predecessorRecord.predecessor, [
+    "runId", "checkoutSessionId", "status",
+  ], "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(originalRecord.runId, original.runId,
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(originalRecord.checkoutSessionId, original.checkoutSessionId,
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
+  requireExtensionValue(originalRecord.status, "SUPERSEDED_HISTORICAL_ONLY",
+    "CURRENT_CONTACTED_RECONCILIATION_TARGET");
 }
 
 export function parseV2EximbayImageAuthority(
@@ -1985,12 +2257,17 @@ CurrentEximbayImageAuthority["buildContext"] {
   });
 }
 
-function parseSuccessorArtifactAuthority(value: unknown):
+function parseSuccessorArtifactAuthority(value: unknown, orderedLayers: boolean):
 CurrentEximbayImageAuthority["artifact"] {
-  requireCondition(isRecord(value) && hasExactKeys(value, [
+  requireCondition(isRecord(value), "CURRENT_ARTIFACT_SHAPE");
+  const artifactKeys = [
     "manifestDigest", "manifestSize", "configDigest", "platform",
     "imageSize", "layerCount", "diffIds",
-  ]), "CURRENT_ARTIFACT_SHAPE");
+  ];
+  const keysWithOrderedLayers = [...artifactKeys, "orderedLayers"];
+  requireCondition(orderedLayers
+    ? hasExactKeys(value, keysWithOrderedLayers)
+    : hasExactKeys(value, artifactKeys), "CURRENT_ARTIFACT_SHAPE");
   requireCondition(isDockerDigest(value.manifestDigest), "CURRENT_MANIFEST_DIGEST");
   requireCondition(isDockerDigest(value.configDigest), "CURRENT_CONFIG_DIGEST");
   requireCondition(value.platform === PLATFORM, "CURRENT_ARTIFACT_PLATFORM");
@@ -2006,6 +2283,23 @@ CurrentEximbayImageAuthority["artifact"] {
   requireCondition(Array.isArray(value.diffIds)
     && value.diffIds.length === layerCount
     && value.diffIds.every(isDockerDigest), "CURRENT_ARTIFACT_DIFF_IDS");
+  if (orderedLayers) {
+    requireCondition(Array.isArray(value.orderedLayers)
+      && value.orderedLayers.length === layerCount,
+    "CURRENT_ARTIFACT_ORDERED_LAYERS");
+    for (const [index, layer] of value.orderedLayers.entries()) {
+      requireCondition(isRecord(layer) && hasExactKeys(layer, [
+        "mediaType", "digest", "size", "diffId",
+      ]), "CURRENT_ARTIFACT_ORDERED_LAYERS");
+      requireCondition(layer.mediaType === "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "CURRENT_ARTIFACT_ORDERED_LAYERS");
+      requireCondition(isDockerDigest(layer.digest)
+        && isNonnegativeSafeInteger(layer.size)
+        && isDockerDigest(layer.diffId), "CURRENT_ARTIFACT_ORDERED_LAYERS");
+      requireCondition(layer.diffId === value.diffIds[index],
+        "CURRENT_ARTIFACT_ORDERED_LAYERS");
+    }
+  }
   return Object.freeze({
     manifestDigest: value.manifestDigest,
     manifestSize,
@@ -2218,11 +2512,87 @@ export function enforceCurrentSubject(
 ): void {
   enforceEximbayImageSubject(authority, context, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V7_AUTHORITY_SHA256,
+    parentAuthoritySha256: V9_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
   });
   requireCondition(authority.sourceTree === CURRENT_SOURCE_TREE,
+    "CURRENT_SOURCE_TREE_BINDING");
+  requireCondition(
+    JSON.stringify(authority.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),
+    "CURRENT_SUPERVISOR_SOURCE_BINDING",
+  );
+  requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,
+    "CURRENT_ENTRYPOINT_COUNT_BINDING");
+  requireCondition(
+    authority.buildContext.migrationCount === context.migrationInventory.migrationCount,
+    "CURRENT_MIGRATION_COUNT_BINDING",
+  );
+  requireCondition(
+    authority.buildContext.migrationDigest === context.migrationInventory.migrationDigest,
+    "CURRENT_MIGRATION_DIGEST_BINDING",
+  );
+}
+
+export function enforceV9EximbayImageSubject(
+  authority: CurrentEximbayImageAuthority,
+  context: Readonly<{
+    manifestDigest: string;
+    manifestEntries: readonly unknown[];
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+    entrypointCount: number;
+    migrationInventory: Readonly<{
+      migrationCount: number;
+      migrationDigest: string;
+    }>;
+  }>,
+): void {
+  enforceEximbayImageSubject(authority, context, {
+    contractVersion: V9_CONTRACT_VERSION,
+    parentAuthoritySha256: V8_AUTHORITY_SHA256,
+    baselineCommit: V9_BASELINE_COMMIT,
+    entrypoints: V9_ENTRYPOINTS,
+  });
+  requireCondition(authority.sourceTree === V9_SOURCE_TREE,
+    "CURRENT_SOURCE_TREE_BINDING");
+  requireCondition(
+    JSON.stringify(authority.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),
+    "CURRENT_SUPERVISOR_SOURCE_BINDING",
+  );
+  requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,
+    "CURRENT_ENTRYPOINT_COUNT_BINDING");
+  requireCondition(
+    authority.buildContext.migrationCount === context.migrationInventory.migrationCount,
+    "CURRENT_MIGRATION_COUNT_BINDING",
+  );
+  requireCondition(
+    authority.buildContext.migrationDigest === context.migrationInventory.migrationDigest,
+    "CURRENT_MIGRATION_DIGEST_BINDING",
+  );
+}
+
+export function enforceV8EximbayImageSubject(
+  authority: CurrentEximbayImageAuthority,
+  context: Readonly<{
+    manifestDigest: string;
+    manifestEntries: readonly unknown[];
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+    entrypointCount: number;
+    migrationInventory: Readonly<{
+      migrationCount: number;
+      migrationDigest: string;
+    }>;
+  }>,
+): void {
+  enforceEximbayImageSubject(authority, context, {
+    contractVersion: V8_CONTRACT_VERSION,
+    parentAuthoritySha256: V7_AUTHORITY_SHA256,
+    baselineCommit: V8_BASELINE_COMMIT,
+    entrypoints: V8_ENTRYPOINTS,
+  });
+  requireCondition(authority.sourceTree === V8_SOURCE_TREE,
     "CURRENT_SOURCE_TREE_BINDING");
   requireCondition(
     JSON.stringify(authority.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),

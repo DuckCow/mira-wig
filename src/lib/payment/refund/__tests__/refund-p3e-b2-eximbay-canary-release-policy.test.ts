@@ -64,14 +64,16 @@ describe("P3E-B2 dormant Eximbay canary release authority", () => {
     }
   });
 
-  it("preserves the old canary policy and contacted-reconciliation authority", () => {
+  it("preserves the canary policy and advances only the contacted-reconciliation authority", () => {
     expect(createHash("sha256").update(read("image-policy-v1.json")).digest("hex"))
       .toBe("5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876");
     expect(createHash("sha256").update(read("image-policy-v8.json")).digest("hex"))
       .toBe("edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a");
+    expect(createHash("sha256").update(read("image-policy-v9.json")).digest("hex"))
+      .toBe("ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf");
     expect(readFileSync(join(ROOT,
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/locals.tf"), "utf8"))
-      .toContain("eximbay-canary/image-policy-v8.json");
+      .toContain("eximbay-canary/image-policy-v10.json");
     expect(imagePolicy.commandAllowlist).toEqual(["worker-check", "worker-health",
       "worker-once", "sandbox-preflight", "image-self-check", "eximbay-canary-once",
       "eximbay-contacted-reconciliation-once"]);

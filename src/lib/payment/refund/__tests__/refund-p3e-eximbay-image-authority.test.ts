@@ -18,8 +18,12 @@ import historicalV6Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v6.json";
 import historicalV7Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v7.json";
-import currentPolicy from
+import historicalV8Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v8.json";
+import historicalV9Policy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v10.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -33,6 +37,8 @@ import {
   enforceV4EximbayImageSubject,
   enforceV5EximbayImageSubject,
   enforceV6EximbayImageSubject,
+  enforceV8EximbayImageSubject,
+  enforceV9EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -42,6 +48,8 @@ import {
   parseV4EximbayImageAuthority,
   parseV5EximbayImageAuthority,
   parseV6EximbayImageAuthority,
+  parseV8EximbayImageAuthority,
+  parseV9EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -49,6 +57,8 @@ import {
   readV4EximbayImageAuthority,
   readV5EximbayImageAuthority,
   readV6EximbayImageAuthority,
+  readV8EximbayImageAuthority,
+  readV9EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -100,6 +110,16 @@ const V7_PATH = join(
 const V8_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v8.json",
+);
+
+const V9_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json",
+);
+
+const V10_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v10.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -278,12 +298,44 @@ describe("immutable first fresh-target predecessor v7 authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v7 predecessors with current v8 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable contacted-reconciliation predecessor v8 authority", () => {
+  const authority = parseV8EximbayImageAuthority(historicalV8Policy);
 
-  it("selects v8 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v8 bytes and accepts its historical subject and closure", async () => {
     expect(createHash("sha256").update(readFileSync(V8_PATH)).digest("hex")).toBe(
       "edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a",
+    );
+    await expect(readV8EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV8EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+  });
+});
+
+describe("immutable single-shot canary v9 authority", () => {
+  const authority = parseV9EximbayImageAuthority(historicalV9Policy);
+
+  it("keeps exact v9 bytes and accepts its historical subject and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V9_PATH)).digest("hex")).toBe(
+      "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf",
+    );
+    await expect(readV9EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV9EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+  });
+});
+
+describe("conjunctive historical A and v1-v9 predecessors with current v10 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v10 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V10_PATH)).digest("hex")).toBe(
+      "5139f86b0cfa8321dd14caf8e5083a765ddccc33e82c5dbf03844c3e0106a851",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -295,10 +347,40 @@ describe("conjunctive historical A and v1-v7 predecessors with current v8 author
     expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
   });
 
+  it("binds the sole contacted target and preserves the canary ceilings", () => {
+    expect(currentPolicy.contactedReconciliation).toMatchObject({
+      target: {
+        runId: "4c5c9b039f18037c6f3356c903df1372",
+        checkoutSessionId: "cmtk62h80000001s626b90f9y",
+        paymentId: "DERIVED_BY_APPLICATION",
+        providerOrderId: "DERIVED_BY_APPLICATION",
+        operatorTargetInputs: 0,
+      },
+      paymentBinding: "APPLICATION_DERIVED",
+      providerOrderIdBinding: "APPLICATION_DERIVED",
+      arbitraryTargetAuthority: "ABSENT",
+      previousTargetCurrent: "NO",
+      eligiblePaymentCardinality: "EXACTLY_ONE",
+      providerEffectCaps: {
+        maxProviderRetrieveAttemptsPerExecution: 1,
+        automaticProviderRetry: 0,
+        cloudRunTaskRetry: 0,
+      },
+    });
+    expect(currentPolicy.canaryExecution).toMatchObject({
+      preRefundRetrieve: 1,
+      refundRequest: 1,
+      postRefundRetrieve: 0,
+      recoveryRetrieve: 0,
+      secondRefundRequest: 0,
+      automaticRetry: 0,
+    });
+  });
+
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "5ff10b135efdc4e8efcc0599c9f74a738be7cc35",
-      sourceTree: "1ff00a67da9bb12d0499c3b2ad716b538d375c7a",
+      baselineCommit: "6e1aaa32b66876252dcce40296970ea23d592d64",
+      sourceTree: "97ea29321bef86e9b2f38abceef5f0b86a7795df",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711",
