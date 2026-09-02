@@ -161,7 +161,7 @@ function bundleOptions(overrides: BuildOptions): BuildOptions {
     format: "esm",
     conditions: ["react-server"],
     banner: {
-      js: "import { createRequire as __miraCreateRequire } from 'node:module'; const require = __miraCreateRequire(import.meta.url);",
+      js: "import { createRequire as __miraCreateRequire } from 'node:module'; import { dirname as __miraDirname } from 'node:path'; import { fileURLToPath as __miraFileURLToPath } from 'node:url'; const require = __miraCreateRequire(import.meta.url); const __filename = __miraFileURLToPath(import.meta.url); const __dirname = __miraDirname(__filename);",
     },
     outExtension: { ".js": ".mjs" },
     sourcemap: false,

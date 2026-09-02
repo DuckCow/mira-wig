@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   PaymentAttemptLifecycle,
   PaymentAttemptStatus,
@@ -9,6 +13,8 @@ import {
 import { PrismaPg } from "@prisma/adapter-pg";
 import { describe, expect, it, vi } from "vitest";
 import { recoverEximbayCheckout } from "@/lib/payment/eximbay/checkout-recovery";
+import { buildRefundWorkerBundles } from
+  "../../../../../scripts/build-refund-worker-bundles.mjs";
 import { main as reconciliationProcessMain } from
   "../../../../../scripts/eximbay-contacted-reconciliation";
 import {
@@ -270,6 +276,9 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
     expect(exit).toBe(0);
     expect(stderr).toEqual([]);
     expect(stdout).toHaveLength(1);
+    const [terminal, trailing] = stdout[0]?.split("\n") ?? [];
+    expect(trailing).toBe("");
+    expect(JSON.parse(terminal ?? "null")).toEqual(await run.mock.results[0]?.value);
     expect(stdout[0]).toContain('"disposition":"OUTCOME_UNKNOWN"');
     expect(stdout[0]).not.toMatch(/PAYMENT_SUCCEEDED|SALE_SUCCEEDED|REFUND_SUCCEEDED/iu);
   });
@@ -292,7 +301,43 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
     expect(exit).toBe(78);
     expect(stdout).toEqual([]);
     expect(stderr).toHaveLength(1);
+    const [terminal, trailing] = stderr[0]?.split("\n") ?? [];
+    expect(trailing).toBe("");
+    expect(JSON.parse(terminal ?? "null")).toEqual(await run.mock.results[0]?.value);
     expect(stderr[0]).not.toMatch(/DATABASE_URL|SYNTHETIC_SECRET|Authorization/iu);
+  });
+
+  it("boots the compiled child and emits one terminal instead of an import-time stack", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "mira-contacted-bundle-test-"));
+    try {
+      await symlink(join(process.cwd(), "node_modules"), join(temporaryRoot, "node_modules"), "dir");
+      const bundleRoot = join(temporaryRoot, "bundles");
+      await buildRefundWorkerBundles(bundleRoot);
+      const result = executeCompiledChild(await realpath(join(
+        bundleRoot,
+        "src/lib/payment/refund/eximbay-contacted-reconciliation.mjs",
+      )));
+
+      expect(result.exitCode).toBe(78);
+      expect(result.signal).toBeNull();
+      expect(result.stdout).toBe("");
+      const [terminal, trailing] = result.stderr.split("\n");
+      expect(trailing).toBe("");
+      expect(JSON.parse(terminal ?? "null")).toEqual({
+        ok: false,
+        code: "CONFIG_INVALID",
+        terminalClass: "HOST_FAILURE",
+        runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+        checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+        providerRetrieveCount: 0,
+        durableRelease: "NOT_REPORTED",
+      });
+      expect(result.stderr).not.toMatch(
+        /ReferenceError|\bat\s+node_modules|SYNTHETIC_SECRET_NEVER_LOG|PROVIDER_PAYLOAD_SENTINEL/iu,
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -401,4 +446,27 @@ async function ignoreSyntheticAmbiguity(promise: Promise<unknown>): Promise<void
   } catch {
     return;
   }
+}
+
+function executeCompiledChild(path: string): Readonly<{
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+}> {
+  const child = spawnSync(process.execPath, [path], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      MIRA_TEST_SECRET_SENTINEL: "SYNTHETIC_SECRET_NEVER_LOG",
+      MIRA_TEST_PROVIDER_PAYLOAD: "PROVIDER_PAYLOAD_SENTINEL",
+    },
+  });
+  if (child.error) throw child.error;
+  return Object.freeze({
+    exitCode: child.status,
+    signal: child.signal,
+    stdout: child.stdout,
+    stderr: child.stderr,
+  });
 }

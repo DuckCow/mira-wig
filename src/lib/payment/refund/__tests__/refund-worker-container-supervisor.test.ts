@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { main as reconciliationProcessMain } from
+  "../../../../../scripts/eximbay-contacted-reconciliation";
 import {
   PROXY_READINESS_POLL_INTERVAL_MS,
   PROXY_READINESS_TIMEOUT_MS,
@@ -11,6 +13,8 @@ import {
   runRefundWorkerContainerSupervisor,
   type RefundWorkerContainerSupervisorDependencies,
 } from "../refund-worker-container-supervisor";
+import type { EximbayContactedReconciliationResult } from
+  "../run-eximbay-contacted-reconciliation-once";
 
 const INSTANCE = "sample-project:asia-northeast3:refund-db";
 const DATABASE_URL =
@@ -156,8 +160,9 @@ describe("refund worker container supervisor", () => {
 
   it("runs the fixed CONTACTED reconciliation bundle once behind the private proxy", async () => {
     const proxy = runningChild({ closeOnTerm: 0 });
-    const terminal = contactedReconciliationTerminal(1);
-    const runner = completedChild(0, terminal, "");
+    const { child: runner, stdout: terminal } = await completedContactedChild(
+      contactedReconciliationResult(1),
+    );
     const harness = supervisorHarness([proxy, runner], { readiness: true });
 
     const exit = await runRefundWorkerContainerSupervisor(
@@ -181,8 +186,9 @@ describe("refund worker container supervisor", () => {
     "relays a validated CONTACTED provider count %i after normal proxy cleanup",
     async (providerRetrieveCount) => {
       const proxy = runningChild({ closeOnTerm: 0 });
-      const terminal = contactedReconciliationTerminal(providerRetrieveCount);
-      const runner = completedChild(0, terminal, "");
+      const { child: runner, stdout: terminal } = await completedContactedChild(
+        contactedReconciliationResult(providerRetrieveCount),
+      );
       const harness = supervisorHarness([proxy, runner], { readiness: true });
 
       const exit = await runRefundWorkerContainerSupervisor(
@@ -202,7 +208,9 @@ describe("refund worker container supervisor", () => {
     "retains validated CONTACTED provider count %i when proxy cleanup is unconfirmed",
     async (providerRetrieveCount) => {
       const proxy = runningChild({ closeOnTerm: null });
-      const runner = completedChild(0, contactedReconciliationTerminal(providerRetrieveCount), "");
+      const { child: runner } = await completedContactedChild(
+        contactedReconciliationResult(providerRetrieveCount),
+      );
       const harness = supervisorHarness([proxy, runner], { readiness: true });
 
       const exit = await runRefundWorkerContainerSupervisor(
@@ -332,7 +340,9 @@ describe("refund worker container supervisor", () => {
 
   it("retains a validated failed-child provider count through proxy cleanup failure", async () => {
     const proxy = runningChild({ closeOnTerm: null });
-    const runner = completedChild(1, "", contactedReconciliationFailureTerminal(1));
+    const { child: runner } = await completedContactedChild(
+      contactedReconciliationFailureResult(1),
+    );
     const harness = supervisorHarness([proxy, runner], { readiness: true });
 
     const exit = await runRefundWorkerContainerSupervisor(
@@ -1080,7 +1090,22 @@ function runningChild(options: Readonly<{ closeOnTerm: number | null }>): FakeCh
 }
 
 function contactedReconciliationTerminal(providerRetrieveCount: 0 | 1): string {
-  return contactedReconciliationTerminalValue({ providerRetrieveCount });
+  return `${JSON.stringify(contactedReconciliationResult(providerRetrieveCount))}\n`;
+}
+
+function contactedReconciliationResult(
+  providerRetrieveCount: 0 | 1,
+): EximbayContactedReconciliationResult {
+  return Object.freeze({
+    ok: true,
+    code: "CONTACTED_RECONCILIATION_COMPLETE",
+    terminalClass: "RECONCILIATION_COMPLETED",
+    runId: "a764f61f4e4ba799ab16b318a676db65",
+    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+    disposition: "OUTCOME_UNKNOWN",
+    providerRetrieveCount,
+    durableRelease: "NOT_REPORTED",
+  });
 }
 
 function contactedReconciliationTerminalValue(
@@ -1099,8 +1124,10 @@ function contactedReconciliationTerminalValue(
   })}\n`;
 }
 
-function contactedReconciliationFailureTerminal(providerRetrieveCount: 0 | 1): string {
-  return `${JSON.stringify({
+function contactedReconciliationFailureResult(
+  providerRetrieveCount: 0 | 1,
+): EximbayContactedReconciliationResult {
+  return Object.freeze({
     ok: false,
     code: "INTERNAL_FAILURE",
     terminalClass: "HOST_FAILURE",
@@ -1108,7 +1135,30 @@ function contactedReconciliationFailureTerminal(providerRetrieveCount: 0 | 1): s
     checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
     providerRetrieveCount,
     durableRelease: "NOT_REPORTED",
-  })}\n`;
+  });
+}
+
+async function completedContactedChild(
+  result: EximbayContactedReconciliationResult,
+): Promise<Readonly<{ child: FakeChild; stdout: string; stderr: string }>> {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const exitCode = await reconciliationProcessMain(
+    [],
+    CONTACTED_RECONCILIATION_ENV,
+    Object.freeze({
+      stdout: Object.freeze({ write: (value: string) => stdout.push(value) }),
+      stderr: Object.freeze({ write: (value: string) => stderr.push(value) }),
+    }),
+    () => Promise.resolve(result),
+  );
+  const stdoutValue = stdout.join("");
+  const stderrValue = stderr.join("");
+  return Object.freeze({
+    child: completedChild(exitCode, stdoutValue, stderrValue),
+    stdout: stdoutValue,
+    stderr: stderrValue,
+  });
 }
 
 function expectContactedSupervisorFailure(
