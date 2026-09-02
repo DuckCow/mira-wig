@@ -390,18 +390,22 @@ resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the
 retires those five resources through the same Terraform state.
 
 The Job binds only the expiry-deadlock-corrected refund-worker digest
-`sha256:809bffa908adc61dea85f69445e92069781a9a58673ffb912790e692d30d4c1b`,
-source `22d0194c0a8bb4709b97056d68db21cabc65c24e`, and immutable image-policy-v6
-authority `8cb641f5f945ce392d19c7b410824f356e205704c0e90f275821d412b2d5979d`, plus
+`sha256:b89e88124fd8832982cd8186317e09a03cbfb8fb52e006d3cd82ad76ab1b994b`,
+source `a39ec21275fba6fa1dc2e89aa9450ad0e430a490`, and immutable image-policy-v7
+authority `6c54d36686b9fbbc41daf1d5023a8ec857b0afec34122c2c71d455b5485f5af8`, plus
 command `eximbay-contacted-reconciliation-once`. The superseded
-`sha256:e121bdc5bb51cc39b1076dd969a5dae1daed448cd066b9370c24c3386d83afd4`
+`sha256:809bffa908adc61dea85f69445e92069781a9a58673ffb912790e692d30d4c1b`
 artifact remains historical provenance only. The run ID
-`a764f61f4e4ba799ab16b318a676db65` and CheckoutSession
-`cmthg2mzu000001s6iuvx7u5x` are fixed in source; payment, provider-order, user, command, argument,
+`da7783b013d20713d6db207c7657b559` and CheckoutSession
+`cmtjnvso1000001s60xfg0tyu` are fixed in source; payment, provider-order, user, command, argument,
 and environment override inputs are absent. It uses one task, parallelism one, zero retries, one
 CPU, 512 MiB, a 180-second timeout, Gen2 Direct VPC, and `PRIVATE_RANGES_ONLY` so the private Cloud
 SQL path uses the existing VPC/subnet while public Eximbay SANDBOX retrieval uses normal Cloud Run
 egress.
+
+The predecessor run `a764f61f4e4ba799ab16b318a676db65` and CheckoutSession
+`cmthg2mzu000001s6iuvx7u5x` remain immutable historical-only provenance and are not selectable by
+the current runtime.
 
 The source contains no execution resource, scheduler, queue, trigger, invoker binding, or
 execution-on-apply hook. Materialization alone is not execution authority. A future separately

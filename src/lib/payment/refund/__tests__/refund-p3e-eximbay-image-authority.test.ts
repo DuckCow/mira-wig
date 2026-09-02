@@ -14,8 +14,10 @@ import historicalV4Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v4.json";
 import historicalV5Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v5.json";
-import currentPolicy from
+import historicalV6Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v6.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v7.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -28,6 +30,7 @@ import {
   enforceV3EximbayImageSubject,
   enforceV4EximbayImageSubject,
   enforceV5EximbayImageSubject,
+  enforceV6EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
   parseV1EximbayImageAuthority,
@@ -35,11 +38,13 @@ import {
   parseV3EximbayImageAuthority,
   parseV4EximbayImageAuthority,
   parseV5EximbayImageAuthority,
+  parseV6EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
   readV3EximbayImageAuthority,
   readV4EximbayImageAuthority,
   readV5EximbayImageAuthority,
+  readV6EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
   type FilesystemInspection,
@@ -80,6 +85,11 @@ const V5_PATH = join(
 const V6_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v6.json",
+);
+
+const V7_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v7.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -226,12 +236,28 @@ describe("immutable child-terminal-predecessor v5 authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v5 predecessors with current v6 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable supervisor-corrected predecessor v6 authority", () => {
+  const authority = parseV6EximbayImageAuthority(historicalV6Policy);
 
-  it("selects v6 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v6 bytes and accepts its historical subject and closure", async () => {
     expect(createHash("sha256").update(readFileSync(V6_PATH)).digest("hex")).toBe(
       "8cb641f5f945ce392d19c7b410824f356e205704c0e90f275821d412b2d5979d",
+    );
+    await expect(readV6EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV6EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+  });
+});
+
+describe("conjunctive historical A and v1-v6 predecessors with current v7 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v7 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V7_PATH)).digest("hex")).toBe(
+      "6c54d36686b9fbbc41daf1d5023a8ec857b0afec34122c2c71d455b5485f5af8",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -245,8 +271,8 @@ describe("conjunctive historical A and v1-v5 predecessors with current v6 author
 
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "22d0194c0a8bb4709b97056d68db21cabc65c24e",
-      sourceTree: "e334b5ef6fe337d72aad4af5def14882f70ee6bd",
+      baselineCommit: "a39ec21275fba6fa1dc2e89aa9450ad0e430a490",
+      sourceTree: "db72f700ea7dda4f0ac7029c6ff0d03830ca6ae1",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711",
