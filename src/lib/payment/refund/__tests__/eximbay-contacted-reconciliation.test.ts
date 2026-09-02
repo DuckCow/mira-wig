@@ -20,6 +20,8 @@ import { main as reconciliationProcessMain } from
 import {
   EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
   EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV,
+  EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID,
+  EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_RUN_ID,
   EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
   EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV,
 } from "../eximbay-contacted-reconciliation-environment";
@@ -43,6 +45,22 @@ const PROHIBITED = Object.freeze([
 ] as const);
 
 describe("fixed Eximbay CONTACTED reconciliation host", () => {
+  it("selects only the fresh-sale successor target and preserves the historical predecessor", () => {
+    expect(EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID)
+      .toBe("da7783b013d20713d6db207c7657b559");
+    expect(EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID)
+      .toBe("cmtjnvso1000001s60xfg0tyu");
+    expect(EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_RUN_ID)
+      .toBe("a764f61f4e4ba799ab16b318a676db65");
+    expect(EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID)
+      .toBe("cmthg2mzu000001s6iuvx7u5x");
+    expect(selectFixedRecoveryTarget({
+      id: EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID,
+      userId: "historical-user",
+      payments: [],
+    })).toBeNull();
+  });
+
   it("keeps the installed recovery owner as the default and surfaces Q004 release once", async () => {
     expect(defaultEximbayContactedReconciliationDependencies.recover)
       .toBe(recoverEximbayCheckout);
@@ -146,6 +164,10 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
     ["missing run identity", { [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: undefined }],
     ["malformed run identity", { [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: "not-a-run" }],
     ["unexpected run identity", { [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]: "b".repeat(32) }],
+    ["historical run identity", {
+      [EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID_ENV]:
+        EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_RUN_ID,
+    }],
     ["missing checkout identity", {
       [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]: undefined,
     }],
@@ -154,6 +176,10 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
     }],
     ["unexpected checkout identity", {
       [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]: "cmwrong0000000000000000000",
+    }],
+    ["historical checkout identity", {
+      [EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID_ENV]:
+        EXIMBAY_CONTACTED_RECONCILIATION_PREDECESSOR_CHECKOUT_SESSION_ID,
     }],
     ["wrong task count", { CLOUD_RUN_TASK_COUNT: "2" }],
     ["retry attempt", { CLOUD_RUN_TASK_ATTEMPT: "1" }],

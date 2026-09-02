@@ -15,6 +15,10 @@ import {
 } from "../refund-worker-container-supervisor";
 import type { EximbayContactedReconciliationResult } from
   "../run-eximbay-contacted-reconciliation-once";
+import {
+  EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+  EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+} from "../eximbay-contacted-reconciliation-environment";
 
 const INSTANCE = "sample-project:asia-northeast3:refund-db";
 const DATABASE_URL =
@@ -35,8 +39,10 @@ const ENABLED_ENV = Object.freeze({
 const CONTACTED_RECONCILIATION_ENV = Object.freeze({
   REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
   DATABASE_URL,
-  MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID: "a764f61f4e4ba799ab16b318a676db65",
-  MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID: "cmthg2mzu000001s6iuvx7u5x",
+  MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID:
+    EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+  MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID:
+    EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
   EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED: "ENABLED",
   EXIMBAY_SANDBOX_MID: "MIRA-SBX",
   MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
@@ -1100,8 +1106,8 @@ function contactedReconciliationResult(
     ok: true,
     code: "CONTACTED_RECONCILIATION_COMPLETE",
     terminalClass: "RECONCILIATION_COMPLETED",
-    runId: "a764f61f4e4ba799ab16b318a676db65",
-    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+    runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+    checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
     disposition: "OUTCOME_UNKNOWN",
     providerRetrieveCount,
     durableRelease: "NOT_REPORTED",
@@ -1115,8 +1121,8 @@ function contactedReconciliationTerminalValue(
     ok: true,
     code: "CONTACTED_RECONCILIATION_COMPLETE",
     terminalClass: "RECONCILIATION_COMPLETED",
-    runId: "a764f61f4e4ba799ab16b318a676db65",
-    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+    runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+    checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
     disposition: "OUTCOME_UNKNOWN",
     providerRetrieveCount: overrides.providerRetrieveCount,
     durableRelease: "NOT_REPORTED",
@@ -1131,8 +1137,8 @@ function contactedReconciliationFailureResult(
     ok: false,
     code: "INTERNAL_FAILURE",
     terminalClass: "HOST_FAILURE",
-    runId: "a764f61f4e4ba799ab16b318a676db65",
-    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+    runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+    checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
     providerRetrieveCount,
     durableRelease: "NOT_REPORTED",
   });
