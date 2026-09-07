@@ -160,20 +160,23 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
   it("keeps the Terraform check aligned with the complete immutable target chain", () => {
     const checks = readFileSync(join(RUNTIME, "checks.tf"), "utf8");
     const expected = [
-      { depth: 0, field: "runId", value: "e03b436e666b4b188ec65c0ee4139790" },
-      { depth: 0, field: "checkoutSessionId", value: "cmtktx8rx000001s6lfbjivo1" },
-      { depth: 1, field: "runId", value: "4c5c9b039f18037c6f3356c903df1372" },
-      { depth: 1, field: "checkoutSessionId", value: "cmtk62h80000001s626b90f9y" },
+      { depth: 0, field: "runId", value: "1f93662ed1b45856aceac782029111fd" },
+      { depth: 0, field: "checkoutSessionId", value: "cmtqwntmf000001s6ol01azw8" },
+      { depth: 1, field: "runId", value: "e03b436e666b4b188ec65c0ee4139790" },
+      { depth: 1, field: "checkoutSessionId", value: "cmtktx8rx000001s6lfbjivo1" },
       { depth: 1, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
-      { depth: 2, field: "runId", value: "89682c544f42d4debb260f5e3186087a" },
-      { depth: 2, field: "checkoutSessionId", value: "cmtjsiiqw000001s6uimkjhj5" },
+      { depth: 2, field: "runId", value: "4c5c9b039f18037c6f3356c903df1372" },
+      { depth: 2, field: "checkoutSessionId", value: "cmtk62h80000001s626b90f9y" },
       { depth: 2, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
-      { depth: 3, field: "runId", value: "da7783b013d20713d6db207c7657b559" },
-      { depth: 3, field: "checkoutSessionId", value: "cmtjnvso1000001s60xfg0tyu" },
+      { depth: 3, field: "runId", value: "89682c544f42d4debb260f5e3186087a" },
+      { depth: 3, field: "checkoutSessionId", value: "cmtjsiiqw000001s6uimkjhj5" },
       { depth: 3, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
-      { depth: 4, field: "runId", value: "a764f61f4e4ba799ab16b318a676db65" },
-      { depth: 4, field: "checkoutSessionId", value: "cmthg2mzu000001s6iuvx7u5x" },
+      { depth: 4, field: "runId", value: "da7783b013d20713d6db207c7657b559" },
+      { depth: 4, field: "checkoutSessionId", value: "cmtjnvso1000001s60xfg0tyu" },
       { depth: 4, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
+      { depth: 5, field: "runId", value: "a764f61f4e4ba799ab16b318a676db65" },
+      { depth: 5, field: "checkoutSessionId", value: "cmthg2mzu000001s6iuvx7u5x" },
+      { depth: 5, field: "status", value: "SUPERSEDED_HISTORICAL_ONLY" },
     ] as const;
 
     expect(() => assertExactContactedTargetChain(checks, expected)).not.toThrow();
@@ -183,14 +186,14 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         /^[ \t]*local\.contract\.target\.predecessor\.(?:runId|checkoutSessionId|status)[ \t]*==[ \t]*"[^"]+" &&\n/gmu,
         "",
       )
-      .replace("4c5c9b039f18037c6f3356c903df1372", "89682c544f42d4debb260f5e3186087a")
-      .replace("cmtk62h80000001s626b90f9y", "cmtjsiiqw000001s6uimkjhj5");
+      .replace("e03b436e666b4b188ec65c0ee4139790", "4c5c9b039f18037c6f3356c903df1372")
+      .replace("cmtktx8rx000001s6lfbjivo1", "cmtk62h80000001s626b90f9y");
     const missingPredecessor = checks.replace(
       /^[ \t]*local\.contract\.target\.predecessor(?:\.predecessor)*\.(?:runId|checkoutSessionId|status)[ \t]*==[ \t]*"[^"]+" &&\n/gmu,
       "",
     );
     const wrongPredecessor = checks.replace(
-      "4c5c9b039f18037c6f3356c903df1372",
+      "e03b436e666b4b188ec65c0ee4139790",
       "00000000000000000000000000000000",
     );
     for (const mutant of [omittedPredecessor, missingPredecessor, wrongPredecessor]) {
