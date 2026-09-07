@@ -22,8 +22,10 @@ import historicalV8Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v8.json";
 import historicalV9Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json";
-import currentPolicy from
+import historicalV10Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v10.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v11.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -39,6 +41,7 @@ import {
   enforceV6EximbayImageSubject,
   enforceV8EximbayImageSubject,
   enforceV9EximbayImageSubject,
+  enforceV10EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -50,6 +53,7 @@ import {
   parseV6EximbayImageAuthority,
   parseV8EximbayImageAuthority,
   parseV9EximbayImageAuthority,
+  parseV10EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -59,6 +63,7 @@ import {
   readV6EximbayImageAuthority,
   readV8EximbayImageAuthority,
   readV9EximbayImageAuthority,
+  readV10EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -120,6 +125,11 @@ const V9_PATH = join(
 const V10_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v10.json",
+);
+
+const V11_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v11.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -330,12 +340,32 @@ describe("immutable single-shot canary v9 authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v9 predecessors with current v10 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable contacted-reconciliation v10 predecessor authority", () => {
+  const authority = parseV10EximbayImageAuthority(historicalV10Policy);
 
-  it("selects v10 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v10 bytes and the four-node contacted chain", async () => {
     expect(createHash("sha256").update(readFileSync(V10_PATH)).digest("hex")).toBe(
       "5139f86b0cfa8321dd14caf8e5083a765ddccc33e82c5dbf03844c3e0106a851",
+    );
+    await expect(readV10EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV10EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+    expect(historicalV10Policy.contactedReconciliation.target.runId)
+      .toBe("4c5c9b039f18037c6f3356c903df1372");
+    expect(historicalV10Policy.contactedReconciliation.target.predecessor.predecessor.runId)
+      .toBe("da7783b013d20713d6db207c7657b559");
+  });
+});
+
+describe("conjunctive historical A and v1-v10 predecessors with current v11 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v11 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V11_PATH)).digest("hex")).toBe(
+      "80c15e7f247991e466ae3b04f736be8b8e96ccc9aec9a161a9df57d8733a0d54",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -350,11 +380,31 @@ describe("conjunctive historical A and v1-v9 predecessors with current v10 autho
   it("binds the sole contacted target and preserves the canary ceilings", () => {
     expect(currentPolicy.contactedReconciliation).toMatchObject({
       target: {
-        runId: "4c5c9b039f18037c6f3356c903df1372",
-        checkoutSessionId: "cmtk62h80000001s626b90f9y",
+        runId: "e03b436e666b4b188ec65c0ee4139790",
+        checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
         paymentId: "DERIVED_BY_APPLICATION",
         providerOrderId: "DERIVED_BY_APPLICATION",
         operatorTargetInputs: 0,
+        predecessor: {
+          runId: "4c5c9b039f18037c6f3356c903df1372",
+          checkoutSessionId: "cmtk62h80000001s626b90f9y",
+          status: "SUPERSEDED_HISTORICAL_ONLY",
+          predecessor: {
+            runId: "89682c544f42d4debb260f5e3186087a",
+            checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+            status: "SUPERSEDED_HISTORICAL_ONLY",
+            predecessor: {
+              runId: "da7783b013d20713d6db207c7657b559",
+              checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+              status: "SUPERSEDED_HISTORICAL_ONLY",
+              predecessor: {
+                runId: "a764f61f4e4ba799ab16b318a676db65",
+                checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                status: "SUPERSEDED_HISTORICAL_ONLY",
+              },
+            },
+          },
+        },
       },
       paymentBinding: "APPLICATION_DERIVED",
       providerOrderIdBinding: "APPLICATION_DERIVED",
@@ -377,10 +427,43 @@ describe("conjunctive historical A and v1-v9 predecessors with current v10 autho
     });
   });
 
+  it("rejects every predecessor or arbitrary current target selector", () => {
+    const targets = [
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        runId: "4c5c9b039f18037c6f3356c903df1372",
+        checkoutSessionId: "cmtk62h80000001s626b90f9y",
+      },
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        runId: "89682c544f42d4debb260f5e3186087a",
+        checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+      },
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        runId: "da7783b013d20713d6db207c7657b559",
+        checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+      },
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        paymentId: "arbitrary-payment",
+      },
+    ];
+    for (const target of targets) {
+      expect(() => parseCurrentEximbayImageAuthority({
+        ...currentPolicy,
+        contactedReconciliation: {
+          ...currentPolicy.contactedReconciliation,
+          target,
+        },
+      })).toThrow("CURRENT_CONTACTED_RECONCILIATION_TARGET");
+    }
+  });
+
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "6e1aaa32b66876252dcce40296970ea23d592d64",
-      sourceTree: "97ea29321bef86e9b2f38abceef5f0b86a7795df",
+      baselineCommit: "8a9bc9e6b45814829cdda3e69b69dae887fee2b0",
+      sourceTree: "7ca22822e8c4352c5f7d01f06f41ae7695cbd5d1",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711",

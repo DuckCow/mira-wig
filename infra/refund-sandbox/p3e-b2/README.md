@@ -390,14 +390,15 @@ resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the
 retires those five resources through the same Terraform state.
 
 The Job binds the latest unknown-sale recovery refund-worker digest
-`sha256:44bf4d246a5a23b02d09dadc8be14f21f3d8a5a5f00bac6a68dfcc78a96e1d08`,
-source `6e1aaa32b66876252dcce40296970ea23d592d64`, canonical context
-`15134b546f11bc265260d384ef6ef1f6b9372a9ee0d9d635459625e89cb6a6ed`, and immutable
-image-policy-v10 authority `5139f86b0cfa8321dd14caf8e5083a765ddccc33e82c5dbf03844c3e0106a851`,
+`sha256:67f6f128c398fa9872fb5734f1c5cdf7223cc3f80e3a8e352599d1e7a1d1127c`,
+source `8a9bc9e6b45814829cdda3e69b69dae887fee2b0`, canonical context
+`3f7fe5b119233a2250553b4f1dd35363ab5dbb638af18c6002d7a488899974d9`, and immutable
+image-policy-v11 authority `80c15e7f247991e466ae3b04f736be8b8e96ccc9aec9a161a9df57d8733a0d54`,
 plus command `eximbay-contacted-reconciliation-once`. Payment and provider-order identity remain
 application-derived with no operator target inputs. The run ID
-`4c5c9b039f18037c6f3356c903df1372` and CheckoutSession
-`cmtk62h80000001s626b90f9y` are fixed in source. The previous current run
+`e03b436e666b4b188ec65c0ee4139790` and CheckoutSession
+`cmtktx8rx000001s6lfbjivo1` are fixed in source. The previous current run
+`4c5c9b039f18037c6f3356c903df1372` / `cmtk62h80000001s626b90f9y`, older run
 `89682c544f42d4debb260f5e3186087a` / `cmtjsiiqw000001s6uimkjhj5`, first fresh run
 `da7783b013d20713d6db207c7657b559` / `cmtjnvso1000001s60xfg0tyu`, and original historical run
 `a764f61f4e4ba799ab16b318a676db65` / `cmthg2mzu000001s6iuvx7u5x` remain immutable

@@ -10,13 +10,13 @@ const INFRA = join(ROOT, "infra/refund-sandbox/p3e-b2");
 const RUNTIME = join(INFRA, "contacted-reconciliation");
 const BOOTSTRAP = join(INFRA, "database-bootstrap");
 const WORKER_DIGEST =
-  "sha256:44bf4d246a5a23b02d09dadc8be14f21f3d8a5a5f00bac6a68dfcc78a96e1d08";
+  "sha256:67f6f128c398fa9872fb5734f1c5cdf7223cc3f80e3a8e352599d1e7a1d1127c";
 const WORKER_CONFIG_DIGEST =
-  "sha256:8db81d36d6354f183bf28cdaee645dfae414afbe87913a1e721708a6838a2d06";
+  "sha256:5e4379b5886203a04924b556d9e636706e05ff99c32206d9ec0a51bb04af9105";
 const HISTORICAL_WORKER_DIGEST =
   "sha256:95b1d7fb170e7af503aab8ad8c6758fa43b5f63afad510c4004b58275dff5662";
 const CURRENT_POLICY_SHA256 =
-  "5139f86b0cfa8321dd14caf8e5083a765ddccc33e82c5dbf03844c3e0106a851";
+  "80c15e7f247991e466ae3b04f736be8b8e96ccc9aec9a161a9df57d8733a0d54";
 const BOOTSTRAP_DIGEST =
   "sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2";
 const EXPECTED_ADDRESSES = Object.freeze([
@@ -82,11 +82,11 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       digestUri:
         `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${WORKER_DIGEST}`,
       configDigest: WORKER_CONFIG_DIGEST,
-      sourceCheckpoint: "6e1aaa32b66876252dcce40296970ea23d592d64",
+      sourceCheckpoint: "8a9bc9e6b45814829cdda3e69b69dae887fee2b0",
       sourceContextSha256:
-        "15134b546f11bc265260d384ef6ef1f6b9372a9ee0d9d635459625e89cb6a6ed",
-      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v10.json",
-      imagePolicyVersion: "V10",
+        "3f7fe5b119233a2250553b4f1dd35363ab5dbb638af18c6002d7a488899974d9",
+      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v11.json",
+      imagePolicyVersion: "V11",
       imagePolicySha256: CURRENT_POLICY_SHA256,
       supervisorSourceSha256:
         "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711",
@@ -106,24 +106,29 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       },
     });
     expect(contract.target).toMatchObject({
-      runId: "4c5c9b039f18037c6f3356c903df1372",
-      checkoutSessionId: "cmtk62h80000001s626b90f9y",
+      runId: "e03b436e666b4b188ec65c0ee4139790",
+      checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
       paymentId: "DERIVED_BY_APPLICATION",
       providerOrderId: "DERIVED_BY_APPLICATION",
       authenticatedUserId: "DERIVED_BY_APPLICATION",
       operatorTargetInputs: 0,
       predecessor: {
-        runId: "89682c544f42d4debb260f5e3186087a",
-        checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+        runId: "4c5c9b039f18037c6f3356c903df1372",
+        checkoutSessionId: "cmtk62h80000001s626b90f9y",
         status: "SUPERSEDED_HISTORICAL_ONLY",
         predecessor: {
-          runId: "da7783b013d20713d6db207c7657b559",
-          checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+          runId: "89682c544f42d4debb260f5e3186087a",
+          checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
           status: "SUPERSEDED_HISTORICAL_ONLY",
           predecessor: {
-            runId: "a764f61f4e4ba799ab16b318a676db65",
-            checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+            runId: "da7783b013d20713d6db207c7657b559",
+            checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
             status: "SUPERSEDED_HISTORICAL_ONLY",
+            predecessor: {
+              runId: "a764f61f4e4ba799ab16b318a676db65",
+              checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+              status: "SUPERSEDED_HISTORICAL_ONLY",
+            },
           },
         },
       },
@@ -198,9 +203,9 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     const source = readTerraform(RUNTIME);
     expect(contract.environment).toEqual({
       MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID:
-        "4c5c9b039f18037c6f3356c903df1372",
+        "e03b436e666b4b188ec65c0ee4139790",
       MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID:
-        "cmtk62h80000001s626b90f9y",
+        "cmtktx8rx000001s6lfbjivo1",
       EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED: "ENABLED",
       EXIMBAY_SANDBOX_MID: "1849705C64",
       MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
