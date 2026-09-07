@@ -20,9 +20,9 @@ COPY --link infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-g
 COPY --link infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/
 COPY --link infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/
 COPY --link infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/
-COPY --link infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
+COPY --link infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json ./infra/refund-sandbox/p3e-b2/contracts/
 COPY --link infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
-COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/
+COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
@@ -70,7 +70,7 @@ COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/business-state-readb
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/contracts ./infra/refund-sandbox/p3e-b2/contracts
-COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json
+COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf

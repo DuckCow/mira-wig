@@ -1,8 +1,35 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const TAG = /^asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/refund-db-bootstrap:p3e-b2-[0-9a-f]{12}$/u;
 const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
+const RUNTIME_PATH = "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json";
+const POLICY_PATH = "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json";
+const PRODUCER_PATH = "scripts/eximbay-refund-canary-target-producer.mjs";
+const RUNTIME_SHA256 = "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41";
+const POLICY_SHA256 = "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf";
+const WORKER_MANIFEST = "sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691";
+const WORKER_CONFIG = "sha256:1bfa5a67f9219a62f717056f1edb2fafaa0ca1c2dabb58c854eb655a435d1e27";
+const STALE_SELECTIONS = Object.freeze([
+  "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v1.json",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+  "9c0735317a2d7222c384cf7241858c24e6a4939fce18fd1d4a83922d8ad32703",
+  "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876",
+]);
+
+export type PackagedRefundAuthorityEvidence = Readonly<{
+  runtimeContractVersion: "mira-refund-p3e-b2-eximbay-canary-runtime/v2";
+  runtimeSha256: typeof RUNTIME_SHA256;
+  imagePolicyVersion: "mira-refund-eximbay-canary-image-policy/v9";
+  imagePolicySha256: typeof POLICY_SHA256;
+  workerManifestDigest: typeof WORKER_MANIFEST;
+  workerConfigDigest: typeof WORKER_CONFIG;
+  staleRuntimeV1Selected: false;
+}>;
 
 type CaBundleEvidence = Readonly<{
   path: typeof CA_BUNDLE_PATH;
@@ -17,7 +44,7 @@ type CaBundleEvidence = Readonly<{
   nodeExtraCaCerts: null;
 }>;
 
-function main(args: readonly string[] = process.argv.slice(2)): void {
+async function main(args: readonly string[] = process.argv.slice(2)): Promise<void> {
   const tag = args[0];
   const sourceCommit = args[1];
   if (!validInput(args, tag, sourceCommit)) {
@@ -28,13 +55,16 @@ function main(args: readonly string[] = process.argv.slice(2)): void {
   ], { encoding: "utf8", maxBuffer: 262_144 });
   requireContains(labels, `"org.opencontainers.image.revision":"${sourceCommit}"`);
   requireContains(labels, '"mira.refund.default-mode":"check"');
+  const refundAuthority = await inspectPackagedRefundAuthority(tag);
 
-  const proxyVersion = run(tag, ["--entrypoint", "/usr/local/bin/cloud-sql-proxy", tag, "--version"]);
+  const proxyVersion = run(tag, [
+    "--network=none", "--entrypoint", "/usr/local/bin/cloud-sql-proxy", tag, "--version",
+  ]);
   if (!proxyVersion.stdout.includes("cloud-sql-proxy version 2.22.0")) {
     throw new Error("DB_BOOTSTRAP_PROXY_VERSION_INVALID");
   }
   const prismaVersion = run(tag, [
-    "--entrypoint", "/usr/local/bin/node", tag,
+    "--network=none", "--entrypoint", "/usr/local/bin/node", tag,
     "/app/node_modules/prisma/build/index.js", "--version",
   ]);
   if (!prismaVersion.stdout.includes("prisma") || !prismaVersion.stdout.includes("7.8.0")) {
@@ -69,9 +99,131 @@ function main(args: readonly string[] = process.argv.slice(2)): void {
     proxyTransportClassCount: 7,
     proxyDiagnosticByteLimit: 4096,
     caBundle,
+    refundAuthority,
     unknownModeExit: 64,
     network: "none",
   })}\n`);
+}
+
+async function inspectPackagedRefundAuthority(
+  tag: string,
+): Promise<PackagedRefundAuthorityEvidence> {
+  const directory = await mkdtemp(join(tmpdir(), "mira-db-bootstrap-static-"));
+  const containerName = `mira-db-bootstrap-static-${randomUUID()}`;
+  let created = false;
+  try {
+    execFileSync("docker", [
+      "create", "--platform=linux/amd64", "--name", containerName, tag,
+    ], { stdio: "ignore" });
+    created = true;
+    copyFromContainer(containerName, `/app/${RUNTIME_PATH}`, join(directory, "runtime.json"));
+    copyFromContainer(containerName, `/app/${POLICY_PATH}`, join(directory, "policy.json"));
+    copyFromContainer(containerName, `/app/${PRODUCER_PATH}`, join(directory, "producer.mjs"));
+    const [runtime, policy, producer] = await Promise.all([
+      readFile(join(directory, "runtime.json")),
+      readFile(join(directory, "policy.json")),
+      readFile(join(directory, "producer.mjs")),
+    ]);
+    return verifyPackagedRefundAuthority(runtime, policy, producer);
+  } finally {
+    try {
+      if (created) {
+        execFileSync("docker", ["container", "rm", containerName], { stdio: "ignore" });
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+}
+
+function copyFromContainer(
+  containerName: string,
+  source: string,
+  destination: string,
+): void {
+  execFileSync("docker", ["cp", `${containerName}:${source}`, destination], { stdio: "ignore" });
+}
+
+export function verifyPackagedRefundAuthority(
+  runtimeBytes: Uint8Array,
+  policyBytes: Uint8Array,
+  producerBytes: Uint8Array,
+): PackagedRefundAuthorityEvidence {
+  if (sha256(runtimeBytes) !== RUNTIME_SHA256 || sha256(policyBytes) !== POLICY_SHA256) {
+    throw new Error("DB_BOOTSTRAP_REFUND_AUTHORITY_BYTES_INVALID");
+  }
+  const runtime = parseRecord(runtimeBytes);
+  const runtimeImage = recordField(runtime, "image");
+  const runtimeJob = recordField(runtime, "job");
+  const providerContact = recordField(runtime, "providerContact");
+  const effectCaps = recordField(providerContact, "effectCaps");
+  const lifecycle = recordField(runtime, "lifecycle");
+  const policy = parseRecord(policyBytes);
+  const artifact = recordField(policy, "artifact");
+  const producer = Buffer.from(producerBytes).toString("utf8");
+  const requiredSelections = [
+    RUNTIME_PATH,
+    POLICY_PATH,
+    RUNTIME_SHA256,
+    POLICY_SHA256,
+    WORKER_MANIFEST,
+  ];
+  const valid = [
+    runtime.contractVersion === "mira-refund-p3e-b2-eximbay-canary-runtime/v2",
+    runtimeImage.imagePolicyPath === POLICY_PATH,
+    runtimeImage.imagePolicySha256 === POLICY_SHA256,
+    runtimeImage.digestUri === `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${WORKER_MANIFEST}`,
+    runtimeJob.taskCount === 1,
+    runtimeJob.parallelism === 1,
+    runtimeJob.maxRetries === 0,
+    runtimeJob.automaticTrigger === false,
+    effectCaps.preRefundRetrieve === 1,
+    effectCaps.refundRequest === 1,
+    effectCaps.postRefundRetrieve === 0,
+    effectCaps.recoveryRetrieve === 0,
+    effectCaps.secondRefundRequest === 0,
+    effectCaps.automaticRetry === 0,
+    lifecycle.default === "ABSENT",
+    policy.contractVersion === "mira-refund-eximbay-canary-image-policy/v9",
+    artifact.manifestDigest === WORKER_MANIFEST,
+    artifact.configDigest === WORKER_CONFIG,
+    requiredSelections.every((selection) => producer.includes(selection)),
+    STALE_SELECTIONS.every((selection) => !producer.includes(selection)),
+  ].every(Boolean);
+  if (!valid) throw new Error("DB_BOOTSTRAP_REFUND_AUTHORITY_INVALID");
+  return Object.freeze({
+    runtimeContractVersion: "mira-refund-p3e-b2-eximbay-canary-runtime/v2",
+    runtimeSha256: RUNTIME_SHA256,
+    imagePolicyVersion: "mira-refund-eximbay-canary-image-policy/v9",
+    imagePolicySha256: POLICY_SHA256,
+    workerManifestDigest: WORKER_MANIFEST,
+    workerConfigDigest: WORKER_CONFIG,
+    staleRuntimeV1Selected: false,
+  });
+}
+
+function parseRecord(bytes: Uint8Array): Readonly<Record<string, unknown>> {
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.from(bytes).toString("utf8"));
+  } catch {
+    throw new Error("DB_BOOTSTRAP_REFUND_AUTHORITY_JSON_INVALID");
+  }
+  if (!isRecord(value)) throw new Error("DB_BOOTSTRAP_REFUND_AUTHORITY_JSON_INVALID");
+  return value;
+}
+
+function recordField(
+  value: Readonly<Record<string, unknown>>,
+  key: string,
+): Readonly<Record<string, unknown>> {
+  const field = value[key];
+  if (!isRecord(field)) throw new Error("DB_BOOTSTRAP_REFUND_AUTHORITY_SHAPE_INVALID");
+  return field;
+}
+
+function sha256(value: Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function inspectCaBundle(tag: string): CaBundleEvidence {
@@ -163,4 +315,4 @@ function requireContains(value: string, expected: string): void {
 }
 
 const entrypoint = process.argv[1];
-if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) main();
+if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) await main();
