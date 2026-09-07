@@ -242,17 +242,39 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       authority: "CURRENT_REVIEWED_EXACT_IMMUTABLE",
       modeSelection: "INDEPENDENT_OF_BOOTSTRAP_MODE",
       digestUri:
-        "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2",
-      configDigest: "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a",
-      sourceCommit: "81e785448f834f4176cd5153eb3cbdf6d79d936c",
+        "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba",
+      configDigest: "sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254",
+      sourceCommit: "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d",
+      sourceTree: "bbcdf4291219be1d732c7cd10198761ce8ebd888",
+      contextSha256: "e2faa1626b4997bfc31cb7b388c0e67e7110edd0c4256faae0f3cd38a602abae",
+      contextFiles: 68,
+      refundAuthority: {
+        runtimeContractVersion: "mira-refund-p3e-b2-eximbay-canary-runtime/v2",
+        runtimeContractSha256:
+          "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41",
+        imagePolicyVersion: "mira-refund-eximbay-canary-image-policy/v9",
+        imagePolicySha256:
+          "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf",
+        workerManifestDigest:
+          "sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691",
+        workerConfigDigest:
+          "sha256:1bfa5a67f9219a62f717056f1edb2fafaa0ca1c2dabb58c854eb655a435d1e27",
+      },
       predecessor: {
+        digestUri:
+          "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2",
+        configDigest: "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a",
+        sourceCommit: "81e785448f834f4176cd5153eb3cbdf6d79d936c",
+        status: "SUPERSEDED_HISTORICAL_ONLY",
+      },
+      historicalPredecessor: {
         digestUri:
           "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3",
         configDigest: "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6",
         sourceCommit: "d908d71b5de5dc4223db77268719ed9e97277253",
         status: "SUPERSEDED_HISTORICAL_ONLY",
       },
-      historicalPredecessor: {
+      earliestPredecessor: {
         digestUri:
           "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086",
         configDigest: "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72",

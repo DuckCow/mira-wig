@@ -3,6 +3,9 @@ output "bootstrap_manifest" {
   value = {
     contract_version                = local.contract.contractVersion
     source_commit                   = local.job_source_commit
+    source_tree                     = local.contract.image.sourceTree
+    context_sha256                  = local.contract.image.contextSha256
+    context_files                   = local.contract.image.contextFiles
     backend_prefix                  = local.backend_prefix
     project_id                      = var.project_id
     region                          = local.region
@@ -31,6 +34,12 @@ output "bootstrap_manifest" {
     egress                          = "ALL_TRAFFIC"
     migration_count                 = local.migration_count
     migration_sha256                = local.migration_sha256
+    refund_runtime_version          = local.contract.image.refundAuthority.runtimeContractVersion
+    refund_runtime_sha256           = local.contract.image.refundAuthority.runtimeContractSha256
+    refund_image_policy_version     = local.contract.image.refundAuthority.imagePolicyVersion
+    refund_image_policy_sha256      = local.contract.image.refundAuthority.imagePolicySha256
+    refund_worker_manifest_digest   = local.contract.image.refundAuthority.workerManifestDigest
+    refund_worker_config_digest     = local.contract.image.refundAuthority.workerConfigDigest
     provider_credentials            = "NONE"
     temporary_cloud_sql_access      = var.temporary_cloud_sql_access_authorized
     cloud_sql_login_authority       = var.temporary_cloud_sql_access_authorized ? "EXACT_TWO_CONDITIONED_BINDINGS" : "NONE"

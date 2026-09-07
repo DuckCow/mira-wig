@@ -92,9 +92,15 @@ project-level Secret Manager role is admitted.
 ## Image and modes
 
 The retained Job is source-bound to the current published mode-capable image
-`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`,
-config digest `sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a`,
-from source commit `81e785448f834f4176cd5153eb3cbdf6d79d936c`. The prior verifier-defective
+`asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba`,
+config digest `sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254`,
+from source commit `1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d` and tree
+`bbcdf4291219be1d732c7cd10198761ce8ebd888`. Its normalized 68-file context has SHA-256
+`e2faa1626b4997bfc31cb7b388c0e67e7110edd0c4256faae0f3cd38a602abae` and embeds exact
+Eximbay runtime v2/policy v9 authority and worker manifest/config identities. The immediate
+predecessor digest `sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`
+from source `81e785448f834f4176cd5153eb3cbdf6d79d936c` remains superseded historical evidence only.
+The prior verifier-defective
 digest `sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
 from source `d908d71b5de5dc4223db77268719ed9e97277253` is superseded historical evidence
 only. The earlier historical predecessor is

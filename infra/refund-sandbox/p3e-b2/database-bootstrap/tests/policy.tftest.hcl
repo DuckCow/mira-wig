@@ -72,8 +72,17 @@ run "exact_retired_bootstrap_authority_shape" {
       "mira-p3e-sbx-db-bootstrap@mira-refund-sandbox-0001.iam.gserviceaccount.com" &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args == tolist(["check"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
-      output.bootstrap_manifest.source_commit == "81e785448f834f4176cd5153eb3cbdf6d79d936c"
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba" &&
+      output.bootstrap_manifest.source_commit == "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d" &&
+      output.bootstrap_manifest.source_tree == "bbcdf4291219be1d732c7cd10198761ce8ebd888" &&
+      output.bootstrap_manifest.context_sha256 == "e2faa1626b4997bfc31cb7b388c0e67e7110edd0c4256faae0f3cd38a602abae" &&
+      output.bootstrap_manifest.context_files == 68 &&
+      output.bootstrap_manifest.refund_runtime_version == "mira-refund-p3e-b2-eximbay-canary-runtime/v2" &&
+      output.bootstrap_manifest.refund_runtime_sha256 == "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41" &&
+      output.bootstrap_manifest.refund_image_policy_version == "mira-refund-eximbay-canary-image-policy/v9" &&
+      output.bootstrap_manifest.refund_image_policy_sha256 == "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf" &&
+      output.bootstrap_manifest.refund_worker_manifest_digest == "sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691" &&
+      output.bootstrap_manifest.refund_worker_config_digest == "sha256:1bfa5a67f9219a62f717056f1edb2fafaa0ca1c2dabb58c854eb655a435d1e27"
     )
     error_message = "The bootstrap Job must remain one-task, zero-retry, check-default and digest-bound."
   }
@@ -166,8 +175,8 @@ run "bind_business_state_readback_grant_reentry_to_reviewed_successor" {
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
       tolist(["apply-business-state-readback-role-grants"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
-      output.bootstrap_manifest.source_commit == "81e785448f834f4176cd5153eb3cbdf6d79d936c" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba" &&
+      output.bootstrap_manifest.source_commit == "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d" &&
       output.bootstrap_manifest.business_state_readback_grant ==
       "apply-business-state-readback-role-grants" &&
       length(google_project_iam_member.cloud_sql_access) == 2
@@ -189,7 +198,7 @@ run "bind_business_state_readback_revoke_to_reviewed_successor" {
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
       tolist(["revoke-business-state-readback-role-grants"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba" &&
       output.bootstrap_manifest.business_state_readback_revoke ==
       "revoke-business-state-readback-role-grants"
     )
@@ -209,7 +218,7 @@ run "return_to_check_preserves_reviewed_successor" {
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args ==
       tolist(["check"]) &&
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba" &&
       length(google_project_iam_member.cloud_sql_access) == 0
     )
     error_message = "Returning to check must preserve the exact current successor with temporary IAM absent."
@@ -226,7 +235,7 @@ run "readback_mode_alone_does_not_materialize_iam" {
   assert {
     condition = (
       google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image ==
-      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba" &&
       length(google_project_iam_member.cloud_sql_access) == 0
     )
     error_message = "Selecting a readback role mode must not implicitly materialize temporary Cloud SQL IAM."
@@ -317,6 +326,14 @@ run "reject_mutable_image_tag" {
   command = plan
   variables {
     bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap:latest"
+  }
+  expect_failures = [var.bootstrap_image_digest_uri]
+}
+
+run "reject_stale_v1_refund_authority_bootstrap_as_current" {
+  command = plan
+  variables {
+    bootstrap_image_digest_uri = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2"
   }
   expect_failures = [var.bootstrap_image_digest_uri]
 }
