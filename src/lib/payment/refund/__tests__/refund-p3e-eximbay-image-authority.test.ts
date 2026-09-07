@@ -28,8 +28,10 @@ import historicalV11Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v11.json";
 import historicalV12Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v12.json";
-import currentPolicy from
+import historicalV13Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v13.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v14.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -48,6 +50,7 @@ import {
   enforceV10EximbayImageSubject,
   enforceV11EximbayImageSubject,
   enforceV12EximbayImageSubject,
+  enforceV13EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -62,6 +65,7 @@ import {
   parseV10EximbayImageAuthority,
   parseV11EximbayImageAuthority,
   parseV12EximbayImageAuthority,
+  parseV13EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -74,6 +78,7 @@ import {
   readV10EximbayImageAuthority,
   readV11EximbayImageAuthority,
   readV12EximbayImageAuthority,
+  readV13EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -150,6 +155,11 @@ const V12_PATH = join(
 const V13_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v13.json",
+);
+
+const V14_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v14.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -420,12 +430,32 @@ describe("immutable contacted-reconciliation v12 predecessor authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v12 predecessors with current v13 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable contacted-reconciliation v13 predecessor authority", () => {
+  const authority = parseV13EximbayImageAuthority(historicalV13Policy);
 
-  it("selects v13 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v13 bytes and the six-node contacted chain", async () => {
     expect(createHash("sha256").update(readFileSync(V13_PATH)).digest("hex")).toBe(
       "8665dec8197d4c8c5a948cd95479974b1de818e4007c6412dad6f3f2f6b61962",
+    );
+    await expect(readV13EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV13EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+    expect(historicalV13Policy.contactedReconciliation.target.runId)
+      .toBe("1f93662ed1b45856aceac782029111fd");
+    expect(historicalV13Policy.contactedReconciliation.target.predecessor.predecessor.runId)
+      .toBe("4c5c9b039f18037c6f3356c903df1372");
+  });
+});
+
+describe("conjunctive historical A and v1-v13 predecessors with current v14 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v14 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V14_PATH)).digest("hex")).toBe(
+      "7c2561ec1c53b1cd1f69ba7ffec271e1a5b16ce4427abd45ea5c4055a4d653a8",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -440,31 +470,36 @@ describe("conjunctive historical A and v1-v12 predecessors with current v13 auth
   it("binds the sole contacted target and preserves the canary ceilings", () => {
     expect(currentPolicy.contactedReconciliation).toMatchObject({
       target: {
-        runId: "1f93662ed1b45856aceac782029111fd",
-        checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
+        runId: "248a30b8004082b8fca92f2c1a1fb066",
+        checkoutSessionId: "cmtr2fobw000001s6ovszlemp",
         paymentId: "DERIVED_BY_APPLICATION",
         providerOrderId: "DERIVED_BY_APPLICATION",
         operatorTargetInputs: 0,
         predecessor: {
-          runId: "e03b436e666b4b188ec65c0ee4139790",
-          checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
+          runId: "1f93662ed1b45856aceac782029111fd",
+          checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
           status: "SUPERSEDED_HISTORICAL_ONLY",
           predecessor: {
-            runId: "4c5c9b039f18037c6f3356c903df1372",
-            checkoutSessionId: "cmtk62h80000001s626b90f9y",
+            runId: "e03b436e666b4b188ec65c0ee4139790",
+            checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
             status: "SUPERSEDED_HISTORICAL_ONLY",
             predecessor: {
-              runId: "89682c544f42d4debb260f5e3186087a",
-              checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+              runId: "4c5c9b039f18037c6f3356c903df1372",
+              checkoutSessionId: "cmtk62h80000001s626b90f9y",
               status: "SUPERSEDED_HISTORICAL_ONLY",
               predecessor: {
-                runId: "da7783b013d20713d6db207c7657b559",
-                checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+                runId: "89682c544f42d4debb260f5e3186087a",
+                checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
                 status: "SUPERSEDED_HISTORICAL_ONLY",
                 predecessor: {
-                  runId: "a764f61f4e4ba799ab16b318a676db65",
-                  checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                  runId: "da7783b013d20713d6db207c7657b559",
+                  checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
                   status: "SUPERSEDED_HISTORICAL_ONLY",
+                  predecessor: {
+                    runId: "a764f61f4e4ba799ab16b318a676db65",
+                    checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                    status: "SUPERSEDED_HISTORICAL_ONLY",
+                  },
                 },
               },
             },
@@ -494,6 +529,11 @@ describe("conjunctive historical A and v1-v12 predecessors with current v13 auth
 
   it("rejects every predecessor or arbitrary current target selector", () => {
     const targets = [
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        runId: "1f93662ed1b45856aceac782029111fd",
+        checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
+      },
       {
         ...currentPolicy.contactedReconciliation.target,
         runId: "e03b436e666b4b188ec65c0ee4139790",
@@ -537,8 +577,8 @@ describe("conjunctive historical A and v1-v12 predecessors with current v13 auth
 
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "1f6bdaab3c7a0ffd45c2037943855661ecd8d109",
-      sourceTree: "ea6f4403ab0aa96d1442c2c121e252d2b9f60209",
+      baselineCommit: "b19b8e679be1d42e36f223fd4eb724d777023072",
+      sourceTree: "e06e0ced69bcb1d6f5f57fb6d9d8bed9e6b553a5",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
