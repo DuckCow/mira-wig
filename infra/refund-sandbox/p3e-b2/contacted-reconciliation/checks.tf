@@ -22,14 +22,14 @@ check "exact_runtime_authority" {
       local.region == "asia-northeast3" &&
       local.service_account_id == "mira-p3e-sbx-contacted-recon" &&
       local.job_name == "mira-p3e-sbx-contacted-reconciliation" &&
-      local.worker_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:67f6f128c398fa9872fb5734f1c5cdf7223cc3f80e3a8e352599d1e7a1d1127c" &&
-      local.worker_image_config_digest == "sha256:5e4379b5886203a04924b556d9e636706e05ff99c32206d9ec0a51bb04af9105" &&
-      local.worker_image_source_commit == "8a9bc9e6b45814829cdda3e69b69dae887fee2b0" &&
-      local.worker_image_source_context_sha256 == "3f7fe5b119233a2250553b4f1dd35363ab5dbb638af18c6002d7a488899974d9" &&
-      local.worker_image_policy_path == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v11.json" &&
-      local.worker_image_policy_version == "V11" &&
-      local.worker_image_policy_sha256 == "80c15e7f247991e466ae3b04f736be8b8e96ccc9aec9a161a9df57d8733a0d54" &&
-      local.worker_supervisor_source_sha256 == "68d443ac70fb8de1863287d320626c3558ac4b92cfb8ab9cf735a3555b540711" &&
+      local.worker_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:83a0eec4475afcc7e61539dc5e2df0b4f293c3c182e0586f82e91f1a88310d50" &&
+      local.worker_image_config_digest == "sha256:b8588cce7c4004507e8ffe6b31490f6e0f8f3443dc1313c3346b7dafbd574a32" &&
+      local.worker_image_source_commit == "9e38d3c5bbfe96bd0331fefbe7afc39919ba379c" &&
+      local.worker_image_source_context_sha256 == "d41db4c5c530ce0ecef0f97093e30d24abef472d61f23c2f91d806a999affec9" &&
+      local.worker_image_policy_path == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v12.json" &&
+      local.worker_image_policy_version == "V12" &&
+      local.worker_image_policy_sha256 == "cc313693936f0928558778b856196ffc2cb1ed9c6323c8ffb15e501542cdf200" &&
+      local.worker_supervisor_source_sha256 == "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15" &&
       local.contract.image.digestUri == local.worker_image_digest_uri &&
       local.contract.image.configDigest == local.worker_image_config_digest &&
       local.contract.image.sourceCheckpoint == local.worker_image_source_commit &&

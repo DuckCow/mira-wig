@@ -390,10 +390,10 @@ resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the
 retires those five resources through the same Terraform state.
 
 The Job binds the latest unknown-sale recovery refund-worker digest
-`sha256:67f6f128c398fa9872fb5734f1c5cdf7223cc3f80e3a8e352599d1e7a1d1127c`,
-source `8a9bc9e6b45814829cdda3e69b69dae887fee2b0`, canonical context
-`3f7fe5b119233a2250553b4f1dd35363ab5dbb638af18c6002d7a488899974d9`, and immutable
-image-policy-v11 authority `80c15e7f247991e466ae3b04f736be8b8e96ccc9aec9a161a9df57d8733a0d54`,
+`sha256:83a0eec4475afcc7e61539dc5e2df0b4f293c3c182e0586f82e91f1a88310d50`,
+source `9e38d3c5bbfe96bd0331fefbe7afc39919ba379c`, canonical context
+`d41db4c5c530ce0ecef0f97093e30d24abef472d61f23c2f91d806a999affec9`, and immutable
+image-policy-v12 authority `cc313693936f0928558778b856196ffc2cb1ed9c6323c8ffb15e501542cdf200`,
 plus command `eximbay-contacted-reconciliation-once`. Payment and provider-order identity remain
 application-derived with no operator target inputs. The run ID
 `e03b436e666b4b188ec65c0ee4139790` and CheckoutSession
@@ -420,10 +420,10 @@ a missing or invalid child terminal remains evidence-unknown and grants no retry
 results admits financial success, refund, or checkout release outside the unchanged exact Q004
 transaction.
 
-The V11 image and policy bound above predate this source correction and remain immutable historical
-evidence. A separately authorized successor image/policy promotion is required before an execution
-may rely on the corrected terminal contract. The runtime remains default disabled, retains the
-one-retrieve ceiling and zero retries, and has no execution authority in this source task.
+The V11 image and policy remain immutable historical evidence. The V12 successor above binds the
+corrected typed provider-observation path through BF4 admission, checkout recovery, the one-shot
+child terminal, and strict supervisor validation. The runtime remains default disabled, retains
+the one-retrieve ceiling and zero retries, and has no execution authority in this promotion.
 
 The source contains no execution resource, scheduler, queue, trigger, invoker binding, or
 execution-on-apply hook. Materialization alone is not execution authority. A future separately
