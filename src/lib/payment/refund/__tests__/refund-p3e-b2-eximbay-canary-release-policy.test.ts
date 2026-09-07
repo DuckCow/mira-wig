@@ -73,7 +73,7 @@ describe("P3E-B2 dormant Eximbay canary release authority", () => {
       .toBe("ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf");
     expect(readFileSync(join(ROOT,
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/locals.tf"), "utf8"))
-      .toContain("eximbay-canary/image-policy-v14.json");
+      .toContain("eximbay-canary/image-policy-v15.json");
     expect(createHash("sha256").update(read("image-policy-v10.json")).digest("hex"))
       .toBe("5139f86b0cfa8321dd14caf8e5083a765ddccc33e82c5dbf03844c3e0106a851");
     expect(createHash("sha256").update(read("image-policy-v11.json")).digest("hex"))
@@ -84,6 +84,8 @@ describe("P3E-B2 dormant Eximbay canary release authority", () => {
       .toBe("8665dec8197d4c8c5a948cd95479974b1de818e4007c6412dad6f3f2f6b61962");
     expect(createHash("sha256").update(read("image-policy-v14.json")).digest("hex"))
       .toBe("7c2561ec1c53b1cd1f69ba7ffec271e1a5b16ce4427abd45ea5c4055a4d653a8");
+    expect(createHash("sha256").update(read("image-policy-v15.json")).digest("hex"))
+      .toBe("7db5aacbe73682fd83bc8608bc729b25969b0b49fae3d772abe784cb2fcc9009");
     expect(imagePolicy.commandAllowlist).toEqual(["worker-check", "worker-health",
       "worker-once", "sandbox-preflight", "image-self-check", "eximbay-canary-once",
       "eximbay-contacted-reconciliation-once"]);
