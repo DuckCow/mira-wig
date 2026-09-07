@@ -192,6 +192,136 @@ describe("Eximbay BF4 provider-free contact protocol", () => {
     });
   });
 
+  it("preserves a matched SALE transaction detail without retaining sensitive provider extras", async () => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse({
+        ...retrieveResponseValue("SALE"),
+        card_info: { pan: "PAN_MUST_NOT_ESCAPE", cvv: "CVV_MUST_NOT_ESCAPE" },
+        other_param: { customer: "CUSTOMER_MUST_NOT_ESCAPE" },
+      })),
+    );
+
+    expect(result).toEqual({
+      kind: "transactionObserved",
+      observation: {
+        admission: "TRANSACTION_DETAIL_ADMITTED",
+        resultCode: "0000",
+        mode: "SANDBOX",
+        binding: {
+          merchant: "MATCH",
+          providerOrder: "MATCH",
+          money: "MATCH",
+        },
+        provider: {
+          transactionId: "tx-1",
+          orderId: "order-1",
+          status: "SALE",
+          amount: "12.34",
+          currency: "USD",
+          transactionDate: "20260817010203",
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/PAN_MUST_NOT_ESCAPE|CVV_MUST_NOT_ESCAPE|CUSTOMER_MUST_NOT_ESCAPE/iu);
+  });
+
+  it.each(["AUTH", "REGISTERED", "NONE"] as const)(
+    "retains recovery status %s without promoting it to SALE",
+    async (status) => {
+      const result = await retrieveEximbayCheckoutRecoveryStatus(
+        config(),
+        recoveryRequest(),
+        () => Promise.resolve(retrieveResponse(status)),
+      );
+
+      expect(result).toMatchObject({
+        kind: "transactionObserved",
+        observation: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          resultCode: "0000",
+          provider: { status },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('"status":"SALE"');
+    },
+  );
+
+  it("retains provider detail mismatches as explicit non-financial binding results", async () => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse({
+        ...retrieveResponseValue("SALE"),
+        mid: "OTHER_MERCHANT",
+        payment: {
+          ...retrieveResponseValue("SALE").payment,
+          order_id: "other-order",
+          currency: "JPY",
+          amount: "999",
+        },
+      })),
+    );
+
+    expect(result).toMatchObject({
+      kind: "transactionObserved",
+      observation: {
+        admission: "TRANSACTION_DETAIL_ADMITTED",
+        resultCode: "0000",
+        binding: {
+          merchant: "MISMATCH",
+          providerOrder: "MISMATCH",
+          money: "MISMATCH",
+        },
+        provider: {
+          orderId: "other-order",
+          status: "SALE",
+          amount: "999",
+          currency: "JPY",
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["successful header with incomplete detail", {
+      rescode: "0000",
+      resmsg: "handled",
+      mid: MID,
+      payment: {},
+    }, "INCOMPLETE_TRANSACTION_DETAIL"],
+    ["non-success header", {
+      rescode: "E123",
+      resmsg: "not handled",
+    }, "PROVIDER_NON_SUCCESS"],
+  ] as const)("keeps %s explicitly incomplete instead of inventing transaction facts", async (
+    _label,
+    response,
+    admission,
+  ) => {
+    const result = await retrieveEximbayCheckoutRecoveryStatus(
+      config(),
+      recoveryRequest(),
+      () => Promise.resolve(jsonResponse(response)),
+    );
+
+    expect(result).toEqual({
+      kind: "transactionObserved",
+      observation: {
+        admission,
+        resultCode: response.rescode,
+        mode: "SANDBOX",
+        binding: {
+          merchant: "NOT_ESTABLISHED",
+          providerOrder: "NOT_ESTABLISHED",
+          money: "NOT_ESTABLISHED",
+        },
+        provider: null,
+      },
+    });
+  });
+
   it("keeps a seventh Q004 root member fail closed with bounded diagnostics", async () => {
     const result = await retrieveEximbayCheckoutRecoveryStatus(
       config(),

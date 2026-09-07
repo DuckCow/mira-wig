@@ -18,6 +18,7 @@ import {
   parseEximbayContactedReconciliationEnvironment,
 } from "./eximbay-contacted-reconciliation-environment";
 import type {
+  EximbayContactedProviderObservation,
   EximbayContactedReconciliationDisposition,
   EximbayContactedReconciliationResult,
 } from "./run-eximbay-contacted-reconciliation-once";
@@ -382,6 +383,7 @@ async function finalizeProxiedChildResult(
         output.stderr,
         contactedSupervisorFailureDiagnostic(workerCapture, assessment.validation, lifecycle),
         assessment.evidence.providerRetrieveCount,
+        assessment.evidence.providerObservation,
       )
       : writeStatic(
         output.stderr,
@@ -395,6 +397,7 @@ async function finalizeProxiedChildResult(
 type TrustedChildEvidence = Readonly<{
   result: ChildResult;
   providerRetrieveCount: 0 | 1 | null;
+  providerObservation: EximbayContactedProviderObservation | null;
 }>;
 
 function trustedChildEvidence(
@@ -408,14 +411,22 @@ function trustedChildEvidence(
   if (!result) return Object.freeze({ evidence: null, validation: capture.validation });
   if (specification.resultSchema !== "EXIMBAY_CONTACTED_RECONCILIATION") {
     return Object.freeze({
-      evidence: Object.freeze({ result, providerRetrieveCount: null }),
+      evidence: Object.freeze({
+        result,
+        providerRetrieveCount: null,
+        providerObservation: null,
+      }),
       validation: "TRUSTED",
     });
   }
   const validation = validateContactedReconciliationTerminal(result);
   return validation.state === "TRUSTED"
     ? Object.freeze({
-      evidence: Object.freeze({ result, providerRetrieveCount: validation.providerRetrieveCount }),
+      evidence: Object.freeze({
+        result,
+        providerRetrieveCount: validation.providerRetrieveCount,
+        providerObservation: validation.providerObservation,
+      }),
       validation: validation.state,
     })
     : Object.freeze({ evidence: null, validation: validation.state });
@@ -547,6 +558,7 @@ type ChildValidationState =
   | "INVALID_RECORD"
   | "FIXED_IDENTITY_MISMATCH"
   | "INVALID_PROVIDER_RETRIEVE_COUNT"
+  | "INVALID_PROVIDER_OBSERVATION"
   | "INVALID_OK"
   | "SUCCESS_DISPOSITION_INVALID"
   | "SUCCESS_KEY_SET_MISMATCH"
@@ -710,6 +722,10 @@ const CONTACTED_RECONCILIATION_SUCCESS_KEYS = Object.freeze([
   "runId",
   "terminalClass",
 ]);
+const CONTACTED_RECONCILIATION_OBSERVED_SUCCESS_KEYS = Object.freeze([
+  ...CONTACTED_RECONCILIATION_SUCCESS_KEYS,
+  "providerObservation",
+].sort());
 const CONTACTED_RECONCILIATION_FAILURE_KEYS = Object.freeze([
   "checkoutSessionId",
   "code",
@@ -719,6 +735,14 @@ const CONTACTED_RECONCILIATION_FAILURE_KEYS = Object.freeze([
   "runId",
   "terminalClass",
 ]);
+const CONTACTED_RECONCILIATION_CLEANUP_FAILURE_KEYS = Object.freeze([
+  ...CONTACTED_RECONCILIATION_FAILURE_KEYS,
+  "cleanupFailure",
+].sort());
+const CONTACTED_RECONCILIATION_OBSERVED_CLEANUP_FAILURE_KEYS = Object.freeze([
+  ...CONTACTED_RECONCILIATION_CLEANUP_FAILURE_KEYS,
+  "providerObservation",
+].sort());
 const CONTACTED_RECONCILIATION_DISPOSITIONS = Object.freeze([
   "RELEASED_AFTER_Q004",
   "REPLAYED_ALREADY_RELEASED",
@@ -735,7 +759,11 @@ type ContactedReconciliationFailureCode = Exclude<
 
 type ChildValidationFailureState = Exclude<ChildValidationState, "TRUSTED">;
 type ContactedTerminalValidation =
-  | Readonly<{ state: "TRUSTED"; providerRetrieveCount: 0 | 1 }>
+  | Readonly<{
+      state: "TRUSTED";
+      providerRetrieveCount: 0 | 1;
+      providerObservation: EximbayContactedProviderObservation | null;
+    }>
   | Readonly<{ state: ChildValidationFailureState }>;
 
 function validateContactedReconciliationTerminal(
@@ -753,13 +781,21 @@ function validateContactedReconciliationTerminal(
   if (value.ok === true) {
     const state = validateContactedReconciliationSuccess(value, terminal.exitCode);
     return state === "TRUSTED"
-      ? Object.freeze({ state, providerRetrieveCount })
+      ? Object.freeze({
+        state,
+        providerRetrieveCount,
+        providerObservation: contactedProviderObservation(value),
+      })
       : validationFailure(state);
   }
   if (value.ok !== false) return validationFailure("INVALID_OK");
   const state = validateContactedReconciliationFailure(value, terminal.exitCode);
   return state === "TRUSTED"
-    ? Object.freeze({ state, providerRetrieveCount })
+    ? Object.freeze({
+      state,
+      providerRetrieveCount,
+      providerObservation: contactedProviderObservation(value),
+    })
     : validationFailure(state);
 }
 
@@ -778,8 +814,19 @@ function validateContactedReconciliationSuccess(
   if (!isContactedReconciliationDisposition(value.disposition)) {
     return "SUCCESS_DISPOSITION_INVALID";
   }
-  if (!hasExactKeys(value, CONTACTED_RECONCILIATION_SUCCESS_KEYS)) {
+  const hasObservation = Object.hasOwn(value, "providerObservation");
+  const observation = contactedProviderObservation(value);
+  const expectedKeys = contactedSuccessExpectedKeys(value.disposition);
+  if (!hasExactKeys(value, expectedKeys)) {
     return "SUCCESS_KEY_SET_MISMATCH";
+  }
+  if (!validSuccessObservationShape(
+    value.disposition,
+    hasObservation,
+    observation,
+    value.providerRetrieveCount,
+  )) {
+    return "INVALID_PROVIDER_OBSERVATION";
   }
   if (exitCode !== 0) return "SUCCESS_EXIT_CODE_MISMATCH";
   if (value.code !== "CONTACTED_RECONCILIATION_COMPLETE") return "SUCCESS_CODE_MISMATCH";
@@ -791,19 +838,256 @@ function validateContactedReconciliationSuccess(
     : "SUCCESS_DURABLE_RELEASE_MISMATCH";
 }
 
+function contactedSuccessExpectedKeys(
+  disposition: EximbayContactedReconciliationDisposition,
+): readonly string[] {
+  return disposition === "TRANSACTION_OBSERVED"
+    ? CONTACTED_RECONCILIATION_OBSERVED_SUCCESS_KEYS
+    : CONTACTED_RECONCILIATION_SUCCESS_KEYS;
+}
+
+function validSuccessObservationShape(
+  disposition: EximbayContactedReconciliationDisposition,
+  hasObservation: boolean,
+  observation: EximbayContactedProviderObservation | null,
+  providerRetrieveCount: unknown,
+): boolean {
+  if (disposition !== "TRANSACTION_OBSERVED") return !hasObservation;
+  return observation !== null && providerRetrieveCount === 1;
+}
+
 function validateContactedReconciliationFailure(
   value: Record<string, unknown>,
   exitCode: number,
 ): ChildValidationState {
   if (!isContactedReconciliationFailureCode(value.code)) return "FAILURE_CODE_INVALID";
-  if (!hasExactKeys(value, CONTACTED_RECONCILIATION_FAILURE_KEYS)) {
+  const hasObservation = Object.hasOwn(value, "providerObservation");
+  const observation = contactedProviderObservation(value);
+  const cleanupFailed = value.cleanupFailure === "DATABASE_DISCONNECT_FAILED";
+  const expectedKeys = contactedFailureExpectedKeys(cleanupFailed, hasObservation);
+  if (!hasExactKeys(value, expectedKeys)) {
     return "FAILURE_KEY_SET_MISMATCH";
   }
+  if (!validFailureObservationShape(
+    hasObservation,
+    observation,
+    cleanupFailed,
+    value.providerRetrieveCount,
+  )) return "INVALID_PROVIDER_OBSERVATION";
+  if (!cleanupFailureCodeMatches(cleanupFailed, value.code)) return "FAILURE_CODE_INVALID";
   if (value.terminalClass !== "HOST_FAILURE") return "FAILURE_TERMINAL_CLASS_MISMATCH";
   if (value.durableRelease !== "NOT_REPORTED") return "FAILURE_DURABLE_RELEASE_MISMATCH";
   return exitCode === contactedReconciliationFailureExitCode(value.code)
     ? "TRUSTED"
     : "FAILURE_EXIT_CODE_MISMATCH";
+}
+
+function cleanupFailureCodeMatches(cleanupFailed: boolean, code: unknown): boolean {
+  return !cleanupFailed || code === "INTERNAL_FAILURE";
+}
+
+function contactedFailureExpectedKeys(
+  cleanupFailed: boolean,
+  hasObservation: boolean,
+): readonly string[] {
+  if (!cleanupFailed) return CONTACTED_RECONCILIATION_FAILURE_KEYS;
+  return hasObservation
+    ? CONTACTED_RECONCILIATION_OBSERVED_CLEANUP_FAILURE_KEYS
+    : CONTACTED_RECONCILIATION_CLEANUP_FAILURE_KEYS;
+}
+
+function validFailureObservationShape(
+  hasObservation: boolean,
+  observation: EximbayContactedProviderObservation | null,
+  cleanupFailed: boolean,
+  providerRetrieveCount: unknown,
+): boolean {
+  if (!hasObservation) return observation === null;
+  return observation !== null && cleanupFailed && providerRetrieveCount === 1;
+}
+
+function contactedProviderObservation(
+  value: Record<string, unknown>,
+): EximbayContactedProviderObservation | null {
+  return isValidContactedProviderObservation(value.providerObservation)
+    ? value.providerObservation
+    : null;
+}
+
+function isValidContactedProviderObservation(
+  value: unknown,
+): value is EximbayContactedProviderObservation {
+  if (!isPlainRecord(value)
+    || !hasExactKeys(value, ["application", "providerResult", "schema", "version"])
+    || value.schema !== "eximbay.contacted-reconciliation.provider-observation"
+    || value.version !== 1
+    || !isValidContactedObservationApplication(value.application)) return false;
+  return isValidContactedProviderResult(value.providerResult, value.application);
+}
+
+function isValidContactedObservationApplication(
+  value: unknown,
+): value is EximbayContactedProviderObservation["application"] {
+  if (!isPlainRecord(value)) return false;
+  if (!hasExactKeys(value, [
+    "checkoutSessionId",
+    "expectedAmountMinor",
+    "expectedCurrency",
+    "operationRunId",
+    "paymentId",
+    "providerOrderId",
+  ])) return false;
+  return [
+    value.operationRunId === EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+    value.checkoutSessionId === EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+    isBoundedTerminalText(value.paymentId, 512),
+    isBoundedTerminalText(value.providerOrderId, 512),
+    isNonnegativeSafeInteger(value.expectedAmountMinor),
+    isSupportedExpectedCurrency(value.expectedCurrency),
+  ].every(Boolean);
+}
+
+function isValidContactedProviderResult(
+  value: unknown,
+  application: EximbayContactedProviderObservation["application"],
+): value is EximbayContactedProviderObservation["providerResult"] {
+  if (!isPlainRecord(value)) return false;
+  if (![hasExactKeys(value, ["admission", "binding", "mode", "provider", "resultCode"]),
+    value.mode === "SANDBOX",
+    isBoundedTerminalText(value.resultCode, 64),
+    isPlainRecord(value.binding),
+  ].every(Boolean)) return false;
+  if (!isPlainRecord(value.binding)
+    || !hasExactKeys(value.binding, ["merchant", "money", "providerOrder"])) return false;
+  if (value.admission === "TRANSACTION_DETAIL_ADMITTED") {
+    return value.resultCode === "0000"
+      && isValidContactedTransactionDetail(value.provider, value.binding, application);
+  }
+  return isValidContactedHeaderObservation(value);
+}
+
+function isValidContactedHeaderObservation(value: Record<string, unknown>): boolean {
+  if (!isPlainRecord(value.binding)) return false;
+  if (![
+    value.provider === null,
+    value.binding.merchant === "NOT_ESTABLISHED",
+    value.binding.providerOrder === "NOT_ESTABLISHED",
+    value.binding.money === "NOT_ESTABLISHED",
+  ].every(Boolean)) return false;
+  if (value.admission === "INCOMPLETE_TRANSACTION_DETAIL") return value.resultCode === "0000";
+  return [
+    value.admission === "PROVIDER_NON_SUCCESS",
+    value.resultCode !== "0000",
+    value.resultCode !== "Q004",
+  ].every(Boolean);
+}
+
+function isValidContactedTransactionDetail(
+  provider: unknown,
+  binding: Record<string, unknown>,
+  application: EximbayContactedProviderObservation["application"],
+): boolean {
+  if (!isPlainRecord(provider)) return false;
+  if (!hasExactKeys(provider, [
+    "amount",
+    "currency",
+    "orderId",
+    "status",
+    "transactionDate",
+    "transactionId",
+  ])) return false;
+  if (![
+    isObservedBinding(binding.merchant),
+    isObservedBinding(binding.providerOrder),
+    isObservedBinding(binding.money),
+    isBoundedTerminalText(provider.transactionId, 512),
+    isBoundedTerminalText(provider.orderId, 512),
+    isProviderCurrency(provider.currency),
+    isProviderAmount(provider.amount),
+    isProviderStatus(provider.status),
+    isTransactionDate(provider.transactionDate),
+  ].every(Boolean)) return false;
+  const orderMatches = provider.orderId === application.providerOrderId;
+  const moneyMatches = provider.currency === application.expectedCurrency
+    && provider.amount === expectedAmountWire(application);
+  return [
+    bindingMatches(binding.providerOrder, orderMatches),
+    bindingMatches(binding.money, moneyMatches),
+  ].every(Boolean);
+}
+
+function isNonnegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isSupportedExpectedCurrency(value: unknown): value is "USD" | "JPY" {
+  return value === "USD" || value === "JPY";
+}
+
+function isTransactionDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{14}$/u.test(value);
+}
+
+function isObservedBinding(value: unknown): value is "MATCH" | "MISMATCH" {
+  return value === "MATCH" || value === "MISMATCH";
+}
+
+function bindingMatches(value: unknown, matches: boolean): boolean {
+  return value === (matches ? "MATCH" : "MISMATCH");
+}
+
+function isProviderCurrency(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Z]{3}$/u.test(value);
+}
+
+function isProviderAmount(value: unknown): value is string {
+  return isBoundedTerminalText(value, 64)
+    && /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(value);
+}
+
+function isProviderStatus(value: unknown): value is "SALE" | "AUTH" | "REGISTERED" | "NONE" {
+  return value === "SALE" || value === "AUTH" || value === "REGISTERED" || value === "NONE";
+}
+
+function expectedAmountWire(
+  application: EximbayContactedProviderObservation["application"],
+): string {
+  if (application.expectedCurrency === "JPY") return String(application.expectedAmountMinor);
+  const digits = String(application.expectedAmountMinor).padStart(3, "0");
+  return `${digits.slice(0, -2)}.${digits.slice(-2)}`;
+}
+
+function isBoundedTerminalText(value: unknown, maxBytes: number): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value === value.trim()
+    && !hasInvalidTerminalCharacter(value)
+    && Buffer.byteLength(value, "utf8") <= maxBytes;
+}
+
+function hasInvalidTerminalCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (isTerminalControlCode(code)) return true;
+    if (isHighSurrogateCode(code)) {
+      const next = value.charCodeAt(index + 1);
+      if (!isLowSurrogateCode(next)) return true;
+      index += 1;
+    } else if (isLowSurrogateCode(code)) return true;
+  }
+  return false;
+}
+
+function isTerminalControlCode(code: number): boolean {
+  return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+}
+
+function isHighSurrogateCode(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogateCode(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }
 
 function contactedReconciliationFailureExitCode(
@@ -910,21 +1194,37 @@ function writeContactedSystemicFailure(
   writer: OutputWriter,
   diagnostic: ContactedSupervisorFailureDiagnostic,
   providerRetrieveCount: 0 | 1 | null,
+  providerObservation: EximbayContactedProviderObservation | null = null,
 ): Promise<number> {
-  const output = `${JSON.stringify(diagnostic)}\n${systemicFailureLine(providerRetrieveCount)}`;
+  const output = `${JSON.stringify(diagnostic)}\n${systemicFailureLine(
+    providerRetrieveCount,
+    providerObservation,
+  )}`;
   return writeStatic(writer, output, 1);
 }
 
 function contactedReconciliationSystemicFailureLine(
   providerRetrieveCount: 0 | 1,
+  providerObservation: EximbayContactedProviderObservation | null,
 ): string {
-  return `{"ok":false,"code":"SYSTEMIC_FAILURE","providerRetrieveCount":${providerRetrieveCount}}\n`;
+  const result = providerObservation
+    ? Object.freeze({
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      providerRetrieveCount,
+      providerObservation,
+    })
+    : Object.freeze({ ok: false, code: "SYSTEMIC_FAILURE", providerRetrieveCount });
+  return `${JSON.stringify(result)}\n`;
 }
 
-function systemicFailureLine(providerRetrieveCount: 0 | 1 | null): string {
+function systemicFailureLine(
+  providerRetrieveCount: 0 | 1 | null,
+  providerObservation: EximbayContactedProviderObservation | null = null,
+): string {
   return providerRetrieveCount === null
     ? SYSTEMIC_FAILURE_LINE
-    : contactedReconciliationSystemicFailureLine(providerRetrieveCount);
+    : contactedReconciliationSystemicFailureLine(providerRetrieveCount, providerObservation);
 }
 
 function hasExactLineTransport(selected: Buffer): boolean {

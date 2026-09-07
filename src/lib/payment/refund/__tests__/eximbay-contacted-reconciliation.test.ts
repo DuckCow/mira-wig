@@ -147,7 +147,7 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
   it("surfaces transaction observation without financial-completion language or another call", async () => {
     const harness = createHarness(async (_database, input) => {
       await input.transport("https://provider.invalid/retrieve", { method: "POST" });
-      return Object.freeze({ kind: "notReleased" as const, reason: "TRANSACTION_OBSERVED" as const });
+      return checkoutTransactionObservation();
     });
 
     const result = await runEximbayContactedReconciliationOnce(validEnvironment(), harness.dependencies);
@@ -157,10 +157,123 @@ describe("fixed Eximbay CONTACTED reconciliation host", () => {
       disposition: "TRANSACTION_OBSERVED",
       providerRetrieveCount: 1,
       durableRelease: "NOT_REPORTED",
+      providerObservation: {
+        schema: "eximbay.contacted-reconciliation.provider-observation",
+        version: 1,
+        application: {
+          operationRunId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+          checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+          paymentId: "payment-1",
+          providerOrderId: "provider-payment-1",
+          expectedAmountMinor: 100,
+          expectedCurrency: "USD",
+        },
+        providerResult: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          resultCode: "0000",
+          mode: "SANDBOX",
+          binding: { merchant: "MATCH", providerOrder: "MATCH", money: "MATCH" },
+          provider: {
+            transactionId: "transaction-1",
+            orderId: "provider-payment-1",
+            status: "SALE",
+            amount: "1.00",
+            currency: "USD",
+            transactionDate: "20260901010203",
+          },
+        },
+      },
     });
     expect(harness.recover).toHaveBeenCalledTimes(1);
     expect(harness.transport).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(result)).not.toMatch(/PAYMENT_SUCCEEDED|SALE_SUCCEEDED|FRESH_SALE|REFUND/iu);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("retains validated provider observation when database disconnect fails", async () => {
+    const harness = createHarness(async (_database, input) => {
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      return checkoutTransactionObservation();
+    }, {
+      disconnectDatabase: () => Promise.reject(new Error("SYNTHETIC_DISCONNECT_FAILURE")),
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(
+      validEnvironment(),
+      harness.dependencies,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "INTERNAL_FAILURE",
+      terminalClass: "HOST_FAILURE",
+      providerRetrieveCount: 1,
+      durableRelease: "NOT_REPORTED",
+      cleanupFailure: "DATABASE_DISCONNECT_FAILED",
+      providerObservation: {
+        application: {
+          operationRunId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+          paymentId: "payment-1",
+          expectedAmountMinor: 100,
+        },
+        providerResult: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          provider: { transactionId: "transaction-1", amount: "1.00", currency: "USD" },
+        },
+      },
+    });
+    expect(harness.disconnectDatabase).toHaveBeenCalledTimes(1);
+    expect(harness.transport).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toMatch(/SYNTHETIC_DISCONNECT_FAILURE|SYNTHETIC_SECRET/iu);
+    expectProhibitedCalls(harness.prohibited);
+  });
+
+  it("preserves an incomplete non-Q004 provider header without inventing transaction facts", async () => {
+    const harness = createHarness(async (_database, input) => {
+      await input.transport("https://provider.invalid/retrieve", { method: "POST" });
+      const observed = checkoutTransactionObservation();
+      return Object.freeze({
+        ...observed,
+        providerObservation: Object.freeze({
+          ...observed.providerObservation,
+          providerResult: Object.freeze({
+            admission: "INCOMPLETE_TRANSACTION_DETAIL" as const,
+            resultCode: "0000" as const,
+            mode: "SANDBOX" as const,
+            binding: Object.freeze({
+              merchant: "NOT_ESTABLISHED" as const,
+              providerOrder: "NOT_ESTABLISHED" as const,
+              money: "NOT_ESTABLISHED" as const,
+            }),
+            provider: null,
+          }),
+        }),
+      });
+    });
+
+    const result = await runEximbayContactedReconciliationOnce(
+      validEnvironment(),
+      harness.dependencies,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      disposition: "TRANSACTION_OBSERVED",
+      providerRetrieveCount: 1,
+      providerObservation: {
+        providerResult: {
+          admission: "INCOMPLETE_TRANSACTION_DETAIL",
+          resultCode: "0000",
+          binding: {
+            merchant: "NOT_ESTABLISHED",
+            providerOrder: "NOT_ESTABLISHED",
+            money: "NOT_ESTABLISHED",
+          },
+          provider: null,
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/transactionId|"status"|"amount"/u);
     expectProhibitedCalls(harness.prohibited);
   });
 
@@ -449,11 +562,12 @@ function createHarness(
     targetKind?: "ACTIVE" | "REPLAY";
     database?: PrismaClient;
     loadTarget?: EximbayContactedReconciliationDependencies["loadTarget"];
+    disconnectDatabase?: EximbayContactedReconciliationDependencies["disconnectDatabase"];
   }> = {},
 ) {
   const database = overrides.database ?? DATABASE;
   const createDatabase = vi.fn(() => database);
-  const disconnectDatabase = vi.fn(() => Promise.resolve());
+  const disconnectDatabase = vi.fn(overrides.disconnectDatabase ?? (() => Promise.resolve()));
   const loadTarget = vi.fn(overrides.loadTarget ?? (() => Promise.resolve(Object.freeze({
     paymentId: "payment-1",
     authenticatedUserId: "synthetic-user",
@@ -485,6 +599,42 @@ function createHarness(
       recover,
     }) satisfies EximbayContactedReconciliationDependencies,
   };
+}
+
+function checkoutTransactionObservation() {
+  return Object.freeze({
+    kind: "notReleased" as const,
+    reason: "TRANSACTION_OBSERVED" as const,
+    providerObservation: Object.freeze({
+      schema: "eximbay.checkout-recovery.provider-observation" as const,
+      version: 1 as const,
+      application: Object.freeze({
+        checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+        paymentId: "payment-1",
+        providerOrderId: "provider-payment-1",
+        expectedAmountMinor: 100,
+        expectedCurrency: "USD",
+      }),
+      providerResult: Object.freeze({
+        admission: "TRANSACTION_DETAIL_ADMITTED" as const,
+        resultCode: "0000" as const,
+        mode: "SANDBOX" as const,
+        binding: Object.freeze({
+          merchant: "MATCH" as const,
+          providerOrder: "MATCH" as const,
+          money: "MATCH" as const,
+        }),
+        provider: Object.freeze({
+          transactionId: "transaction-1",
+          orderId: "provider-payment-1",
+          status: "SALE" as const,
+          amount: "1.00",
+          currency: "USD",
+          transactionDate: "20260901010203",
+        }),
+      }),
+    }),
+  });
 }
 
 function validEnvironment(): Record<string, string> {

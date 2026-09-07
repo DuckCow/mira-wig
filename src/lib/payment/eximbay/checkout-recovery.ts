@@ -20,6 +20,7 @@ import {
   retrieveEximbayCheckoutRecoveryStatus,
   type EximbayBf4Fetch,
   type EximbayBf4OutcomeUnknownDiagnostic,
+  type EximbayCheckoutRecoveryProviderObservation,
   type EximbayCheckoutRecoveryRetrieveResult,
 } from "./bf4-contact";
 import { EXIMBAY_BF4_EVENT_TYPE } from "./bf4-envelope";
@@ -51,12 +52,30 @@ export const EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_LOG_EVENT =
 
 type RecoveryPayment = EximbayCheckoutRecoveryPayment;
 
+export type EximbayCheckoutRecoveryObservation = Readonly<{
+  schema: "eximbay.checkout-recovery.provider-observation";
+  version: 1;
+  application: Readonly<{
+    checkoutSessionId: string;
+    paymentId: string;
+    providerOrderId: string;
+    expectedAmountMinor: number;
+    expectedCurrency: string;
+  }>;
+  providerResult: EximbayCheckoutRecoveryProviderObservation;
+}>;
+
 export type EximbayCheckoutRecoveryResult =
   | Readonly<{ kind: "released"; paymentId: string; eventId: string; releasedAt: Date }>
   | Readonly<{ kind: "replayed"; paymentId: string; eventId: string; releasedAt: Date }>
   | Readonly<{
       kind: "notReleased";
-      reason: "DISABLED" | "NOT_ELIGIBLE" | "TRANSACTION_OBSERVED" | "OUTCOME_UNKNOWN" | "STATE_CHANGED";
+      reason: "TRANSACTION_OBSERVED";
+      providerObservation: EximbayCheckoutRecoveryObservation;
+    }>
+  | Readonly<{
+      kind: "notReleased";
+      reason: "DISABLED" | "NOT_ELIGIBLE" | "OUTCOME_UNKNOWN" | "STATE_CHANGED";
     }>;
 
 export interface RecoverEximbayCheckoutInput {
@@ -130,7 +149,10 @@ async function checkoutRecoveryPreflight(
 }
 
 function recoveryPreflightResult(
-  reason: Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>["reason"],
+  reason: Exclude<
+    Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>["reason"],
+    "TRANSACTION_OBSERVED"
+  >,
 ): RecoveryPreflight {
   return Object.freeze({ kind: "result", result: Object.freeze({ kind: "notReleased", reason }) });
 }
@@ -141,7 +163,11 @@ function recoveryProviderDisposition(
   emitDiagnostic: ((line: string) => void) | undefined,
 ): EximbayCheckoutRecoveryResult | null {
   if (retrieved.kind === "transactionObserved") {
-    return Object.freeze({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
+    return Object.freeze({
+      kind: "notReleased",
+      reason: "TRANSACTION_OBSERVED",
+      providerObservation: checkoutRecoveryObservation(payment, retrieved.observation),
+    });
   }
   if (retrieved.kind === "outcomeUnknown") {
     emitOutcomeUnknownDiagnostic({
@@ -152,6 +178,24 @@ function recoveryProviderDisposition(
     return Object.freeze({ kind: "notReleased", reason: "OUTCOME_UNKNOWN" });
   }
   return null;
+}
+
+function checkoutRecoveryObservation(
+  payment: RecoveryPayment,
+  providerResult: EximbayCheckoutRecoveryProviderObservation,
+): EximbayCheckoutRecoveryObservation {
+  return Object.freeze({
+    schema: "eximbay.checkout-recovery.provider-observation",
+    version: 1,
+    application: Object.freeze({
+      checkoutSessionId: payment.checkoutSessionId,
+      paymentId: payment.id,
+      providerOrderId: requireProviderOrderId(payment),
+      expectedAmountMinor: payment.amount,
+      expectedCurrency: payment.currency,
+    }),
+    providerResult,
+  });
 }
 
 function emitOutcomeUnknownDiagnostic(input: Readonly<{

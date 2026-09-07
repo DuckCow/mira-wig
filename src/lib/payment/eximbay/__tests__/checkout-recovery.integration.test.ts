@@ -160,11 +160,107 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
   });
 
   it("does not release an observed transaction", async () => {
-    const result = await recoverEximbayCheckout(db, recoveryInput(fixture, transactionObservedTransport()));
-    expect(result).toEqual({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
+    const result = await recoverEximbayCheckout(
+      db,
+      recoveryInput(fixture, transactionObservedTransport(fixture)),
+    );
+    expect(result).toEqual({
+      kind: "notReleased",
+      reason: "TRANSACTION_OBSERVED",
+      providerObservation: {
+        schema: "eximbay.checkout-recovery.provider-observation",
+        version: 1,
+        application: {
+          checkoutSessionId: fixture.sessionId,
+          paymentId: fixture.paymentId,
+          providerOrderId: fixture.providerOrderId,
+          expectedAmountMinor: fixture.amount,
+          expectedCurrency: "USD",
+        },
+        providerResult: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          resultCode: "0000",
+          mode: "SANDBOX",
+          binding: {
+            merchant: "MATCH",
+            providerOrder: "MATCH",
+            money: "MATCH",
+          },
+          provider: {
+            transactionId: "observed-transaction",
+            orderId: fixture.providerOrderId,
+            status: "SALE",
+            amount: amountWire(fixture.amount),
+            currency: "USD",
+            transactionDate: "20260825010400",
+          },
+        },
+      },
+    });
+    await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+    await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+      .resolves.toMatchObject({
+        status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        remediationStatus: PaymentRemediationStatus.NONE,
+        providerPaymentKey: null,
+        financialSucceededAt: null,
+        blockingEndedAt: null,
+        errorCode: null,
+      });
+    await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+  });
+
+  it("keeps mismatched provider identity and money distinct from the application target", async () => {
+    const result = await recoverEximbayCheckout(db, recoveryInput(
+      fixture,
+      () => Promise.resolve(jsonResponse({
+        rescode: "0000",
+        resmsg: "observed",
+        mid: "OTHER_MERCHANT",
+        payment: {
+          order_id: "other-provider-order",
+          currency: "JPY",
+          amount: "777",
+          transaction_id: "other-transaction",
+          status: "AUTH",
+          transaction_date: "20260825010401",
+        },
+      })),
+    ));
+
+    expect(result).toMatchObject({
+      kind: "notReleased",
+      reason: "TRANSACTION_OBSERVED",
+      providerObservation: {
+        application: {
+          checkoutSessionId: fixture.sessionId,
+          paymentId: fixture.paymentId,
+          providerOrderId: fixture.providerOrderId,
+          expectedAmountMinor: fixture.amount,
+          expectedCurrency: "USD",
+        },
+        providerResult: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          binding: {
+            merchant: "MISMATCH",
+            providerOrder: "MISMATCH",
+            money: "MISMATCH",
+          },
+          provider: {
+            orderId: "other-provider-order",
+            currency: "JPY",
+            amount: "777",
+            transactionId: "other-transaction",
+            status: "AUTH",
+          },
+        },
+      },
+    });
     await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
     await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
       .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });
+    await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
   });
 
   it("recovers an expired SUBMITTED session only through its exact contacted blocker", async () => {
@@ -350,11 +446,18 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
 
       const observedFixture = await createFixture();
       additionalFixtures.push(observedFixture);
-      const observedTransport = transactionObservedTransport();
+      const observedTransport = transactionObservedTransport(observedFixture);
       await expect(recoverEximbayCheckout(
         restricted,
         recoveryInput(observedFixture, observedTransport),
-      )).resolves.toEqual({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
+      )).resolves.toMatchObject({
+        kind: "notReleased",
+        reason: "TRANSACTION_OBSERVED",
+        providerObservation: {
+          application: { paymentId: observedFixture.paymentId },
+          providerResult: { admission: "TRANSACTION_DETAIL_ADMITTED" },
+        },
+      });
       expect(observedTransport).toHaveBeenCalledTimes(1);
 
       const ambiguousFixture = await createFixture();
@@ -878,9 +981,21 @@ function realCanaryObservedQ004Envelope(resmsg: string): Record<string, unknown>
   };
 }
 
-function transactionObservedTransport() {
+function transactionObservedTransport(fixture: Fixture) {
   return vi.fn<EximbayBf4Fetch>(() => Promise.resolve(
-    jsonResponse({ rescode: "0000", resmsg: "observed", mid: MID, payment: {} }),
+    jsonResponse({
+      rescode: "0000",
+      resmsg: "observed",
+      mid: MID,
+      payment: {
+        order_id: fixture.providerOrderId,
+        currency: "USD",
+        amount: amountWire(fixture.amount),
+        transaction_id: "observed-transaction",
+        status: "SALE",
+        transaction_date: "20260825010400",
+      },
+    }),
   ));
 }
 

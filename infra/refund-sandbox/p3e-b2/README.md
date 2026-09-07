@@ -407,6 +407,24 @@ parallelism one, zero retries, one CPU, 512 MiB, a 180-second timeout, Gen2 Dire
 `PRIVATE_RANGES_ONLY` so the private Cloud SQL path uses the existing VPC/subnet while public
 Eximbay SANDBOX retrieval uses normal Cloud Run egress.
 
+The repository source result contract preserves a bounded non-Q004 provider observation through
+checkout recovery, the one-shot child terminal, and supervisor validation. A complete admitted
+detail retains only transaction/order identity, closed inquiry status, provider-reported money,
+transaction date, result code, SANDBOX mode, and MID/order/money binding results. A non-success or
+incomplete header remains explicitly non-financial and contains no invented transaction detail.
+Application binding adds the fixed operation run and CheckoutSession plus application-derived
+Payment/provider-order identity and expected minor-unit money. Raw payloads, `card_info`,
+`other_param`, credentials, and customer identity are excluded. Database disconnect failure and
+proxy lifecycle failure are reported separately without erasing an already validated observation;
+a missing or invalid child terminal remains evidence-unknown and grants no retry. None of these
+results admits financial success, refund, or checkout release outside the unchanged exact Q004
+transaction.
+
+The V11 image and policy bound above predate this source correction and remain immutable historical
+evidence. A separately authorized successor image/policy promotion is required before an execution
+may rely on the corrected terminal contract. The runtime remains default disabled, retains the
+one-retrieve ceiling and zero retries, and has no execution authority in this source task.
+
 The source contains no execution resource, scheduler, queue, trigger, invoker binding, or
 execution-on-apply hook. Materialization alone is not execution authority. A future separately
 authorized attended lifecycle is: materialize the fixed Job, temporarily enable bootstrap Cloud

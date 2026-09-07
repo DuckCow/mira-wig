@@ -13,7 +13,10 @@ import {
   runRefundWorkerContainerSupervisor,
   type RefundWorkerContainerSupervisorDependencies,
 } from "../refund-worker-container-supervisor";
-import type { EximbayContactedReconciliationResult } from
+import type {
+  EximbayContactedProviderObservation,
+  EximbayContactedReconciliationResult,
+} from
   "../run-eximbay-contacted-reconciliation-once";
 import {
   EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
@@ -210,6 +213,149 @@ describe("refund worker container supervisor", () => {
     },
   );
 
+  it("relays one exact validated contacted provider observation", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const result = contactedTransactionObservationResult();
+    const { child: runner, stdout: terminal } = await completedContactedChild(result);
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.stdout).toEqual([terminal]);
+    expect(JSON.parse(terminal)).toEqual(result);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("admits the exact bounded incomplete-detail observation shape", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const observation = contactedIncompleteProviderObservation();
+    const { child: runner, stdout: terminal } = await completedContactedChild(
+      contactedTransactionObservationResult(observation),
+    );
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.stdout).toEqual([terminal]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("retains validated contacted provider observation when proxy cleanup is unconfirmed", async () => {
+    const proxy = runningChild({ closeOnTerm: null });
+    const observation = contactedProviderObservation();
+    const { child: runner } = await completedContactedChild(
+      contactedTransactionObservationResult(observation),
+    );
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toHaveLength(1);
+    const [diagnostic, terminal, trailing] = harness.stderr[0]?.split("\n") ?? [];
+    expect(trailing).toBe("");
+    expect(JSON.parse(diagnostic ?? "null")).toMatchObject({
+      childValidation: "TRUSTED",
+      proxyLifecycle: "READY_CLEANUP_UNCONFIRMED",
+    });
+    expect(JSON.parse(terminal ?? "null")).toEqual({
+      ok: false,
+      code: "SYSTEMIC_FAILURE",
+      providerRetrieveCount: 1,
+      providerObservation: observation,
+    });
+  });
+
+  it.each([
+    ["unknown observation key", () => ({
+      ...contactedProviderObservation(),
+      rawPayload: "RAW_PROVIDER_PAYLOAD_MUST_NOT_ESCAPE",
+    })],
+    ["overlong transaction identifier", () => {
+      const observation = contactedProviderObservation();
+      return {
+        ...observation,
+        providerResult: {
+          ...observation.providerResult,
+          provider: {
+            ...observation.providerResult.provider,
+            transactionId: "x".repeat(513),
+          },
+        },
+      };
+    }],
+    ["unknown provider status", () => {
+      const observation = contactedProviderObservation();
+      return {
+        ...observation,
+        providerResult: {
+          ...observation.providerResult,
+          provider: { ...observation.providerResult.provider, status: "CAPTURED" },
+        },
+      };
+    }],
+    ["invalid provider money", () => {
+      const observation = contactedProviderObservation();
+      return {
+        ...observation,
+        providerResult: {
+          ...observation.providerResult,
+          provider: { ...observation.providerResult.provider, amount: "1e2" },
+        },
+      };
+    }],
+    ["incoherent order binding", () => {
+      const observation = contactedProviderObservation();
+      return {
+        ...observation,
+        providerResult: {
+          ...observation.providerResult,
+          provider: { ...observation.providerResult.provider, orderId: "different-order" },
+        },
+      };
+    }],
+  ] as const)("rejects %s in contacted provider evidence", async (_name, providerObservation) => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const runner = completedChild(0, contactedReconciliationTerminalValue({
+      disposition: "TRANSACTION_OBSERVED",
+      providerRetrieveCount: 1,
+      providerObservation: providerObservation(),
+    }), "");
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expectContactedSupervisorFailure(harness.stderr, {
+      childValidation: "INVALID_PROVIDER_OBSERVATION",
+    });
+    expect(JSON.stringify(harness.stderr)).not.toContain("MUST_NOT_ESCAPE");
+  });
+
   it.each([0, 1] as const)(
     "retains validated CONTACTED provider count %i when proxy cleanup is unconfirmed",
     async (providerRetrieveCount) => {
@@ -366,6 +512,30 @@ describe("refund worker container supervisor", () => {
       childValidation: "TRUSTED",
       proxyLifecycle: "READY_CLEANUP_UNCONFIRMED",
     }, 1);
+  });
+
+  it("relays a validated database-cleanup failure without erasing provider observation", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const observation = contactedProviderObservation();
+    const result: EximbayContactedReconciliationResult = Object.freeze({
+      ...contactedReconciliationFailureResult(1),
+      cleanupFailure: "DATABASE_DISCONNECT_FAILED",
+      providerObservation: observation,
+    });
+    const { child: runner, stderr: terminal } = await completedContactedChild(result);
+    const harness = supervisorHarness([proxy, runner], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-reconciliation-once"],
+      CONTACTED_RECONCILIATION_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual([terminal]);
+    expect(JSON.parse(terminal)).toEqual(result);
   });
 
   it.each([-1, 2, 1.5, "1", null])(
@@ -1141,6 +1311,73 @@ function contactedReconciliationFailureResult(
     checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
     providerRetrieveCount,
     durableRelease: "NOT_REPORTED",
+  });
+}
+
+function contactedTransactionObservationResult(
+  providerObservation: EximbayContactedProviderObservation = contactedProviderObservation(),
+): EximbayContactedReconciliationResult {
+  return Object.freeze({
+    ok: true,
+    code: "CONTACTED_RECONCILIATION_COMPLETE",
+    terminalClass: "RECONCILIATION_COMPLETED",
+    runId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+    checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+    disposition: "TRANSACTION_OBSERVED",
+    providerRetrieveCount: 1,
+    durableRelease: "NOT_REPORTED",
+    providerObservation,
+  });
+}
+
+function contactedProviderObservation(): EximbayContactedProviderObservation {
+  return Object.freeze({
+    schema: "eximbay.contacted-reconciliation.provider-observation",
+    version: 1,
+    application: Object.freeze({
+      operationRunId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+      checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      paymentId: "payment-1",
+      providerOrderId: "provider-order-1",
+      expectedAmountMinor: 100,
+      expectedCurrency: "USD",
+    }),
+    providerResult: Object.freeze({
+      admission: "TRANSACTION_DETAIL_ADMITTED",
+      resultCode: "0000",
+      mode: "SANDBOX",
+      binding: Object.freeze({
+        merchant: "MATCH",
+        providerOrder: "MATCH",
+        money: "MATCH",
+      }),
+      provider: Object.freeze({
+        transactionId: "transaction-1",
+        orderId: "provider-order-1",
+        status: "SALE",
+        amount: "1.00",
+        currency: "USD",
+        transactionDate: "20260901010203",
+      }),
+    }),
+  });
+}
+
+function contactedIncompleteProviderObservation(): EximbayContactedProviderObservation {
+  const observation = contactedProviderObservation();
+  return Object.freeze({
+    ...observation,
+    providerResult: Object.freeze({
+      admission: "INCOMPLETE_TRANSACTION_DETAIL",
+      resultCode: "0000",
+      mode: "SANDBOX",
+      binding: Object.freeze({
+        merchant: "NOT_ESTABLISHED",
+        providerOrder: "NOT_ESTABLISHED",
+        money: "NOT_ESTABLISHED",
+      }),
+      provider: null,
+    }),
   });
 }
 

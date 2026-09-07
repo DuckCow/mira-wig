@@ -5,6 +5,7 @@ import {
   isExactRecoverableBlocker,
   recoverEximbayCheckout,
   type EximbayCheckoutRecoveryResult,
+  type EximbayCheckoutRecoveryObservation,
 } from "@/lib/payment/eximbay/checkout-recovery";
 import type { EximbayBf4Fetch } from "@/lib/payment/eximbay/bf4-contact";
 import { EXIMBAY_SANDBOX_API_KEY } from "@/lib/payment/providers/credentials";
@@ -46,6 +47,20 @@ export type EximbayContactedReconciliationDisposition =
   | "RECOVERY_DISABLED"
   | "STATE_CHANGED";
 
+export type EximbayContactedProviderObservation = Readonly<{
+  schema: "eximbay.contacted-reconciliation.provider-observation";
+  version: 1;
+  application: Readonly<{
+    operationRunId: typeof EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID;
+    checkoutSessionId: typeof EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID;
+    paymentId: string;
+    providerOrderId: string;
+    expectedAmountMinor: number;
+    expectedCurrency: string;
+  }>;
+  providerResult: EximbayCheckoutRecoveryObservation["providerResult"];
+}>;
+
 export type EximbayContactedReconciliationResult = Readonly<{
   ok: boolean;
   code: "CONTACTED_RECONCILIATION_COMPLETE" | "CONFIG_INVALID"
@@ -56,6 +71,8 @@ export type EximbayContactedReconciliationResult = Readonly<{
   disposition?: EximbayContactedReconciliationDisposition;
   providerRetrieveCount: 0 | 1;
   durableRelease: "PERFORMED" | "OBSERVED_EXISTING" | "NOT_REPORTED";
+  providerObservation?: EximbayContactedProviderObservation;
+  cleanupFailure?: "DATABASE_DISCONNECT_FAILED";
 }>;
 
 type FixedRecoveryTarget = Readonly<{
@@ -112,7 +129,12 @@ export async function runEximbayContactedReconciliationOnce(
   try {
     await dependencies.disconnectDatabase(database);
   } catch {
-    return hostFailure("INTERNAL_FAILURE", contact.count);
+    return hostFailure(
+      "INTERNAL_FAILURE",
+      contact.count,
+      result.providerObservation ?? null,
+      "DATABASE_DISCONNECT_FAILED",
+    );
   }
   return result;
 }
@@ -147,7 +169,7 @@ async function executeFixedTarget(
     transport: singleRetrieveTransport(contact, dependencies.transport),
     emitDiagnostic: suppressRedundantDiagnostic,
   });
-  return recoveryResult(recovered, contact.count);
+  return recoveryResult(recovered, contact.count, target);
 }
 
 function suppressRedundantDiagnostic(): void {
@@ -229,21 +251,31 @@ function singleRetrieveTransport(
 function recoveryResult(
   result: EximbayCheckoutRecoveryResult,
   providerRetrieveCount: 0 | 1,
+  target: FixedRecoveryTarget,
 ): EximbayContactedReconciliationResult {
   if (result.kind === "released") return completed("RELEASED_AFTER_Q004", providerRetrieveCount);
   if (result.kind === "replayed") {
     return completed("REPLAYED_ALREADY_RELEASED", providerRetrieveCount);
   }
+  if (result.reason === "TRANSACTION_OBSERVED") {
+    return completed(
+      "TRANSACTION_OBSERVED",
+      providerRetrieveCount,
+      contactedProviderObservation(result.providerObservation, target),
+    );
+  }
   return completed(recoveryReasonDisposition(result.reason), providerRetrieveCount);
 }
 
 function recoveryReasonDisposition(
-  reason: Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>["reason"],
+  reason: Exclude<
+    Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>["reason"],
+    "TRANSACTION_OBSERVED"
+  >,
 ): EximbayContactedReconciliationDisposition {
   const dispositions = Object.freeze({
     DISABLED: "RECOVERY_DISABLED",
     NOT_ELIGIBLE: "STALE_OR_NOT_ELIGIBLE",
-    TRANSACTION_OBSERVED: "TRANSACTION_OBSERVED",
     OUTCOME_UNKNOWN: "OUTCOME_UNKNOWN",
     STATE_CHANGED: "STATE_CHANGED",
   } as const);
@@ -253,8 +285,9 @@ function recoveryReasonDisposition(
 function completed(
   disposition: EximbayContactedReconciliationDisposition,
   providerRetrieveCount: 0 | 1,
+  providerObservation: EximbayContactedProviderObservation | null = null,
 ): EximbayContactedReconciliationResult {
-  return Object.freeze({
+  const result = Object.freeze({
     ok: true,
     code: "CONTACTED_RECONCILIATION_COMPLETE",
     terminalClass: "RECONCILIATION_COMPLETED",
@@ -268,14 +301,19 @@ function completed(
         ? "OBSERVED_EXISTING"
         : "NOT_REPORTED",
   });
+  return providerObservation
+    ? Object.freeze({ ...result, providerObservation })
+    : result;
 }
 
 function hostFailure(
   code: Extract<EximbayContactedReconciliationResult["code"],
     "CONFIG_INVALID" | "CREDENTIAL_UNAVAILABLE" | "INTERNAL_FAILURE">,
   providerRetrieveCount: 0 | 1,
+  providerObservation: EximbayContactedProviderObservation | null = null,
+  cleanupFailure: "DATABASE_DISCONNECT_FAILED" | null = null,
 ): EximbayContactedReconciliationResult {
-  return Object.freeze({
+  const result = Object.freeze({
     ok: false,
     code,
     terminalClass: "HOST_FAILURE",
@@ -283,5 +321,34 @@ function hostFailure(
     checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
     providerRetrieveCount,
     durableRelease: "NOT_REPORTED",
+  });
+  if (providerObservation && cleanupFailure) {
+    return Object.freeze({ ...result, providerObservation, cleanupFailure });
+  }
+  if (providerObservation) return Object.freeze({ ...result, providerObservation });
+  return cleanupFailure ? Object.freeze({ ...result, cleanupFailure }) : result;
+}
+
+function contactedProviderObservation(
+  observation: EximbayCheckoutRecoveryObservation,
+  target: FixedRecoveryTarget,
+): EximbayContactedProviderObservation {
+  if (observation.application.checkoutSessionId
+      !== EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID
+    || observation.application.paymentId !== target.paymentId) {
+    throw new Error("CONTACTED_PROVIDER_OBSERVATION_TARGET_MISMATCH");
+  }
+  return Object.freeze({
+    schema: "eximbay.contacted-reconciliation.provider-observation",
+    version: 1,
+    application: Object.freeze({
+      operationRunId: EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
+      checkoutSessionId: EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
+      paymentId: observation.application.paymentId,
+      providerOrderId: observation.application.providerOrderId,
+      expectedAmountMinor: observation.application.expectedAmountMinor,
+      expectedCurrency: observation.application.expectedCurrency,
+    }),
+    providerResult: observation.providerResult,
   });
 }
