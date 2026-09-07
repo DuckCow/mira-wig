@@ -389,16 +389,17 @@ purpose-specific service account, one exact-instance-conditioned Cloud SQL Clien
 resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the gate to false
 retires those five resources through the same Terraform state.
 
-The Job binds the latest unknown-sale recovery refund-worker digest
-`sha256:83a0eec4475afcc7e61539dc5e2df0b4f293c3c182e0586f82e91f1a88310d50`,
-source `9e38d3c5bbfe96bd0331fefbe7afc39919ba379c`, canonical context
-`d41db4c5c530ce0ecef0f97093e30d24abef472d61f23c2f91d806a999affec9`, and immutable
-image-policy-v12 authority `cc313693936f0928558778b856196ffc2cb1ed9c6323c8ffb15e501542cdf200`,
+The Job binds the current contacted-recovery refund-worker digest
+`sha256:64e3dd80c4b0ce0a18999d81c5e12c6ce8dc9f5a9f705ace2391111f1e9839b0`,
+source `1f6bdaab3c7a0ffd45c2037943855661ecd8d109`, canonical context
+`afbe2ebc50cb7ed2ae7524d573f31791e671729e688b16f6ecabc717def31290`, and immutable
+image-policy-v13 authority `8665dec8197d4c8c5a948cd95479974b1de818e4007c6412dad6f3f2f6b61962`,
 plus command `eximbay-contacted-reconciliation-once`. Payment and provider-order identity remain
 application-derived with no operator target inputs. The run ID
-`e03b436e666b4b188ec65c0ee4139790` and CheckoutSession
-`cmtktx8rx000001s6lfbjivo1` are fixed in source. The previous current run
-`4c5c9b039f18037c6f3356c903df1372` / `cmtk62h80000001s626b90f9y`, older run
+`1f93662ed1b45856aceac782029111fd` and CheckoutSession
+`cmtqwntmf000001s6ol01azw8` are fixed in source. The previous current run
+`e03b436e666b4b188ec65c0ee4139790` / `cmtktx8rx000001s6lfbjivo1`, older run
+`4c5c9b039f18037c6f3356c903df1372` / `cmtk62h80000001s626b90f9y`, earlier run
 `89682c544f42d4debb260f5e3186087a` / `cmtjsiiqw000001s6uimkjhj5`, first fresh run
 `da7783b013d20713d6db207c7657b559` / `cmtjnvso1000001s60xfg0tyu`, and original historical run
 `a764f61f4e4ba799ab16b318a676db65` / `cmthg2mzu000001s6iuvx7u5x` remain immutable
@@ -420,10 +421,11 @@ a missing or invalid child terminal remains evidence-unknown and grants no retry
 results admits financial success, refund, or checkout release outside the unchanged exact Q004
 transaction.
 
-The V11 image and policy remain immutable historical evidence. The V12 successor above binds the
-corrected typed provider-observation path through BF4 admission, checkout recovery, the one-shot
-child terminal, and strict supervisor validation. The runtime remains default disabled, retains
-the one-retrieve ceiling and zero retries, and has no execution authority in this promotion.
+The V11 and V12 images and policies remain immutable historical evidence. The V13 successor above
+preserves the corrected typed provider-observation path through BF4 admission, checkout recovery,
+the one-shot child terminal, and strict supervisor validation while advancing only the exact
+contacted target. The runtime remains default disabled, retains the one-retrieve ceiling and zero
+retries, and has no execution authority in this promotion.
 
 The source contains no execution resource, scheduler, queue, trigger, invoker binding, or
 execution-on-apply hook. Materialization alone is not execution authority. A future separately

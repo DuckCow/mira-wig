@@ -73,13 +73,15 @@ describe("P3E-B2 dormant Eximbay canary release authority", () => {
       .toBe("ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf");
     expect(readFileSync(join(ROOT,
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/locals.tf"), "utf8"))
-      .toContain("eximbay-canary/image-policy-v12.json");
+      .toContain("eximbay-canary/image-policy-v13.json");
     expect(createHash("sha256").update(read("image-policy-v10.json")).digest("hex"))
       .toBe("5139f86b0cfa8321dd14caf8e5083a765ddccc33e82c5dbf03844c3e0106a851");
     expect(createHash("sha256").update(read("image-policy-v11.json")).digest("hex"))
       .toBe("80c15e7f247991e466ae3b04f736be8b8e96ccc9aec9a161a9df57d8733a0d54");
     expect(createHash("sha256").update(read("image-policy-v12.json")).digest("hex"))
       .toBe("cc313693936f0928558778b856196ffc2cb1ed9c6323c8ffb15e501542cdf200");
+    expect(createHash("sha256").update(read("image-policy-v13.json")).digest("hex"))
+      .toBe("8665dec8197d4c8c5a948cd95479974b1de818e4007c6412dad6f3f2f6b61962");
     expect(imagePolicy.commandAllowlist).toEqual(["worker-check", "worker-health",
       "worker-once", "sandbox-preflight", "image-self-check", "eximbay-canary-once",
       "eximbay-contacted-reconciliation-once"]);

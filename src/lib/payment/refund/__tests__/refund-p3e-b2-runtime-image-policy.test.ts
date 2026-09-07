@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import currentAuthority from
-  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v12.json";
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v13.json";
 import historicalSourceAuthority from
   "./fixtures/refund-p3e-b2-r2a-historical-source-v1.json";
 import {
