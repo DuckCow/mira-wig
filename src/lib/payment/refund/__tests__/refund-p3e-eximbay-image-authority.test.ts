@@ -38,8 +38,10 @@ import historicalV16Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json";
 import historicalV17Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json";
-import currentPolicy from
+import historicalV18Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -63,6 +65,7 @@ import {
   enforceV15EximbayImageSubject,
   enforceV16EximbayImageSubject,
   enforceV17EximbayImageSubject,
+  enforceV18EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -82,6 +85,7 @@ import {
   parseV15EximbayImageAuthority,
   parseV16EximbayImageAuthority,
   parseV17EximbayImageAuthority,
+  parseV18EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -99,6 +103,7 @@ import {
   readV15EximbayImageAuthority,
   readV16EximbayImageAuthority,
   readV17EximbayImageAuthority,
+  readV18EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -202,6 +207,11 @@ const V18_PATH = join(
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json",
 );
 
+const V19_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json",
+);
+
 describe("immutable four-entrypoint v1 predecessor authority", () => {
   const authority = parseV1EximbayImageAuthority(predecessorPolicy);
 
@@ -292,7 +302,7 @@ describe("immutable five-entrypoint v2 predecessor authority", () => {
       baselineCommit: currentPolicy.baselineCommit,
     })).toThrow("CURRENT_BASELINE_COMMIT_BINDING");
     expect(() => enforceCurrentClosure(
-      currentFilesystem(parseCurrentEximbayImageAuthority(currentPolicy)),
+      currentFilesystem(parseV18EximbayImageAuthority(historicalV18Policy)),
       authority,
     )).toThrow("SYSTEM_ADDITION_MANIFEST");
   });
@@ -570,12 +580,28 @@ describe("immutable contacted-reconciliation v17 predecessor authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v17 predecessors with current v18 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable contacted-reconciliation v18 predecessor authority", () => {
+  const authority = parseV18EximbayImageAuthority(historicalV18Policy);
 
-  it("selects v18 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v18 bytes and accepts its historical subject and closure", async () => {
     expect(createHash("sha256").update(readFileSync(V18_PATH)).digest("hex")).toBe(
       "8744198014a3327b569420afad356d090186a118a7057758ea4ad8783a7d7822",
+    );
+    await expect(readV18EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV18EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+  });
+});
+
+describe("conjunctive historical A and v1-v18 predecessors with current v19 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v19 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V19_PATH)).digest("hex")).toBe(
+      "438901986b24d2872712ce4f130bc1f70f2fd27daf6d9ee855ca5a455936c143",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -668,6 +694,65 @@ describe("conjunctive historical A and v1-v17 predecessors with current v18 auth
     });
   });
 
+  it("binds the exact one-shot refund re-entry target, historical seal, and ceilings", () => {
+    expect(currentPolicy.refundReentry).toMatchObject({
+      command: "eximbay-refund-reentry-once",
+      executionAuthority: "ABSENT_SEPARATE_EXPLICIT_HUMAN_LIVE_AUTHORITY_REQUIRED",
+      target: {
+        paymentId: "cmtsdmk16000201s6alc0evek",
+        refundAttemptId: "eximbay-canary-7f9188b209f5f8504df28fe300e53aba980859e8",
+        commandId: "cmtsdrrxk00010ss6we7g8qe7",
+        targetBindingDigest:
+          "e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c",
+      },
+      historicalApproval: {
+        status: "CONSUMED_HISTORICAL_TARGET_SEAL_ONLY",
+        reset: 0,
+        reconsume: 0,
+        mutation: "FORBIDDEN",
+      },
+      predecessorLease: {
+        status: "LEASED_EXPIRED",
+        generation: 1,
+        dispatchAttempt: 0,
+        contactMarkedAt: null,
+        preflightObservationCount: 0,
+        dispatchRowCount: 0,
+        providerRefundResultCount: 0,
+        refundSuccessEvidenceCount: 0,
+      },
+      takeover: {
+        commandReuse: "SAME_REFUND_EXECUTION_COMMAND",
+        refundAttemptReuse: "SAME_REFUND_ATTEMPT",
+        futureGeneration: 2,
+        automaticExecution: "NONE",
+      },
+      providerEffectCaps: {
+        preRefundRetrieve: 1,
+        refundRequestR1: 1,
+        reconciliationLookup: 0,
+        r2: 0,
+        secondRefundRequest: 0,
+        automaticRetry: 0,
+      },
+      terminalEvidence: {
+        childOperationAndHostResult: "SEPARATE",
+        trustworthyProviderEffectsSurviveHostFailure: true,
+        malformedOrMissingProviderEffects: "UNKNOWN",
+      },
+    });
+    expect(() => parseCurrentEximbayImageAuthority({
+      ...currentPolicy,
+      refundReentry: {
+        ...currentPolicy.refundReentry,
+        providerEffectCaps: {
+          ...currentPolicy.refundReentry.providerEffectCaps,
+          secondRefundRequest: 1,
+        },
+      },
+    })).toThrow("CURRENT_REFUND_REENTRY_CAPS");
+  });
+
   it("rejects every predecessor or arbitrary current target selector", () => {
     const targets = [
       {
@@ -738,21 +823,22 @@ describe("conjunctive historical A and v1-v17 predecessors with current v18 auth
 
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "5ed4407412996d195577766c04ba3d73430fa791",
-      sourceTree: "dd0e81d06f146935e617ccf81c24c54b1ca22102",
+      baselineCommit: "a1564f36e070cdda9236812e704adf7d088517dd",
+      sourceTree: "27549e6a8780ade525b727d2dfdae573b3b68c73",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
-        sha256: "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
+        sha256: "17a36c859823cd98b8435db409dff67a0148dadac11f99b7040b8925a23cce8f",
       },
       commandAllowlist: [
         "worker-check", "worker-health", "worker-once", "sandbox-preflight",
         "image-self-check", "eximbay-canary-once",
         "eximbay-contacted-reconciliation-once",
+        "eximbay-refund-reentry-once",
       ],
     });
     expect(() => parseCurrentEximbayImageAuthority({
       ...currentPolicy,
-      commandAllowlist: currentPolicy.commandAllowlist.slice(0, 6),
+      commandAllowlist: currentPolicy.commandAllowlist.slice(0, 7),
     })).toThrow("CURRENT_COMMAND_ALLOWLIST_BINDING");
     expect(() => parseCurrentEximbayImageAuthority({
       ...currentPolicy,
@@ -836,16 +922,16 @@ describe("conjunctive historical A and v1-v17 predecessors with current v18 auth
     expect(() => enforceCurrentClosure(historicalFilesystem, authority)).toThrow();
   });
 
-  it("rejects four, six, missing, renamed, and retargeted current entrypoints", () => {
+  it("rejects five, seven, missing, renamed, and retargeted current entrypoints", () => {
     expect(() => parseCurrentEximbayImageAuthority({
       ...currentPolicy,
-      entrypoints: currentPolicy.entrypoints.slice(0, 4),
+      entrypoints: currentPolicy.entrypoints.slice(0, 5),
     })).toThrow("CURRENT_ENTRYPOINTS_SHAPE");
     expect(() => parseCurrentEximbayImageAuthority({
       ...currentPolicy,
       entrypoints: [...currentPolicy.entrypoints, {
-        source: "scripts/unapproved-sixth-entrypoint.ts",
-        runtimePath: "/app/unapproved-sixth-entrypoint.mjs",
+        source: "scripts/unapproved-seventh-entrypoint.ts",
+        runtimePath: "/app/unapproved-seventh-entrypoint.mjs",
       }],
     })).toThrow("CURRENT_ENTRYPOINTS_SHAPE");
     for (const entrypoints of [
@@ -857,6 +943,9 @@ describe("conjunctive historical A and v1-v17 predecessors with current v18 auth
         : entry),
       currentPolicy.entrypoints.map((entry, index) => index === 4
         ? { ...entry, runtimePath: "/app/retargeted-reconciliation.mjs" }
+        : entry),
+      currentPolicy.entrypoints.map((entry, index) => index === 5
+        ? { ...entry, source: "scripts/renamed-refund-reentry.ts" }
         : entry),
     ]) {
       const changed = parseCurrentEximbayImageAuthority({

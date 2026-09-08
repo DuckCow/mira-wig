@@ -5,7 +5,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import currentAuthority from
-  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json";
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json";
 import historicalSourceAuthority from
   "./fixtures/refund-p3e-b2-r2a-historical-source-v1.json";
 import {
@@ -110,7 +110,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(148);
+    expect(completeInfra).toHaveLength(156);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
@@ -183,7 +183,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       fileCount: currentAuthority.buildContext.fileCount,
       repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
       packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
-      entrypointCount: 5,
+      entrypointCount: 6,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -204,7 +204,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
   });
 
-  it("supplies the exact five bundle entrypoint sources to the Docker build stage", () => {
+  it("supplies the exact six bundle entrypoint sources to the Docker build stage", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const contextBuilder = readFileSync(
       join(ROOT, "scripts/build-refund-worker-bundles.mts"),
@@ -217,12 +217,14 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
   "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
   "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
+  "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
 });`);
     expect(dockerfile).toContain(
       "COPY --link scripts/refund-execution-worker.ts "
       + "scripts/refund-sandbox-provider-free-preflight.ts "
       + "scripts/eximbay-refund-canary.ts "
-      + "scripts/eximbay-contacted-reconciliation.ts ./scripts/",
+      + "scripts/eximbay-contacted-reconciliation.ts "
+      + "scripts/eximbay-refund-reentry.ts ./scripts/",
     );
     expect(dockerfile).toContain(
       "COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/",

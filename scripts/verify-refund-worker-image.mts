@@ -93,9 +93,13 @@ const V17_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json",
 );
-const CURRENT_AUTHORITY_PATH = resolve(
+const V18_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json",
+);
+const CURRENT_AUTHORITY_PATH = resolve(
+  import.meta.dirname,
+  "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json",
 );
 const V1_AUTHORITY_SHA256 =
   "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876";
@@ -131,6 +135,8 @@ const V16_AUTHORITY_SHA256 =
   "0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24";
 const V17_AUTHORITY_SHA256 =
   "48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86";
+const V18_AUTHORITY_SHA256 =
+  "8744198014a3327b569420afad356d090186a118a7057758ea4ad8783a7d7822";
 const V1_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v1";
 const V2_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v2";
 const V3_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v3";
@@ -148,7 +154,8 @@ const V14_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v14";
 const V15_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v15";
 const V16_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v16";
 const V17_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v17";
-const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v18";
+const V18_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v18";
+const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v19";
 const V1_BASELINE_COMMIT = "518513e0990b6f3e2f0958125cbfa1118d423988";
 const V2_BASELINE_COMMIT = "e5758c2ce812beae6306becad48a2ebc10f2cf4b";
 const V3_BASELINE_COMMIT = "7958fb0b228266d502f5e55a14929e8d5510e913";
@@ -166,7 +173,8 @@ const V14_BASELINE_COMMIT = "b19b8e679be1d42e36f223fd4eb724d777023072";
 const V15_BASELINE_COMMIT = "6167e56b6a4ba61fa65ec727e7c987f7481173f9";
 const V16_BASELINE_COMMIT = "682227612579a7065744f58ae95b5cf2c78bced6";
 const V17_BASELINE_COMMIT = "ec661b16bc0930394bebfd1c4ca5256a1c21869f";
-const CURRENT_BASELINE_COMMIT = "5ed4407412996d195577766c04ba3d73430fa791";
+const V18_BASELINE_COMMIT = "5ed4407412996d195577766c04ba3d73430fa791";
+const CURRENT_BASELINE_COMMIT = "a1564f36e070cdda9236812e704adf7d088517dd";
 const V3_SOURCE_TREE = "edcf50357c49521febd194502c167872a2dead67";
 const V4_SOURCE_TREE = "5cdacc1c1c32c163b7675f8fe9453b91e7c15f6d";
 const V5_SOURCE_TREE = "d5fde2249103d263b1dab1b126027c419d18f1aa";
@@ -182,7 +190,8 @@ const V14_SOURCE_TREE = "e06e0ced69bcb1d6f5f57fb6d9d8bed9e6b553a5";
 const V15_SOURCE_TREE = "7fe0b4d66d856a0f5ee32881623312ee1a7b2760";
 const V16_SOURCE_TREE = "5a91b9d462faa50c04ed235474c4af0d4d8036bb";
 const V17_SOURCE_TREE = "e602e949e8a0bd3ddb6830a2e68546456c62750d";
-const CURRENT_SOURCE_TREE = "dd0e81d06f146935e617ccf81c24c54b1ca22102";
+const V18_SOURCE_TREE = "dd0e81d06f146935e617ccf81c24c54b1ca22102";
+const CURRENT_SOURCE_TREE = "27549e6a8780ade525b727d2dfdae573b3b68c73";
 const V3_SUPERVISOR_SOURCE = Object.freeze({
   path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
   sha256: "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
@@ -207,7 +216,11 @@ const V14_SUPERVISOR_SOURCE = V13_SUPERVISOR_SOURCE;
 const V15_SUPERVISOR_SOURCE = V14_SUPERVISOR_SOURCE;
 const V16_SUPERVISOR_SOURCE = V15_SUPERVISOR_SOURCE;
 const V17_SUPERVISOR_SOURCE = V16_SUPERVISOR_SOURCE;
-const CURRENT_SUPERVISOR_SOURCE = V17_SUPERVISOR_SOURCE;
+const V18_SUPERVISOR_SOURCE = V17_SUPERVISOR_SOURCE;
+const CURRENT_SUPERVISOR_SOURCE = Object.freeze({
+  path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+  sha256: "17a36c859823cd98b8435db409dff67a0148dadac11f99b7040b8925a23cce8f",
+});
 const V1_ENTRYPOINTS = Object.freeze([
   Object.freeze({ source: "containers/refund-worker/entrypoint.ts", runtimePath: "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs" }),
   Object.freeze({ source: "scripts/eximbay-refund-canary.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-refund-canary.mjs" }),
@@ -233,7 +246,14 @@ const V14_ENTRYPOINTS = V13_ENTRYPOINTS;
 const V15_ENTRYPOINTS = V14_ENTRYPOINTS;
 const V16_ENTRYPOINTS = V15_ENTRYPOINTS;
 const V17_ENTRYPOINTS = V16_ENTRYPOINTS;
-const CURRENT_ENTRYPOINTS = V17_ENTRYPOINTS;
+const V18_ENTRYPOINTS = V17_ENTRYPOINTS;
+const CURRENT_ENTRYPOINTS = Object.freeze([
+  ...V18_ENTRYPOINTS,
+  Object.freeze({
+    source: "scripts/eximbay-refund-reentry.ts",
+    runtimePath: "/app/src/lib/payment/refund/eximbay-refund-reentry.mjs",
+  }),
+]);
 const V3_COMMAND_ALLOWLIST = Object.freeze([
   "worker-check",
   "worker-health",
@@ -257,7 +277,11 @@ const V14_COMMAND_ALLOWLIST = V13_COMMAND_ALLOWLIST;
 const V15_COMMAND_ALLOWLIST = V14_COMMAND_ALLOWLIST;
 const V16_COMMAND_ALLOWLIST = V15_COMMAND_ALLOWLIST;
 const V17_COMMAND_ALLOWLIST = V16_COMMAND_ALLOWLIST;
-const CURRENT_COMMAND_ALLOWLIST = V17_COMMAND_ALLOWLIST;
+const V18_COMMAND_ALLOWLIST = V17_COMMAND_ALLOWLIST;
+const CURRENT_COMMAND_ALLOWLIST = Object.freeze([
+  ...V18_COMMAND_ALLOWLIST,
+  "eximbay-refund-reentry-once",
+]);
 type ContactedTargetIdentity = Readonly<{
   runId: string;
   checkoutSessionId: string;
@@ -324,13 +348,14 @@ const V17_CONTACTED_TARGET_CHAIN = Object.freeze([
   }),
   ...V16_CONTACTED_TARGET_CHAIN,
 ]);
-const CURRENT_CONTACTED_TARGET_CHAIN = Object.freeze([
+const V18_CONTACTED_TARGET_CHAIN = Object.freeze([
   Object.freeze({
     runId: "eea19da85caa9d370c0be2f20dcd68da",
     checkoutSessionId: "cmtsa2gt7000001s6vpz7vepd",
   }),
   ...V17_CONTACTED_TARGET_CHAIN,
 ]);
+const CURRENT_CONTACTED_TARGET_CHAIN = V18_CONTACTED_TARGET_CHAIN;
 const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const SYSTEM_CA_TRUST = Object.freeze({
   sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
@@ -1903,9 +1928,20 @@ export function parseFrozenImageContract(raw: unknown): FrozenImageContract {
 
 export async function readCurrentEximbayImageAuthority():
 Promise<CurrentEximbayImageAuthority> {
-  await readV17EximbayImageAuthority();
+  await readV18EximbayImageAuthority();
   const raw: unknown = JSON.parse(await readFile(CURRENT_AUTHORITY_PATH, "utf8"));
   return parseCurrentEximbayImageAuthority(raw);
+}
+
+export async function readV18EximbayImageAuthority():
+Promise<CurrentEximbayImageAuthority> {
+  await readV17EximbayImageAuthority();
+  const bytes = await readFile(V18_AUTHORITY_PATH);
+  requireCondition(
+    createHash("sha256").update(bytes).digest("hex") === V18_AUTHORITY_SHA256,
+    "V18_IMAGE_AUTHORITY_SHA256",
+  );
+  return parseV18EximbayImageAuthority(JSON.parse(bytes.toString("utf8")));
 }
 
 export async function readV17EximbayImageAuthority():
@@ -2101,12 +2137,25 @@ export function parseCurrentEximbayImageAuthority(
 ): CurrentEximbayImageAuthority {
   return parseSuccessorEximbayImageAuthority(raw, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V17_AUTHORITY_SHA256,
+    parentAuthoritySha256: V18_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
   }, CURRENT_SOURCE_TREE, CURRENT_SUPERVISOR_SOURCE, CURRENT_COMMAND_ALLOWLIST,
+  ["filesystemAuthority", "canaryExecution", "contactedReconciliation", "refundReentry"], true,
+  CURRENT_CONTACTED_TARGET_CHAIN, "application/vnd.oci.image.layer.v1.tar+gzip");
+}
+
+export function parseV18EximbayImageAuthority(
+  raw: unknown,
+): CurrentEximbayImageAuthority {
+  return parseSuccessorEximbayImageAuthority(raw, {
+    contractVersion: V18_CONTRACT_VERSION,
+    parentAuthoritySha256: V17_AUTHORITY_SHA256,
+    baselineCommit: V18_BASELINE_COMMIT,
+    entrypoints: V18_ENTRYPOINTS,
+  }, V18_SOURCE_TREE, V18_SUPERVISOR_SOURCE, V18_COMMAND_ALLOWLIST,
   ["filesystemAuthority", "canaryExecution", "contactedReconciliation"], true,
-  CURRENT_CONTACTED_TARGET_CHAIN);
+  V18_CONTACTED_TARGET_CHAIN);
 }
 
 export function parseV17EximbayImageAuthority(
@@ -2301,6 +2350,7 @@ function parseSuccessorEximbayImageAuthority(
   orderedLayers = false,
   contactedTargetChain: readonly ContactedTargetIdentity[] =
     CURRENT_CONTACTED_TARGET_CHAIN,
+  orderedLayerMediaType = "application/vnd.docker.image.rootfs.diff.tar.gzip",
 ): CurrentEximbayImageAuthority {
   requireCondition(isRecord(raw) && hasExactKeys(raw, [
     "contractVersion", "parentAuthoritySha256", "baselineCommit", "sourceTree",
@@ -2342,7 +2392,11 @@ function parseSuccessorEximbayImageAuthority(
     sourceTree,
     supervisorSource,
     buildContext: successorContext,
-    artifact: parseSuccessorArtifactAuthority(raw.artifact, orderedLayers),
+    artifact: parseSuccessorArtifactAuthority(
+      raw.artifact,
+      orderedLayers,
+      orderedLayerMediaType,
+    ),
     imageConfiguration: parseSuccessorImageConfiguration(raw.imageConfiguration),
     commandAllowlist: Object.freeze([...commandAllowlist]),
   });
@@ -2368,6 +2422,9 @@ function validateSuccessorAuthorityExtensions(
       raw.contactedReconciliation,
       contactedTargetChain,
     );
+  }
+  if (extensions.has("refundReentry")) {
+    validateRefundReentryAuthority(raw.refundReentry);
   }
 }
 
@@ -2492,6 +2549,156 @@ function validateContactedReconciliationAuthority(
     "CURRENT_CONTACTED_RECONCILIATION_PACKAGED");
 }
 
+function validateRefundReentryAuthority(value: unknown): void {
+  const reentry = requireExtensionRecord(value, [
+    "command", "mode", "executionAuthority", "target", "historicalApproval",
+    "providerOperationBinding", "predecessorLease", "takeover", "providerEffectCaps",
+    "terminalEvidence", "runtime", "sourceFiles", "packagedReentrySha256",
+    "packagedSupervisorSha256",
+  ], "CURRENT_REFUND_REENTRY_SHAPE");
+  requireExtensionValue(reentry.command, "eximbay-refund-reentry-once",
+    "CURRENT_REFUND_REENTRY_BINDING");
+  requireExtensionValue(reentry.mode, "SANDBOX", "CURRENT_REFUND_REENTRY_BINDING");
+  requireExtensionValue(reentry.executionAuthority,
+    "ABSENT_SEPARATE_EXPLICIT_HUMAN_LIVE_AUTHORITY_REQUIRED",
+    "CURRENT_REFUND_REENTRY_BINDING");
+
+  const target = requireExtensionRecord(reentry.target, [
+    "paymentId", "orderId", "refundAttemptId", "commandId",
+    "providerOperationBindingId", "targetBindingDigest",
+  ], "CURRENT_REFUND_REENTRY_TARGET");
+  const targetValues: readonly [string, unknown][] = [
+    ["paymentId", "cmtsdmk16000201s6alc0evek"],
+    ["orderId", "cmtsdmo8r000401s671x1chsp"],
+    ["refundAttemptId", "eximbay-canary-7f9188b209f5f8504df28fe300e53aba980859e8"],
+    ["commandId", "cmtsdrrxk00010ss6we7g8qe7"],
+    ["providerOperationBindingId", "cmtsdrs0900030ss6qwxcgar6"],
+    ["targetBindingDigest", "e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c"],
+  ];
+  for (const [field, expected] of targetValues) {
+    requireExtensionValue(target[field], expected, "CURRENT_REFUND_REENTRY_TARGET");
+  }
+
+  const approval = requireExtensionRecord(reentry.historicalApproval, [
+    "id", "status", "consumedAt", "consumedExecutionId",
+    "consumedExecutionBindingDigest", "reset", "reconsume", "mutation",
+  ], "CURRENT_REFUND_REENTRY_APPROVAL");
+  requireExtensionValue(approval.id,
+    "eximbay-canary-approval-cd3e243b-97da-41d2-9bdc-c1dc001065cc",
+    "CURRENT_REFUND_REENTRY_APPROVAL");
+  requireExtensionValue(approval.status, "CONSUMED_HISTORICAL_TARGET_SEAL_ONLY",
+    "CURRENT_REFUND_REENTRY_APPROVAL");
+  requireExtensionValue(approval.consumedAt, "2026-09-08T08:07:49.762Z",
+    "CURRENT_REFUND_REENTRY_APPROVAL");
+  requireExtensionValue(approval.consumedExecutionId,
+    "cloud-run-0899eaa6e48ed3578f7c1ae2427ce00c",
+    "CURRENT_REFUND_REENTRY_APPROVAL");
+  requireExtensionValue(approval.consumedExecutionBindingDigest,
+    "e95385493ef34bace5fcb2c706740255984b57ced3ac8b6eae8e022df63e2748",
+    "CURRENT_REFUND_REENTRY_APPROVAL");
+  for (const field of ["reset", "reconsume"] as const) {
+    requireExtensionValue(approval[field], 0, "CURRENT_REFUND_REENTRY_APPROVAL");
+  }
+  requireExtensionValue(approval.mutation, "FORBIDDEN", "CURRENT_REFUND_REENTRY_APPROVAL");
+
+  const binding = requireExtensionRecord(reentry.providerOperationBinding, [
+    "operationFamilyKey", "operationFamilyFingerprint", "merchantAccountBindingId",
+    "credentialGenerationBindingId", "wireContractVersion",
+  ], "CURRENT_REFUND_REENTRY_PROVIDER_BINDING");
+  const bindingValues: readonly [string, unknown][] = [
+    ["operationFamilyKey", "eximbay-refund-family-v1-a2d09d6749cea4634bcd11078f719631d8c0b8923e510985fd3f4caafd382f62"],
+    ["operationFamilyFingerprint", "a2d09d6749cea4634bcd11078f719631d8c0b8923e510985fd3f4caafd382f62"],
+    ["merchantAccountBindingId", "783244bb25ed5c7506bd3589e8b252e683c65f265068673dbe4d18e415477893"],
+    ["credentialGenerationBindingId", "2c03724ab5f9746b50815e888ef1619719b5ab1590ac69873487d337ffd50c73"],
+    ["wireContractVersion", "refund-provider-eximbay-cancel-wire/v1"],
+  ];
+  for (const [field, expected] of bindingValues) {
+    requireExtensionValue(binding[field], expected, "CURRENT_REFUND_REENTRY_PROVIDER_BINDING");
+  }
+
+  const lease = requireExtensionRecord(reentry.predecessorLease, [
+    "status", "generation", "dispatchAttempt", "leaseUntil", "contactMarkedAt",
+    "preflightObservationCount", "dispatchRowCount", "providerRefundResultCount",
+    "refundSuccessEvidenceCount",
+  ], "CURRENT_REFUND_REENTRY_PREDECESSOR_LEASE");
+  const leaseValues: readonly [string, unknown][] = [
+    ["status", "LEASED_EXPIRED"], ["generation", 1], ["dispatchAttempt", 0],
+    ["leaseUntil", "2026-09-08T08:12:50.494Z"], ["contactMarkedAt", null],
+    ["preflightObservationCount", 0], ["dispatchRowCount", 0],
+    ["providerRefundResultCount", 0], ["refundSuccessEvidenceCount", 0],
+  ];
+  for (const [field, expected] of leaseValues) {
+    requireExtensionValue(lease[field], expected, "CURRENT_REFUND_REENTRY_PREDECESSOR_LEASE");
+  }
+
+  const takeover = requireExtensionRecord(reentry.takeover, [
+    "commandReuse", "refundAttemptReuse", "futureGeneration", "fencing",
+    "automaticExecution",
+  ], "CURRENT_REFUND_REENTRY_TAKEOVER");
+  requireExtensionValue(takeover.commandReuse, "SAME_REFUND_EXECUTION_COMMAND",
+    "CURRENT_REFUND_REENTRY_TAKEOVER");
+  requireExtensionValue(takeover.refundAttemptReuse, "SAME_REFUND_ATTEMPT",
+    "CURRENT_REFUND_REENTRY_TAKEOVER");
+  requireExtensionValue(takeover.futureGeneration, 2, "CURRENT_REFUND_REENTRY_TAKEOVER");
+  requireExtensionValue(takeover.fencing, "EXISTING_FULL_CAS_AND_LEASE_EVENT",
+    "CURRENT_REFUND_REENTRY_TAKEOVER");
+  requireExtensionValue(takeover.automaticExecution, "NONE",
+    "CURRENT_REFUND_REENTRY_TAKEOVER");
+
+  const caps = requireExtensionRecord(reentry.providerEffectCaps, [
+    "preRefundRetrieve", "refundRequestR1", "reconciliationLookup", "r2",
+    "secondRefundRequest", "automaticRetry",
+  ], "CURRENT_REFUND_REENTRY_CAPS");
+  for (const [field, expected] of [
+    ["preRefundRetrieve", 1], ["refundRequestR1", 1], ["reconciliationLookup", 0],
+    ["r2", 0], ["secondRefundRequest", 0], ["automaticRetry", 0],
+  ] as const) {
+    requireExtensionValue(caps[field], expected, "CURRENT_REFUND_REENTRY_CAPS");
+  }
+
+  const terminal = requireExtensionRecord(reentry.terminalEvidence, [
+    "childSchema", "supervisorSchema", "childOperationAndHostResult",
+    "trustworthyProviderEffectsSurviveHostFailure", "malformedOrMissingProviderEffects",
+  ], "CURRENT_REFUND_REENTRY_TERMINAL");
+  const terminalValues: readonly [string, unknown][] = [
+    ["childSchema", "mira-refund-eximbay-reentry-result/v1"],
+    ["supervisorSchema", "mira-refund-eximbay-reentry-supervisor/v1"],
+    ["childOperationAndHostResult", "SEPARATE"],
+    ["trustworthyProviderEffectsSurviveHostFailure", true],
+    ["malformedOrMissingProviderEffects", "UNKNOWN"],
+  ];
+  for (const [field, expected] of terminalValues) {
+    requireExtensionValue(terminal[field], expected, "CURRENT_REFUND_REENTRY_TERMINAL");
+  }
+
+  const runtime = requireExtensionRecord(reentry.runtime, [
+    "default", "taskCount", "parallelism", "maxRetries", "automaticTrigger",
+    "argumentOverride",
+  ], "CURRENT_REFUND_REENTRY_RUNTIME");
+  for (const [field, expected] of [
+    ["default", "ABSENT"], ["taskCount", 1], ["parallelism", 1], ["maxRetries", 0],
+    ["automaticTrigger", "NONE"], ["argumentOverride", "FORBIDDEN_BY_RUNTIME"],
+  ] as const) {
+    requireExtensionValue(runtime[field], expected, "CURRENT_REFUND_REENTRY_RUNTIME");
+  }
+  validateRefundReentrySources(reentry);
+}
+
+function validateRefundReentrySources(
+  reentry: Readonly<Record<string, unknown>>,
+): void {
+  requireCondition(Array.isArray(reentry.sourceFiles) && reentry.sourceFiles.length === 7,
+    "CURRENT_REFUND_REENTRY_SOURCES");
+  for (const source of reentry.sourceFiles) {
+    const sourceRecord = requireExtensionRecord(source, ["path", "sha256"],
+      "CURRENT_REFUND_REENTRY_SOURCES");
+    requireCondition(typeof sourceRecord.path === "string" && isSha256(sourceRecord.sha256),
+      "CURRENT_REFUND_REENTRY_SOURCES");
+  }
+  requireCondition(isSha256(reentry.packagedReentrySha256)
+    && isSha256(reentry.packagedSupervisorSha256), "CURRENT_REFUND_REENTRY_PACKAGED");
+}
+
 function validateContactedTargetAuthority(
   value: unknown,
   targetChain: readonly ContactedTargetIdentity[],
@@ -2609,7 +2816,11 @@ CurrentEximbayImageAuthority["buildContext"] {
   });
 }
 
-function parseSuccessorArtifactAuthority(value: unknown, orderedLayers: boolean):
+function parseSuccessorArtifactAuthority(
+  value: unknown,
+  orderedLayers: boolean,
+  orderedLayerMediaType: string,
+):
 CurrentEximbayImageAuthority["artifact"] {
   requireCondition(isRecord(value), "CURRENT_ARTIFACT_SHAPE");
   const artifactKeys = [
@@ -2643,7 +2854,7 @@ CurrentEximbayImageAuthority["artifact"] {
       requireCondition(isRecord(layer) && hasExactKeys(layer, [
         "mediaType", "digest", "size", "diffId",
       ]), "CURRENT_ARTIFACT_ORDERED_LAYERS");
-      requireCondition(layer.mediaType === "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      requireCondition(layer.mediaType === orderedLayerMediaType,
         "CURRENT_ARTIFACT_ORDERED_LAYERS");
       requireCondition(isDockerDigest(layer.digest)
         && isNonnegativeSafeInteger(layer.size)
@@ -2864,7 +3075,7 @@ export function enforceCurrentSubject(
 ): void {
   enforceEximbayImageSubject(authority, context, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V17_AUTHORITY_SHA256,
+    parentAuthoritySha256: V18_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
   });
@@ -2872,6 +3083,44 @@ export function enforceCurrentSubject(
     "CURRENT_SOURCE_TREE_BINDING");
   requireCondition(
     JSON.stringify(authority.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),
+    "CURRENT_SUPERVISOR_SOURCE_BINDING",
+  );
+  requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,
+    "CURRENT_ENTRYPOINT_COUNT_BINDING");
+  requireCondition(
+    authority.buildContext.migrationCount === context.migrationInventory.migrationCount,
+    "CURRENT_MIGRATION_COUNT_BINDING",
+  );
+  requireCondition(
+    authority.buildContext.migrationDigest === context.migrationInventory.migrationDigest,
+    "CURRENT_MIGRATION_DIGEST_BINDING",
+  );
+}
+
+export function enforceV18EximbayImageSubject(
+  authority: CurrentEximbayImageAuthority,
+  context: Readonly<{
+    manifestDigest: string;
+    manifestEntries: readonly unknown[];
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+    entrypointCount: number;
+    migrationInventory: Readonly<{
+      migrationCount: number;
+      migrationDigest: string;
+    }>;
+  }>,
+): void {
+  enforceEximbayImageSubject(authority, context, {
+    contractVersion: V18_CONTRACT_VERSION,
+    parentAuthoritySha256: V17_AUTHORITY_SHA256,
+    baselineCommit: V18_BASELINE_COMMIT,
+    entrypoints: V18_ENTRYPOINTS,
+  });
+  requireCondition(authority.sourceTree === V18_SOURCE_TREE,
+    "CURRENT_SOURCE_TREE_BINDING");
+  requireCondition(
+    JSON.stringify(authority.supervisorSource) === JSON.stringify(V18_SUPERVISOR_SOURCE),
     "CURRENT_SUPERVISOR_SOURCE_BINDING",
   );
   requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,

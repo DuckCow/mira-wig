@@ -1,0 +1,185 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-eximbay-canary-runtime/v3",
+  "status": "RELEASE_CAPABLE_DORMANT_NOT_APPLIED",
+  "projectId": "mira-refund-sandbox-0001",
+  "region": "asia-northeast3",
+  "backend": {
+    "type": "gcs",
+    "bucket": "mira-refund-sandbox-0001-tfstate-925882331349",
+    "prefix": "p3e-b2/eximbay-canary"
+  },
+  "resourceGraph": {
+    "resourceCount": 5,
+    "addresses": [
+      "google_cloud_run_v2_job.canary",
+      "google_project_iam_member.cloud_sql_client",
+      "google_secret_manager_secret_iam_member.database_url",
+      "google_secret_manager_secret_iam_member.eximbay_api_key",
+      "google_service_account.canary"
+    ],
+    "sortedAddressSha256": "833b4caedde774886cc25f2ca28fe996f37c4ee5345b0158c3a749517f65409b"
+  },
+  "identity": {
+    "serviceAccountEmail": "mira-eximbay-canary@mira-refund-sandbox-0001.iam.gserviceaccount.com",
+    "secondProviderIdentity": false
+  },
+  "iam": {
+    "cloudSqlRole": "roles/cloudsql.client",
+    "cloudSqlInstanceUser": false,
+    "cloudSqlCondition": "resource.name == 'projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18' && resource.service == 'sqladmin.googleapis.com'",
+    "databaseSecretRole": "roles/secretmanager.secretAccessor",
+    "providerSecretRole": "roles/secretmanager.secretAccessor",
+    "scope": "EXACT_RESOURCE"
+  },
+  "secrets": {
+    "database": {
+      "resource": "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-canary-database-url",
+      "version": "1"
+    },
+    "provider": {
+      "resource": "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key",
+      "version": "1"
+    }
+  },
+  "image": {
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:fb7e9132b216dc5799a0a6bb95f069359ac1de17e086ea9d59e6e6a44e98ef32",
+    "configDigest": "sha256:96e19d75681672b21107d1417e93a135d539db9c832019ed395b0e51eb7f25ea",
+    "imagePolicyPath": "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json",
+    "imagePolicyVersion": "V19",
+    "imagePolicySha256": "438901986b24d2872712ce4f130bc1f70f2fd27daf6d9ee855ca5a455936c143",
+    "sourceCommit": "a1564f36e070cdda9236812e704adf7d088517dd",
+    "sourceTree": "27549e6a8780ade525b727d2dfdae573b3b68c73",
+    "contextSha256": "63680ca38dbc186150efd2f00ec81f487e682be7f2a5edcb814703ea8e2f9763",
+    "contextFiles": 212,
+    "entrypoints": 6
+  },
+  "network": {
+    "mode": "DIRECT_VPC",
+    "egress": "PRIVATE_RANGES_ONLY",
+    "network": "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc",
+    "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",
+    "tags": [
+      "refund-provider-free"
+    ]
+  },
+  "job": {
+    "name": "mira-eximbay-refund-canary",
+    "arguments": [
+      "eximbay-refund-reentry-once"
+    ],
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "taskTimeoutSeconds": 180,
+    "automaticTrigger": false,
+    "argumentOverride": "FORBIDDEN_BY_RUNTIME",
+    "executionPassLimit": 1
+  },
+  "databaseRole": {
+    "name": "mira_refund_canary",
+    "grantAuthority": "UNCHANGED_EXISTING_INSTALLED_AUTHORITY",
+    "newGrantOrBootstrapMutation": 0,
+    "durableWriteCeiling": [
+      "UPDATE existing RefundExecutionCommand by full fenced CAS",
+      "INSERT one generation-2 RefundExecutionCommandEvent",
+      "INSERT one R1 RefundExecutionDispatchAttempt",
+      "INSERT one immutable pre-refund Eximbay observation",
+      "INSERT provider-contact eligibility proof and refund execution evidence",
+      "UPDATE existing RefundAttempt and Order on known success",
+      "INSERT deduplicated existing refund-success PaymentOutbox intent"
+    ],
+    "prohibitedCreates": [
+      "RefundAttempt",
+      "RefundExecutionCommand",
+      "EximbayRefundSandboxCanaryApproval"
+    ]
+  },
+  "providerContact": {
+    "default": "DENIED",
+    "endpoint": "https://api-test.eximbay.com",
+    "credentialReadTiming": "AFTER_EXACT_IMMUTABLE_HISTORICAL_SEAL_VERIFICATION",
+    "requiredPrerequisites": [
+      "EXACT_RETAINED_DURABLE_BASELINE",
+      "CONSUMED_APPROVAL_IMMUTABLE_HISTORICAL_SEAL",
+      "EXACT_EXPIRED_GENERATION_1_COMMAND",
+      "SEPARATELY_AUTHORIZED_DORMANT_RUNTIME_MATERIALIZATION",
+      "SEPARATELY_AUTHORIZED_SINGLE_LIVE_EXECUTION"
+    ],
+    "effectCaps": {
+      "preRefundRetrieve": 1,
+      "refundRequestR1": 1,
+      "reconciliationLookup": 0,
+      "r2": 0,
+      "secondRefundRequest": 0,
+      "automaticRetry": 0
+    },
+    "uncertainOutcome": "STOP_NO_LOOKUP_NO_RETRY_NO_SECOND_REFUND"
+  },
+  "emailBoundary": "PAYMENT_OUTBOX_INTENT_ONLY_NO_DISPATCH",
+  "lifecycle": {
+    "default": "ABSENT",
+    "materialization": "SEPARATE_EXPLICIT_HUMAN_AUTHORITY",
+    "execution": "SEPARATE_EXPLICIT_HUMAN_AUTHORITY",
+    "retirement": "EXPLICIT_HUMAN_AUTHORITY",
+    "preventDestroy": false,
+    "deletionProtection": false
+  },
+  "purpose": "EXACT_EXISTING_EXIMBAY_SANDBOX_REFUND_REENTRY_SUCCESSOR",
+  "parentAuthority": {
+    "path": "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json",
+    "sha256": "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41",
+    "status": "FROZEN_HISTORICAL_PREDECESSOR"
+  },
+  "terraform": {
+    "rootPath": "infra/refund-sandbox/p3e-b2/eximbay-refund-reentry",
+    "predecessorRootPath": "infra/refund-sandbox/p3e-b2/eximbay-canary",
+    "backendIdentity": "REUSED_EXACT",
+    "resourceAddressIdentity": "REUSED_EXACT",
+    "newResourceCount": 0,
+    "applyAuthority": "ABSENT_IN_THIS_TASK"
+  },
+  "exactTarget": {
+    "paymentId": "cmtsdmk16000201s6alc0evek",
+    "orderId": "cmtsdmo8r000401s671x1chsp",
+    "refundAttemptId": "eximbay-canary-7f9188b209f5f8504df28fe300e53aba980859e8",
+    "commandId": "cmtsdrrxk00010ss6we7g8qe7",
+    "providerOperationBindingId": "cmtsdrs0900030ss6qwxcgar6",
+    "targetBindingDigest": "e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c",
+    "predecessorLeaseGeneration": 1,
+    "futureTakeoverGeneration": 2
+  },
+  "historicalApproval": {
+    "id": "eximbay-canary-approval-cd3e243b-97da-41d2-9bdc-c1dc001065cc",
+    "status": "CONSUMED_HISTORICAL_TARGET_SEAL_ONLY",
+    "consumedAt": "2026-09-08T08:07:49.762Z",
+    "consumedExecutionId": "cloud-run-0899eaa6e48ed3578f7c1ae2427ce00c",
+    "reset": 0,
+    "reconsume": 0,
+    "mutation": "FORBIDDEN"
+  },
+  "historicalSealEnvironment": {
+    "releaseBindingDigest": "0944e3e6fd1d0f85a0b5196adf4fe724e27eff64992e1fe711bfdf3f77637433",
+    "canaryJobBindingDigest": "204c8cd805e7cb66f66e7a7590f070117bc2f2312c30d46ac64b7cd574b42c07",
+    "preflightJobBindingDigest": "97e3aeb0fc4c1bec9ae316d915158ffb647ced886fd8166f1929d2f9dc925ffd",
+    "imageBindingDigest": "5c5718b3e697f5bb72491f5347e172eddb7026aac1fb87aa7b8da4bae875852e",
+    "secretGenerationBindingDigest": "cc778c3c5d0a533371ef31c119b521510f0b7eb2a1515cc7e6f04a4c304129d7",
+    "targetBindingDigest": "e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c",
+    "syntheticProvenanceDigest": "710a63bda4810d0f1f974a82b33b476dedaa20cc14df6746eb3bb478790a4d75",
+    "mid": "1849705C64",
+    "merchantAccountBindingId": "783244bb25ed5c7506bd3589e8b252e683c65f265068673dbe4d18e415477893",
+    "credentialGenerationBindingId": "2c03724ab5f9746b50815e888ef1619719b5ab1590ac69873487d337ffd50c73"
+  },
+  "terminalEvidence": {
+    "childSchema": "mira-refund-eximbay-reentry-result/v1",
+    "supervisorSchema": "mira-refund-eximbay-reentry-supervisor/v1",
+    "childOperationAndHostResult": "SEPARATE",
+    "trustworthyProviderEffectsSurviveHostFailure": true,
+    "malformedOrMissingProviderEffects": "UNKNOWN"
+  },
+  "executionAuthority": {
+    "currentTask": "IMPLEMENTATION_PROMOTION_PUBLICATION_ONLY",
+    "liveExecution": "ABSENT",
+    "terraformApply": "ABSENT",
+    "providerContact": "ABSENT"
+  }
+}
