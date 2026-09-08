@@ -82,7 +82,7 @@ async function verifyInTransaction(
 ): Promise<EximbayRefundReentryHistoricalSeal | null> {
   if (!environmentMatchesRetainedSeal(authority)) return null;
   const capturedAt = await captureDatabaseTime(tx);
-  const [approval, command, contactProofCount, evidenceCount, successOutboxCount] =
+  const [approval, command, contactProofCount, evidenceCount] =
     await Promise.all([
       tx.eximbayRefundSandboxCanaryApproval.findUnique({
         where: { id: EXIMBAY_REFUND_REENTRY_TARGET.approvalId },
@@ -94,17 +94,12 @@ async function verifyInTransaction(
       tx.refundExecutionEvidence.count({
         where: { commandId: EXIMBAY_REFUND_REENTRY_TARGET.commandId },
       }),
-      tx.paymentOutbox.count({
-        where: {
-          dedupKey: `customer-refund-succeeded:v1:${EXIMBAY_REFUND_REENTRY_TARGET.refundAttemptId}`,
-        },
-      }),
     ]);
   if (!approval || !command) return null;
   if (![approvalMatches(approval, authority), targetMatches(command, capturedAt)].every(Boolean)) {
     return null;
   }
-  if ([contactProofCount, evidenceCount, successOutboxCount].some((count) => count !== 0)) {
+  if ([contactProofCount, evidenceCount].some((count) => count !== 0)) {
     return null;
   }
   return Object.freeze({
