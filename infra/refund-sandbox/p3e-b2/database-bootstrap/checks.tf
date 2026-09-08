@@ -121,3 +121,25 @@ check "business_state_readback_role_lifecycle_reentry" {
     error_message = "The readback role lifecycle requires explicit temporary Cloud SQL admission; the current exact image/source remain mode-independent."
   }
 }
+
+check "producer_input_forwarding" {
+  assert {
+    condition = local.materialize_target_mode ? (
+      var.bootstrap_payment_id != null &&
+      var.bootstrap_attestation_json != null &&
+      var.bootstrap_runtime_readback_json == null &&
+      var.bootstrap_issuer_principal_id == null
+      ) : local.issue_approval_mode ? (
+      var.bootstrap_payment_id != null &&
+      var.bootstrap_attestation_json != null &&
+      var.bootstrap_runtime_readback_json != null &&
+      var.bootstrap_issuer_principal_id != null
+      ) : (
+      var.bootstrap_payment_id == null &&
+      var.bootstrap_attestation_json == null &&
+      var.bootstrap_runtime_readback_json == null &&
+      var.bootstrap_issuer_principal_id == null
+    )
+    error_message = "Existing producer inputs must be complete for the selected producer mode and absent from every other mode."
+  }
+}

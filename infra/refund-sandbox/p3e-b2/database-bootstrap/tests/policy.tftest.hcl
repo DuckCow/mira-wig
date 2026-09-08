@@ -140,6 +140,85 @@ run "exact_retired_bootstrap_authority_shape" {
   }
 }
 
+run "forward_exact_materialized_target_inputs" {
+  command = plan
+
+  variables {
+    bootstrap_mode             = "materialize-eximbay-canary-target"
+    bootstrap_payment_id       = "payment_1"
+    bootstrap_attestation_json = "{}"
+  }
+
+  assert {
+    condition = (
+      {
+        for item in google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].env :
+        item.name => item.value
+      }["MIRA_DB_BOOTSTRAP_PAYMENT_ID"] == "payment_1" &&
+      {
+        for item in google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].env :
+        item.name => item.value
+      }["MIRA_DB_BOOTSTRAP_ATTESTATION_JSON"] == "{}" &&
+      !contains([
+        for item in google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].env :
+        item.name
+      ], "MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON") &&
+      !contains([
+        for item in google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].env :
+        item.name
+      ], "MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID")
+    )
+    error_message = "Target materialization must forward exactly its two existing producer inputs."
+  }
+}
+
+run "forward_exact_approval_inputs" {
+  command = plan
+
+  variables {
+    bootstrap_mode                  = "issue-eximbay-canary-approval"
+    bootstrap_payment_id            = "payment_1"
+    bootstrap_attestation_json      = "{}"
+    bootstrap_runtime_readback_json = "{\"authority\":{\"targetBindingDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"
+    bootstrap_issuer_principal_id   = "operator@example.test"
+  }
+
+  assert {
+    condition = alltrue([
+      for name in [
+        "MIRA_DB_BOOTSTRAP_PAYMENT_ID",
+        "MIRA_DB_BOOTSTRAP_ATTESTATION_JSON",
+        "MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON",
+        "MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID",
+        ] : contains([
+          for item in google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].env :
+          item.name
+      ], name)
+    ])
+    error_message = "Approval issuance must forward all four existing producer inputs."
+  }
+}
+
+run "reject_missing_or_out_of_mode_producer_inputs" {
+  command = plan
+
+  variables {
+    bootstrap_mode = "materialize-eximbay-canary-target"
+  }
+
+  expect_failures = [check.producer_input_forwarding]
+}
+
+run "reject_arbitrary_producer_input_on_check" {
+  command = plan
+
+  variables {
+    bootstrap_payment_id = "payment_1"
+  }
+
+  expect_failures = [check.producer_input_forwarding]
+}
+
 run "bind_contacted_reconciliation_grant_mode_to_job_args" {
   command = plan
 

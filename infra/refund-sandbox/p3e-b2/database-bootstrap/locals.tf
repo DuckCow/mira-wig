@@ -29,9 +29,12 @@ locals {
     "apply-business-state-readback-role-grants",
     "revoke-business-state-readback-role-grants",
   ], var.bootstrap_mode)
-  job_source_commit    = var.source_commit
-  job_image_digest_uri = var.bootstrap_image_digest_uri
-  job_environment = {
+  materialize_target_mode = var.bootstrap_mode == "materialize-eximbay-canary-target"
+  issue_approval_mode     = var.bootstrap_mode == "issue-eximbay-canary-approval"
+  producer_mode           = local.materialize_target_mode || local.issue_approval_mode
+  job_source_commit       = var.source_commit
+  job_image_digest_uri    = var.bootstrap_image_digest_uri
+  base_job_environment = {
     MIRA_DB_BOOTSTRAP_PROJECT_ID               = var.project_id
     MIRA_DB_BOOTSTRAP_REGION                   = local.region
     MIRA_DB_BOOTSTRAP_INSTANCE_CONNECTION_NAME = local.cloud_sql_connection_name
@@ -42,4 +45,17 @@ locals {
     MIRA_DB_BOOTSTRAP_MIGRATION_COUNT          = tostring(local.migration_count)
     MIRA_DB_BOOTSTRAP_MIGRATION_SHA256         = local.migration_sha256
   }
+  target_producer_environment = local.producer_mode ? {
+    MIRA_DB_BOOTSTRAP_PAYMENT_ID       = var.bootstrap_payment_id
+    MIRA_DB_BOOTSTRAP_ATTESTATION_JSON = var.bootstrap_attestation_json
+  } : {}
+  approval_producer_environment = local.issue_approval_mode ? {
+    MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON = var.bootstrap_runtime_readback_json
+    MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID   = var.bootstrap_issuer_principal_id
+  } : {}
+  job_environment = merge(
+    local.base_job_environment,
+    local.target_producer_environment,
+    local.approval_producer_environment,
+  )
 }

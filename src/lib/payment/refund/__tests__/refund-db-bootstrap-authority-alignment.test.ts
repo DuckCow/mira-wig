@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { verifyPackagedRefundAuthority } from
+import {
+  verifyPackagedProducerResultTransport,
+  verifyPackagedRefundAuthority,
+} from
   "../../../../../scripts/verify-refund-db-bootstrap-image.mjs";
 
 const ROOT = process.cwd();
@@ -47,6 +50,22 @@ describe("refund database-bootstrap authority alignment", () => {
       workerConfigDigest:
         "sha256:1bfa5a67f9219a62f717056f1edb2fafaa0ca1c2dabb58c854eb655a435d1e27",
       staleRuntimeV1Selected: false,
+    });
+  });
+
+  it("requires the corrected producer-result transport in the packaged entrypoint", () => {
+    expect(verifyPackagedProducerResultTransport(
+      read("containers/refund-db-bootstrap/entrypoint.ts"),
+    )).toEqual({
+      stdoutByteLimit: 16_384,
+      producerStdout: "BOUNDED_PIPE",
+      producerStderr: "DISCARDED",
+      singleCanonicalJson: true,
+      exactModeSchemas: true,
+      paymentCorrespondence: true,
+      targetBindingCorrespondence: true,
+      runtimeBindingsPreserved: true,
+      cleanupFailurePreservesValidatedResult: true,
     });
   });
 

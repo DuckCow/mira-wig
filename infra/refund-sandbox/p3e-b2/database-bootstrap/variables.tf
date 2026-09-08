@@ -50,6 +50,34 @@ variable "bootstrap_mode" {
   }
 }
 
+variable "bootstrap_payment_id" {
+  description = "Existing target Payment identity forwarded only to an attended producer mode."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "bootstrap_attestation_json" {
+  description = "Existing attended Eximbay canary attestation forwarded only to a producer mode."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "bootstrap_runtime_readback_json" {
+  description = "Existing runtime readback forwarded only to approval issuance."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "bootstrap_issuer_principal_id" {
+  description = "Existing issuer principal identity forwarded only to approval issuance."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "source_commit" {
   description = "Exact reviewed source commit embedded in the published bootstrap image."
   type        = string

@@ -66,6 +66,7 @@ const READINESS_URL = "http://127.0.0.1:9801/readiness";
 const READINESS_TIMEOUT_MS = 120_000;
 const READINESS_POLL_MS = 250;
 export const PROXY_DIAGNOSTIC_BYTE_LIMIT = 4_096;
+export const PRODUCER_RESULT_BYTE_LIMIT = 16_384;
 export const CANARY_ROLE_GRANT_MODE = "apply-canary-role-grants" as const;
 export const SYNTHETIC_SALE_ROLE_GRANT_MODE = "apply-synthetic-sale-role-grants" as const;
 export const CONTACTED_RECONCILIATION_ROLE_GRANT_MODE =
@@ -124,6 +125,41 @@ export const SQLADMIN_REQUEST_PHASE = "INSTANCE_METADATA" as const;
 export const SQLADMIN_REQUEST_HOST = "sqladmin.googleapis.com" as const;
 
 type BootstrapFailureCode = (typeof BOOTSTRAP_FAILURE_CODES)[number];
+type RuntimeBindings = Readonly<{
+  targetBindingDigest: string;
+  syntheticProvenanceDigest: string;
+  merchantAccountBindingId: string;
+  credentialGenerationBindingId: string;
+  releaseBindingDigest: string;
+  canaryJobBindingDigest: string;
+  preflightJobBindingDigest: string;
+  imageBindingDigest: string;
+  secretGenerationBindingDigest: string;
+}>;
+export type MaterializedTargetProducerResult = Readonly<{
+  ok: true;
+  code: "EXIMBAY_CANARY_TARGET_MATERIALIZED";
+  paymentId: string;
+  checkoutSessionId: string;
+  orderId: string;
+  refundAttemptId: string;
+  commandId: string;
+  providerOperationBindingId: string;
+  targetBindingDigest: string;
+  syntheticProvenanceDigest: string;
+  runtimeBindings: RuntimeBindings;
+}>;
+export type IssuedApprovalProducerResult = Readonly<{
+  ok: true;
+  code: "EXIMBAY_CANARY_APPROVAL_ISSUED";
+  approvalId: string;
+  commandId: string;
+  approvedAt: string;
+  expiresAt: string;
+  approvalEvidenceDigest: string;
+  targetBindingDigest: string;
+}>;
+export type ProducerResult = MaterializedTargetProducerResult | IssuedApprovalProducerResult;
 export type ProxyFailureClass = (typeof PROXY_FAILURE_CLASSES)[number];
 export type ProxyTransportClass = (typeof PROXY_TRANSPORT_CLASSES)[number];
 export type SqlAdminRequestSubtype = Readonly<{
@@ -138,6 +174,7 @@ type SafeFailureDetails = Readonly<{
   proxySignal?: string | null;
   proxyDiagnosticAvailable?: boolean;
   proxyFailureClass?: ProxyFailureClass;
+  validatedProducerResult?: ProducerResult;
 }> & Partial<SqlAdminRequestSubtype>;
 type SafeFailureRecord = Readonly<{
   code: BootstrapFailureCode;
@@ -201,11 +238,17 @@ export type RuntimeConfiguration = Readonly<{
   producerInput?: ProducerInput;
 }>;
 
-type ProducerInput = Readonly<{
+export type ProducerInput = Readonly<{
   paymentId: string;
   attestationJson: string;
   runtimeReadbackJson?: string;
   issuerPrincipalId?: string;
+}>;
+
+export type ProducerChildObservation = Readonly<{
+  stdout: AsyncIterable<unknown> | null;
+  waitForExit: () => Promise<number | null>;
+  terminate: () => void;
 }>;
 
 type LedgerRow = Readonly<{
@@ -440,7 +483,7 @@ async function runWithProxy(
     return runProxySession(true, () => executeBusinessStateReadback(configuration.databaseUrl));
   }
   if (isProducerMode(mode)) {
-    return runProxySession(true, () => runProducerMode(configuration, inventory));
+    return runProducerProxySession(configuration, inventory);
   }
   if (mode === SYNTHETIC_SALE_MARKET_PRECONDITION_MODE) {
     return runProxySession(true, () => executeSyntheticSaleMarketPrecondition(
@@ -502,6 +545,23 @@ async function runWithProxy(
     : applyDatabase(configuration.databaseUrl, inventory));
 }
 
+async function runProducerProxySession(
+  configuration: RuntimeConfiguration,
+  inventory: RefundWorkerMigrationInventory,
+): Promise<Readonly<Record<string, unknown>>> {
+  let producerResult: ProducerResult | null = null;
+  try {
+    return await runProxySession(true, async () => {
+      const completed = await runProducerMode(configuration, inventory);
+      producerResult = completed.validatedProducerResult;
+      return completed;
+    });
+  } catch (error) {
+    if (!producerResult || hasValidatedProducerResult(error)) throw error;
+    throw producerResultFailure(producerResult);
+  }
+}
+
 function isProducerMode(
   mode: BootstrapMode,
 ): mode is typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE {
@@ -511,7 +571,16 @@ function isProducerMode(
 async function runProducerMode(
   configuration: RuntimeConfiguration,
   inventory: RefundWorkerMigrationInventory,
-): Promise<Readonly<Record<string, unknown>>> {
+): Promise<Readonly<{
+  code: ProducerResult["code"];
+  mode: typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
+  migrationCount: number;
+  completedMigrationCount: number;
+  providerEffects: 0;
+  validatedProducerResult: ProducerResult;
+}>> {
+  const mode = configuration.mode;
+  if (!isProducerMode(mode)) throw new Error("BOOTSTRAP_PRODUCER_MODE_INVALID");
   const input = configuration.producerInput;
   if (!input) throw new Error("BOOTSTRAP_PRODUCER_INPUT_MISSING");
   const database = new Client({ connectionString: configuration.databaseUrl });
@@ -524,24 +593,297 @@ async function runProducerMode(
   }
   const attestationPath = "/tmp/refund-db-bootstrap/eximbay-canary-attestation.json";
   const readbackPath = "/tmp/refund-db-bootstrap/eximbay-canary-runtime-readback.json";
+  const cleanup = () => Promise.all([
+    rm(attestationPath, { force: true }),
+    rm(readbackPath, { force: true }),
+  ]).then(() => undefined);
+  let result: Readonly<{
+    code: ProducerResult["code"];
+    mode: typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
+    migrationCount: number;
+    completedMigrationCount: number;
+    providerEffects: 0;
+    validatedProducerResult: ProducerResult;
+  }>;
   try {
     await writeFile(attestationPath, input.attestationJson, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    const args = configuration.mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE
+    const args = mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE
       ? ["materialize-target", "--payment-id", input.paymentId, "--attestation", attestationPath]
       : await approvalProducerArgs(input, attestationPath, readbackPath);
-    await requireSuccessfulChild(TARGET_PRODUCER_EXECUTABLE, args, configuration.databaseUrl);
-    return Object.freeze({
-      code: configuration.mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE
-        ? "EXIMBAY_CANARY_TARGET_MATERIALIZED"
-        : "EXIMBAY_CANARY_APPROVAL_ISSUED",
-      mode: configuration.mode,
+    const producerResult = await runProducerChild(
+      mode, input, args, configuration.databaseUrl,
+    );
+    result = Object.freeze({
+      code: producerResult.code,
+      mode,
       migrationCount: inventory.migrationCount,
       completedMigrationCount: inventory.migrationCount,
-      providerEffects: 0,
+      providerEffects: 0 as const,
+      validatedProducerResult: producerResult,
     });
-  } finally {
-    await Promise.all([rm(attestationPath, { force: true }), rm(readbackPath, { force: true })]);
+  } catch (error) {
+    await cleanup().catch(() => undefined);
+    throw error;
   }
+  return finalizeProducerResult(result, cleanup);
+}
+
+async function runProducerChild(
+  mode: typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE,
+  input: ProducerInput,
+  args: readonly string[],
+  databaseUrlValue: string,
+): Promise<ProducerResult> {
+  const child = spawn(process.execPath, [TARGET_PRODUCER_EXECUTABLE, ...args], {
+    env: childEnvironment(databaseUrlValue),
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return captureProducerChildResult(mode, input, {
+    stdout: child.stdout,
+    waitForExit: () => childExit(child),
+    terminate: () => { child.kill("SIGKILL"); },
+  });
+}
+
+export async function captureProducerChildResult(
+  mode: typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE,
+  input: ProducerInput,
+  observation: ProducerChildObservation,
+): Promise<ProducerResult> {
+  const exitPromise = observation.waitForExit();
+  const bytes = await readBoundedProducerStdout(observation, exitPromise);
+  const result = parseProducerResult(mode, input, bytes);
+  if (!result) {
+    await exitPromise.catch(() => undefined);
+    throw new Error("BOOTSTRAP_PRODUCER_RESULT_INVALID");
+  }
+  let exit: number | null;
+  try {
+    exit = await exitPromise;
+  } catch {
+    throw producerResultFailure(result);
+  }
+  if (exit !== 0) throw producerResultFailure(result);
+  return result;
+}
+
+async function readBoundedProducerStdout(
+  observation: ProducerChildObservation,
+  exitPromise: Promise<number | null>,
+): Promise<Buffer> {
+  if (!observation.stdout) throw new Error("BOOTSTRAP_PRODUCER_RESULT_INVALID");
+  const chunks: Buffer[] = [];
+  let observedBytes = 0;
+  try {
+    for await (const chunk of observation.stdout) {
+      const buffer = producerOutputChunk(chunk);
+      observedBytes += buffer.byteLength;
+      if (observedBytes > PRODUCER_RESULT_BYTE_LIMIT) {
+        throw new Error("BOOTSTRAP_PRODUCER_RESULT_INVALID");
+      }
+      chunks.push(buffer);
+    }
+  } catch (error) {
+    observation.terminate();
+    await exitPromise.catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, observedBytes);
+}
+
+function producerOutputChunk(value: unknown): Buffer {
+  if (typeof value === "string") return Buffer.from(value, "utf8");
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  throw new Error("BOOTSTRAP_PRODUCER_RESULT_INVALID");
+}
+
+export function parseProducerResult(
+  mode: typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE,
+  input: ProducerInput,
+  bytes: Uint8Array,
+): ProducerResult | null {
+  if (bytes.byteLength < 2 || bytes.byteLength > PRODUCER_RESULT_BYTE_LIMIT) return null;
+  let source: string;
+  let value: unknown;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const json = source.endsWith("\n") ? source.slice(0, -1) : source;
+    value = JSON.parse(json);
+    if (JSON.stringify(value) !== json) return null;
+  } catch {
+    return null;
+  }
+  if (!isRecord(value)) return null;
+  return mode === MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE
+    ? parseMaterializedTargetResult(value, input.paymentId)
+    : parseIssuedApprovalResult(value, approvalInputTargetDigest(input));
+}
+
+const MATERIALIZED_TARGET_RESULT_KEYS = Object.freeze([
+  "checkoutSessionId", "code", "commandId", "ok", "orderId", "paymentId",
+  "providerOperationBindingId", "refundAttemptId", "runtimeBindings",
+  "syntheticProvenanceDigest", "targetBindingDigest",
+].sort());
+const RUNTIME_BINDING_KEYS = Object.freeze([
+  "canaryJobBindingDigest", "credentialGenerationBindingId", "imageBindingDigest",
+  "merchantAccountBindingId", "preflightJobBindingDigest", "releaseBindingDigest",
+  "secretGenerationBindingDigest", "syntheticProvenanceDigest", "targetBindingDigest",
+].sort());
+const ISSUED_APPROVAL_RESULT_KEYS = Object.freeze([
+  "approvalEvidenceDigest", "approvalId", "approvedAt", "code", "commandId", "expiresAt",
+  "ok", "targetBindingDigest",
+].sort());
+const PAYMENT_ID = /^[A-Za-z0-9_-]{1,128}$/u;
+const PRISMA_CUID = /^c[a-z0-9]{24}$/u;
+const REFUND_ATTEMPT_ID = /^eximbay-canary-[0-9a-f]{40}$/u;
+const APPROVAL_ID = /^eximbay-canary-approval-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const SHA256 = /^[0-9a-f]{64}$/u;
+const ISO_MILLISECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+function parseMaterializedTargetResult(
+  value: Readonly<Record<string, unknown>>,
+  requestedPaymentId: string,
+): MaterializedTargetProducerResult | null {
+  if (!hasExactKeys(value, MATERIALIZED_TARGET_RESULT_KEYS)
+    || value.ok !== true || value.code !== "EXIMBAY_CANARY_TARGET_MATERIALIZED") return null;
+  try {
+    const paymentId = requireMatchingString(value.paymentId, PAYMENT_ID);
+    const checkoutSessionId = requireMatchingString(value.checkoutSessionId, PRISMA_CUID);
+    const orderId = requireMatchingString(value.orderId, PRISMA_CUID);
+    const refundAttemptId = requireMatchingString(value.refundAttemptId, REFUND_ATTEMPT_ID);
+    const commandId = requireMatchingString(value.commandId, PRISMA_CUID);
+    const providerOperationBindingId = requireMatchingString(value.providerOperationBindingId, PRISMA_CUID);
+    const targetBindingDigest = requireMatchingString(value.targetBindingDigest, SHA256);
+    const syntheticProvenanceDigest = requireMatchingString(value.syntheticProvenanceDigest, SHA256);
+    const runtimeBindings = parseRuntimeBindings(value.runtimeBindings);
+    if (!runtimeBindings || !materializedResultCorresponds(
+      paymentId, requestedPaymentId, targetBindingDigest, syntheticProvenanceDigest, runtimeBindings,
+    )) return null;
+    return Object.freeze({
+      ok: true, code: "EXIMBAY_CANARY_TARGET_MATERIALIZED", paymentId, checkoutSessionId, orderId,
+      refundAttemptId, commandId, providerOperationBindingId, targetBindingDigest,
+      syntheticProvenanceDigest, runtimeBindings,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseRuntimeBindings(value: unknown): RuntimeBindings | null {
+  if (!isRecord(value) || !hasExactKeys(value, RUNTIME_BINDING_KEYS)) return null;
+  try {
+    return Object.freeze({
+      targetBindingDigest: requireMatchingString(value.targetBindingDigest, SHA256),
+      syntheticProvenanceDigest: requireMatchingString(value.syntheticProvenanceDigest, SHA256),
+      merchantAccountBindingId: requireMatchingString(value.merchantAccountBindingId, SHA256),
+      credentialGenerationBindingId: requireMatchingString(value.credentialGenerationBindingId, SHA256),
+      releaseBindingDigest: requireMatchingString(value.releaseBindingDigest, SHA256),
+      canaryJobBindingDigest: requireMatchingString(value.canaryJobBindingDigest, SHA256),
+      preflightJobBindingDigest: requireMatchingString(value.preflightJobBindingDigest, SHA256),
+      imageBindingDigest: requireMatchingString(value.imageBindingDigest, SHA256),
+      secretGenerationBindingDigest: requireMatchingString(value.secretGenerationBindingDigest, SHA256),
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseIssuedApprovalResult(
+  value: Readonly<Record<string, unknown>>,
+  inputTargetBindingDigest: string | null,
+): IssuedApprovalProducerResult | null {
+  if (!hasExactKeys(value, ISSUED_APPROVAL_RESULT_KEYS)
+    || value.ok !== true || value.code !== "EXIMBAY_CANARY_APPROVAL_ISSUED") return null;
+  try {
+    const approvalId = requireMatchingString(value.approvalId, APPROVAL_ID);
+    const commandId = requireMatchingString(value.commandId, PRISMA_CUID);
+    const approvedAt = requireIsoTimestamp(value.approvedAt);
+    const expiresAt = requireIsoTimestamp(value.expiresAt);
+    const approvalEvidenceDigest = requireMatchingString(value.approvalEvidenceDigest, SHA256);
+    const targetBindingDigest = requireMatchingString(value.targetBindingDigest, SHA256);
+    if (targetBindingDigest !== inputTargetBindingDigest
+      || Date.parse(expiresAt) - Date.parse(approvedAt) !== 30 * 60 * 1_000) return null;
+    return Object.freeze({
+      ok: true, code: "EXIMBAY_CANARY_APPROVAL_ISSUED", approvalId, commandId, approvedAt,
+      expiresAt, approvalEvidenceDigest, targetBindingDigest,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function materializedResultCorresponds(
+  paymentId: string,
+  requestedPaymentId: string,
+  targetBindingDigest: string,
+  syntheticProvenanceDigest: string,
+  runtimeBindings: RuntimeBindings,
+): boolean {
+  return paymentId === requestedPaymentId
+    && runtimeBindings.targetBindingDigest === targetBindingDigest
+    && runtimeBindings.syntheticProvenanceDigest === syntheticProvenanceDigest;
+}
+
+function approvalInputTargetDigest(input: ProducerInput): string | null {
+  if (!input.runtimeReadbackJson) return null;
+  try {
+    const value: unknown = JSON.parse(input.runtimeReadbackJson);
+    if (!isRecord(value) || !isRecord(value.authority)) return null;
+    return matchingString(value.authority.targetBindingDigest, SHA256);
+  } catch {
+    return null;
+  }
+}
+
+function matchingString(value: unknown, pattern: RegExp): string | null {
+  return typeof value === "string" && pattern.test(value) ? value : null;
+}
+
+function requireMatchingString(value: unknown, pattern: RegExp): string {
+  const result = matchingString(value, pattern);
+  if (!result) throw new Error("BOOTSTRAP_PRODUCER_RESULT_INVALID");
+  return result;
+}
+
+function requireIsoTimestamp(value: unknown): string {
+  const result = requireMatchingString(value, ISO_MILLISECONDS);
+  if (new Date(result).toISOString() !== result) {
+    throw new Error("BOOTSTRAP_PRODUCER_RESULT_INVALID");
+  }
+  return result;
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[],
+): boolean {
+  return JSON.stringify(Object.keys(value).sort()) === JSON.stringify(expected);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export async function finalizeProducerResult<Result extends Readonly<{
+  validatedProducerResult: ProducerResult;
+}>>(
+  result: Result,
+  cleanup: () => Promise<void>,
+): Promise<Result> {
+  try {
+    await cleanup();
+    return result;
+  } catch {
+    throw producerResultFailure(result.validatedProducerResult);
+  }
+}
+
+function producerResultFailure(result: ProducerResult): BootstrapStageFailure {
+  return new BootstrapStageFailure("RUNTIME_LOCAL_FAILED", { validatedProducerResult: result });
+}
+
+function hasValidatedProducerResult(error: unknown): boolean {
+  return error instanceof BootstrapStageFailure && Boolean(error.record.validatedProducerResult);
 }
 
 async function approvalProducerArgs(
@@ -1175,12 +1517,7 @@ async function requireSuccessfulChild(
   databaseUrlValue: string,
   roleBootstrap = false,
 ): Promise<void> {
-  const childEnv: NodeJS.ProcessEnv = {
-    DATABASE_URL: databaseUrlValue,
-    HOME: "/tmp/refund-db-bootstrap",
-    NODE_ENV: "production",
-    PATH: "/usr/local/bin:/usr/bin:/bin",
-  };
+  const childEnv = childEnvironment(databaseUrlValue);
   if (roleBootstrap) {
     childEnv.EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION =
       "EXPLICIT_EXIMBAY_P3E_SANDBOX_DATABASE_BOOTSTRAP";
@@ -1192,6 +1529,15 @@ async function requireSuccessfulChild(
   });
   const exit = await childExit(child);
   if (exit !== 0) throw new Error("BOOTSTRAP_CHILD_FAILED");
+}
+
+function childEnvironment(databaseUrlValue: string): NodeJS.ProcessEnv {
+  return {
+    DATABASE_URL: databaseUrlValue,
+    HOME: "/tmp/refund-db-bootstrap",
+    NODE_ENV: "production",
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+  };
 }
 
 const defaultProxyReadinessDependencies = Object.freeze<ProxyReadinessDependencies>({

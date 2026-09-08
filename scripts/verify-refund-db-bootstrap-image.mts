@@ -10,6 +10,7 @@ const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const RUNTIME_PATH = "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json";
 const POLICY_PATH = "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json";
 const PRODUCER_PATH = "scripts/eximbay-refund-canary-target-producer.mjs";
+const BOOTSTRAP_ENTRYPOINT_PATH = "scripts/refund-db-bootstrap-entrypoint.mjs";
 const RUNTIME_SHA256 = "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41";
 const POLICY_SHA256 = "ab131ce60eb1d3643a7323402d84694d0d62a6d3c68653440f0cca8422002bdf";
 const WORKER_MANIFEST = "sha256:f3bbc000423588905c19507fcabb52e475923c1fcf1d0d03ffe5ac6b1d9fa691";
@@ -29,6 +30,18 @@ export type PackagedRefundAuthorityEvidence = Readonly<{
   workerManifestDigest: typeof WORKER_MANIFEST;
   workerConfigDigest: typeof WORKER_CONFIG;
   staleRuntimeV1Selected: false;
+}>;
+
+export type PackagedProducerResultTransportEvidence = Readonly<{
+  stdoutByteLimit: 16_384;
+  producerStdout: "BOUNDED_PIPE";
+  producerStderr: "DISCARDED";
+  singleCanonicalJson: true;
+  exactModeSchemas: true;
+  paymentCorrespondence: true;
+  targetBindingCorrespondence: true;
+  runtimeBindingsPreserved: true;
+  cleanupFailurePreservesValidatedResult: true;
 }>;
 
 type CaBundleEvidence = Readonly<{
@@ -55,7 +68,7 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
   ], { encoding: "utf8", maxBuffer: 262_144 });
   requireContains(labels, `"org.opencontainers.image.revision":"${sourceCommit}"`);
   requireContains(labels, '"mira.refund.default-mode":"check"');
-  const refundAuthority = await inspectPackagedRefundAuthority(tag);
+  const packaged = await inspectPackagedBootstrap(tag);
 
   const proxyVersion = run(tag, [
     "--network=none", "--entrypoint", "/usr/local/bin/cloud-sql-proxy", tag, "--version",
@@ -75,10 +88,10 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
     "--network=none",
     "--entrypoint", "/usr/local/bin/node", tag,
     "--input-type=module", "--eval",
-    "import('/app/scripts/refund-db-bootstrap-entrypoint.mjs').then(async runtime => { const inventory = await runtime.defaultRuntimeDependencies.loadMigrationInventory(); process.stdout.write(JSON.stringify({ count: inventory.migrationCount, sha256: inventory.migrationDigest, marketPreconditionMode: runtime.SYNTHETIC_SALE_MARKET_PRECONDITION_MODE, failureCodes: runtime.BOOTSTRAP_FAILURE_CODES, proxyFailureClasses: runtime.PROXY_FAILURE_CLASSES, proxyTransportClasses: runtime.PROXY_TRANSPORT_CLASSES, sqlAdminRequestPhase: runtime.SQLADMIN_REQUEST_PHASE, sqlAdminRequestHost: runtime.SQLADMIN_REQUEST_HOST, proxyArguments: runtime.proxyArguments(), passwordProxyArguments: runtime.proxyArguments(false), proxyDiagnosticByteLimit: runtime.PROXY_DIAGNOSTIC_BYTE_LIMIT, proxyStdio: runtime.PROXY_STDIO })); })",
+    "import('/app/scripts/refund-db-bootstrap-entrypoint.mjs').then(async runtime => { const inventory = await runtime.defaultRuntimeDependencies.loadMigrationInventory(); process.stdout.write(JSON.stringify({ count: inventory.migrationCount, sha256: inventory.migrationDigest, marketPreconditionMode: runtime.SYNTHETIC_SALE_MARKET_PRECONDITION_MODE, failureCodes: runtime.BOOTSTRAP_FAILURE_CODES, proxyFailureClasses: runtime.PROXY_FAILURE_CLASSES, proxyTransportClasses: runtime.PROXY_TRANSPORT_CLASSES, sqlAdminRequestPhase: runtime.SQLADMIN_REQUEST_PHASE, sqlAdminRequestHost: runtime.SQLADMIN_REQUEST_HOST, proxyArguments: runtime.proxyArguments(), passwordProxyArguments: runtime.proxyArguments(false), proxyDiagnosticByteLimit: runtime.PROXY_DIAGNOSTIC_BYTE_LIMIT, producerResultByteLimit: runtime.PRODUCER_RESULT_BYTE_LIMIT, proxyStdio: runtime.PROXY_STDIO })); })",
   ]);
   if (migrationInventory.stdout !==
-    '{"count":41,"sha256":"4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c","marketPreconditionMode":"materialize-synthetic-sale-market-precondition","failureCodes":["PROXY_START_FAILED","PROXY_EARLY_EXIT","PROXY_READY_TIMEOUT","DB_CONNECT_FAILED","LEDGER_READ_FAILED","LEDGER_REJECTED","ROLE_AUTHORITY_POSTCONDITION_FAILED","RUNTIME_LOCAL_FAILED","SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT","SECRET_METADATA_UNAVAILABLE","SECRET_VERSION_BASELINE_DRIFT","APPLICATION_PASSWORD_TRANSACTION_FAILED","APPLICATION_PASSWORD_LOGIN_FAILED","SECRET_VERSION_ADD_FAILED","SECRET_VERSION_ADD_AMBIGUOUS_ZERO","SECRET_VERSION_ADD_AMBIGUOUS_ONE","SECRET_VERSION_ADD_AMBIGUOUS_DRIFT","SECRET_VERSION_POSTCONDITION_FAILED"],"proxyFailureClasses":["PROXY_CREDENTIAL_SOURCE_FAILED","PROXY_SQLADMIN_PERMISSION_DENIED","PROXY_SQLADMIN_REQUEST_FAILED","PROXY_INSTANCE_CONFIG_FAILED","PROXY_LISTENER_FAILED","PROXY_EARLY_EXIT_UNCLASSIFIED"],"proxyTransportClasses":["TOKEN","DNS","CONNECT","TLS","TIMEOUT","RESET","OTHER"],"sqlAdminRequestPhase":"INSTANCE_METADATA","sqlAdminRequestHost":"sqladmin.googleapis.com","proxyArguments":["--structured-logs","--private-ip","--auto-iam-authn","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"passwordProxyArguments":["--structured-logs","--private-ip","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"proxyDiagnosticByteLimit":4096,"proxyStdio":["ignore","pipe","pipe"]}') {
+    '{"count":41,"sha256":"4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c","marketPreconditionMode":"materialize-synthetic-sale-market-precondition","failureCodes":["PROXY_START_FAILED","PROXY_EARLY_EXIT","PROXY_READY_TIMEOUT","DB_CONNECT_FAILED","LEDGER_READ_FAILED","LEDGER_REJECTED","ROLE_AUTHORITY_POSTCONDITION_FAILED","RUNTIME_LOCAL_FAILED","SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT","SECRET_METADATA_UNAVAILABLE","SECRET_VERSION_BASELINE_DRIFT","APPLICATION_PASSWORD_TRANSACTION_FAILED","APPLICATION_PASSWORD_LOGIN_FAILED","SECRET_VERSION_ADD_FAILED","SECRET_VERSION_ADD_AMBIGUOUS_ZERO","SECRET_VERSION_ADD_AMBIGUOUS_ONE","SECRET_VERSION_ADD_AMBIGUOUS_DRIFT","SECRET_VERSION_POSTCONDITION_FAILED"],"proxyFailureClasses":["PROXY_CREDENTIAL_SOURCE_FAILED","PROXY_SQLADMIN_PERMISSION_DENIED","PROXY_SQLADMIN_REQUEST_FAILED","PROXY_INSTANCE_CONFIG_FAILED","PROXY_LISTENER_FAILED","PROXY_EARLY_EXIT_UNCLASSIFIED"],"proxyTransportClasses":["TOKEN","DNS","CONNECT","TLS","TIMEOUT","RESET","OTHER"],"sqlAdminRequestPhase":"INSTANCE_METADATA","sqlAdminRequestHost":"sqladmin.googleapis.com","proxyArguments":["--structured-logs","--private-ip","--auto-iam-authn","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"passwordProxyArguments":["--structured-logs","--private-ip","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"proxyDiagnosticByteLimit":4096,"producerResultByteLimit":16384,"proxyStdio":["ignore","pipe","pipe"]}') {
     throw new Error("DB_BOOTSTRAP_MIGRATION_INVENTORY_INVALID");
   }
   const unknown = run(tag, ["--network=none", tag, "unknown"], false);
@@ -99,15 +112,19 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
     proxyTransportClassCount: 7,
     proxyDiagnosticByteLimit: 4096,
     caBundle,
-    refundAuthority,
+    refundAuthority: packaged.refundAuthority,
+    producerResultTransport: packaged.producerResultTransport,
     unknownModeExit: 64,
     network: "none",
   })}\n`);
 }
 
-async function inspectPackagedRefundAuthority(
+async function inspectPackagedBootstrap(
   tag: string,
-): Promise<PackagedRefundAuthorityEvidence> {
+): Promise<Readonly<{
+  refundAuthority: PackagedRefundAuthorityEvidence;
+  producerResultTransport: PackagedProducerResultTransportEvidence;
+}>> {
   const directory = await mkdtemp(join(tmpdir(), "mira-db-bootstrap-static-"));
   const containerName = `mira-db-bootstrap-static-${randomUUID()}`;
   let created = false;
@@ -119,12 +136,17 @@ async function inspectPackagedRefundAuthority(
     copyFromContainer(containerName, `/app/${RUNTIME_PATH}`, join(directory, "runtime.json"));
     copyFromContainer(containerName, `/app/${POLICY_PATH}`, join(directory, "policy.json"));
     copyFromContainer(containerName, `/app/${PRODUCER_PATH}`, join(directory, "producer.mjs"));
-    const [runtime, policy, producer] = await Promise.all([
+    copyFromContainer(containerName, `/app/${BOOTSTRAP_ENTRYPOINT_PATH}`, join(directory, "entrypoint.mjs"));
+    const [runtime, policy, producer, entrypoint] = await Promise.all([
       readFile(join(directory, "runtime.json")),
       readFile(join(directory, "policy.json")),
       readFile(join(directory, "producer.mjs")),
+      readFile(join(directory, "entrypoint.mjs")),
     ]);
-    return verifyPackagedRefundAuthority(runtime, policy, producer);
+    return Object.freeze({
+      refundAuthority: verifyPackagedRefundAuthority(runtime, policy, producer),
+      producerResultTransport: verifyPackagedProducerResultTransport(entrypoint),
+    });
   } finally {
     try {
       if (created) {
@@ -134,6 +156,39 @@ async function inspectPackagedRefundAuthority(
       await rm(directory, { recursive: true, force: true });
     }
   }
+}
+
+export function verifyPackagedProducerResultTransport(
+  entrypointBytes: Uint8Array,
+): PackagedProducerResultTransportEvidence {
+  const entrypoint = Buffer.from(entrypointBytes).toString("utf8");
+  const required = [
+    /PRODUCER_RESULT_BYTE_LIMIT\s*=\s*16_?384/u,
+    /stdio:\s*\["ignore",\s*"pipe",\s*"ignore"\]/u,
+    /new TextDecoder\("utf-8",\s*\{\s*fatal:\s*true\s*\}\)/u,
+    /JSON\.stringify\(value\)\s*!==\s*json/u,
+    /MATERIALIZED_TARGET_RESULT_KEYS/u,
+    /ISSUED_APPROVAL_RESULT_KEYS/u,
+    /paymentId\s*===\s*requestedPaymentId/u,
+    /runtimeBindings\.targetBindingDigest\s*===\s*targetBindingDigest/u,
+    /runtimeBindings\.syntheticProvenanceDigest\s*===\s*syntheticProvenanceDigest/u,
+    /validatedProducerResult/u,
+    /BootstrapStageFailure\("RUNTIME_LOCAL_FAILED",\s*\{\s*validatedProducerResult:\s*result\s*\}\)/u,
+  ];
+  if (!required.every((selection) => selection.test(entrypoint))) {
+    throw new Error("DB_BOOTSTRAP_PRODUCER_RESULT_TRANSPORT_INVALID");
+  }
+  return Object.freeze({
+    stdoutByteLimit: 16_384,
+    producerStdout: "BOUNDED_PIPE",
+    producerStderr: "DISCARDED",
+    singleCanonicalJson: true,
+    exactModeSchemas: true,
+    paymentCorrespondence: true,
+    targetBindingCorrespondence: true,
+    runtimeBindingsPreserved: true,
+    cleanupFailurePreservesValidatedResult: true,
+  });
 }
 
 function copyFromContainer(
