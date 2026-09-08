@@ -32,8 +32,10 @@ import historicalV13Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v13.json";
 import historicalV14Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v14.json";
-import currentPolicy from
+import historicalV15Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v15.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -54,6 +56,7 @@ import {
   enforceV12EximbayImageSubject,
   enforceV13EximbayImageSubject,
   enforceV14EximbayImageSubject,
+  enforceV15EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -70,6 +73,7 @@ import {
   parseV12EximbayImageAuthority,
   parseV13EximbayImageAuthority,
   parseV14EximbayImageAuthority,
+  parseV15EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -84,6 +88,7 @@ import {
   readV12EximbayImageAuthority,
   readV13EximbayImageAuthority,
   readV14EximbayImageAuthority,
+  readV15EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -170,6 +175,11 @@ const V14_PATH = join(
 const V15_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v15.json",
+);
+
+const V16_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -480,12 +490,32 @@ describe("immutable contacted-reconciliation v14 predecessor authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v14 predecessors with current v15 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable contacted-reconciliation v15 predecessor authority", () => {
+  const authority = parseV15EximbayImageAuthority(historicalV15Policy);
 
-  it("selects v15 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v15 bytes and the eight-node contacted chain", async () => {
     expect(createHash("sha256").update(readFileSync(V15_PATH)).digest("hex")).toBe(
       "7db5aacbe73682fd83bc8608bc729b25969b0b49fae3d772abe784cb2fcc9009",
+    );
+    await expect(readV15EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV15EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+    expect(historicalV15Policy.contactedReconciliation.target.runId)
+      .toBe("9945726fe48b738bf30011af707b5b5f");
+    expect(historicalV15Policy.contactedReconciliation.target.predecessor.predecessor.runId)
+      .toBe("1f93662ed1b45856aceac782029111fd");
+  });
+});
+
+describe("conjunctive historical A and v1-v15 predecessors with current v16 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v16 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V16_PATH)).digest("hex")).toBe(
+      "0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -500,39 +530,44 @@ describe("conjunctive historical A and v1-v14 predecessors with current v15 auth
   it("binds the sole contacted target and preserves the canary ceilings", () => {
     expect(currentPolicy.contactedReconciliation).toMatchObject({
       target: {
-        runId: "9945726fe48b738bf30011af707b5b5f",
-        checkoutSessionId: "cmtroa82m000001s6zh79k5jw",
+        runId: "cb90075b0ee7c3ac5402af2b39ea19af",
+        checkoutSessionId: "cmts0gevg000001s6zvwa5m06",
         paymentId: "DERIVED_BY_APPLICATION",
         providerOrderId: "DERIVED_BY_APPLICATION",
         operatorTargetInputs: 0,
         predecessor: {
-          runId: "248a30b8004082b8fca92f2c1a1fb066",
-          checkoutSessionId: "cmtr2fobw000001s6ovszlemp",
+          runId: "9945726fe48b738bf30011af707b5b5f",
+          checkoutSessionId: "cmtroa82m000001s6zh79k5jw",
           status: "SUPERSEDED_HISTORICAL_ONLY",
           predecessor: {
-            runId: "1f93662ed1b45856aceac782029111fd",
-            checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
+            runId: "248a30b8004082b8fca92f2c1a1fb066",
+            checkoutSessionId: "cmtr2fobw000001s6ovszlemp",
             status: "SUPERSEDED_HISTORICAL_ONLY",
             predecessor: {
-              runId: "e03b436e666b4b188ec65c0ee4139790",
-              checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
+              runId: "1f93662ed1b45856aceac782029111fd",
+              checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
               status: "SUPERSEDED_HISTORICAL_ONLY",
               predecessor: {
-                runId: "4c5c9b039f18037c6f3356c903df1372",
-                checkoutSessionId: "cmtk62h80000001s626b90f9y",
+                runId: "e03b436e666b4b188ec65c0ee4139790",
+                checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
                 status: "SUPERSEDED_HISTORICAL_ONLY",
                 predecessor: {
-                  runId: "89682c544f42d4debb260f5e3186087a",
-                  checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+                  runId: "4c5c9b039f18037c6f3356c903df1372",
+                  checkoutSessionId: "cmtk62h80000001s626b90f9y",
                   status: "SUPERSEDED_HISTORICAL_ONLY",
                   predecessor: {
-                    runId: "da7783b013d20713d6db207c7657b559",
-                    checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+                    runId: "89682c544f42d4debb260f5e3186087a",
+                    checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
                     status: "SUPERSEDED_HISTORICAL_ONLY",
                     predecessor: {
-                      runId: "a764f61f4e4ba799ab16b318a676db65",
-                      checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                      runId: "da7783b013d20713d6db207c7657b559",
+                      checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
                       status: "SUPERSEDED_HISTORICAL_ONLY",
+                      predecessor: {
+                        runId: "a764f61f4e4ba799ab16b318a676db65",
+                        checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                        status: "SUPERSEDED_HISTORICAL_ONLY",
+                      },
                     },
                   },
                 },
@@ -564,6 +599,11 @@ describe("conjunctive historical A and v1-v14 predecessors with current v15 auth
 
   it("rejects every predecessor or arbitrary current target selector", () => {
     const targets = [
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        runId: "9945726fe48b738bf30011af707b5b5f",
+        checkoutSessionId: "cmtroa82m000001s6zh79k5jw",
+      },
       {
         ...currentPolicy.contactedReconciliation.target,
         runId: "248a30b8004082b8fca92f2c1a1fb066",
@@ -617,8 +657,8 @@ describe("conjunctive historical A and v1-v14 predecessors with current v15 auth
 
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "6167e56b6a4ba61fa65ec727e7c987f7481173f9",
-      sourceTree: "7fe0b4d66d856a0f5ee32881623312ee1a7b2760",
+      baselineCommit: "682227612579a7065744f58ae95b5cf2c78bced6",
+      sourceTree: "5a91b9d462faa50c04ed235474c4af0d4d8036bb",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
