@@ -40,6 +40,12 @@ output "bootstrap_manifest" {
     refund_image_policy_sha256      = local.contract.image.refundAuthority.imagePolicySha256
     refund_worker_manifest_digest   = local.contract.image.refundAuthority.workerManifestDigest
     refund_worker_config_digest     = local.contract.image.refundAuthority.workerConfigDigest
+    producer_result_field           = local.contract.image.producerResultBoundary.field
+    producer_result_stdout_limit    = local.contract.image.producerResultBoundary.stdoutByteLimit
+    producer_result_cleanup_failure = local.contract.image.producerResultBoundary.cleanupFailurePreservation
+    producer_input_owner            = local.contract.job.producerInputForwarding.owner
+    producer_target_input_names     = local.contract.job.producerInputForwarding.materializeTarget
+    producer_approval_input_names   = local.contract.job.producerInputForwarding.issueApproval
     provider_credentials            = "NONE"
     temporary_cloud_sql_access      = var.temporary_cloud_sql_access_authorized
     cloud_sql_login_authority       = var.temporary_cloud_sql_access_authorized ? "EXACT_TWO_CONDITIONED_BINDINGS" : "NONE"

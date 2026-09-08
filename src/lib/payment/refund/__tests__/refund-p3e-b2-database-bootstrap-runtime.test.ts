@@ -242,11 +242,11 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       authority: "CURRENT_REVIEWED_EXACT_IMMUTABLE",
       modeSelection: "INDEPENDENT_OF_BOOTSTRAP_MODE",
       digestUri:
-        "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba",
-      configDigest: "sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254",
-      sourceCommit: "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d",
-      sourceTree: "bbcdf4291219be1d732c7cd10198761ce8ebd888",
-      contextSha256: "e2faa1626b4997bfc31cb7b388c0e67e7110edd0c4256faae0f3cd38a602abae",
+        "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8",
+      configDigest: "sha256:04ee9e2a981086d904a1c318fcf30cb7ad8523029c78ff1670e0c1f17254645e",
+      sourceCommit: "8293f62b3817c37f82820a055b1ba68d62e50f85",
+      sourceTree: "c18fb7426f1ddbfc7bb2d25d4202c933a0bd5637",
+      contextSha256: "25c6abf4fb695cfb17577bd1907f9a072f614047678f22ae9da15348712c44cf",
       contextFiles: 68,
       refundAuthority: {
         runtimeContractVersion: "mira-refund-p3e-b2-eximbay-canary-runtime/v2",
@@ -260,14 +260,40 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
         workerConfigDigest:
           "sha256:1bfa5a67f9219a62f717056f1edb2fafaa0ca1c2dabb58c854eb655a435d1e27",
       },
+      producerResultBoundary: {
+        field: "validatedProducerResult",
+        stdoutByteLimit: 16384,
+        stdout: "BOUNDED_PIPE",
+        stderr: "DISCARDED",
+        singleCanonicalJson: true,
+        exactModeSchemas: [
+          "EXIMBAY_CANARY_TARGET_MATERIALIZED",
+          "EXIMBAY_CANARY_APPROVAL_ISSUED",
+        ],
+        paymentCorrespondence: "EXACT",
+        approvalTargetBindingCorrespondence: "EXACT",
+        topLevelTargetMatchesRuntimeBindings: true,
+        topLevelProvenanceMatchesRuntimeBindings: true,
+        cleanupFailurePreservation: "VALIDATED_RESULT_PRESERVED_OVERALL_FAILURE",
+        missingOrMalformed: "RUNTIME_LOCAL_FAILED_NO_BINDING_EVIDENCE",
+        automaticProducerRetry: 0,
+        providerEffectAuthority: "NONE",
+      },
       predecessor: {
+        digestUri:
+          "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba",
+        configDigest: "sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254",
+        sourceCommit: "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d",
+        status: "SUPERSEDED_HISTORICAL_ONLY",
+      },
+      historicalPredecessor: {
         digestUri:
           "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2",
         configDigest: "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a",
         sourceCommit: "81e785448f834f4176cd5153eb3cbdf6d79d936c",
         status: "SUPERSEDED_HISTORICAL_ONLY",
       },
-      historicalPredecessor: {
+      verifierDefectivePredecessor: {
         digestUri:
           "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3",
         configDigest: "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6",
@@ -308,6 +334,22 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
       ],
       defaultMode: "check",
       jobArgumentsBinding: ["var.bootstrap_mode"],
+      executionOverrideSurface: "ABSENT",
+    });
+    expect(contract.job.producerInputForwarding).toEqual({
+      owner: "EXISTING_BOOTSTRAP_PARSER",
+      materializeTarget: [
+        "MIRA_DB_BOOTSTRAP_PAYMENT_ID",
+        "MIRA_DB_BOOTSTRAP_ATTESTATION_JSON",
+      ],
+      issueApproval: [
+        "MIRA_DB_BOOTSTRAP_PAYMENT_ID",
+        "MIRA_DB_BOOTSTRAP_ATTESTATION_JSON",
+        "MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON",
+        "MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID",
+      ],
+      otherModes: "ABSENT",
+      bindingCalculation: "NONE",
       executionOverrideSurface: "ABSENT",
     });
     expect(contract.job.secretVersionProjectRepresentations).toEqual([

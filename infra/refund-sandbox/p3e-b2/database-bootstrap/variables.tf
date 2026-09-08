@@ -81,10 +81,10 @@ variable "bootstrap_issuer_principal_id" {
 variable "source_commit" {
   description = "Exact reviewed source commit embedded in the published bootstrap image."
   type        = string
-  default     = "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d"
+  default     = "8293f62b3817c37f82820a055b1ba68d62e50f85"
 
   validation {
-    condition     = var.source_commit == "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d"
+    condition     = var.source_commit == "8293f62b3817c37f82820a055b1ba68d62e50f85"
     error_message = "source_commit must be the exact current reviewed bootstrap source commit."
   }
 }
@@ -92,10 +92,10 @@ variable "source_commit" {
 variable "bootstrap_image_digest_uri" {
   description = "Exact immutable published bootstrap image digest URI."
   type        = string
-  default     = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba"
+  default     = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8"
 
   validation {
-    condition     = var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba"
+    condition     = var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8"
     error_message = "bootstrap_image_digest_uri must be the exact current reviewed bootstrap digest."
   }
 }

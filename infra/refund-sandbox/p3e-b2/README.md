@@ -472,16 +472,18 @@ Adder member. The six formerly managed IAM members remain historical Git/state e
 cloud retirement is already complete.
 
 The Job now binds the current published mode-capable bootstrap image at digest
-`sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba`,
-config `sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254`,
-from source commit `1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d` and tree
-`bbcdf4291219be1d732c7cd10198761ce8ebd888`. Its 68-file normalized context SHA-256 is
-`e2faa1626b4997bfc31cb7b388c0e67e7110edd0c4256faae0f3cd38a602abae`; the image carries the
+`sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8`,
+config `sha256:04ee9e2a981086d904a1c318fcf30cb7ad8523029c78ff1670e0c1f17254645e`,
+from source commit `8293f62b3817c37f82820a055b1ba68d62e50f85` and tree
+`c18fb7426f1ddbfc7bb2d25d4202c933a0bd5637`. Its 68-file normalized context SHA-256 is
+`25c6abf4fb695cfb17577bd1907f9a072f614047678f22ae9da15348712c44cf`; the image carries the
 exact Eximbay runtime v2, image policy v9, and selected worker manifest/config identities. The
 immediate predecessor digest
+`sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba`
+from source `1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d` is superseded historical evidence only.
+The prior v1-refund-authority digest
 `sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`
-from source `81e785448f834f4176cd5153eb3cbdf6d79d936c` is superseded historical evidence only.
-The prior verifier-defective
+from source `81e785448f834f4176cd5153eb3cbdf6d79d936c` remains historical. The verifier-defective
 digest `sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3`
 from source `d908d71b5de5dc4223db77268719ed9e97277253` is superseded historical evidence
 only. The earlier predecessor
@@ -495,6 +497,12 @@ with the current image's 14 exact entrypoint modes. Current image identity is in
 so mode transitions cannot restore the predecessor. The Job's sole argument derives from this
 selector; Cloud Run execution overrides are not its control surface, and selecting a mode neither
 enables the separate default-false temporary Cloud SQL IAM gate nor executes the Job.
+The existing producer inputs are forwarded only for the two producer modes: Payment and
+attestation for target materialization, plus runtime readback and issuer principal for approval.
+The bootstrap captures at most 16 KiB of producer stdout, accepts one exact canonical result,
+checks target/input correspondence, and exposes validated binding authority only under
+`validatedProducerResult`. A later cleanup failure preserves that field in a nonzero failure
+terminal. Terraform calculates no binding and adds no execution override surface.
 `restore-canary-refund-role-grants` reconstructs the canonical reviewed refund-canary authority. Explicit
 credential modes are the initial `materialize-application-credentials` `(0,0)`
 path and the exact `recover-canary-application-credential` `(1,0)` partial-state path. No scheduler,

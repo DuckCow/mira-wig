@@ -18,7 +18,7 @@ const HISTORICAL_WORKER_DIGEST =
 const CURRENT_POLICY_SHA256 =
   "7db5aacbe73682fd83bc8608bc729b25969b0b49fae3d772abe784cb2fcc9009";
 const BOOTSTRAP_DIGEST =
-  "sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba";
+  "sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8";
 const EXPECTED_ADDRESSES = Object.freeze([
   'google_cloud_run_v2_job.reconciliation["runtime"]',
   'google_project_iam_member.cloud_sql_client["runtime"]',
@@ -344,8 +344,8 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       digestUri:
         `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@${BOOTSTRAP_DIGEST}`,
       configDigest:
-        "sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254",
-      sourceCommit: "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d",
+        "sha256:04ee9e2a981086d904a1c318fcf30cb7ad8523029c78ff1670e0c1f17254645e",
+      sourceCommit: "8293f62b3817c37f82820a055b1ba68d62e50f85",
       defaultMode: "check",
     });
     expect(bootstrapContract.image.mutatingModes).toEqual(expect.arrayContaining([
@@ -380,7 +380,7 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       executionOverrideSurface: "ABSENT",
     });
     expect(variables).toContain(`refund-db-bootstrap@${BOOTSTRAP_DIGEST}`);
-    expect(variables).toContain('default     = "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d"');
+    expect(variables).toContain('default     = "8293f62b3817c37f82820a055b1ba68d62e50f85"');
     expect(variables).toMatch(
       /variable "temporary_cloud_sql_access_authorized"[\s\S]*default\s*=\s*false/u,
     );

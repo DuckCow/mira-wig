@@ -46,10 +46,10 @@ check "exact_machine_contract" {
       local.contract.migrations.count == local.migration_count &&
       local.contract.migrations.sha256 == local.migration_sha256 &&
       local.contract.image.digestUri == var.bootstrap_image_digest_uri &&
-      local.contract.image.configDigest == "sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254" &&
+      local.contract.image.configDigest == "sha256:04ee9e2a981086d904a1c318fcf30cb7ad8523029c78ff1670e0c1f17254645e" &&
       local.contract.image.sourceCommit == var.source_commit &&
-      local.contract.image.sourceTree == "bbcdf4291219be1d732c7cd10198761ce8ebd888" &&
-      local.contract.image.contextSha256 == "e2faa1626b4997bfc31cb7b388c0e67e7110edd0c4256faae0f3cd38a602abae" &&
+      local.contract.image.sourceTree == "c18fb7426f1ddbfc7bb2d25d4202c933a0bd5637" &&
+      local.contract.image.contextSha256 == "25c6abf4fb695cfb17577bd1907f9a072f614047678f22ae9da15348712c44cf" &&
       local.contract.image.contextFiles == 68 &&
       local.contract.image.refundAuthority.runtimeContractVersion == "mira-refund-p3e-b2-eximbay-canary-runtime/v2" &&
       local.contract.image.refundAuthority.runtimeContractSha256 == "45d04facf3c1fdc02ccffcbdf6f32e3274ebaf38c218462cba3d279897ab0d41" &&
@@ -59,14 +59,35 @@ check "exact_machine_contract" {
       local.contract.image.refundAuthority.workerConfigDigest == "sha256:1bfa5a67f9219a62f717056f1edb2fafaa0ca1c2dabb58c854eb655a435d1e27" &&
       local.contract.image.authority == "CURRENT_REVIEWED_EXACT_IMMUTABLE" &&
       local.contract.image.modeSelection == "INDEPENDENT_OF_BOOTSTRAP_MODE" &&
-      local.contract.image.predecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
-      local.contract.image.predecessor.configDigest == "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a" &&
-      local.contract.image.predecessor.sourceCommit == "81e785448f834f4176cd5153eb3cbdf6d79d936c" &&
+      local.contract.image.producerResultBoundary.field == "validatedProducerResult" &&
+      local.contract.image.producerResultBoundary.stdoutByteLimit == 16384 &&
+      local.contract.image.producerResultBoundary.stdout == "BOUNDED_PIPE" &&
+      local.contract.image.producerResultBoundary.stderr == "DISCARDED" &&
+      local.contract.image.producerResultBoundary.singleCanonicalJson == true &&
+      local.contract.image.producerResultBoundary.exactModeSchemas == [
+        "EXIMBAY_CANARY_TARGET_MATERIALIZED",
+        "EXIMBAY_CANARY_APPROVAL_ISSUED",
+      ] &&
+      local.contract.image.producerResultBoundary.paymentCorrespondence == "EXACT" &&
+      local.contract.image.producerResultBoundary.approvalTargetBindingCorrespondence == "EXACT" &&
+      local.contract.image.producerResultBoundary.topLevelTargetMatchesRuntimeBindings == true &&
+      local.contract.image.producerResultBoundary.topLevelProvenanceMatchesRuntimeBindings == true &&
+      local.contract.image.producerResultBoundary.cleanupFailurePreservation == "VALIDATED_RESULT_PRESERVED_OVERALL_FAILURE" &&
+      local.contract.image.producerResultBoundary.missingOrMalformed == "RUNTIME_LOCAL_FAILED_NO_BINDING_EVIDENCE" &&
+      local.contract.image.producerResultBoundary.automaticProducerRetry == 0 &&
+      local.contract.image.producerResultBoundary.providerEffectAuthority == "NONE" &&
+      local.contract.image.predecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:bd8137d52a1040986e793646b92e73d11eab6a6742448948997225e59d47b8ba" &&
+      local.contract.image.predecessor.configDigest == "sha256:99785c2f52c6dc4f58983354354efa6f9c8905fbe107f80dc79034c2ab9fa254" &&
+      local.contract.image.predecessor.sourceCommit == "1bd9b7f9c37f2d66bb7e615a0d9e1c335190fc4d" &&
       local.contract.image.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.image.historicalPredecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
-      local.contract.image.historicalPredecessor.configDigest == "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6" &&
-      local.contract.image.historicalPredecessor.sourceCommit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
+      local.contract.image.historicalPredecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2" &&
+      local.contract.image.historicalPredecessor.configDigest == "sha256:9b3482a74b764b5ea0e56c23c53457a448091d9163466967831daf6334b52c8a" &&
+      local.contract.image.historicalPredecessor.sourceCommit == "81e785448f834f4176cd5153eb3cbdf6d79d936c" &&
       local.contract.image.historicalPredecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
+      local.contract.image.verifierDefectivePredecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:89bae2d93d3fc2594dff9eeddee25577223fd91524c1b0beed43ab84584fc2c3" &&
+      local.contract.image.verifierDefectivePredecessor.configDigest == "sha256:9f76a76badc546af43ab6e04006262d12579ba1953d1ff287f65ba7aa9b53de6" &&
+      local.contract.image.verifierDefectivePredecessor.sourceCommit == "d908d71b5de5dc4223db77268719ed9e97277253" &&
+      local.contract.image.verifierDefectivePredecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
       local.contract.image.earliestPredecessor.digestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:cc1d0e7e82cb8674b0b5da47e04a3a7b72b41aa9035ad4144e15747bcaa5f086" &&
       local.contract.image.earliestPredecessor.configDigest == "sha256:10cac1ead90cfdf9ec718e22dab7dfac42206df2d4c1e9db7e05f021be1eab72" &&
       local.contract.image.earliestPredecessor.sourceCommit == "4a6f2967be6de4526fa7b47d414d1cbaec600783" &&
@@ -106,6 +127,20 @@ check "exact_machine_contract" {
       local.contract.job.terraformModeSelector.defaultMode == "check" &&
       local.contract.job.terraformModeSelector.jobArgumentsBinding == ["var.bootstrap_mode"] &&
       local.contract.job.terraformModeSelector.executionOverrideSurface == "ABSENT" &&
+      local.contract.job.producerInputForwarding.owner == "EXISTING_BOOTSTRAP_PARSER" &&
+      local.contract.job.producerInputForwarding.materializeTarget == [
+        "MIRA_DB_BOOTSTRAP_PAYMENT_ID",
+        "MIRA_DB_BOOTSTRAP_ATTESTATION_JSON",
+      ] &&
+      local.contract.job.producerInputForwarding.issueApproval == [
+        "MIRA_DB_BOOTSTRAP_PAYMENT_ID",
+        "MIRA_DB_BOOTSTRAP_ATTESTATION_JSON",
+        "MIRA_DB_BOOTSTRAP_RUNTIME_READBACK_JSON",
+        "MIRA_DB_BOOTSTRAP_ISSUER_PRINCIPAL_ID",
+      ] &&
+      local.contract.job.producerInputForwarding.otherModes == "ABSENT" &&
+      local.contract.job.producerInputForwarding.bindingCalculation == "NONE" &&
+      local.contract.job.producerInputForwarding.executionOverrideSurface == "ABSENT" &&
       local.contract.job.contactedReconciliationArguments == [
         "apply-contacted-reconciliation-role-grants",
         "restore-canary-refund-role-grants",
