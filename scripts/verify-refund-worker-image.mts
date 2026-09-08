@@ -97,9 +97,13 @@ const V18_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json",
 );
-const CURRENT_AUTHORITY_PATH = resolve(
+const V19_AUTHORITY_PATH = resolve(
   import.meta.dirname,
   "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json",
+);
+const CURRENT_AUTHORITY_PATH = resolve(
+  import.meta.dirname,
+  "../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v20.json",
 );
 const V1_AUTHORITY_SHA256 =
   "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876";
@@ -137,6 +141,8 @@ const V17_AUTHORITY_SHA256 =
   "48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86";
 const V18_AUTHORITY_SHA256 =
   "8744198014a3327b569420afad356d090186a118a7057758ea4ad8783a7d7822";
+const V19_AUTHORITY_SHA256 =
+  "438901986b24d2872712ce4f130bc1f70f2fd27daf6d9ee855ca5a455936c143";
 const V1_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v1";
 const V2_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v2";
 const V3_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v3";
@@ -155,7 +161,8 @@ const V15_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v15";
 const V16_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v16";
 const V17_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v17";
 const V18_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v18";
-const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v19";
+const V19_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v19";
+const CURRENT_CONTRACT_VERSION = "mira-refund-eximbay-canary-image-policy/v20";
 const V1_BASELINE_COMMIT = "518513e0990b6f3e2f0958125cbfa1118d423988";
 const V2_BASELINE_COMMIT = "e5758c2ce812beae6306becad48a2ebc10f2cf4b";
 const V3_BASELINE_COMMIT = "7958fb0b228266d502f5e55a14929e8d5510e913";
@@ -174,7 +181,8 @@ const V15_BASELINE_COMMIT = "6167e56b6a4ba61fa65ec727e7c987f7481173f9";
 const V16_BASELINE_COMMIT = "682227612579a7065744f58ae95b5cf2c78bced6";
 const V17_BASELINE_COMMIT = "ec661b16bc0930394bebfd1c4ca5256a1c21869f";
 const V18_BASELINE_COMMIT = "5ed4407412996d195577766c04ba3d73430fa791";
-const CURRENT_BASELINE_COMMIT = "a1564f36e070cdda9236812e704adf7d088517dd";
+const V19_BASELINE_COMMIT = "a1564f36e070cdda9236812e704adf7d088517dd";
+const CURRENT_BASELINE_COMMIT = "3de0b8c7c8ed2e7047a7d866b83abc24eec0da23";
 const V3_SOURCE_TREE = "edcf50357c49521febd194502c167872a2dead67";
 const V4_SOURCE_TREE = "5cdacc1c1c32c163b7675f8fe9453b91e7c15f6d";
 const V5_SOURCE_TREE = "d5fde2249103d263b1dab1b126027c419d18f1aa";
@@ -191,7 +199,8 @@ const V15_SOURCE_TREE = "7fe0b4d66d856a0f5ee32881623312ee1a7b2760";
 const V16_SOURCE_TREE = "5a91b9d462faa50c04ed235474c4af0d4d8036bb";
 const V17_SOURCE_TREE = "e602e949e8a0bd3ddb6830a2e68546456c62750d";
 const V18_SOURCE_TREE = "dd0e81d06f146935e617ccf81c24c54b1ca22102";
-const CURRENT_SOURCE_TREE = "27549e6a8780ade525b727d2dfdae573b3b68c73";
+const V19_SOURCE_TREE = "27549e6a8780ade525b727d2dfdae573b3b68c73";
+const CURRENT_SOURCE_TREE = "213dc029e02aec80868c384fd0d0b7ce3ef6aad5";
 const V3_SUPERVISOR_SOURCE = Object.freeze({
   path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
   sha256: "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
@@ -217,10 +226,11 @@ const V15_SUPERVISOR_SOURCE = V14_SUPERVISOR_SOURCE;
 const V16_SUPERVISOR_SOURCE = V15_SUPERVISOR_SOURCE;
 const V17_SUPERVISOR_SOURCE = V16_SUPERVISOR_SOURCE;
 const V18_SUPERVISOR_SOURCE = V17_SUPERVISOR_SOURCE;
-const CURRENT_SUPERVISOR_SOURCE = Object.freeze({
+const V19_SUPERVISOR_SOURCE = Object.freeze({
   path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
   sha256: "17a36c859823cd98b8435db409dff67a0148dadac11f99b7040b8925a23cce8f",
 });
+const CURRENT_SUPERVISOR_SOURCE = V19_SUPERVISOR_SOURCE;
 const V1_ENTRYPOINTS = Object.freeze([
   Object.freeze({ source: "containers/refund-worker/entrypoint.ts", runtimePath: "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs" }),
   Object.freeze({ source: "scripts/eximbay-refund-canary.ts", runtimePath: "/app/src/lib/payment/refund/eximbay-refund-canary.mjs" }),
@@ -247,13 +257,14 @@ const V15_ENTRYPOINTS = V14_ENTRYPOINTS;
 const V16_ENTRYPOINTS = V15_ENTRYPOINTS;
 const V17_ENTRYPOINTS = V16_ENTRYPOINTS;
 const V18_ENTRYPOINTS = V17_ENTRYPOINTS;
-const CURRENT_ENTRYPOINTS = Object.freeze([
+const V19_ENTRYPOINTS = Object.freeze([
   ...V18_ENTRYPOINTS,
   Object.freeze({
     source: "scripts/eximbay-refund-reentry.ts",
     runtimePath: "/app/src/lib/payment/refund/eximbay-refund-reentry.mjs",
   }),
 ]);
+const CURRENT_ENTRYPOINTS = V19_ENTRYPOINTS;
 const V3_COMMAND_ALLOWLIST = Object.freeze([
   "worker-check",
   "worker-health",
@@ -278,10 +289,11 @@ const V15_COMMAND_ALLOWLIST = V14_COMMAND_ALLOWLIST;
 const V16_COMMAND_ALLOWLIST = V15_COMMAND_ALLOWLIST;
 const V17_COMMAND_ALLOWLIST = V16_COMMAND_ALLOWLIST;
 const V18_COMMAND_ALLOWLIST = V17_COMMAND_ALLOWLIST;
-const CURRENT_COMMAND_ALLOWLIST = Object.freeze([
+const V19_COMMAND_ALLOWLIST = Object.freeze([
   ...V18_COMMAND_ALLOWLIST,
   "eximbay-refund-reentry-once",
 ]);
+const CURRENT_COMMAND_ALLOWLIST = V19_COMMAND_ALLOWLIST;
 type ContactedTargetIdentity = Readonly<{
   runId: string;
   checkoutSessionId: string;
@@ -355,7 +367,8 @@ const V18_CONTACTED_TARGET_CHAIN = Object.freeze([
   }),
   ...V17_CONTACTED_TARGET_CHAIN,
 ]);
-const CURRENT_CONTACTED_TARGET_CHAIN = V18_CONTACTED_TARGET_CHAIN;
+const V19_CONTACTED_TARGET_CHAIN = V18_CONTACTED_TARGET_CHAIN;
+const CURRENT_CONTACTED_TARGET_CHAIN = V19_CONTACTED_TARGET_CHAIN;
 const CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt";
 const SYSTEM_CA_TRUST = Object.freeze({
   sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
@@ -1928,9 +1941,20 @@ export function parseFrozenImageContract(raw: unknown): FrozenImageContract {
 
 export async function readCurrentEximbayImageAuthority():
 Promise<CurrentEximbayImageAuthority> {
-  await readV18EximbayImageAuthority();
+  await readV19EximbayImageAuthority();
   const raw: unknown = JSON.parse(await readFile(CURRENT_AUTHORITY_PATH, "utf8"));
   return parseCurrentEximbayImageAuthority(raw);
+}
+
+export async function readV19EximbayImageAuthority():
+Promise<CurrentEximbayImageAuthority> {
+  await readV18EximbayImageAuthority();
+  const bytes = await readFile(V19_AUTHORITY_PATH);
+  requireCondition(
+    createHash("sha256").update(bytes).digest("hex") === V19_AUTHORITY_SHA256,
+    "V19_IMAGE_AUTHORITY_SHA256",
+  );
+  return parseV19EximbayImageAuthority(JSON.parse(bytes.toString("utf8")));
 }
 
 export async function readV18EximbayImageAuthority():
@@ -2137,12 +2161,25 @@ export function parseCurrentEximbayImageAuthority(
 ): CurrentEximbayImageAuthority {
   return parseSuccessorEximbayImageAuthority(raw, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V18_AUTHORITY_SHA256,
+    parentAuthoritySha256: V19_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
   }, CURRENT_SOURCE_TREE, CURRENT_SUPERVISOR_SOURCE, CURRENT_COMMAND_ALLOWLIST,
   ["filesystemAuthority", "canaryExecution", "contactedReconciliation", "refundReentry"], true,
   CURRENT_CONTACTED_TARGET_CHAIN, "application/vnd.oci.image.layer.v1.tar+gzip");
+}
+
+export function parseV19EximbayImageAuthority(
+  raw: unknown,
+): CurrentEximbayImageAuthority {
+  return parseSuccessorEximbayImageAuthority(raw, {
+    contractVersion: V19_CONTRACT_VERSION,
+    parentAuthoritySha256: V18_AUTHORITY_SHA256,
+    baselineCommit: V19_BASELINE_COMMIT,
+    entrypoints: V19_ENTRYPOINTS,
+  }, V19_SOURCE_TREE, V19_SUPERVISOR_SOURCE, V19_COMMAND_ALLOWLIST,
+  ["filesystemAuthority", "canaryExecution", "contactedReconciliation", "refundReentry"], true,
+  V19_CONTACTED_TARGET_CHAIN, "application/vnd.oci.image.layer.v1.tar+gzip");
 }
 
 export function parseV18EximbayImageAuthority(
@@ -3075,7 +3112,7 @@ export function enforceCurrentSubject(
 ): void {
   enforceEximbayImageSubject(authority, context, {
     contractVersion: CURRENT_CONTRACT_VERSION,
-    parentAuthoritySha256: V18_AUTHORITY_SHA256,
+    parentAuthoritySha256: V19_AUTHORITY_SHA256,
     baselineCommit: CURRENT_BASELINE_COMMIT,
     entrypoints: CURRENT_ENTRYPOINTS,
   });
@@ -3083,6 +3120,44 @@ export function enforceCurrentSubject(
     "CURRENT_SOURCE_TREE_BINDING");
   requireCondition(
     JSON.stringify(authority.supervisorSource) === JSON.stringify(CURRENT_SUPERVISOR_SOURCE),
+    "CURRENT_SUPERVISOR_SOURCE_BINDING",
+  );
+  requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,
+    "CURRENT_ENTRYPOINT_COUNT_BINDING");
+  requireCondition(
+    authority.buildContext.migrationCount === context.migrationInventory.migrationCount,
+    "CURRENT_MIGRATION_COUNT_BINDING",
+  );
+  requireCondition(
+    authority.buildContext.migrationDigest === context.migrationInventory.migrationDigest,
+    "CURRENT_MIGRATION_DIGEST_BINDING",
+  );
+}
+
+export function enforceV19EximbayImageSubject(
+  authority: CurrentEximbayImageAuthority,
+  context: Readonly<{
+    manifestDigest: string;
+    manifestEntries: readonly unknown[];
+    repositoryGraphInputCount: number;
+    packagedGraphInputCount: number;
+    entrypointCount: number;
+    migrationInventory: Readonly<{
+      migrationCount: number;
+      migrationDigest: string;
+    }>;
+  }>,
+): void {
+  enforceEximbayImageSubject(authority, context, {
+    contractVersion: V19_CONTRACT_VERSION,
+    parentAuthoritySha256: V18_AUTHORITY_SHA256,
+    baselineCommit: V19_BASELINE_COMMIT,
+    entrypoints: V19_ENTRYPOINTS,
+  });
+  requireCondition(authority.sourceTree === V19_SOURCE_TREE,
+    "CURRENT_SOURCE_TREE_BINDING");
+  requireCondition(
+    JSON.stringify(authority.supervisorSource) === JSON.stringify(V19_SUPERVISOR_SOURCE),
     "CURRENT_SUPERVISOR_SOURCE_BINDING",
   );
   requireCondition(authority.buildContext.entrypointCount === context.entrypointCount,

@@ -40,8 +40,10 @@ import historicalV17Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json";
 import historicalV18Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json";
-import currentPolicy from
+import historicalV19Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v20.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -66,6 +68,7 @@ import {
   enforceV16EximbayImageSubject,
   enforceV17EximbayImageSubject,
   enforceV18EximbayImageSubject,
+  enforceV19EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -86,6 +89,7 @@ import {
   parseV16EximbayImageAuthority,
   parseV17EximbayImageAuthority,
   parseV18EximbayImageAuthority,
+  parseV19EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -104,6 +108,7 @@ import {
   readV16EximbayImageAuthority,
   readV17EximbayImageAuthority,
   readV18EximbayImageAuthority,
+  readV19EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -210,6 +215,11 @@ const V18_PATH = join(
 const V19_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v19.json",
+);
+
+const V20_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v20.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -596,12 +606,28 @@ describe("immutable contacted-reconciliation v18 predecessor authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v18 predecessors with current v19 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable refund re-entry v19 predecessor authority", () => {
+  const authority = parseV19EximbayImageAuthority(historicalV19Policy);
 
-  it("selects v19 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v19 bytes and accepts its historical subject and closure", async () => {
     expect(createHash("sha256").update(readFileSync(V19_PATH)).digest("hex")).toBe(
       "438901986b24d2872712ce4f130bc1f70f2fd27daf6d9ee855ca5a455936c143",
+    );
+    await expect(readV19EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV19EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+  });
+});
+
+describe("conjunctive historical A and v1-v19 predecessors with current v20 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v20 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V20_PATH)).digest("hex")).toBe(
+      "2bf2887cc6bead7336dea8a36dc25fba695434674a272623f57299be42ad4cd8",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -823,8 +849,8 @@ describe("conjunctive historical A and v1-v18 predecessors with current v19 auth
 
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "a1564f36e070cdda9236812e704adf7d088517dd",
-      sourceTree: "27549e6a8780ade525b727d2dfdae573b3b68c73",
+      baselineCommit: "3de0b8c7c8ed2e7047a7d866b83abc24eec0da23",
+      sourceTree: "213dc029e02aec80868c384fd0d0b7ce3ef6aad5",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "17a36c859823cd98b8435db409dff67a0148dadac11f99b7040b8925a23cce8f",

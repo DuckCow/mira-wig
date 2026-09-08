@@ -22,7 +22,7 @@ run "admit_exact_dormant_refund_reentry_successor" {
   assert {
     condition = (
       output.status == "DORMANT_EXIMBAY_SANDBOX_REFUND_REENTRY_SUCCESSOR_RELEASE_CAPABLE_NOT_APPLIED" &&
-      output.runtime_manifest.contract_version == "mira-refund-p3e-b2-eximbay-canary-runtime/v3" &&
+      output.runtime_manifest.contract_version == "mira-refund-p3e-b2-eximbay-canary-runtime/v4" &&
       output.runtime_manifest.resource_count == 5 &&
       output.runtime_manifest.new_resource_count == 0 &&
       output.runtime_manifest.provider_contact_authorized == false &&
