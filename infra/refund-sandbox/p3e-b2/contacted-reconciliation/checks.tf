@@ -22,13 +22,13 @@ check "exact_runtime_authority" {
       local.region == "asia-northeast3" &&
       local.service_account_id == "mira-p3e-sbx-contacted-recon" &&
       local.job_name == "mira-p3e-sbx-contacted-reconciliation" &&
-      local.worker_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:add489070506be0bcf4f76ba296a07f97b745ce7799f4487d8ff1f4f9e8dc09d" &&
-      local.worker_image_config_digest == "sha256:586b1ba8c389e8ea06a0e61594f447637fc682b637f4b8fdc163bf70970cfdf6" &&
-      local.worker_image_source_commit == "682227612579a7065744f58ae95b5cf2c78bced6" &&
-      local.worker_image_source_context_sha256 == "3475760054dd070b097127c9ca94ea2416d61ee83e15edaef70696c5d1e105f9" &&
-      local.worker_image_policy_path == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json" &&
-      local.worker_image_policy_version == "V16" &&
-      local.worker_image_policy_sha256 == "0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24" &&
+      local.worker_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:0b3798de394041bd5869389d67668add04c66018ac8f890582c07860ca3a9dac" &&
+      local.worker_image_config_digest == "sha256:0af1f7b7c6836e4bd15c177b0a757c627f0cb59e812c2196ad831aa375ca0476" &&
+      local.worker_image_source_commit == "ec661b16bc0930394bebfd1c4ca5256a1c21869f" &&
+      local.worker_image_source_context_sha256 == "a5a41521bd32c2ef46c4caf101fe53e744741cc7d5406bb00eefc0ea41dea5cf" &&
+      local.worker_image_policy_path == "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json" &&
+      local.worker_image_policy_version == "V17" &&
+      local.worker_image_policy_sha256 == "48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86" &&
       local.worker_supervisor_source_sha256 == "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15" &&
       local.contract.image.digestUri == local.worker_image_digest_uri &&
       local.contract.image.configDigest == local.worker_image_config_digest &&

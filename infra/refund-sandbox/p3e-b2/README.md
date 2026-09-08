@@ -390,20 +390,21 @@ resource-scoped Secret Accessor members, and one Cloud Run v2 Job. Returning the
 retires those five resources through the same Terraform state.
 
 The Job binds the current contacted-recovery refund-worker digest
-`sha256:add489070506be0bcf4f76ba296a07f97b745ce7799f4487d8ff1f4f9e8dc09d`,
-source `682227612579a7065744f58ae95b5cf2c78bced6`, canonical context
-`3475760054dd070b097127c9ca94ea2416d61ee83e15edaef70696c5d1e105f9`, and immutable
-image-policy-v16 authority `0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24`,
+`sha256:0b3798de394041bd5869389d67668add04c66018ac8f890582c07860ca3a9dac`,
+source `ec661b16bc0930394bebfd1c4ca5256a1c21869f`, canonical context
+`a5a41521bd32c2ef46c4caf101fe53e744741cc7d5406bb00eefc0ea41dea5cf`, and immutable
+image-policy-v17 authority `48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86`,
 plus command `eximbay-contacted-reconciliation-once`. Payment and provider-order identity remain
 application-derived with no operator target inputs. The run ID
-`cb90075b0ee7c3ac5402af2b39ea19af` and CheckoutSession
-`cmts0gevg000001s6zvwa5m06` are fixed in source. The previous current run
-`9945726fe48b738bf30011af707b5b5f` / `cmtroa82m000001s6zh79k5jw`, older run
-`248a30b8004082b8fca92f2c1a1fb066` / `cmtr2fobw000001s6ovszlemp`, earlier run
-`1f93662ed1b45856aceac782029111fd` / `cmtqwntmf000001s6ol01azw8`, prior run
-`e03b436e666b4b188ec65c0ee4139790` / `cmtktx8rx000001s6lfbjivo1`, earlier prior run
-`4c5c9b039f18037c6f3356c903df1372` / `cmtk62h80000001s626b90f9y`, first prior run
-`89682c544f42d4debb260f5e3186087a` / `cmtjsiiqw000001s6uimkjhj5`, first fresh run
+`6a44959c5335c547b9519761168dbe1a` and CheckoutSession
+`cmts5d5oz000001s6mfq4g6bc` are fixed in source. The previous current run
+`cb90075b0ee7c3ac5402af2b39ea19af` / `cmts0gevg000001s6zvwa5m06`, older run
+`9945726fe48b738bf30011af707b5b5f` / `cmtroa82m000001s6zh79k5jw`, earlier run
+`248a30b8004082b8fca92f2c1a1fb066` / `cmtr2fobw000001s6ovszlemp`, prior run
+`1f93662ed1b45856aceac782029111fd` / `cmtqwntmf000001s6ol01azw8`, earlier prior run
+`e03b436e666b4b188ec65c0ee4139790` / `cmtktx8rx000001s6lfbjivo1`, first prior run
+`4c5c9b039f18037c6f3356c903df1372` / `cmtk62h80000001s626b90f9y`, first fresh run
+`89682c544f42d4debb260f5e3186087a` / `cmtjsiiqw000001s6uimkjhj5`, earliest run
 `da7783b013d20713d6db207c7657b559` / `cmtjnvso1000001s60xfg0tyu`, and original historical run
 `a764f61f4e4ba799ab16b318a676db65` / `cmthg2mzu000001s6iuvx7u5x` remain immutable
 historical-only provenance and are not selectable by the current runtime. It uses one task,
@@ -424,7 +425,7 @@ a missing or invalid child terminal remains evidence-unknown and grants no retry
 results admits financial success, refund, or checkout release outside the unchanged exact Q004
 transaction.
 
-The V11, V12, V13, V14, and V15 images and policies remain immutable historical evidence. The V16 successor above
+The V11, V12, V13, V14, V15, and V16 images and policies remain immutable historical evidence. The V17 successor above
 preserves the corrected typed provider-observation path through BF4 admission, checkout recovery,
 the one-shot child terminal, and strict supervisor validation while advancing only the exact
 contacted target. The runtime remains default disabled, retains the one-retrieve ceiling and zero

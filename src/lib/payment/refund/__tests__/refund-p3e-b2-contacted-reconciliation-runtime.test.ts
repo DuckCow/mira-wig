@@ -10,13 +10,13 @@ const INFRA = join(ROOT, "infra/refund-sandbox/p3e-b2");
 const RUNTIME = join(INFRA, "contacted-reconciliation");
 const BOOTSTRAP = join(INFRA, "database-bootstrap");
 const WORKER_DIGEST =
-  "sha256:add489070506be0bcf4f76ba296a07f97b745ce7799f4487d8ff1f4f9e8dc09d";
+  "sha256:0b3798de394041bd5869389d67668add04c66018ac8f890582c07860ca3a9dac";
 const WORKER_CONFIG_DIGEST =
-  "sha256:586b1ba8c389e8ea06a0e61594f447637fc682b637f4b8fdc163bf70970cfdf6";
+  "sha256:0af1f7b7c6836e4bd15c177b0a757c627f0cb59e812c2196ad831aa375ca0476";
 const HISTORICAL_WORKER_DIGEST =
   "sha256:95b1d7fb170e7af503aab8ad8c6758fa43b5f63afad510c4004b58275dff5662";
 const CURRENT_POLICY_SHA256 =
-  "0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24";
+  "48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86";
 const BOOTSTRAP_DIGEST =
   "sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8";
 const EXPECTED_ADDRESSES = Object.freeze([
@@ -82,11 +82,11 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       digestUri:
         `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@${WORKER_DIGEST}`,
       configDigest: WORKER_CONFIG_DIGEST,
-      sourceCheckpoint: "682227612579a7065744f58ae95b5cf2c78bced6",
+      sourceCheckpoint: "ec661b16bc0930394bebfd1c4ca5256a1c21869f",
       sourceContextSha256:
-        "3475760054dd070b097127c9ca94ea2416d61ee83e15edaef70696c5d1e105f9",
-      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json",
-      imagePolicyVersion: "V16",
+        "a5a41521bd32c2ef46c4caf101fe53e744741cc7d5406bb00eefc0ea41dea5cf",
+      imagePolicyPath: "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json",
+      imagePolicyVersion: "V17",
       imagePolicySha256: CURRENT_POLICY_SHA256,
       supervisorSourceSha256:
         "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
@@ -106,44 +106,49 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
       },
     });
     expect(contract.target).toMatchObject({
-      runId: "cb90075b0ee7c3ac5402af2b39ea19af",
-      checkoutSessionId: "cmts0gevg000001s6zvwa5m06",
+      runId: "6a44959c5335c547b9519761168dbe1a",
+      checkoutSessionId: "cmts5d5oz000001s6mfq4g6bc",
       paymentId: "DERIVED_BY_APPLICATION",
       providerOrderId: "DERIVED_BY_APPLICATION",
       authenticatedUserId: "DERIVED_BY_APPLICATION",
       operatorTargetInputs: 0,
       predecessor: {
-        runId: "9945726fe48b738bf30011af707b5b5f",
-        checkoutSessionId: "cmtroa82m000001s6zh79k5jw",
+        runId: "cb90075b0ee7c3ac5402af2b39ea19af",
+        checkoutSessionId: "cmts0gevg000001s6zvwa5m06",
         status: "SUPERSEDED_HISTORICAL_ONLY",
         predecessor: {
-          runId: "248a30b8004082b8fca92f2c1a1fb066",
-          checkoutSessionId: "cmtr2fobw000001s6ovszlemp",
+          runId: "9945726fe48b738bf30011af707b5b5f",
+          checkoutSessionId: "cmtroa82m000001s6zh79k5jw",
           status: "SUPERSEDED_HISTORICAL_ONLY",
           predecessor: {
-            runId: "1f93662ed1b45856aceac782029111fd",
-            checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
+            runId: "248a30b8004082b8fca92f2c1a1fb066",
+            checkoutSessionId: "cmtr2fobw000001s6ovszlemp",
             status: "SUPERSEDED_HISTORICAL_ONLY",
             predecessor: {
-              runId: "e03b436e666b4b188ec65c0ee4139790",
-              checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
+              runId: "1f93662ed1b45856aceac782029111fd",
+              checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
               status: "SUPERSEDED_HISTORICAL_ONLY",
               predecessor: {
-                runId: "4c5c9b039f18037c6f3356c903df1372",
-                  checkoutSessionId: "cmtk62h80000001s626b90f9y",
+                runId: "e03b436e666b4b188ec65c0ee4139790",
+                checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
                 status: "SUPERSEDED_HISTORICAL_ONLY",
                 predecessor: {
-                  runId: "89682c544f42d4debb260f5e3186087a",
-                  checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
+                  runId: "4c5c9b039f18037c6f3356c903df1372",
+                  checkoutSessionId: "cmtk62h80000001s626b90f9y",
                   status: "SUPERSEDED_HISTORICAL_ONLY",
                   predecessor: {
-                    runId: "da7783b013d20713d6db207c7657b559",
-                    checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
+                    runId: "89682c544f42d4debb260f5e3186087a",
+                    checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
                     status: "SUPERSEDED_HISTORICAL_ONLY",
                     predecessor: {
-                      runId: "a764f61f4e4ba799ab16b318a676db65",
-                      checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                      runId: "da7783b013d20713d6db207c7657b559",
+                      checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
                       status: "SUPERSEDED_HISTORICAL_ONLY",
+                      predecessor: {
+                        runId: "a764f61f4e4ba799ab16b318a676db65",
+                        checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
+                        status: "SUPERSEDED_HISTORICAL_ONLY",
+                      },
                     },
                   },
                 },
@@ -238,9 +243,9 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     const source = readTerraform(RUNTIME);
     expect(contract.environment).toEqual({
       MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID:
-        "cb90075b0ee7c3ac5402af2b39ea19af",
+        "6a44959c5335c547b9519761168dbe1a",
       MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID:
-        "cmts0gevg000001s6zvwa5m06",
+        "cmts5d5oz000001s6mfq4g6bc",
       EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED: "ENABLED",
       EXIMBAY_SANDBOX_MID: "1849705C64",
       MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
@@ -434,10 +439,12 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         "7c2561ec1c53b1cd1f69ba7ffec271e1a5b16ce4427abd45ea5c4055a4d653a8",
       "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v15.json":
         "7db5aacbe73682fd83bc8608bc729b25969b0b49fae3d772abe784cb2fcc9009",
+      "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json":
+        "0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24",
       "containers/refund-worker/Dockerfile":
         "bee4fbc2d3ef914f34327a6bd2b5ce921a8a4c6354f58340b682bdf4e485ede0",
       "src/lib/payment/refund/eximbay-contacted-reconciliation-environment.ts":
-        "647851c21e62e06d7a41e577e0c4fd58712cf73cd55fe0d5a773932c9d713419",
+        "080b55096bf54cc83b169b4e5fb2d7fc2e2075dc11df2a462c22a1d957b45e35",
       "scripts/eximbay-contacted-reconciliation.ts":
         "3fc861fe0abe7597a95ccc5b6c3142eda7edd7ac99f782c152d0821b917ecbfa",
       "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql":
@@ -462,7 +469,7 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
     for (const [path, expectedHash] of Object.entries(sourceHashes)) {
       expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expectedHash);
     }
-    const currentPolicy = read("infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json");
+    const currentPolicy = read("infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json");
     expect(currentPolicy).toContain(sourceHashes[
       "src/lib/payment/refund/run-eximbay-contacted-reconciliation-once.ts"
     ]);

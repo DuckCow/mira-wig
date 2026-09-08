@@ -39,13 +39,13 @@
     "defaultComputeIdentity": "FORBIDDEN"
   },
   "image": {
-    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:add489070506be0bcf4f76ba296a07f97b745ce7799f4487d8ff1f4f9e8dc09d",
-    "configDigest": "sha256:586b1ba8c389e8ea06a0e61594f447637fc682b637f4b8fdc163bf70970cfdf6",
-    "sourceCheckpoint": "682227612579a7065744f58ae95b5cf2c78bced6",
-    "sourceContextSha256": "3475760054dd070b097127c9ca94ea2416d61ee83e15edaef70696c5d1e105f9",
-    "imagePolicyPath": "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json",
-    "imagePolicyVersion": "V16",
-    "imagePolicySha256": "0068409ece6ed1323078dad75096cb2a98210a5b0920dc0c7dcce67e0f9e5b24",
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:0b3798de394041bd5869389d67668add04c66018ac8f890582c07860ca3a9dac",
+    "configDigest": "sha256:0af1f7b7c6836e4bd15c177b0a757c627f0cb59e812c2196ad831aa375ca0476",
+    "sourceCheckpoint": "ec661b16bc0930394bebfd1c4ca5256a1c21869f",
+    "sourceContextSha256": "a5a41521bd32c2ef46c4caf101fe53e744741cc7d5406bb00eefc0ea41dea5cf",
+    "imagePolicyPath": "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json",
+    "imagePolicyVersion": "V17",
+    "imagePolicySha256": "48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86",
     "supervisorSourceSha256": "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
     "predecessor": {
       "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:95b1d7fb170e7af503aab8ad8c6758fa43b5f63afad510c4004b58275dff5662",
@@ -59,44 +59,49 @@
     }
   },
   "target": {
-    "runId": "cb90075b0ee7c3ac5402af2b39ea19af",
-    "checkoutSessionId": "cmts0gevg000001s6zvwa5m06",
+    "runId": "6a44959c5335c547b9519761168dbe1a",
+    "checkoutSessionId": "cmts5d5oz000001s6mfq4g6bc",
     "paymentId": "DERIVED_BY_APPLICATION",
     "providerOrderId": "DERIVED_BY_APPLICATION",
     "authenticatedUserId": "DERIVED_BY_APPLICATION",
     "operatorTargetInputs": 0,
     "predecessor": {
-      "runId": "9945726fe48b738bf30011af707b5b5f",
-      "checkoutSessionId": "cmtroa82m000001s6zh79k5jw",
+      "runId": "cb90075b0ee7c3ac5402af2b39ea19af",
+      "checkoutSessionId": "cmts0gevg000001s6zvwa5m06",
       "status": "SUPERSEDED_HISTORICAL_ONLY",
       "predecessor": {
-        "runId": "248a30b8004082b8fca92f2c1a1fb066",
-        "checkoutSessionId": "cmtr2fobw000001s6ovszlemp",
+        "runId": "9945726fe48b738bf30011af707b5b5f",
+        "checkoutSessionId": "cmtroa82m000001s6zh79k5jw",
         "status": "SUPERSEDED_HISTORICAL_ONLY",
         "predecessor": {
-          "runId": "1f93662ed1b45856aceac782029111fd",
-          "checkoutSessionId": "cmtqwntmf000001s6ol01azw8",
+          "runId": "248a30b8004082b8fca92f2c1a1fb066",
+          "checkoutSessionId": "cmtr2fobw000001s6ovszlemp",
           "status": "SUPERSEDED_HISTORICAL_ONLY",
           "predecessor": {
-            "runId": "e03b436e666b4b188ec65c0ee4139790",
-            "checkoutSessionId": "cmtktx8rx000001s6lfbjivo1",
+            "runId": "1f93662ed1b45856aceac782029111fd",
+            "checkoutSessionId": "cmtqwntmf000001s6ol01azw8",
             "status": "SUPERSEDED_HISTORICAL_ONLY",
             "predecessor": {
-              "runId": "4c5c9b039f18037c6f3356c903df1372",
-              "checkoutSessionId": "cmtk62h80000001s626b90f9y",
+              "runId": "e03b436e666b4b188ec65c0ee4139790",
+              "checkoutSessionId": "cmtktx8rx000001s6lfbjivo1",
               "status": "SUPERSEDED_HISTORICAL_ONLY",
               "predecessor": {
-                "runId": "89682c544f42d4debb260f5e3186087a",
-                "checkoutSessionId": "cmtjsiiqw000001s6uimkjhj5",
+                "runId": "4c5c9b039f18037c6f3356c903df1372",
+                "checkoutSessionId": "cmtk62h80000001s626b90f9y",
                 "status": "SUPERSEDED_HISTORICAL_ONLY",
                 "predecessor": {
-                  "runId": "da7783b013d20713d6db207c7657b559",
-                  "checkoutSessionId": "cmtjnvso1000001s60xfg0tyu",
+                  "runId": "89682c544f42d4debb260f5e3186087a",
+                  "checkoutSessionId": "cmtjsiiqw000001s6uimkjhj5",
                   "status": "SUPERSEDED_HISTORICAL_ONLY",
                   "predecessor": {
-                    "runId": "a764f61f4e4ba799ab16b318a676db65",
-                    "checkoutSessionId": "cmthg2mzu000001s6iuvx7u5x",
-                    "status": "SUPERSEDED_HISTORICAL_ONLY"
+                    "runId": "da7783b013d20713d6db207c7657b559",
+                    "checkoutSessionId": "cmtjnvso1000001s60xfg0tyu",
+                    "status": "SUPERSEDED_HISTORICAL_ONLY",
+                    "predecessor": {
+                      "runId": "a764f61f4e4ba799ab16b318a676db65",
+                      "checkoutSessionId": "cmthg2mzu000001s6iuvx7u5x",
+                      "status": "SUPERSEDED_HISTORICAL_ONLY"
+                    }
                   }
                 }
               }
@@ -124,8 +129,8 @@
     "environmentOverrides": "PROHIBITED_BY_AUTHORITY"
   },
   "environment": {
-    "MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID": "cb90075b0ee7c3ac5402af2b39ea19af",
-    "MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID": "cmts0gevg000001s6zvwa5m06",
+    "MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID": "6a44959c5335c547b9519761168dbe1a",
+    "MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID": "cmts5d5oz000001s6mfq4g6bc",
     "EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED": "ENABLED",
     "EXIMBAY_SANDBOX_MID": "1849705C64",
     "MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE": "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key",
