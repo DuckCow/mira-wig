@@ -19,7 +19,8 @@ describe("exact Eximbay refund re-entry authority", () => {
       approvalId: "eximbay-canary-approval-cd3e243b-97da-41d2-9bdc-c1dc001065cc",
       targetBindingDigest: "e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c",
       consumedExecutionId: "cloud-run-0899eaa6e48ed3578f7c1ae2427ce00c",
-      predecessorLeaseGeneration: 1,
+      predecessorLeaseGeneration: 2,
+      predecessorLeaseDurationMs: 300_000,
       amount: 100,
       currency: "USD",
     });
@@ -155,6 +156,12 @@ describe("exact Eximbay refund re-entry authority", () => {
     expect(source).not.toMatch(/\bwhile\s*\(|\bfor\s*\(|dependencies\.sleep/u);
     expect(source).not.toContain('candidateClass: "CONTACTED"');
     expect(source).not.toContain("R2_AUTHORIZED");
+
+    const processSource = readFileSync(join(
+      process.cwd(), "scripts/eximbay-refund-reentry.ts",
+    ), "utf8");
+    expect(processSource).toContain("process.stdout.write(line)");
+    expect(processSource).not.toMatch(/result\.ok.*process\.stdout.*process\.stderr/u);
   });
 });
 

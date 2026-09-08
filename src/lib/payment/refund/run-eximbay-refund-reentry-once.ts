@@ -126,7 +126,7 @@ async function runAdmitted(
   const admitted = await dependencies.runAdmission(env, async () => {
     const seal = await dependencies.verifyHistoricalSeal(database, authority);
     if (!seal || seal.commandId !== EXIMBAY_REFUND_REENTRY_TARGET.commandId
-      || seal.predecessorLeaseGeneration !== 1) {
+      || seal.predecessorLeaseGeneration !== 2) {
       return result(false, "TARGET_MISMATCH", zeroCounts());
     }
     let transport: EximbayRefundRestFetch;

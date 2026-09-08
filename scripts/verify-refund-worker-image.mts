@@ -12,6 +12,8 @@ import type {
 } from "../src/lib/payment/refund/worker-migration-inventory.js";
 
 const PROOF_IMAGE_TAG_PREFIX = "mira-refund-worker:r2a-local-proof-";
+const RELEASE_IMAGE_TAG_PREFIX =
+  "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker:p3e-b2-";
 const PROOF_CONTAINER_NAME_PREFIX = "mira-refund-r2a-proof-";
 const PLATFORM = "linux/amd64";
 const SOURCE_DATE_EPOCH = "1784764800";
@@ -1135,13 +1137,27 @@ export async function withProofImageLifecycle<T>(
   return Object.freeze({ value, identity: ownership.identity });
 }
 
-async function main(captureContract: boolean): Promise<Record<string, unknown>> {
+async function main(
+  captureContract: boolean,
+  publicationTag?: string,
+): Promise<Record<string, unknown>> {
+  if (publicationTag !== undefined) {
+    requireCondition(
+      publicationTag.startsWith(RELEASE_IMAGE_TAG_PREFIX)
+        && /^[a-f0-9]{12}$/u.test(
+          publicationTag.slice(RELEASE_IMAGE_TAG_PREFIX.length),
+        ),
+      "RELEASE_IMAGE_TAG_REFERENCE",
+    );
+    assertLocalImageTagAvailable(publicationTag);
+  }
   const context = await assembleRefundWorkerBuildContext();
   const proofDirectory = await mkdtemp(join(tmpdir(), "mira-refund-r2a-proof-"));
   const iidFile = join(proofDirectory, "image.iid");
   const metadataFile = join(proofDirectory, "image-metadata.json");
   const tag = createProofImageTag();
   const ownership = new ProofImageOwnership(tag, executeDockerCommand);
+  let publicationTagCreated = false;
   const lifecycle = await withProofImageLifecycle(
     ownership,
     async (proof) => {
@@ -1164,7 +1180,9 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
       await readFile(iidFile, "utf8"),
       await readFile(metadataFile, "utf8"),
     );
-    proveProxyChecksumMismatchFails(context.directory, dockerfile);
+    if (!captureContract) {
+      proveProxyChecksumMismatchFails(context.directory, dockerfile);
+    }
 
     const rawInspection: unknown = JSON.parse(
       capture("docker", ["image", "inspect", proof.tag]),
@@ -1200,6 +1218,11 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
       enforceCurrentSubject(current, context);
       enforceCurrentArtifact(current, rawInspection);
       enforceCurrentClosure(filesystem, current);
+    }
+    if (publicationTag !== undefined) {
+      run("docker", ["tag", proof.tag, publicationTag], 30_000);
+      publicationTagCreated = true;
+      run("docker", ["push", publicationTag], 900_000);
     }
 
     return Object.freeze({
@@ -1255,13 +1278,32 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
       writeDeniedProbeCount: runtimeProof.writeDeniedProbeCount,
       writeAllowedProbeCount: runtimeProof.writeAllowedProbeCount,
       captureContract,
+      publicationTag: publicationTag ?? "ABSENT",
+      publicationManifestDigest:
+        publicationTag === undefined ? "ABSENT" : identity.manifestDigest.value,
       localAuthority: "LOCAL_REPRODUCIBILITY_PROOF: NOT_RELEASE_AUTHORITY",
-      releaseImageDigest: "ABSENT",
+      releaseImageDigest:
+        publicationTag === undefined ? "ABSENT" : identity.manifestDigest.value,
     });
     },
     async () => {
-      await context.cleanup();
-      await rm(proofDirectory, { recursive: true, force: true });
+      let failed = false;
+      if (publicationTagCreated && publicationTag !== undefined) {
+        failed = !cleanupExactLocalImageTag(publicationTag) || failed;
+      }
+      try {
+        await context.cleanup();
+      } catch {
+        failed = true;
+      }
+      try {
+        await rm(proofDirectory, { recursive: true, force: true });
+      } catch {
+        failed = true;
+      }
+      if (failed) {
+        throw new Error("IMAGE_VERIFICATION_FAILED:LOCAL_PUBLICATION_ARTIFACT_CLEANUP_FAILED");
+      }
     },
   );
   return Object.freeze({
@@ -1278,6 +1320,36 @@ async function main(captureContract: boolean): Promise<Record<string, unknown>> 
       lifecycle.identity.repoDigestReferences.map((reference) => reference.value),
     proofImageCleanup: "COMPLETE",
   });
+}
+
+function assertLocalImageTagAvailable(tag: string): void {
+  const inspection = executeDockerCommand(
+    ["image", "inspect", "--format", "{{.Id}}", tag],
+    30_000,
+  );
+  requireCondition(
+    !inspection.error && inspection.status === 1,
+    inspection.status === 0
+      ? "RELEASE_IMAGE_LOCAL_TAG_COLLISION"
+      : "RELEASE_IMAGE_LOCAL_TAG_COLLISION_CHECK",
+  );
+}
+
+function cleanupExactLocalImageTag(tag: string): boolean {
+  const inspection = executeDockerCommand(
+    ["image", "inspect", "--format", "{{.Id}}", tag],
+    30_000,
+  );
+  if (inspection.error || inspection.status === null) return false;
+  if (inspection.status === 1) return true;
+  if (inspection.status !== 0) return false;
+  const removed = executeDockerCommand(["image", "rm", tag], 120_000);
+  if (removed.error || removed.status !== 0) return false;
+  const verified = executeDockerCommand(
+    ["image", "inspect", "--format", "{{.Id}}", tag],
+    30_000,
+  );
+  return !verified.error && verified.status === 1;
 }
 
 export async function verifyExistingRefundWorkerImage(
@@ -4469,8 +4541,12 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 const isMain = process.argv[1] !== undefined
   && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  const captureContract = process.argv.length === 3
+  const captureContractOnly = process.argv.length === 3
     && process.argv[2] === "--capture-contract";
+  const captureContractAndPublish = process.argv.length === 4
+    && process.argv[2] === "--capture-contract-and-publish"
+    && process.argv[3] !== undefined;
+  const captureContract = captureContractOnly || captureContractAndPublish;
   const verifyExistingImage = process.argv.length === 4
     && process.argv[2] === "--verify-existing-image"
     && process.argv[3] !== undefined;
@@ -4480,7 +4556,10 @@ if (isMain) {
   try {
     const result = verifyExistingImage
       ? await verifyExistingRefundWorkerImage(process.argv[3] ?? "")
-      : await main(captureContract);
+      : await main(
+        captureContract,
+        captureContractAndPublish ? process.argv[3] : undefined,
+      );
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     const bounded = boundedPrimaryError(error);

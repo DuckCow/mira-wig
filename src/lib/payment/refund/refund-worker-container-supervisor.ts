@@ -369,7 +369,7 @@ async function runWithProxy(
     );
   }
   const signal = forwardTerminationSignals(worker);
-  const workerCapture = await captureChildResult(worker);
+  const workerCapture = await captureChildResult(worker, childSpecification.resultSchema);
   signal.dispose();
   const proxyFailedWhileRunning = proxy.exitCode !== null || proxy.signalCode !== null;
   const proxyStopped = await stopChild(proxy, proxyExit, dependencies);
@@ -573,7 +573,7 @@ async function runStandaloneChild(
       childEnvironment(env),
     );
     const signal = forwardTerminationSignals(child);
-    const capture = await captureChildResult(child);
+    const capture = await captureChildResult(child, childSpecification.resultSchema);
     signal.dispose();
     return capture.result
       ? relayChildResult(capture.result, output)
@@ -668,6 +668,7 @@ type ChildValidationState =
   | "MISSING_TERMINAL"
   | "STREAM_CONTRACT_VIOLATION"
   | "LINE_CONTRACT_VIOLATION"
+  | "INVALID_UTF8"
   | "INVALID_JSON"
   | "NON_OBJECT_JSON"
   | "INVALID_RECORD"
@@ -699,30 +700,54 @@ type ChildCapture = Readonly<{
   signal: NodeJS.Signals | null;
   streamState: ChildStreamState;
   outputOverflow: boolean;
+  framing: ChildFramingMetadata;
   result: ChildResult | null;
   validation: ChildValidationState;
+}>;
+type ChildTerminalUtf8State = "NOT_ATTEMPTED" | "VALID" | "INVALID";
+type ChildFramingMetadata = Readonly<{
+  stdoutBytes: number;
+  stderrBytes: number;
+  stdoutLfCount: number;
+  stdoutCrCount: number;
+  terminalCandidateCount: number;
+  terminalUtf8: ChildTerminalUtf8State;
 }>;
 type TerminalCapture = Readonly<{
   terminal: Readonly<{ line: string; value: unknown }> | null;
   validation: ChildValidationState;
 }>;
 
-async function captureChildResult(child: SpawnedChild): Promise<ChildCapture> {
+async function captureChildResult(
+  child: SpawnedChild,
+  resultSchema?: ChildSpecification["resultSchema"],
+): Promise<ChildCapture> {
   let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-  let overflow = false;
+  let stdoutOverflow = false;
+  let stderrOverflow = false;
   let stdoutSeen = false;
   let stderrSeen = false;
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let stdoutLfCount = 0;
+  let stdoutCrCount = 0;
   const appendStdout = (chunk: Buffer | string) => {
     stdoutSeen = true;
-    stdout = boundedAppend(stdout, chunk, () => {
-      overflow = true;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stdoutBytes = boundedObservedCount(stdoutBytes, bytes.length);
+    stdoutLfCount = boundedObservedCount(stdoutLfCount, countByte(bytes, 0x0a));
+    stdoutCrCount = boundedObservedCount(stdoutCrCount, countByte(bytes, 0x0d));
+    stdout = boundedAppend(stdout, bytes, () => {
+      stdoutOverflow = true;
     });
   };
   const appendStderr = (chunk: Buffer | string) => {
     stderrSeen = true;
-    stderr = boundedAppend(stderr, chunk, () => {
-      overflow = true;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stderrBytes = boundedObservedCount(stderrBytes, bytes.length);
+    stderr = boundedAppend(stderr, bytes, () => {
+      stderrOverflow = true;
     });
   };
   child.stdout.on("data", appendStdout);
@@ -732,28 +757,64 @@ async function captureChildResult(child: SpawnedChild): Promise<ChildCapture> {
   child.stderr.removeListener("data", appendStderr);
   const processState = childProcessState(exit);
   const streams = childStreamState(stdoutSeen, stderrSeen);
+  const overflow = stdoutOverflow || stderrOverflow;
+  const framing = childFramingMetadata({
+    stdoutBytes,
+    stderrBytes,
+    stdoutLfCount,
+    stdoutCrCount,
+    stdout,
+    stdoutOverflow,
+  });
   if (overflow) {
-    return childCapture(processState, exit, streams, true, null, "OUTPUT_OVERFLOW");
+    return childCapture(processState, exit, streams, true, framing, null, "OUTPUT_OVERFLOW");
   }
   if (exit.signal !== null) {
-    return childCapture(processState, exit, streams, false, null, "SIGNAL_TERMINATION");
+    return childCapture(processState, exit, streams, false, framing, null, "SIGNAL_TERMINATION");
   }
   if (exit.code === null) {
-    return childCapture(processState, exit, streams, false, null, "CLOSE_STATE_UNAVAILABLE");
+    return childCapture(
+      processState, exit, streams, false, framing, null, "CLOSE_STATE_UNAVAILABLE",
+    );
   }
-  const selected = exit.code === 0 ? stdout : stderr;
-  const other = exit.code === 0 ? stderr : stdout;
-  const terminal = exactOneJsonLine(selected, other);
+  return captureCompletedChildResult({
+    processState,
+    exitCode: exit.code,
+    streams,
+    framing,
+    stdout,
+    stderr,
+    resultSchema,
+  });
+}
+
+function captureCompletedChildResult(input: Readonly<{
+  processState: ChildProcessState;
+  exitCode: number;
+  streams: ChildStreamState;
+  framing: ChildFramingMetadata;
+  stdout: Buffer;
+  stderr: Buffer;
+  resultSchema?: ChildSpecification["resultSchema"];
+}>): ChildCapture {
+  const exit = Object.freeze({ code: input.exitCode, signal: null });
+  const reentry = input.resultSchema === "EXIMBAY_REFUND_REENTRY";
+  const selected = reentry ? input.stdout : input.exitCode === 0 ? input.stdout : input.stderr;
+  const other = reentry ? Buffer.alloc(0) : input.exitCode === 0 ? input.stderr : input.stdout;
+  const terminal = exactOneJsonLine(selected, other, reentry);
   return terminal.terminal
     ? childCapture(
-      processState,
+      input.processState,
       exit,
-      streams,
+      input.streams,
       false,
-      Object.freeze({ ...terminal.terminal, exitCode: exit.code }),
+      input.framing,
+      Object.freeze({ ...terminal.terminal, exitCode: input.exitCode }),
       "TRUSTED",
     )
-    : childCapture(processState, exit, streams, false, null, terminal.validation);
+    : childCapture(
+      input.processState, exit, input.streams, false, input.framing, null, terminal.validation,
+    );
 }
 
 function childCapture(
@@ -761,6 +822,7 @@ function childCapture(
   exit: Readonly<{ code: number | null; signal: NodeJS.Signals | null }>,
   streamState: ChildStreamState,
   outputOverflow: boolean,
+  framing: ChildFramingMetadata,
   result: ChildResult | null,
   validation: ChildValidationState,
 ): ChildCapture {
@@ -770,9 +832,52 @@ function childCapture(
     signal: exit.signal,
     streamState,
     outputOverflow,
+    framing,
     result,
     validation,
   });
+}
+
+function childFramingMetadata(input: Readonly<{
+  stdoutBytes: number;
+  stderrBytes: number;
+  stdoutLfCount: number;
+  stdoutCrCount: number;
+  stdout: Buffer;
+  stdoutOverflow: boolean;
+}>): ChildFramingMetadata {
+  return Object.freeze({
+    stdoutBytes: input.stdoutBytes,
+    stderrBytes: input.stderrBytes,
+    stdoutLfCount: input.stdoutLfCount,
+    stdoutCrCount: input.stdoutCrCount,
+    terminalCandidateCount: input.stdoutLfCount,
+    terminalUtf8: input.stdoutOverflow
+      ? "NOT_ATTEMPTED"
+      : fatalUtf8State(input.stdout),
+  });
+}
+
+function boundedObservedCount(current: number, increment: number): number {
+  return Math.min(CHILD_OUTPUT_LIMIT_BYTES + 1, current + increment);
+}
+
+function countByte(bytes: Buffer, expected: number): number {
+  let count = 0;
+  for (const byte of bytes) {
+    if (byte === expected) count += 1;
+  }
+  return count;
+}
+
+function fatalUtf8State(bytes: Buffer): ChildTerminalUtf8State {
+  if (bytes.length === 0) return "NOT_ATTEMPTED";
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return "VALID";
+  } catch {
+    return "INVALID";
+  }
 }
 
 function childProcessState(
@@ -804,6 +909,7 @@ function boundedAppend(
 function exactOneJsonLine(
   selected: Buffer,
   other: Buffer,
+  fatalUtf8 = false,
 ): TerminalCapture {
   const transportFailure = terminalTransportFailure(selected, other);
   if (transportFailure) return transportFailure;
@@ -811,14 +917,41 @@ function exactOneJsonLine(
   if (withoutLf.includes(0x0a) || withoutLf.includes(0x0d)) {
     return Object.freeze({ terminal: null, validation: "LINE_CONTRACT_VIOLATION" });
   }
-  const line = selected.toString("utf8");
+  const decoded = decodeTerminalLine(selected, withoutLf, fatalUtf8);
+  if (!decoded) {
+    return Object.freeze({ terminal: null, validation: "INVALID_UTF8" });
+  }
+  return parseTerminalJson(decoded);
+}
+
+function parseTerminalJson(
+  decoded: Readonly<{ line: string; json: string }>,
+): TerminalCapture {
   try {
-    const parsed: unknown = JSON.parse(withoutLf.toString("utf8"));
+    const parsed: unknown = JSON.parse(decoded.json);
     return parsed && typeof parsed === "object"
-      ? Object.freeze({ terminal: Object.freeze({ line, value: parsed }), validation: "TRUSTED" })
+      ? Object.freeze({
+        terminal: Object.freeze({ line: decoded.line, value: parsed }),
+        validation: "TRUSTED",
+      })
       : Object.freeze({ terminal: null, validation: "NON_OBJECT_JSON" });
   } catch {
     return Object.freeze({ terminal: null, validation: "INVALID_JSON" });
+  }
+}
+
+function decodeTerminalLine(
+  selected: Buffer,
+  withoutLf: Buffer,
+  fatalUtf8: boolean,
+): Readonly<{ line: string; json: string }> | null {
+  try {
+    return Object.freeze({
+      line: new TextDecoder("utf-8", { fatal: fatalUtf8 }).decode(selected),
+      json: new TextDecoder("utf-8", { fatal: fatalUtf8 }).decode(withoutLf),
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -1456,7 +1589,7 @@ function writeReentrySupervisorTerminal(
   const hostOk = reentryHostIsOk(childSpawnState, validation, lifecycle);
   const ok = reentrySupervisorIsOk(hostOk, childResult);
   const terminal = Object.freeze({
-    schema: "mira-refund-eximbay-reentry-supervisor/v1",
+    schema: "mira-refund-eximbay-reentry-supervisor/v2",
     ok,
     childOperationResult: Object.freeze({
       evidence: childResult ? "TRUSTWORTHY" : "UNKNOWN",
@@ -1472,11 +1605,7 @@ function writeReentrySupervisorTerminal(
       proxyLifecycle: lifecycle,
     }),
   });
-  return writeStatic(
-    ok ? output.stdout : output.stderr,
-    `${JSON.stringify(terminal)}\n`,
-    ok ? 0 : 1,
-  );
+  return writeStatic(output.stdout, `${JSON.stringify(terminal)}\n`, ok ? 0 : 1);
 }
 
 function reentryHostIsOk(
@@ -1521,6 +1650,7 @@ function reentryChildProcessResult(capture: ChildCapture | null) {
       childSignal: capture.signal,
       childStreamState: capture.streamState,
       childOutputOverflow: capture.outputOverflow,
+      childFraming: capture.framing,
     })
     : Object.freeze({
       childProcessState: "NOT_STARTED",
@@ -1528,6 +1658,14 @@ function reentryChildProcessResult(capture: ChildCapture | null) {
       childSignal: null,
       childStreamState: "NOT_CAPTURED",
       childOutputOverflow: false,
+      childFraming: Object.freeze({
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        stdoutLfCount: 0,
+        stdoutCrCount: 0,
+        terminalCandidateCount: 0,
+        terminalUtf8: "NOT_ATTEMPTED",
+      }),
     });
 }
 

@@ -251,7 +251,7 @@ describe("refund worker container supervisor", () => {
     });
     const terminal = parseOnlyOutput(harness.stdout);
     expect(terminal).toMatchObject({
-      schema: "mira-refund-eximbay-reentry-supervisor/v1",
+      schema: "mira-refund-eximbay-reentry-supervisor/v2",
       ok: true,
       childOperationResult: {
         evidence: "TRUSTWORTHY",
@@ -262,7 +262,18 @@ describe("refund worker container supervisor", () => {
           cancellationCount: 1,
         },
       },
-      hostResult: { ok: true, code: "COMPLETE", childValidation: "TRUSTED" },
+      hostResult: {
+        ok: true,
+        code: "COMPLETE",
+        childValidation: "TRUSTED",
+        childFraming: {
+          stderrBytes: 0,
+          stdoutLfCount: 1,
+          stdoutCrCount: 0,
+          terminalCandidateCount: 1,
+          terminalUtf8: "VALID",
+        },
+      },
     });
     expect(harness.stderr).toEqual([]);
   });
@@ -270,7 +281,8 @@ describe("refund worker container supervisor", () => {
   it("preserves a trustworthy failed child and its effects when proxy cleanup fails", async () => {
     const proxy = runningChild({ closeOnTerm: null });
     const operation = reentryFailure();
-    const child = completedChild(1, "", reentryTerminal(operation));
+    const diagnostic = "BOUNDED_NON_AUTHORITATIVE_DIAGNOSTIC\n";
+    const child = completedChild(1, reentryTerminal(operation), diagnostic);
     const harness = supervisorHarness([proxy, child], { readiness: true });
 
     const exit = await runRefundWorkerContainerSupervisor(
@@ -281,7 +293,7 @@ describe("refund worker container supervisor", () => {
     );
 
     expect(exit).toBe(1);
-    const terminal = parseOnlyOutput(harness.stderr);
+    const terminal = parseOnlyOutput(harness.stdout);
     expect(terminal).toMatchObject({
       ok: false,
       childOperationResult: {
@@ -297,14 +309,22 @@ describe("refund worker container supervisor", () => {
         ok: false,
         code: "PROXY_LIFECYCLE_FAILED",
         proxyLifecycle: "READY_CLEANUP_UNCONFIRMED",
+        childStreamState: "BOTH",
+        childFraming: {
+          stderrBytes: Buffer.byteLength(diagnostic),
+          stdoutLfCount: 1,
+          stdoutCrCount: 0,
+          terminalCandidateCount: 1,
+          terminalUtf8: "VALID",
+        },
       },
     });
-    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual([]);
   });
 
   it("reports malformed re-entry child evidence with UNKNOWN provider effects", async () => {
     const proxy = runningChild({ closeOnTerm: 0 });
-    const child = completedChild(1, "", '{"ok":false}\n');
+    const child = completedChild(1, '{"ok":false}\n', "diagnostic only\n");
     const harness = supervisorHarness([proxy, child], { readiness: true });
 
     const exit = await runRefundWorkerContainerSupervisor(
@@ -315,7 +335,7 @@ describe("refund worker container supervisor", () => {
     );
 
     expect(exit).toBe(1);
-    expect(parseOnlyOutput(harness.stderr)).toMatchObject({
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({
       childOperationResult: {
         evidence: "UNKNOWN",
         result: null,
@@ -325,9 +345,90 @@ describe("refund worker container supervisor", () => {
           cancellationCount: null,
         },
       },
-      hostResult: { ok: false, code: "CHILD_EVIDENCE_INVALID" },
+      hostResult: {
+        ok: false,
+        code: "CHILD_EVIDENCE_INVALID",
+        childValidation: "REENTRY_KEY_SET_MISMATCH",
+      },
     });
-    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it.each([
+    {
+      label: "fatal UTF-8 failure",
+      stdout: Buffer.concat([
+        Buffer.from('{"ok":false,"x":"'),
+        Buffer.from([0xc3]),
+        Buffer.from('"}\n'),
+      ]),
+      exitCode: 1,
+      validation: "INVALID_UTF8",
+      framing: { terminalCandidateCount: 1, terminalUtf8: "INVALID" },
+    },
+    {
+      label: "multiple stdout terminals",
+      stdout: `${reentryTerminal(reentryFailure())}${reentryTerminal(reentryFailure())}`,
+      exitCode: 1,
+      validation: "LINE_CONTRACT_VIOLATION",
+      framing: { terminalCandidateCount: 2, terminalUtf8: "VALID" },
+    },
+    {
+      label: "CR framing",
+      stdout: reentryTerminal(reentryFailure()).replace("\n", "\r\n"),
+      exitCode: 1,
+      validation: "LINE_CONTRACT_VIOLATION",
+      framing: { stdoutCrCount: 1, terminalCandidateCount: 1, terminalUtf8: "VALID" },
+    },
+    {
+      label: "stdout overflow",
+      stdout: `${"x".repeat(64 * 1024)}\n`,
+      exitCode: 1,
+      validation: "OUTPUT_OVERFLOW",
+      framing: { terminalCandidateCount: 1, terminalUtf8: "NOT_ATTEMPTED" },
+    },
+    {
+      label: "exit and result mismatch",
+      stdout: reentryTerminal(reentryFailure()),
+      exitCode: 0,
+      validation: "REENTRY_EXIT_CODE_MISMATCH",
+      framing: { terminalCandidateCount: 1, terminalUtf8: "VALID" },
+    },
+  ])("rejects $label without deriving provider effects", async ({
+    stdout,
+    exitCode,
+    validation,
+    framing,
+  }) => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const child = completedChild(exitCode, stdout, "bounded diagnostic\n");
+    const harness = supervisorHarness([proxy, child], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"],
+      REFUND_REENTRY_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({
+      childOperationResult: {
+        evidence: "UNKNOWN",
+        result: null,
+        providerEffects: {
+          preflightRetrieveCount: null,
+          reconciliationLookupCount: null,
+          cancellationCount: null,
+        },
+      },
+      hostResult: {
+        code: "CHILD_EVIDENCE_INVALID",
+        childValidation: validation,
+        childFraming: framing,
+      },
+    });
+    expect(harness.stderr).toEqual([]);
   });
 
   it.each([0, 1] as const)(
@@ -1393,7 +1494,11 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function completedChild(exitCode: number, stdout: string, stderr: string): FakeChild {
+function completedChild(
+  exitCode: number,
+  stdout: string | Buffer,
+  stderr: string | Buffer,
+): FakeChild {
   return new FakeChild((child) => {
     if (stdout) child.stdout.write(stdout);
     if (stderr) child.stderr.write(stderr);

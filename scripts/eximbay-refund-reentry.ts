@@ -7,7 +7,7 @@ export async function main(): Promise<number> {
   const result = await runEximbayRefundReentryOnce(process.env);
   const line = `${JSON.stringify(result)}\n`;
   const clean = result.cleanupFailures.length === 0;
-  (result.ok && clean ? process.stdout : process.stderr).write(line);
+  process.stdout.write(line);
   return result.ok && clean ? 0 : 1;
 }
 

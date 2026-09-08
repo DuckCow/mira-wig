@@ -194,7 +194,7 @@ describe("reclaimUncontactedRefundExecution integration", () => {
     expect(state.evidence.length).toBe(0);
   });
 
-  it("takes over only the exact sealed Eximbay predecessor generation once from 1 to 2", async () => {
+  it("takes over only the exact sealed Eximbay predecessor generation once from 2 to 3", async () => {
     const leased = await trackedExactSealedEximbayReentryFixture(fixtures);
 
     const first = await reclaimUncontactedRefundExecution(
@@ -206,7 +206,7 @@ describe("reclaimUncontactedRefundExecution integration", () => {
     expect(first.ok).toBe(true);
     if (!first.ok) throw new Error(`Expected exact sealed reclaim success: ${first.code}`);
     expect(first.lease.commandId).toBe(EXIMBAY_REFUND_REENTRY_TARGET.commandId);
-    expect(first.lease.leaseGeneration).toBe(2);
+    expect(first.lease.leaseGeneration).toBe(3);
     expect(first.recoveredState).toBe("ORDINAL_ZERO");
     expect(await db.refundExecutionProviderOperationBinding.count({
       where: { refundAttemptId: EXIMBAY_REFUND_REENTRY_TARGET.refundAttemptId },
@@ -780,6 +780,38 @@ async function trackedExactSealedEximbayReentryFixture(
     leaseOwner: "exact-sealed-eximbay-predecessor",
   }, LEASE_ENV);
   if (!acquired.ok) throw new Error(`Expected exact predecessor lease: ${acquired.code}`);
+  const generationOneOccurredAt = new Date("1999-12-31T23:50:00.000Z");
+  const generationTwoOccurredAt = new Date("2000-01-01T00:00:00.000Z");
+  await db.$transaction([
+    db.refundExecutionCommandEvent.updateMany({
+      where: {
+        commandId: fixture.commandId,
+        eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+        leaseGeneration: acquired.lease.leaseGeneration,
+      },
+      data: { occurredAt: generationOneOccurredAt },
+    }),
+    db.refundExecutionCommand.update({
+      where: { id: fixture.commandId },
+      data: {
+        leaseGeneration: target.predecessorLeaseGeneration,
+        leaseOwner: "exact-sealed-eximbay-generation-two-predecessor",
+        leaseUntil: new Date(
+          generationTwoOccurredAt.getTime() + target.predecessorLeaseDurationMs,
+        ),
+        leaseTokenHash: createHash("sha256").update("generation-two-token").digest("hex"),
+      },
+    }),
+    db.refundExecutionCommandEvent.create({
+      data: {
+        commandId: fixture.commandId,
+        eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+        leaseGeneration: target.predecessorLeaseGeneration,
+        dispatchAttempt: 0,
+        occurredAt: generationTwoOccurredAt,
+      },
+    }),
+  ]);
   await db.refundExecutionProviderOperationBinding.create({
     data: {
       id: target.providerOperationBindingId,

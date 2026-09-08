@@ -74,8 +74,8 @@ export type LockedUncontactedRecoveryState = Readonly<{
 export type UncontactedRecoveryClassification =
   | Readonly<{ kind: "EXPIRED_U1" }>
   | Readonly<{ kind: "ACTIVE_U1" }>
-  | Readonly<{ kind: "EXPIRED_SEALED_EXIMBAY_U1" }>
-  | Readonly<{ kind: "ACTIVE_SEALED_EXIMBAY_U1" }>
+  | Readonly<{ kind: "EXPIRED_SEALED_EXIMBAY_REENTRY" }>
+  | Readonly<{ kind: "ACTIVE_SEALED_EXIMBAY_REENTRY" }>
   | Readonly<{ kind: "AUTHORIZED_U2" }>
   | Readonly<{ kind: "EXPIRED_AUTHORIZED_EXIMBAY_R1" }>
   | Readonly<{ kind: "CONTACTED" }>
@@ -143,8 +143,8 @@ function classifyOrdinalZeroLease(
   const sealedEximbay = hasExactSealedEximbayReentryState(locked);
   if (sealedEximbay) {
     return isExpired(locked)
-      ? classification("EXPIRED_SEALED_EXIMBAY_U1")
-      : classification("ACTIVE_SEALED_EXIMBAY_U1");
+      ? classification("EXPIRED_SEALED_EXIMBAY_REENTRY")
+      : classification("ACTIVE_SEALED_EXIMBAY_REENTRY");
   }
   const exactUncontactedShape = [
     locked.dispatches.length === 0,

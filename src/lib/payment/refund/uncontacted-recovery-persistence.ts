@@ -73,7 +73,7 @@ async function reclaimInTransaction(
   if (!locked) return reclaimFailure("COMMAND_NOT_FOUND_OR_INELIGIBLE");
   const classification = classifyUncontactedRefundExecutionState(locked);
   if (classification.kind !== "EXPIRED_U1"
-    && classification.kind !== "EXPIRED_SEALED_EXIMBAY_U1"
+    && classification.kind !== "EXPIRED_SEALED_EXIMBAY_REENTRY"
     && classification.kind !== "EXPIRED_AUTHORIZED_EXIMBAY_R1") {
     return resultForClassification(classification, "LEASE_CONFLICT");
   }
@@ -299,12 +299,12 @@ function resultForClassification(
 ): ReclaimUncontactedRefundExecutionResult {
   if ([
     "EXPIRED_U1",
-    "EXPIRED_SEALED_EXIMBAY_U1",
+    "EXPIRED_SEALED_EXIMBAY_REENTRY",
     "EXPIRED_AUTHORIZED_EXIMBAY_R1",
   ].includes(classification.kind)) {
     return reclaimFailure(expiredFallback);
   }
-  if (["ACTIVE_U1", "ACTIVE_SEALED_EXIMBAY_U1"].includes(classification.kind)) {
+  if (["ACTIVE_U1", "ACTIVE_SEALED_EXIMBAY_REENTRY"].includes(classification.kind)) {
     return reclaimFailure("LEASE_NOT_EXPIRED");
   }
   if (classification.kind === "AUTHORIZED_U2") {

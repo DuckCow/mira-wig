@@ -53,10 +53,11 @@ export const EXIMBAY_REFUND_REENTRY_TARGET = Object.freeze({
   approvalApprovedAt: "2026-09-08T08:05:31.763Z",
   approvalExpiresAt: "2026-09-08T08:35:31.763Z",
   approvalConsumedAt: "2026-09-08T08:07:49.762Z",
-  predecessorLeaseUntil: "2026-09-08T08:12:50.494Z",
-  predecessorLeaseEventId: "cmtse03xh00000ps6ktj4v6ys",
-  predecessorLeaseOccurredAt: "2026-09-08T08:07:50.494Z",
-  predecessorLeaseGeneration: 1,
+  generationOneLeaseUntil: "2026-09-08T08:12:50.494Z",
+  generationOneLeaseEventId: "cmtse03xh00000ps6ktj4v6ys",
+  generationOneLeaseOccurredAt: "2026-09-08T08:07:50.494Z",
+  predecessorLeaseDurationMs: 300_000,
+  predecessorLeaseGeneration: 2,
   amount: 100,
   currency: "USD",
   mid: "1849705C64",
@@ -162,7 +163,7 @@ function targetMatches(command: Target, capturedAt: Date): boolean {
   });
   const leaseExpired = isExpiredLease(command.leaseUntil, capturedAt);
   const leaseOwnerValid = isNonemptyLeaseOwner(command.leaseOwner);
-  const predecessorLeaseMatches = exactPredecessorLeaseMatches(command);
+  const predecessorLeaseMatches = exactPredecessorLeaseMatches(command, command.events);
   return [
     payment.id === target.paymentId,
     order.id === target.orderId,
@@ -233,23 +234,41 @@ function isLeaseTokenHash(value: string | null): boolean {
   return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
 }
 
-function exactPredecessorLeaseMatches(command: Target): boolean {
+function exactPredecessorLeaseMatches(
+  command: Target,
+  events: Target["events"],
+): boolean {
   const leaseUntil = command.leaseUntil;
+  const predecessorEvent = events.at(-1);
   return leaseUntil instanceof Date
-    && leaseUntil.toISOString() === EXIMBAY_REFUND_REENTRY_TARGET.predecessorLeaseUntil;
+    && predecessorEvent !== undefined
+    && leaseUntil.getTime() === predecessorEvent.occurredAt.getTime()
+      + EXIMBAY_REFUND_REENTRY_TARGET.predecessorLeaseDurationMs;
 }
 
 function exactPredecessorEventMatches(events: Target["events"]): boolean {
-  const event = events[0];
-  if (events.length !== 1 || !event) return false;
+  const generationOne = events[0];
+  const predecessor = events[1];
+  if (events.length !== 2 || !generationOne || !predecessor) return false;
   const target = EXIMBAY_REFUND_REENTRY_TARGET;
   return [
-    event.id === target.predecessorLeaseEventId,
-    event.eventType === RefundExecutionCommandEventType.LEASE_ACQUIRED,
-    event.leaseGeneration === target.predecessorLeaseGeneration,
-    event.dispatchAttempt === 0,
-    event.occurredAt.toISOString() === target.predecessorLeaseOccurredAt,
+    generationOne.id === target.generationOneLeaseEventId,
+    generationOne.commandId === target.commandId,
+    generationOne.eventType === RefundExecutionCommandEventType.LEASE_ACQUIRED,
+    generationOne.leaseGeneration === 1,
+    generationOne.dispatchAttempt === 0,
+    generationOne.occurredAt.toISOString() === target.generationOneLeaseOccurredAt,
+    predecessor.commandId === target.commandId,
+    predecessor.eventType === RefundExecutionCommandEventType.LEASE_ACQUIRED,
+    predecessor.leaseGeneration === target.predecessorLeaseGeneration,
+    predecessor.dispatchAttempt === 0,
+    predecessor.occurredAt.getTime() >= generationOne.occurredAt.getTime(),
+    isCuid(predecessor.id),
   ].every(Boolean);
+}
+
+function isCuid(value: string): boolean {
+  return /^c[a-z0-9]{24}$/u.test(value);
 }
 
 function approvalMatches(
