@@ -46,35 +46,38 @@ check "exact_runtime_authority" {
       local.contract.image.predecessor.imagePolicyVersion == "V8" &&
       local.contract.image.predecessor.imagePolicySha256 == "edd02390a033d26d239ce1f0bf13e19d983228e2a80aaaea665afb6bdffbfe5a" &&
       local.contract.image.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.runId == "6a44959c5335c547b9519761168dbe1a" &&
-      local.contract.target.checkoutSessionId == "cmts5d5oz000001s6mfq4g6bc" &&
-      local.contract.target.predecessor.runId == "cb90075b0ee7c3ac5402af2b39ea19af" &&
-      local.contract.target.predecessor.checkoutSessionId == "cmts0gevg000001s6zvwa5m06" &&
+      local.contract.target.runId == "eea19da85caa9d370c0be2f20dcd68da" &&
+      local.contract.target.checkoutSessionId == "cmtsa2gt7000001s6vpz7vepd" &&
+      local.contract.target.predecessor.runId == "6a44959c5335c547b9519761168dbe1a" &&
+      local.contract.target.predecessor.checkoutSessionId == "cmts5d5oz000001s6mfq4g6bc" &&
       local.contract.target.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.runId == "9945726fe48b738bf30011af707b5b5f" &&
-      local.contract.target.predecessor.predecessor.checkoutSessionId == "cmtroa82m000001s6zh79k5jw" &&
+      local.contract.target.predecessor.predecessor.runId == "cb90075b0ee7c3ac5402af2b39ea19af" &&
+      local.contract.target.predecessor.predecessor.checkoutSessionId == "cmts0gevg000001s6zvwa5m06" &&
       local.contract.target.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.runId == "248a30b8004082b8fca92f2c1a1fb066" &&
-      local.contract.target.predecessor.predecessor.predecessor.checkoutSessionId == "cmtr2fobw000001s6ovszlemp" &&
+      local.contract.target.predecessor.predecessor.predecessor.runId == "9945726fe48b738bf30011af707b5b5f" &&
+      local.contract.target.predecessor.predecessor.predecessor.checkoutSessionId == "cmtroa82m000001s6zh79k5jw" &&
       local.contract.target.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.runId == "1f93662ed1b45856aceac782029111fd" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtqwntmf000001s6ol01azw8" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.runId == "248a30b8004082b8fca92f2c1a1fb066" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtr2fobw000001s6ovszlemp" &&
       local.contract.target.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "e03b436e666b4b188ec65c0ee4139790" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtktx8rx000001s6lfbjivo1" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "1f93662ed1b45856aceac782029111fd" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtqwntmf000001s6ol01azw8" &&
       local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "4c5c9b039f18037c6f3356c903df1372" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtk62h80000001s626b90f9y" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "e03b436e666b4b188ec65c0ee4139790" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtktx8rx000001s6lfbjivo1" &&
       local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "89682c544f42d4debb260f5e3186087a" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtjsiiqw000001s6uimkjhj5" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "4c5c9b039f18037c6f3356c903df1372" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtk62h80000001s626b90f9y" &&
       local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "da7783b013d20713d6db207c7657b559" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtjnvso1000001s60xfg0tyu" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "89682c544f42d4debb260f5e3186087a" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtjsiiqw000001s6uimkjhj5" &&
       local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "a764f61f4e4ba799ab16b318a676db65" &&
-      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmthg2mzu000001s6iuvx7u5x" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "da7783b013d20713d6db207c7657b559" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmtjnvso1000001s60xfg0tyu" &&
       local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.runId == "a764f61f4e4ba799ab16b318a676db65" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.checkoutSessionId == "cmthg2mzu000001s6iuvx7u5x" &&
+      local.contract.target.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.predecessor.status == "SUPERSEDED_HISTORICAL_ONLY" &&
       local.fixed_environment.MIRA_EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID == local.contract.target.runId &&
       local.fixed_environment.MIRA_EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID == local.contract.target.checkoutSessionId &&
       local.command == "eximbay-contacted-reconciliation-once"
