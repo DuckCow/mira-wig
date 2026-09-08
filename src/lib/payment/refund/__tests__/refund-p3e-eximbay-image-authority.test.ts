@@ -36,8 +36,10 @@ import historicalV15Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v15.json";
 import historicalV16Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v16.json";
-import currentPolicy from
+import historicalV17Policy from
   "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json";
+import currentPolicy from
+  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json";
 import {
   enforceCurrentArtifact,
   enforceCurrentImageConfiguration,
@@ -60,6 +62,7 @@ import {
   enforceV14EximbayImageSubject,
   enforceV15EximbayImageSubject,
   enforceV16EximbayImageSubject,
+  enforceV17EximbayImageSubject,
   enforceV7EximbayImageSubject,
   parseCurrentEximbayImageAuthority,
   parseFrozenImageContract,
@@ -78,6 +81,7 @@ import {
   parseV14EximbayImageAuthority,
   parseV15EximbayImageAuthority,
   parseV16EximbayImageAuthority,
+  parseV17EximbayImageAuthority,
   parseV7EximbayImageAuthority,
   readCurrentEximbayImageAuthority,
   readV2EximbayImageAuthority,
@@ -94,6 +98,7 @@ import {
   readV14EximbayImageAuthority,
   readV15EximbayImageAuthority,
   readV16EximbayImageAuthority,
+  readV17EximbayImageAuthority,
   readV7EximbayImageAuthority,
   verifyFrozenImageAuthorityBytes,
   type CurrentEximbayImageAuthority,
@@ -190,6 +195,11 @@ const V16_PATH = join(
 const V17_PATH = join(
   process.cwd(),
   "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v17.json",
+);
+
+const V18_PATH = join(
+  process.cwd(),
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json",
 );
 
 describe("immutable four-entrypoint v1 predecessor authority", () => {
@@ -540,12 +550,32 @@ describe("immutable contacted-reconciliation v16 predecessor authority", () => {
   });
 });
 
-describe("conjunctive historical A and v1-v16 predecessors with current v17 authority", () => {
-  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+describe("immutable contacted-reconciliation v17 predecessor authority", () => {
+  const authority = parseV17EximbayImageAuthority(historicalV17Policy);
 
-  it("selects v17 and accepts exact historical chain, subject, artifact, and closure", async () => {
+  it("keeps exact v17 bytes and the ten-node contacted chain", async () => {
     expect(createHash("sha256").update(readFileSync(V17_PATH)).digest("hex")).toBe(
       "48452e46f0d56bb0f305bca36d2537fc19db0e22538f5099aa507fe2a8b7cc86",
+    );
+    await expect(readV17EximbayImageAuthority()).resolves.toEqual(authority);
+    expect(() => enforceV17EximbayImageSubject(
+      authority,
+      currentContext(authority),
+    )).not.toThrow();
+    expect(() => enforceCurrentClosure(currentFilesystem(authority), authority)).not.toThrow();
+    expect(historicalV17Policy.contactedReconciliation.target.runId)
+      .toBe("6a44959c5335c547b9519761168dbe1a");
+    expect(historicalV17Policy.contactedReconciliation.target.predecessor.predecessor.runId)
+      .toBe("9945726fe48b738bf30011af707b5b5f");
+  });
+});
+
+describe("conjunctive historical A and v1-v17 predecessors with current v18 authority", () => {
+  const authority = parseCurrentEximbayImageAuthority(currentPolicy);
+
+  it("selects v18 and accepts exact historical chain, subject, artifact, and closure", async () => {
+    expect(createHash("sha256").update(readFileSync(V18_PATH)).digest("hex")).toBe(
+      "8744198014a3327b569420afad356d090186a118a7057758ea4ad8783a7d7822",
     );
     expect(() => verifyFrozenImageAuthorityBytes(readFileSync(A_PATH))).not.toThrow();
     await expect(readCurrentEximbayImageAuthority()).resolves.toEqual(authority);
@@ -560,56 +590,62 @@ describe("conjunctive historical A and v1-v16 predecessors with current v17 auth
   it("binds the sole contacted target and preserves the canary ceilings", () => {
     expect(currentPolicy.contactedReconciliation).toMatchObject({
       target: {
-        runId: "6a44959c5335c547b9519761168dbe1a",
-        checkoutSessionId: "cmts5d5oz000001s6mfq4g6bc",
-        paymentId: "DERIVED_BY_APPLICATION",
-        providerOrderId: "DERIVED_BY_APPLICATION",
-        operatorTargetInputs: 0,
-        predecessor: {
-          runId: "cb90075b0ee7c3ac5402af2b39ea19af",
-          checkoutSessionId: "cmts0gevg000001s6zvwa5m06",
-          status: "SUPERSEDED_HISTORICAL_ONLY",
-          predecessor: {
-            runId: "9945726fe48b738bf30011af707b5b5f",
-            checkoutSessionId: "cmtroa82m000001s6zh79k5jw",
-            status: "SUPERSEDED_HISTORICAL_ONLY",
-            predecessor: {
-              runId: "248a30b8004082b8fca92f2c1a1fb066",
-              checkoutSessionId: "cmtr2fobw000001s6ovszlemp",
-              status: "SUPERSEDED_HISTORICAL_ONLY",
-              predecessor: {
-                runId: "1f93662ed1b45856aceac782029111fd",
-                checkoutSessionId: "cmtqwntmf000001s6ol01azw8",
-                status: "SUPERSEDED_HISTORICAL_ONLY",
-                predecessor: {
-                  runId: "e03b436e666b4b188ec65c0ee4139790",
-                  checkoutSessionId: "cmtktx8rx000001s6lfbjivo1",
-                  status: "SUPERSEDED_HISTORICAL_ONLY",
-                  predecessor: {
-                    runId: "4c5c9b039f18037c6f3356c903df1372",
-                    checkoutSessionId: "cmtk62h80000001s626b90f9y",
-                    status: "SUPERSEDED_HISTORICAL_ONLY",
-                    predecessor: {
-                      runId: "89682c544f42d4debb260f5e3186087a",
-                      checkoutSessionId: "cmtjsiiqw000001s6uimkjhj5",
-                      status: "SUPERSEDED_HISTORICAL_ONLY",
-                      predecessor: {
-                        runId: "da7783b013d20713d6db207c7657b559",
-                        checkoutSessionId: "cmtjnvso1000001s60xfg0tyu",
-                        status: "SUPERSEDED_HISTORICAL_ONLY",
-                        predecessor: {
-                          runId: "a764f61f4e4ba799ab16b318a676db65",
-                          checkoutSessionId: "cmthg2mzu000001s6iuvx7u5x",
-                          status: "SUPERSEDED_HISTORICAL_ONLY",
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        "runId": "eea19da85caa9d370c0be2f20dcd68da",
+        "checkoutSessionId": "cmtsa2gt7000001s6vpz7vepd",
+        "paymentId": "DERIVED_BY_APPLICATION",
+        "providerOrderId": "DERIVED_BY_APPLICATION",
+        "authenticatedUserId": "DERIVED_BY_APPLICATION",
+        "operatorTargetInputs": 0,
+        "predecessor": {
+          "runId": "6a44959c5335c547b9519761168dbe1a",
+          "checkoutSessionId": "cmts5d5oz000001s6mfq4g6bc",
+          "status": "SUPERSEDED_HISTORICAL_ONLY",
+          "predecessor": {
+            "runId": "cb90075b0ee7c3ac5402af2b39ea19af",
+            "checkoutSessionId": "cmts0gevg000001s6zvwa5m06",
+            "status": "SUPERSEDED_HISTORICAL_ONLY",
+            "predecessor": {
+              "runId": "9945726fe48b738bf30011af707b5b5f",
+              "checkoutSessionId": "cmtroa82m000001s6zh79k5jw",
+              "status": "SUPERSEDED_HISTORICAL_ONLY",
+              "predecessor": {
+                "runId": "248a30b8004082b8fca92f2c1a1fb066",
+                "checkoutSessionId": "cmtr2fobw000001s6ovszlemp",
+                "status": "SUPERSEDED_HISTORICAL_ONLY",
+                "predecessor": {
+                  "runId": "1f93662ed1b45856aceac782029111fd",
+                  "checkoutSessionId": "cmtqwntmf000001s6ol01azw8",
+                  "status": "SUPERSEDED_HISTORICAL_ONLY",
+                  "predecessor": {
+                    "runId": "e03b436e666b4b188ec65c0ee4139790",
+                    "checkoutSessionId": "cmtktx8rx000001s6lfbjivo1",
+                    "status": "SUPERSEDED_HISTORICAL_ONLY",
+                    "predecessor": {
+                      "runId": "4c5c9b039f18037c6f3356c903df1372",
+                      "checkoutSessionId": "cmtk62h80000001s626b90f9y",
+                      "status": "SUPERSEDED_HISTORICAL_ONLY",
+                      "predecessor": {
+                        "runId": "89682c544f42d4debb260f5e3186087a",
+                        "checkoutSessionId": "cmtjsiiqw000001s6uimkjhj5",
+                        "status": "SUPERSEDED_HISTORICAL_ONLY",
+                        "predecessor": {
+                          "runId": "da7783b013d20713d6db207c7657b559",
+                          "checkoutSessionId": "cmtjnvso1000001s60xfg0tyu",
+                          "status": "SUPERSEDED_HISTORICAL_ONLY",
+                          "predecessor": {
+                            "runId": "a764f61f4e4ba799ab16b318a676db65",
+                            "checkoutSessionId": "cmthg2mzu000001s6iuvx7u5x",
+                            "status": "SUPERSEDED_HISTORICAL_ONLY"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       paymentBinding: "APPLICATION_DERIVED",
       providerOrderIdBinding: "APPLICATION_DERIVED",
@@ -634,6 +670,11 @@ describe("conjunctive historical A and v1-v16 predecessors with current v17 auth
 
   it("rejects every predecessor or arbitrary current target selector", () => {
     const targets = [
+      {
+        ...currentPolicy.contactedReconciliation.target,
+        runId: "6a44959c5335c547b9519761168dbe1a",
+        checkoutSessionId: "cmts5d5oz000001s6mfq4g6bc",
+      },
       {
         ...currentPolicy.contactedReconciliation.target,
         runId: "cb90075b0ee7c3ac5402af2b39ea19af",
@@ -697,8 +738,8 @@ describe("conjunctive historical A and v1-v16 predecessors with current v17 auth
 
   it("binds the exact successor source tree, supervisor, and command allowlist", () => {
     expect(authority).toMatchObject({
-      baselineCommit: "ec661b16bc0930394bebfd1c4ca5256a1c21869f",
-      sourceTree: "e602e949e8a0bd3ddb6830a2e68546456c62750d",
+      baselineCommit: "5ed4407412996d195577766c04ba3d73430fa791",
+      sourceTree: "dd0e81d06f146935e617ccf81c24c54b1ca22102",
       supervisorSource: {
         path: "src/lib/payment/refund/refund-worker-container-supervisor.ts",
         sha256: "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
