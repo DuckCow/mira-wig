@@ -22,6 +22,11 @@ import type {
   EximbayContactedReconciliationDisposition,
   EximbayContactedReconciliationResult,
 } from "./run-eximbay-contacted-reconciliation-once";
+import type {
+  EximbayRefundReentryCleanupFailure,
+  EximbayRefundReentryResult,
+  EximbayRefundReentryResultCode,
+} from "./run-eximbay-refund-reentry-once";
 import {
   TOSS_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING,
   TOSS_REFUND_SANDBOX_MERCHANT_BINDING,
@@ -55,6 +60,9 @@ const EXIMBAY_CANARY_BUNDLE = fileURLToPath(
 const EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE = fileURLToPath(
   new URL("./eximbay-contacted-reconciliation.mjs", import.meta.url),
 );
+const EXIMBAY_REFUND_REENTRY_BUNDLE = fileURLToPath(
+  new URL("./eximbay-refund-reentry.mjs", import.meta.url),
+);
 const PROXY_EXECUTABLE = "/usr/local/bin/cloud-sql-proxy";
 const SYSTEMIC_FAILURE_LINE = '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n';
 const DATABASE_UNAVAILABLE_LINE = '{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n';
@@ -69,6 +77,7 @@ export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
   "image-self-check",
   "eximbay-canary-once",
   "eximbay-contacted-reconciliation-once",
+  "eximbay-refund-reentry-once",
 ] as const);
 
 export type RefundWorkerContainerCommand = typeof REFUND_WORKER_CONTAINER_COMMANDS[number];
@@ -111,6 +120,7 @@ export type RefundWorkerContainerSupervisorDependencies = Readonly<{
   preflightBundle: string;
   eximbayCanaryBundle: string;
   eximbayContactedReconciliationBundle: string;
+  eximbayRefundReentryBundle: string;
   inspectSelf: () => Promise<RefundWorkerImageSelfCheck>;
 }>;
 
@@ -125,6 +135,7 @@ export type RefundWorkerImageSelfCheck = Readonly<{
   preflightBundlePresent: true;
   eximbayCanaryBundlePresent: true;
   eximbayContactedReconciliationBundlePresent: true;
+  eximbayRefundReentryBundlePresent: true;
   migrationCount: number;
   migrationDigest: string;
   nonRoot: true;
@@ -148,6 +159,7 @@ RefundWorkerContainerSupervisorDependencies = Object.freeze({
   preflightBundle: PREFLIGHT_BUNDLE,
   eximbayCanaryBundle: EXIMBAY_CANARY_BUNDLE,
   eximbayContactedReconciliationBundle: EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE,
+  eximbayRefundReentryBundle: EXIMBAY_REFUND_REENTRY_BUNDLE,
   inspectSelf: inspectRefundWorkerImage,
 });
 
@@ -190,7 +202,29 @@ function directCommand(
   if (command === "eximbay-contacted-reconciliation-once") {
     return runEximbayContactedReconciliationOnce(env, output, dependencies);
   }
+  if (command === "eximbay-refund-reentry-once") {
+    return runEximbayRefundReentryOnce(env, output, dependencies);
+  }
   return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+}
+
+async function runEximbayRefundReentryOnce(
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> {
+  if (!parseEximbayRefundCanaryEnvironment(env)) {
+    return writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "NOT_STARTED");
+  }
+  const binding = validateDatabaseBinding(env);
+  if (!binding) {
+    return writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "NOT_STARTED");
+  }
+  return runWithProxy(binding, Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([dependencies.eximbayRefundReentryBundle]),
+    resultSchema: "EXIMBAY_REFUND_REENTRY",
+  }), env, output, dependencies);
 }
 
 async function runEximbayContactedReconciliationOnce(
@@ -298,7 +332,7 @@ function hasConnectionEnvironmentOverride(env: RuntimeEnvironment): boolean {
 type ChildSpecification = Readonly<{
   executable: string;
   args: readonly string[];
-  resultSchema?: "EXIMBAY_CONTACTED_RECONCILIATION";
+  resultSchema?: "EXIMBAY_CONTACTED_RECONCILIATION" | "EXIMBAY_REFUND_REENTRY";
 }>;
 
 async function runWithProxy(
@@ -316,30 +350,23 @@ async function runWithProxy(
       childEnvironment(env),
     );
   } catch {
-    return writeStatic(output.stderr, DATABASE_UNAVAILABLE_LINE, 1);
+    return proxyStartFailure(childSpecification, output);
   }
   const proxyExit = observeExit(proxy);
   const ready = await waitForProxyReadiness(proxyExit, dependencies);
   if (!ready) {
     await stopChild(proxy, proxyExit, dependencies);
-    return writeStatic(output.stderr, DATABASE_UNAVAILABLE_LINE, 1);
+    return proxyReadinessFailure(childSpecification, output);
   }
   const worker = spawnChild(childSpecification, env, dependencies);
   if (!worker) {
     const proxyFailedWhileRunning = proxy.exitCode !== null || proxy.signalCode !== null;
     const proxyStopped = await stopChild(proxy, proxyExit, dependencies);
-    if (childSpecification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION") {
-      return writeContactedSystemicFailure(
-        output.stderr,
-        contactedSupervisorFailureDiagnostic(
-          null,
-          "NOT_ATTEMPTED",
-          proxyLifecycle(proxyFailedWhileRunning, proxyStopped),
-        ),
-        null,
-      );
-    }
-    return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
+    return failedChildSpawnResult(
+      childSpecification,
+      proxyLifecycle(proxyFailedWhileRunning, proxyStopped),
+      output,
+    );
   }
   const signal = forwardTerminationSignals(worker);
   const workerCapture = await captureChildResult(worker);
@@ -355,6 +382,44 @@ async function runWithProxy(
   );
 }
 
+function proxyStartFailure(
+  specification: ChildSpecification,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+): Promise<number> {
+  return specification.resultSchema === "EXIMBAY_REFUND_REENTRY"
+    ? writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "PROXY_START_FAILED")
+    : writeStatic(output.stderr, DATABASE_UNAVAILABLE_LINE, 1);
+}
+
+function proxyReadinessFailure(
+  specification: ChildSpecification,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+): Promise<number> {
+  return specification.resultSchema === "EXIMBAY_REFUND_REENTRY"
+    ? writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "PROXY_READINESS_FAILED")
+    : writeStatic(output.stderr, DATABASE_UNAVAILABLE_LINE, 1);
+}
+
+function failedChildSpawnResult(
+  specification: ChildSpecification,
+  lifecycle: ProxyLifecycleState,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+): Promise<number> {
+  if (specification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION") {
+    return writeContactedSystemicFailure(
+      output.stderr,
+      contactedSupervisorFailureDiagnostic(null, "NOT_ATTEMPTED", lifecycle),
+      null,
+    );
+  }
+  if (specification.resultSchema === "EXIMBAY_REFUND_REENTRY") {
+    return writeReentrySupervisorTerminal(
+      output, null, "NOT_ATTEMPTED", lifecycle, "FAILED",
+    );
+  }
+  return writeStatic(output.stderr, SYSTEMIC_FAILURE_LINE, 1);
+}
+
 async function finalizeProxiedChildResult(
   childSpecification: ChildSpecification,
   workerCapture: ChildCapture,
@@ -364,6 +429,36 @@ async function finalizeProxiedChildResult(
 ): Promise<number> {
   const assessment = trustedChildEvidence(childSpecification, workerCapture);
   const lifecycle = proxyLifecycle(proxyFailedWhileRunning, proxyStopped);
+  if (childSpecification.resultSchema === "EXIMBAY_REFUND_REENTRY") {
+    return writeReentrySupervisorTerminal(
+      output,
+      workerCapture,
+      assessment.validation,
+      lifecycle,
+      "SUCCEEDED",
+      assessment.evidence?.reentryResult ?? null,
+    );
+  }
+  return finalizeLegacyProxiedChildResult(
+    childSpecification,
+    workerCapture,
+    assessment,
+    lifecycle,
+    proxyFailedWhileRunning,
+    proxyStopped,
+    output,
+  );
+}
+
+async function finalizeLegacyProxiedChildResult(
+  childSpecification: ChildSpecification,
+  workerCapture: ChildCapture,
+  assessment: ReturnType<typeof trustedChildEvidence>,
+  lifecycle: ProxyLifecycleState,
+  proxyFailedWhileRunning: boolean,
+  proxyStopped: boolean,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+): Promise<number> {
   if (!assessment.evidence) {
     return childSpecification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION"
       ? writeContactedSystemicFailure(
@@ -398,6 +493,7 @@ type TrustedChildEvidence = Readonly<{
   result: ChildResult;
   providerRetrieveCount: 0 | 1 | null;
   providerObservation: EximbayContactedProviderObservation | null;
+  reentryResult: EximbayRefundReentryResult | null;
 }>;
 
 function trustedChildEvidence(
@@ -409,12 +505,27 @@ function trustedChildEvidence(
 }> {
   const result = capture.result;
   if (!result) return Object.freeze({ evidence: null, validation: capture.validation });
+  if (specification.resultSchema === "EXIMBAY_REFUND_REENTRY") {
+    const validation = validateEximbayRefundReentryTerminal(result);
+    return validation.state === "TRUSTED"
+      ? Object.freeze({
+        evidence: Object.freeze({
+          result,
+          providerRetrieveCount: null,
+          providerObservation: null,
+          reentryResult: validation.result,
+        }),
+        validation: validation.state,
+      })
+      : Object.freeze({ evidence: null, validation: validation.state });
+  }
   if (specification.resultSchema !== "EXIMBAY_CONTACTED_RECONCILIATION") {
     return Object.freeze({
       evidence: Object.freeze({
         result,
         providerRetrieveCount: null,
         providerObservation: null,
+        reentryResult: null,
       }),
       validation: "TRUSTED",
     });
@@ -426,6 +537,7 @@ function trustedChildEvidence(
         result,
         providerRetrieveCount: validation.providerRetrieveCount,
         providerObservation: validation.providerObservation,
+        reentryResult: null,
       }),
       validation: validation.state,
     })
@@ -541,6 +653,9 @@ type ChildResult = Readonly<{ line: string; exitCode: number; value: unknown }>;
 type ChildProcessState = "NORMAL_EXIT" | "SIGNAL_TERMINATION" | "CLOSE_STATE_UNAVAILABLE";
 type ChildStreamState = "NOT_CAPTURED" | "EMPTY" | "STDOUT_ONLY" | "STDERR_ONLY" | "BOTH";
 type ProxyLifecycleState =
+  | "NOT_STARTED"
+  | "PROXY_START_FAILED"
+  | "PROXY_READINESS_FAILED"
   | "READY_CLEANUP_CONFIRMED"
   | "READY_PREMATURE_EXIT"
   | "READY_CLEANUP_UNCONFIRMED";
@@ -570,7 +685,14 @@ type ChildValidationState =
   | "FAILURE_KEY_SET_MISMATCH"
   | "FAILURE_TERMINAL_CLASS_MISMATCH"
   | "FAILURE_DURABLE_RELEASE_MISMATCH"
-  | "FAILURE_EXIT_CODE_MISMATCH";
+  | "FAILURE_EXIT_CODE_MISMATCH"
+  | "REENTRY_KEY_SET_MISMATCH"
+  | "REENTRY_SCHEMA_MISMATCH"
+  | "REENTRY_CODE_INVALID"
+  | "REENTRY_COUNTER_INVALID"
+  | "REENTRY_CLEANUP_INVALID"
+  | "REENTRY_SEMANTICS_INVALID"
+  | "REENTRY_EXIT_CODE_MISMATCH";
 type ChildCapture = Readonly<{
   processState: ChildProcessState;
   exitCode: number | null;
@@ -710,6 +832,180 @@ function terminalTransportFailure(selected: Buffer, other: Buffer): TerminalCapt
   return hasExactLineTransport(selected)
     ? null
     : Object.freeze({ terminal: null, validation: "LINE_CONTRACT_VIOLATION" });
+}
+
+const EXIMBAY_REFUND_REENTRY_KEYS = Object.freeze([
+  "cancellationCount",
+  "cleanupFailures",
+  "code",
+  "ok",
+  "preflightRetrieveCount",
+  "reconciliationLookupCount",
+  "reentry",
+  "schema",
+  "terminalClass",
+]);
+
+type ReentryTerminalValidation =
+  | Readonly<{ state: "TRUSTED"; result: EximbayRefundReentryResult }>
+  | Readonly<{ state: ChildValidationFailureState }>;
+
+function validateEximbayRefundReentryTerminal(
+  terminal: ChildResult,
+): ReentryTerminalValidation {
+  const value = terminal.value;
+  if (!isPlainRecord(value)) return reentryValidationFailure("INVALID_RECORD");
+  const shapeFailure = reentryShapeFailure(value);
+  if (shapeFailure) return reentryValidationFailure(shapeFailure);
+  const cleanupFailures = validReentryCleanupFailures(value.cleanupFailures);
+  if (!cleanupFailures) return reentryValidationFailure("REENTRY_CLEANUP_INVALID");
+  if (!validReentrySemantics(value)) return reentryValidationFailure("REENTRY_SEMANTICS_INVALID");
+  const expectedExitCode = value.ok && cleanupFailures.length === 0 ? 0 : 1;
+  if (terminal.exitCode !== expectedExitCode) {
+    return reentryValidationFailure("REENTRY_EXIT_CODE_MISMATCH");
+  }
+  return Object.freeze({
+    state: "TRUSTED",
+    result: Object.freeze({
+      schema: "mira-refund-eximbay-reentry-result/v1",
+      ok: value.ok,
+      code: value.code,
+      terminalClass: value.terminalClass,
+      preflightRetrieveCount: value.preflightRetrieveCount,
+      reconciliationLookupCount: 0,
+      cancellationCount: value.cancellationCount,
+      reentry: "FORBIDDEN",
+      cleanupFailures,
+    }),
+  });
+}
+
+function reentryShapeFailure(
+  value: Record<string, unknown>,
+): ChildValidationFailureState | null {
+  if (!hasExactKeys(value, EXIMBAY_REFUND_REENTRY_KEYS)) {
+    return "REENTRY_KEY_SET_MISMATCH";
+  }
+  if (value.schema !== "mira-refund-eximbay-reentry-result/v1") {
+    return "REENTRY_SCHEMA_MISMATCH";
+  }
+  if (![typeof value.ok === "boolean", isEximbayRefundReentryCode(value.code)].every(Boolean)) {
+    return "REENTRY_CODE_INVALID";
+  }
+  return [
+    isProviderRetrieveCount(value.preflightRetrieveCount),
+    value.reconciliationLookupCount === 0,
+    isProviderRetrieveCount(value.cancellationCount),
+  ].every(Boolean) ? null : "REENTRY_COUNTER_INVALID";
+}
+
+function reentryValidationFailure(
+  state: ChildValidationFailureState,
+): ReentryTerminalValidation {
+  return Object.freeze({ state });
+}
+
+function validReentrySemantics(value: Record<string, unknown>): value is Record<string, unknown> & {
+  ok: boolean;
+  code: EximbayRefundReentryResultCode;
+  terminalClass: EximbayRefundReentryResult["terminalClass"];
+  preflightRetrieveCount: 0 | 1;
+  cancellationCount: 0 | 1;
+  reentry: "FORBIDDEN";
+} {
+  if (value.reentry !== "FORBIDDEN") return false;
+  const retrieve = value.preflightRetrieveCount;
+  const cancel = value.cancellationCount;
+  if (!isProviderRetrieveCount(retrieve)) return false;
+  if (!isProviderRetrieveCount(cancel)) return false;
+  if (cancel === 1) {
+    if (retrieve !== 1) return false;
+  }
+  if (value.ok === true) {
+    return validSuccessfulReentrySemantics(value, retrieve, cancel);
+  }
+  return validFailedReentrySemantics(value, retrieve, cancel);
+}
+
+function validSuccessfulReentrySemantics(
+  value: Record<string, unknown>,
+  retrieve: 0 | 1,
+  cancel: 0 | 1,
+): boolean {
+  return [
+    value.code === "KNOWN_SUCCESS",
+    value.terminalClass === "REFUND_SUCCEEDED",
+    retrieve === 1,
+    cancel === 1,
+  ].every(Boolean);
+}
+
+function validFailedReentrySemantics(
+  value: Record<string, unknown>,
+  retrieve: 0 | 1,
+  cancel: 0 | 1,
+): boolean {
+  if (value.code === "KNOWN_SUCCESS") return false;
+  const effectPossible = [retrieve, cancel].some((count) => count === 1);
+  const expectedTerminal = effectPossible ? "PROVIDER_EFFECT_POSSIBLE" : "SAFE_STOP";
+  if (value.terminalClass !== expectedTerminal) {
+    return false;
+  }
+  if (cancel === 1) return value.code === "CANCEL_CONTACT_MAY_HAVE_OCCURRED";
+  if (retrieve === 1) return value.code === "RETRIEVE_CONTACTED";
+  return !["RETRIEVE_CONTACTED", "CANCEL_CONTACT_MAY_HAVE_OCCURRED"].includes(
+    String(value.code),
+  );
+}
+
+const EXIMBAY_REFUND_REENTRY_CODES = new Set<string>([
+  "KNOWN_SUCCESS",
+  "NO_PROVIDER_CONTACT",
+  "RETRIEVE_CONTACTED",
+  "CANCEL_CONTACT_MAY_HAVE_OCCURRED",
+  "MANUAL_REVIEW",
+  "OVERLAP_SKIPPED",
+  "TARGET_MISMATCH",
+  "CONFIG_MISMATCH",
+  "CREDENTIAL_UNAVAILABLE",
+  "INTERNAL_FAILURE",
+]);
+
+function isEximbayRefundReentryCode(value: unknown): value is EximbayRefundReentryResultCode {
+  return typeof value === "string" && EXIMBAY_REFUND_REENTRY_CODES.has(value);
+}
+
+function validReentryCleanupFailures(
+  value: unknown,
+): readonly EximbayRefundReentryCleanupFailure[] | null {
+  if (!Array.isArray(value)) return null;
+  if (Reflect.getPrototypeOf(value) !== Array.prototype) return null;
+  if (value.length === 0) return Object.freeze([]);
+  if (value.length === 1) return singleReentryCleanupFailure(value[0]);
+  if (value.length === 2) return pairedReentryCleanupFailures(value);
+  return null;
+}
+
+function singleReentryCleanupFailure(
+  value: unknown,
+): readonly EximbayRefundReentryCleanupFailure[] | null {
+  if (value === "ADMISSION_CLEANUP_FAILED") {
+    return Object.freeze(["ADMISSION_CLEANUP_FAILED"]);
+  }
+  return value === "DATABASE_DISCONNECT_FAILED"
+    ? Object.freeze(["DATABASE_DISCONNECT_FAILED"])
+    : null;
+}
+
+function pairedReentryCleanupFailures(
+  value: readonly unknown[],
+): readonly EximbayRefundReentryCleanupFailure[] | null {
+  return [
+    value[0] === "ADMISSION_CLEANUP_FAILED",
+    value[1] === "DATABASE_DISCONNECT_FAILED",
+  ].every(Boolean)
+    ? Object.freeze(["ADMISSION_CLEANUP_FAILED", "DATABASE_DISCONNECT_FAILED"])
+    : null;
 }
 
 const CONTACTED_RECONCILIATION_SUCCESS_KEYS = Object.freeze([
@@ -1139,6 +1435,117 @@ function hasExactKeys(
     && keys.every((key, index) => key === expected[index]);
 }
 
+type ReentryChildSpawnState = "NOT_ATTEMPTED" | "FAILED" | "SUCCEEDED";
+type ReentryHostCode =
+  | "COMPLETE"
+  | "CONFIG_INVALID"
+  | "PROXY_START_FAILED"
+  | "PROXY_READINESS_FAILED"
+  | "CHILD_SPAWN_FAILED"
+  | "CHILD_EVIDENCE_INVALID"
+  | "PROXY_LIFECYCLE_FAILED";
+
+function writeReentrySupervisorTerminal(
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  capture: ChildCapture | null,
+  validation: ChildValidationState,
+  lifecycle: ProxyLifecycleState,
+  childSpawnState: ReentryChildSpawnState = "NOT_ATTEMPTED",
+  childResult: EximbayRefundReentryResult | null = null,
+): Promise<number> {
+  const hostOk = reentryHostIsOk(childSpawnState, validation, lifecycle);
+  const ok = reentrySupervisorIsOk(hostOk, childResult);
+  const terminal = Object.freeze({
+    schema: "mira-refund-eximbay-reentry-supervisor/v1",
+    ok,
+    childOperationResult: Object.freeze({
+      evidence: childResult ? "TRUSTWORTHY" : "UNKNOWN",
+      result: childResult,
+      providerEffects: reentryProviderEffects(childResult),
+    }),
+    hostResult: Object.freeze({
+      ok: hostOk,
+      code: reentryHostCode(childSpawnState, validation, lifecycle),
+      childSpawnState,
+      ...reentryChildProcessResult(capture),
+      childValidation: validation,
+      proxyLifecycle: lifecycle,
+    }),
+  });
+  return writeStatic(
+    ok ? output.stdout : output.stderr,
+    `${JSON.stringify(terminal)}\n`,
+    ok ? 0 : 1,
+  );
+}
+
+function reentryHostIsOk(
+  childSpawnState: ReentryChildSpawnState,
+  validation: ChildValidationState,
+  lifecycle: ProxyLifecycleState,
+): boolean {
+  return [
+    childSpawnState === "SUCCEEDED",
+    validation === "TRUSTED",
+    lifecycle === "READY_CLEANUP_CONFIRMED",
+  ].every(Boolean);
+}
+
+function reentrySupervisorIsOk(
+  hostOk: boolean,
+  childResult: EximbayRefundReentryResult | null,
+): boolean {
+  if (!childResult) return false;
+  return [hostOk, childResult.ok, childResult.cleanupFailures.length === 0].every(Boolean);
+}
+
+function reentryProviderEffects(childResult: EximbayRefundReentryResult | null) {
+  return childResult
+    ? Object.freeze({
+      preflightRetrieveCount: childResult.preflightRetrieveCount,
+      reconciliationLookupCount: childResult.reconciliationLookupCount,
+      cancellationCount: childResult.cancellationCount,
+    })
+    : Object.freeze({
+      preflightRetrieveCount: null,
+      reconciliationLookupCount: null,
+      cancellationCount: null,
+    });
+}
+
+function reentryChildProcessResult(capture: ChildCapture | null) {
+  return capture
+    ? Object.freeze({
+      childProcessState: capture.processState,
+      childExitCode: capture.exitCode,
+      childSignal: capture.signal,
+      childStreamState: capture.streamState,
+      childOutputOverflow: capture.outputOverflow,
+    })
+    : Object.freeze({
+      childProcessState: "NOT_STARTED",
+      childExitCode: null,
+      childSignal: null,
+      childStreamState: "NOT_CAPTURED",
+      childOutputOverflow: false,
+    });
+}
+
+function reentryHostCode(
+  childSpawnState: ReentryChildSpawnState,
+  validation: ChildValidationState,
+  lifecycle: ProxyLifecycleState,
+): ReentryHostCode {
+  if (lifecycle === "NOT_STARTED") return "CONFIG_INVALID";
+  if (lifecycle === "PROXY_START_FAILED") return "PROXY_START_FAILED";
+  if (lifecycle === "PROXY_READINESS_FAILED") return "PROXY_READINESS_FAILED";
+  if (childSpawnState === "FAILED") return "CHILD_SPAWN_FAILED";
+  if (validation !== "TRUSTED") return "CHILD_EVIDENCE_INVALID";
+  return lifecycle === "READY_CLEANUP_CONFIRMED"
+    ? "COMPLETE"
+    : "PROXY_LIFECYCLE_FAILED";
+}
+
 type ContactedSupervisorFailureDiagnostic = Readonly<{
   event: typeof CONTACTED_SUPERVISOR_FAILURE_EVENT;
   childSpawnState: "FAILED" | "SUCCEEDED";
@@ -1350,6 +1757,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     access(PREFLIGHT_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_CANARY_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE, fsConstants.R_OK),
+    access(EXIMBAY_REFUND_REENTRY_BUNDLE, fsConstants.R_OK),
   ]);
   const version = spawnSync(PROXY_EXECUTABLE, ["--version"], {
     encoding: "utf8",
@@ -1372,6 +1780,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     preflightBundlePresent: true,
     eximbayCanaryBundlePresent: true,
     eximbayContactedReconciliationBundlePresent: true,
+    eximbayRefundReentryBundlePresent: true,
     migrationCount: migrationProof.migrationCount,
     migrationDigest: migrationProof.migrationDigest,
     nonRoot: true,

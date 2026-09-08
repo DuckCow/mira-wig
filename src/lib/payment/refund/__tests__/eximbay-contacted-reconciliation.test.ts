@@ -788,6 +788,7 @@ function executeCompiledChild(path: string): Readonly<{
     encoding: "utf8",
     env: {
       PATH: process.env.PATH,
+      NODE_ENV: "test",
       MIRA_TEST_SECRET_SENTINEL: "SYNTHETIC_SECRET_NEVER_LOG",
       MIRA_TEST_PROVIDER_PAYLOAD: "PROVIDER_PAYLOAD_SENTINEL",
     },

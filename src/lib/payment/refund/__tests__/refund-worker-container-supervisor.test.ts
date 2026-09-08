@@ -22,6 +22,8 @@ import {
   EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
   EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
 } from "../eximbay-contacted-reconciliation-environment";
+import { EXIMBAY_REFUND_REENTRY_TARGET } from "../eximbay-refund-reentry-authority";
+import type { EximbayRefundReentryResult } from "../run-eximbay-refund-reentry-once";
 
 const INSTANCE = "sample-project:asia-northeast3:refund-db";
 const DATABASE_URL =
@@ -53,6 +55,45 @@ const CONTACTED_RECONCILIATION_ENV = Object.freeze({
   MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: "1",
   CLOUD_RUN_JOB: "contacted-reconciliation",
   CLOUD_RUN_EXECUTION: "execution-1",
+  CLOUD_RUN_TASK_COUNT: "1",
+  CLOUD_RUN_TASK_INDEX: "0",
+  CLOUD_RUN_TASK_ATTEMPT: "0",
+});
+const REFUND_REENTRY_ENV = Object.freeze({
+  REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
+  DATABASE_URL,
+  MIRA_REFUND_EXIMBAY_CANARY_LANE: "EXIMBAY_SANDBOX_V1",
+  MIRA_REFUND_EXIMBAY_CANARY_RELEASE_BINDING_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.releaseBindingDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_JOB_BINDING_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.canaryJobBindingDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_PREFLIGHT_JOB_BINDING_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.preflightJobBindingDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_IMAGE_BINDING_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.imageBindingDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_SECRET_GENERATION_BINDING_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.secretGenerationBindingDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_TARGET_BINDING_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.targetBindingDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_SYNTHETIC_PROVENANCE_DIGEST:
+    EXIMBAY_REFUND_REENTRY_TARGET.syntheticProvenanceDigest,
+  MIRA_REFUND_EXIMBAY_CANARY_NO_CUSTOMER_PII_ATTESTED: "TRUE",
+  MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
+    "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key",
+  MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: "1",
+  EXIMBAY_SANDBOX_MID: "1849705C64",
+  EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING:
+    EXIMBAY_REFUND_REENTRY_TARGET.merchantAccountBindingId,
+  EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING:
+    EXIMBAY_REFUND_REENTRY_TARGET.credentialGenerationBindingId,
+  REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
+  REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED: "ENABLED",
+  REFUND_EXECUTION_LEASE_ENABLED: "ENABLED",
+  REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED: "ENABLED",
+  REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED: "ENABLED",
+  REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED: "ENABLED",
+  CLOUD_RUN_JOB: "mira-eximbay-refund-canary",
+  CLOUD_RUN_EXECUTION: "refund-reentry-execution",
   CLOUD_RUN_TASK_COUNT: "1",
   CLOUD_RUN_TASK_INDEX: "0",
   CLOUD_RUN_TASK_ATTEMPT: "0",
@@ -189,6 +230,104 @@ describe("refund worker container supervisor", () => {
     });
     expect(harness.stdout).toEqual([terminal]);
     expect(harness.stderr).toEqual([]);
+  });
+
+  it("reports a trustworthy re-entry child success separately from clean host cleanup", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const child = completedChild(0, reentryTerminal(reentrySuccess()), "");
+    const harness = supervisorHarness([proxy, child], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"],
+      REFUND_REENTRY_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.spawnCalls[1]).toMatchObject({
+      executable: process.execPath,
+      args: ["/test/eximbay-refund-reentry.mjs"],
+    });
+    const terminal = parseOnlyOutput(harness.stdout);
+    expect(terminal).toMatchObject({
+      schema: "mira-refund-eximbay-reentry-supervisor/v1",
+      ok: true,
+      childOperationResult: {
+        evidence: "TRUSTWORTHY",
+        result: reentrySuccess(),
+        providerEffects: {
+          preflightRetrieveCount: 1,
+          reconciliationLookupCount: 0,
+          cancellationCount: 1,
+        },
+      },
+      hostResult: { ok: true, code: "COMPLETE", childValidation: "TRUSTED" },
+    });
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("preserves a trustworthy failed child and its effects when proxy cleanup fails", async () => {
+    const proxy = runningChild({ closeOnTerm: null });
+    const operation = reentryFailure();
+    const child = completedChild(1, "", reentryTerminal(operation));
+    const harness = supervisorHarness([proxy, child], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"],
+      REFUND_REENTRY_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    const terminal = parseOnlyOutput(harness.stderr);
+    expect(terminal).toMatchObject({
+      ok: false,
+      childOperationResult: {
+        evidence: "TRUSTWORTHY",
+        result: operation,
+        providerEffects: {
+          preflightRetrieveCount: 1,
+          reconciliationLookupCount: 0,
+          cancellationCount: 1,
+        },
+      },
+      hostResult: {
+        ok: false,
+        code: "PROXY_LIFECYCLE_FAILED",
+        proxyLifecycle: "READY_CLEANUP_UNCONFIRMED",
+      },
+    });
+    expect(harness.stdout).toEqual([]);
+  });
+
+  it("reports malformed re-entry child evidence with UNKNOWN provider effects", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const child = completedChild(1, "", '{"ok":false}\n');
+    const harness = supervisorHarness([proxy, child], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"],
+      REFUND_REENTRY_ENV,
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(1);
+    expect(parseOnlyOutput(harness.stderr)).toMatchObject({
+      childOperationResult: {
+        evidence: "UNKNOWN",
+        result: null,
+        providerEffects: {
+          preflightRetrieveCount: null,
+          reconciliationLookupCount: null,
+          cancellationCount: null,
+        },
+      },
+      hostResult: { ok: false, code: "CHILD_EVIDENCE_INVALID" },
+    });
+    expect(harness.stdout).toEqual([]);
   });
 
   it.each([0, 1] as const)(
@@ -1039,6 +1178,7 @@ function supervisorHarness(
     workerBundle: "/test/refund-execution-worker.mjs",
     preflightBundle: "/test/refund-sandbox-provider-free-preflight.mjs",
     eximbayContactedReconciliationBundle: "/test/eximbay-contacted-reconciliation.mjs",
+    eximbayRefundReentryBundle: "/test/eximbay-refund-reentry.mjs",
     spawn: (executable, args) => {
       spawnCalls.push(Object.freeze({
         executable,
@@ -1263,6 +1403,43 @@ function completedChild(exitCode: number, stdout: string, stderr: string): FakeC
 
 function runningChild(options: Readonly<{ closeOnTerm: number | null }>): FakeChild {
   return new FakeChild(() => undefined, options.closeOnTerm);
+}
+
+function reentrySuccess(): EximbayRefundReentryResult {
+  return Object.freeze({
+    schema: "mira-refund-eximbay-reentry-result/v1",
+    ok: true,
+    code: "KNOWN_SUCCESS",
+    terminalClass: "REFUND_SUCCEEDED",
+    preflightRetrieveCount: 1,
+    reconciliationLookupCount: 0,
+    cancellationCount: 1,
+    reentry: "FORBIDDEN",
+    cleanupFailures: Object.freeze([]),
+  });
+}
+
+function reentryFailure(): EximbayRefundReentryResult {
+  return Object.freeze({
+    schema: "mira-refund-eximbay-reentry-result/v1",
+    ok: false,
+    code: "CANCEL_CONTACT_MAY_HAVE_OCCURRED",
+    terminalClass: "PROVIDER_EFFECT_POSSIBLE",
+    preflightRetrieveCount: 1,
+    reconciliationLookupCount: 0,
+    cancellationCount: 1,
+    reentry: "FORBIDDEN",
+    cleanupFailures: Object.freeze([]),
+  });
+}
+
+function reentryTerminal(result: EximbayRefundReentryResult): string {
+  return `${JSON.stringify(result)}\n`;
+}
+
+function parseOnlyOutput(output: readonly string[]): unknown {
+  expect(output).toHaveLength(1);
+  return JSON.parse(output[0] ?? "null");
 }
 
 function contactedReconciliationTerminal(providerRetrieveCount: 0 | 1): string {
