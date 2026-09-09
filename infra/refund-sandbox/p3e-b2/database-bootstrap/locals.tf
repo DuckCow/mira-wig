@@ -11,8 +11,8 @@ locals {
   job_name                  = "${var.resource_prefix}-refund-db-bootstrap"
   network_tags              = ["refund-provider-free"]
   backend_prefix            = "p3e-b2/database-bootstrap"
-  migration_count           = 41
-  migration_sha256          = "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
+  migration_count           = var.refund_authorization_installation ? 42 : 41
+  migration_sha256          = var.refund_authorization_installation ? "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370" : "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
   cloud_sql_condition       = "resource.name == '${local.cloud_sql_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
   cloud_sql_roles = var.temporary_cloud_sql_access_authorized ? {
     client = {
@@ -55,6 +55,7 @@ locals {
   } : {}
   job_environment = merge(
     local.base_job_environment,
+    var.refund_authorization_installation ? { MIRA_DB_BOOTSTRAP_APPLICATION_ROLE = "mira_application" } : {},
     local.target_producer_environment,
     local.approval_producer_environment,
   )

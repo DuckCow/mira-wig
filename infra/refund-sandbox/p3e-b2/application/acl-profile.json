@@ -1,0 +1,1196 @@
+{
+  "sourceCommit": "3d66ca446876788df7e7e947d6b7ec52149afa38",
+  "tables": {
+    "User": {
+      "SELECT": [
+        "id",
+        "email",
+        "emailVerified",
+        "name",
+        "image",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "email",
+        "emailVerified",
+        "name",
+        "image",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "Account": {
+      "SELECT": [
+        "id",
+        "userId",
+        "type",
+        "provider",
+        "providerAccountId",
+        "refresh_token",
+        "access_token",
+        "expires_at",
+        "token_type",
+        "scope",
+        "id_token",
+        "session_state"
+      ],
+      "INSERT": [
+        "id",
+        "userId",
+        "type",
+        "provider",
+        "providerAccountId",
+        "refresh_token",
+        "access_token",
+        "expires_at",
+        "token_type",
+        "scope",
+        "id_token",
+        "session_state"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "Market": {
+      "SELECT": [
+        "code",
+        "currency",
+        "isActive",
+        "shippableCountries"
+      ],
+      "INSERT": [],
+      "UPDATE": [
+        "defaultLocale"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyle": {
+      "SELECT": [
+        "id",
+        "name",
+        "description",
+        "category",
+        "tags",
+        "coverImageKey",
+        "imageKeys",
+        "sortOrder",
+        "isActive",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "name",
+        "description",
+        "category",
+        "tags",
+        "imageKeys",
+        "sortOrder",
+        "isActive",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "name",
+        "description",
+        "category",
+        "tags",
+        "sortOrder",
+        "isActive",
+        "coverImageKey",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigVariant": {
+      "SELECT": [
+        "id",
+        "wigStyleId",
+        "color",
+        "colorHex",
+        "length",
+        "curl",
+        "price",
+        "stock",
+        "sku",
+        "isActive",
+        "fulfillmentType"
+      ],
+      "INSERT": [
+        "id",
+        "wigStyleId",
+        "color",
+        "colorHex",
+        "length",
+        "curl",
+        "price",
+        "stock",
+        "sku",
+        "isActive",
+        "fulfillmentType"
+      ],
+      "UPDATE": [
+        "color",
+        "colorHex",
+        "length",
+        "curl",
+        "price",
+        "stock",
+        "sku",
+        "isActive"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyleMarket": {
+      "SELECT": [
+        "wigStyleId",
+        "marketCode",
+        "isActive"
+      ],
+      "INSERT": [
+        "wigStyleId",
+        "marketCode",
+        "isActive"
+      ],
+      "UPDATE": [
+        "isActive"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "VariantMarketPrice": {
+      "SELECT": [
+        "variantId",
+        "marketCode",
+        "amount"
+      ],
+      "INSERT": [
+        "variantId",
+        "marketCode",
+        "amount"
+      ],
+      "UPDATE": [
+        "amount"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyleRelation": {
+      "SELECT": [
+        "id",
+        "sourceStyleId",
+        "targetStyleId",
+        "marketCode",
+        "purpose",
+        "priority",
+        "isActive",
+        "internalRationale",
+        "createdByAdminUserId",
+        "updatedByAdminUserId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "sourceStyleId",
+        "targetStyleId",
+        "marketCode",
+        "purpose",
+        "priority",
+        "isActive",
+        "internalRationale",
+        "createdByAdminUserId",
+        "updatedByAdminUserId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "purpose",
+        "priority",
+        "internalRationale",
+        "updatedByAdminUserId",
+        "isActive",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyleLocalizedRevision": {
+      "SELECT": [
+        "id",
+        "wigStyleId",
+        "locale",
+        "displayName",
+        "description",
+        "sourceKind",
+        "sourceRevisionId",
+        "legacySourceUpdatedAt",
+        "claimDisposition",
+        "submissionKey",
+        "submittedByUserId",
+        "submittedAt"
+      ],
+      "INSERT": [
+        "id",
+        "wigStyleId",
+        "locale",
+        "displayName",
+        "description",
+        "sourceKind",
+        "sourceRevisionId",
+        "legacySourceUpdatedAt",
+        "claimDisposition",
+        "submissionKey",
+        "submittedByUserId"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyleLocalizedApprovalDecision": {
+      "SELECT": [
+        "id",
+        "revisionId",
+        "ordinal",
+        "decision",
+        "rationale",
+        "requestKey",
+        "actorUserId",
+        "authorityBasis",
+        "decidedAt"
+      ],
+      "INSERT": [
+        "id",
+        "revisionId",
+        "ordinal",
+        "decision",
+        "rationale",
+        "requestKey",
+        "actorUserId",
+        "authorityBasis"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyleLocalizedPublication": {
+      "SELECT": [
+        "wigStyleId",
+        "locale",
+        "currentRevisionId",
+        "version"
+      ],
+      "INSERT": [
+        "wigStyleId",
+        "locale",
+        "currentRevisionId",
+        "version",
+        "lastChangedByUserId"
+      ],
+      "UPDATE": [
+        "currentRevisionId",
+        "version",
+        "lastChangedByUserId",
+        "lastChangedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WigStyleLocalizedPublicationEvent": {
+      "SELECT": [
+        "id",
+        "wigStyleId",
+        "locale",
+        "sequence",
+        "action",
+        "fromRevisionId",
+        "toRevisionId",
+        "reason",
+        "requestKey",
+        "actorUserId",
+        "authorityBasis",
+        "occurredAt"
+      ],
+      "INSERT": [
+        "id",
+        "wigStyleId",
+        "locale",
+        "sequence",
+        "action",
+        "fromRevisionId",
+        "toRevisionId",
+        "reason",
+        "requestKey",
+        "actorUserId",
+        "authorityBasis"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "CartItem": {
+      "SELECT": [
+        "id",
+        "userId",
+        "wigStyleId",
+        "variantId",
+        "quantity",
+        "createdAt"
+      ],
+      "INSERT": [
+        "id",
+        "userId",
+        "wigStyleId",
+        "variantId",
+        "quantity",
+        "createdAt"
+      ],
+      "UPDATE": [
+        "quantity"
+      ],
+      "DELETE": true,
+      "tablePrivileges": []
+    },
+    "Fitting": {
+      "SELECT": [
+        "id",
+        "userId",
+        "variantId",
+        "status",
+        "sourceImageKey",
+        "resultImageKey",
+        "providerJobId",
+        "failureReason",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "userId",
+        "variantId",
+        "status",
+        "sourceImageKey",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "providerJobId",
+        "status",
+        "resultImageKey",
+        "failureReason",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "CheckoutSession": {
+      "SELECT": [
+        "id",
+        "userId",
+        "marketCode",
+        "communicationLocale",
+        "currency",
+        "status",
+        "subtotalAmount",
+        "shippingAmount",
+        "totalAmount",
+        "expiresAt",
+        "submittedAt",
+        "completedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "userId",
+        "marketCode",
+        "communicationLocale",
+        "currency",
+        "status",
+        "subtotalAmount",
+        "shippingAmount",
+        "totalAmount",
+        "expiresAt",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "status",
+        "completedAt",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "CheckoutSessionLine": {
+      "SELECT": [
+        "id",
+        "sessionId",
+        "sourceCartItemId",
+        "variantId",
+        "wigStyleId",
+        "quantity",
+        "unitAmount",
+        "fulfillmentType",
+        "snapshotData",
+        "createdAt"
+      ],
+      "INSERT": [
+        "id",
+        "sessionId",
+        "sourceCartItemId",
+        "variantId",
+        "wigStyleId",
+        "quantity",
+        "unitAmount",
+        "fulfillmentType",
+        "snapshotData",
+        "createdAt"
+      ],
+      "UPDATE": [
+        "id"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "CheckoutSessionShipping": {
+      "SELECT": [
+        "sessionId",
+        "recipientName",
+        "phone",
+        "country",
+        "postalCode",
+        "administrativeArea",
+        "city",
+        "addressLine1",
+        "addressLine2",
+        "memo"
+      ],
+      "INSERT": [
+        "sessionId",
+        "recipientName",
+        "phone",
+        "country",
+        "postalCode",
+        "administrativeArea",
+        "city",
+        "addressLine1",
+        "addressLine2",
+        "memo"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "Payment": {
+      "SELECT": [
+        "id",
+        "checkoutSessionId",
+        "provider",
+        "mode",
+        "adapterExecutionKind",
+        "routingRuleId",
+        "status",
+        "attemptLifecycle",
+        "remediationStatus",
+        "amount",
+        "currency",
+        "providerOrderId",
+        "providerRef",
+        "providerConfirmIdempotencyKey",
+        "providerPaymentKey",
+        "idempotencyKey",
+        "contactIntentAt",
+        "contactStartedAt",
+        "initiationOutputKind",
+        "initiationApproveUrl",
+        "initiationCompletedAt",
+        "financialSucceededAt",
+        "errorCode",
+        "errorMessage",
+        "supersededAt",
+        "blockingEndedAt",
+        "suspendedByPaymentId",
+        "remediationOperation",
+        "remediationResultRef",
+        "remediatedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "checkoutSessionId",
+        "provider",
+        "mode",
+        "adapterExecutionKind",
+        "routingRuleId",
+        "status",
+        "attemptLifecycle",
+        "remediationStatus",
+        "amount",
+        "currency",
+        "providerOrderId",
+        "providerPaymentKey",
+        "idempotencyKey",
+        "contactIntentAt",
+        "contactStartedAt",
+        "financialSucceededAt",
+        "blockingEndedAt",
+        "suspendedByPaymentId",
+        "errorCode",
+        "errorMessage",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "status",
+        "attemptLifecycle",
+        "amount",
+        "currency",
+        "providerPaymentKey",
+        "financialSucceededAt",
+        "remediationStatus",
+        "supersededAt",
+        "blockingEndedAt",
+        "suspendedByPaymentId",
+        "errorCode",
+        "errorMessage",
+        "contactStartedAt",
+        "initiationOutputKind",
+        "initiationApproveUrl",
+        "initiationCompletedAt",
+        "providerRef",
+        "providerConfirmIdempotencyKey",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "Order": {
+      "SELECT": [
+        "id",
+        "checkoutSessionId",
+        "paymentId",
+        "userId",
+        "marketCode",
+        "currency",
+        "subtotalAmount",
+        "shippingAmount",
+        "totalAmount",
+        "status",
+        "disputeStatus",
+        "paidAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "checkoutSessionId",
+        "paymentId",
+        "userId",
+        "marketCode",
+        "currency",
+        "subtotalAmount",
+        "shippingAmount",
+        "totalAmount",
+        "status",
+        "paidAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "status",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "OrderItem": {
+      "SELECT": [
+        "id",
+        "orderId",
+        "quantity",
+        "unitAmount",
+        "fulfillmentType",
+        "snapshotData"
+      ],
+      "INSERT": [
+        "id",
+        "orderId",
+        "variantId",
+        "wigStyleId",
+        "quantity",
+        "unitAmount",
+        "fulfillmentType",
+        "snapshotData"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "OrderShipping": {
+      "SELECT": [
+        "orderId",
+        "recipientName",
+        "phone",
+        "country",
+        "postalCode",
+        "administrativeArea",
+        "city",
+        "addressLine1",
+        "addressLine2",
+        "memo",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "orderId",
+        "recipientName",
+        "phone",
+        "country",
+        "postalCode",
+        "administrativeArea",
+        "city",
+        "addressLine1",
+        "addressLine2",
+        "memo",
+        "updatedAt"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "ManufacturingRequest": {
+      "SELECT": [
+        "id",
+        "orderItemId",
+        "status",
+        "startedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "orderItemId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "PaymentEvent": {
+      "SELECT": [
+        "id",
+        "provider",
+        "source",
+        "transmissionId",
+        "eventType",
+        "verifiedMode",
+        "verifiedCredentialBinding",
+        "checkoutSessionId",
+        "providerPaymentKey",
+        "raw",
+        "status",
+        "receivedAt",
+        "processedAt",
+        "attemptCount",
+        "lastAttemptAt",
+        "failureStage",
+        "failureCode",
+        "lastError"
+      ],
+      "INSERT": [
+        "id",
+        "provider",
+        "source",
+        "transmissionId",
+        "eventType",
+        "verifiedMode",
+        "verifiedCredentialBinding",
+        "checkoutSessionId",
+        "raw",
+        "status",
+        "receivedAt",
+        "processedAt",
+        "attemptCount"
+      ],
+      "UPDATE": [
+        "status",
+        "processedAt",
+        "checkoutSessionId",
+        "providerPaymentKey",
+        "attemptCount",
+        "lastAttemptAt",
+        "failureStage",
+        "failureCode",
+        "lastError",
+        "raw",
+        "verifiedMode",
+        "verifiedCredentialBinding"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "WebhookIngressRejection": {
+      "SELECT": [
+        "id",
+        "provider",
+        "stage",
+        "code",
+        "candidateTransmissionId",
+        "candidateEventType",
+        "rawBodyBytes",
+        "rawBodyHash",
+        "rawBodyPrefix",
+        "lastError",
+        "receivedAt",
+        "createdAt"
+      ],
+      "INSERT": [
+        "id",
+        "provider",
+        "stage",
+        "code",
+        "candidateTransmissionId",
+        "candidateEventType",
+        "rawBodyBytes",
+        "rawBodyHash",
+        "rawBodyPrefix",
+        "lastError",
+        "receivedAt",
+        "createdAt"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "PaymentOutbox": {
+      "SELECT": [],
+      "INSERT": [
+        "id",
+        "topic",
+        "payload",
+        "status",
+        "attempts",
+        "dedupKey",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "CustomerRefundIntake": {
+      "SELECT": [
+        "id",
+        "orderId",
+        "customerUserId",
+        "status",
+        "reasonCode",
+        "reasonDetail",
+        "submittedAt",
+        "withdrawnAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "adminRejectionReason",
+        "approvedRefundAttemptId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "orderId",
+        "customerUserId",
+        "status",
+        "reasonCode",
+        "reasonDetail",
+        "submittedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "status",
+        "withdrawnAt",
+        "reviewedAt",
+        "reviewedByUserId",
+        "adminRejectionReason",
+        "approvedRefundAttemptId",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundAttempt": {
+      "SELECT": [
+        "id",
+        "orderId",
+        "paymentId",
+        "amount",
+        "currency",
+        "status",
+        "reason",
+        "actorType",
+        "actorUserId",
+        "provider",
+        "mode",
+        "providerRefundId",
+        "idempotencyKey",
+        "requestedAt",
+        "processedAt",
+        "failedAt",
+        "failureCode",
+        "safeFailureMessage",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "orderId",
+        "paymentId",
+        "amount",
+        "currency",
+        "status",
+        "reason",
+        "actorType",
+        "actorUserId",
+        "provider",
+        "mode",
+        "providerRefundId",
+        "idempotencyKey",
+        "requestedAt",
+        "processedAt",
+        "failedAt",
+        "failureCode",
+        "safeFailureMessage",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "status",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundAttemptTransition": {
+      "SELECT": [
+        "id",
+        "refundAttemptId",
+        "fromStatus",
+        "toStatus",
+        "orderStatusBefore",
+        "orderStatusAfter",
+        "actorType",
+        "actorUserId",
+        "reason",
+        "operationKey",
+        "createdAt"
+      ],
+      "INSERT": [
+        "id",
+        "refundAttemptId",
+        "fromStatus",
+        "toStatus",
+        "orderStatusBefore",
+        "orderStatusAfter",
+        "actorType",
+        "actorUserId",
+        "reason",
+        "operationKey",
+        "createdAt"
+      ],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionCommand": {
+      "SELECT": [
+        "id",
+        "refundAttemptId",
+        "status",
+        "availableAt",
+        "leaseOwner",
+        "leaseUntil",
+        "leaseGeneration",
+        "leaseTokenHash",
+        "dispatchAttempt",
+        "lastSafeErrorCode",
+        "lastSafeErrorMessage",
+        "createdAt",
+        "updatedAt"
+      ],
+      "INSERT": [
+        "id",
+        "refundAttemptId",
+        "status",
+        "availableAt",
+        "leaseOwner",
+        "leaseUntil",
+        "leaseGeneration",
+        "dispatchAttempt",
+        "lastSafeErrorCode",
+        "lastSafeErrorMessage",
+        "createdAt",
+        "updatedAt"
+      ],
+      "UPDATE": [
+        "leaseGeneration",
+        "leaseOwner",
+        "leaseUntil",
+        "leaseTokenHash",
+        "updatedAt"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionAuthorization": {
+      "SELECT": [
+        "id",
+        "issuanceRequestId",
+        "commandId",
+        "refundAttemptId",
+        "providerOperationBindingId",
+        "targetBindingDigest",
+        "expectedPredecessorGeneration",
+        "operationClass",
+        "releasePolicyDigest",
+        "issuedByUserId",
+        "issuedAt",
+        "expiresAt",
+        "revokedAt",
+        "revokedByUserId",
+        "consumedAt",
+        "consumedByPrincipalId",
+        "consumedExecutionId",
+        "consumedExecutionUid",
+        "consumedLeaseEventId"
+      ],
+      "INSERT": [
+        "id",
+        "issuanceRequestId",
+        "commandId",
+        "refundAttemptId",
+        "providerOperationBindingId",
+        "targetBindingDigest",
+        "expectedPredecessorGeneration",
+        "operationClass",
+        "releasePolicyDigest",
+        "issuedByUserId",
+        "issuedAt",
+        "expiresAt",
+        "revokedAt",
+        "revokedByUserId",
+        "consumedAt",
+        "consumedByPrincipalId",
+        "consumedExecutionId",
+        "consumedExecutionUid",
+        "consumedLeaseEventId"
+      ],
+      "UPDATE": [
+        "revokedAt",
+        "revokedByUserId",
+        "consumedAt",
+        "consumedByPrincipalId",
+        "consumedExecutionId",
+        "consumedExecutionUid",
+        "consumedLeaseEventId"
+      ],
+      "DELETE": false,
+      "tablePrivileges": [
+        "SELECT",
+        "INSERT"
+      ]
+    },
+    "EximbayRefundSandboxCanaryApproval": {
+      "SELECT": [
+        "id",
+        "formatVersion",
+        "provider",
+        "mode",
+        "approvalEvidenceDigest",
+        "releaseBindingDigest",
+        "canaryJobBindingDigest",
+        "preflightJobBindingDigest",
+        "imageBindingDigest",
+        "secretGenerationBindingDigest",
+        "targetBindingDigest",
+        "commandId",
+        "approvedAt",
+        "expiresAt",
+        "issuedByPrincipalId",
+        "consumedAt",
+        "consumedExecutionId",
+        "consumedExecutionBindingDigest",
+        "createdAt"
+      ],
+      "INSERT": [],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionProviderOperationBinding": {
+      "SELECT": [
+        "id",
+        "refundAttemptId",
+        "provider",
+        "mode",
+        "providerOperationKey",
+        "operationKeyAlgorithmVersion",
+        "wireContractVersion",
+        "wireRequestFingerprint",
+        "merchantAccountBindingId",
+        "credentialGenerationBindingId",
+        "createdAt"
+      ],
+      "INSERT": [],
+      "UPDATE": [
+        "id"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionCommandEvent": {
+      "SELECT": [
+        "id",
+        "commandId",
+        "eventType",
+        "leaseGeneration",
+        "dispatchAttempt",
+        "occurredAt",
+        "createdAt"
+      ],
+      "INSERT": [
+        "id",
+        "commandId",
+        "eventType",
+        "leaseGeneration",
+        "dispatchAttempt",
+        "occurredAt",
+        "createdAt"
+      ],
+      "UPDATE": [
+        "id"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionDispatchAttempt": {
+      "SELECT": [
+        "id",
+        "commandId",
+        "ordinal",
+        "leaseGeneration",
+        "provider",
+        "mode",
+        "providerOperationKey",
+        "requestFingerprint",
+        "state",
+        "authorizedAt",
+        "contactMarkedAt",
+        "createdAt"
+      ],
+      "INSERT": [],
+      "UPDATE": [
+        "id"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionEvidence": {
+      "SELECT": [
+        "id",
+        "commandId",
+        "source",
+        "sourceDedupKey",
+        "outcome",
+        "application",
+        "observedProviderRefundId",
+        "reportedAmount",
+        "reportedCurrency",
+        "safeCode",
+        "safeMessage",
+        "observedAt",
+        "createdAt",
+        "dispatchAttemptId",
+        "authorizingLeaseGeneration"
+      ],
+      "INSERT": [],
+      "UPDATE": [
+        "id"
+      ],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionEximbayPreflightObservation": {
+      "SELECT": [
+        "id",
+        "bindingId",
+        "observingLeaseGeneration",
+        "mid",
+        "providerOrderId",
+        "providerTransactionId",
+        "providerStatus",
+        "currency",
+        "originalAmount",
+        "refundableBalance",
+        "observedAt",
+        "inquiryContractVersion",
+        "parserVersion",
+        "observationFingerprint",
+        "createdAt"
+      ],
+      "INSERT": [],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionProviderEligibilityProof": {
+      "SELECT": [
+        "id",
+        "bindingId",
+        "paymentKey",
+        "method",
+        "easyPayPresent",
+        "currency",
+        "providerStatus",
+        "totalAmount",
+        "balanceAmount",
+        "taxFreeAmount",
+        "taxExemptionAmount",
+        "cancelsCount",
+        "localReceivedAt",
+        "eligibilityFingerprint",
+        "createdAt"
+      ],
+      "INSERT": [],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    },
+    "RefundExecutionProviderContactEligibilityProof": {
+      "SELECT": [
+        "id",
+        "dispatchAttemptId"
+      ],
+      "INSERT": [],
+      "UPDATE": [],
+      "DELETE": false,
+      "tablePrivileges": []
+    }
+  }
+}

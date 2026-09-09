@@ -25,7 +25,7 @@ check "exact_foundation_handoff" {
 
 check "exact_machine_contract" {
   assert {
-    condition = (
+    condition = var.refund_authorization_installation || (
       local.contract.contractVersion == "mira-refund-p3e-b2-db-bootstrap-runtime/v1" &&
       local.contract.status == "SOURCE_DEFINED_AUTHORITY_RETIREMENT_TARGET" &&
       local.contract.resourceGraph.resourceCount == 3 &&
@@ -176,5 +176,20 @@ check "producer_input_forwarding" {
       var.bootstrap_issuer_principal_id == null
     )
     error_message = "Existing producer inputs must be complete for the selected producer mode and absent from every other mode."
+  }
+}
+
+check "exact_refund_authorization_installation" {
+  assert {
+    condition = var.refund_authorization_installation ? (
+      var.source_commit == "8dc0233557615ca95a649d40ee83c13c83b6a435" &&
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6" &&
+      filesha256("${path.module}/../contracts/database-bootstrap-runtime-v2.json") == "96970db5cb05de5a979ad8ca240f86d354922759f04a1498edcf2bf247fc455a" &&
+      local.migration_count == 42 &&
+      local.migration_sha256 == "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370" &&
+      contains(["check", "apply-refund-authorization-cutover", "restore-canary-refund-role-grants"], var.bootstrap_mode) &&
+      (var.bootstrap_mode == "check" || var.temporary_cloud_sql_access_authorized)
+    ) : var.bootstrap_mode != "apply-refund-authorization-cutover"
+    error_message = "Only the retained v2 artifact, exact application role, 42 inventory and bounded attended cutover/restoration are allowed."
   }
 }
