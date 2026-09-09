@@ -311,10 +311,11 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(nonCanonicalBuildStageSources(dockerfile, observed.paths)).toEqual([]);
 
     const withStaleAdmission = dockerfile.replace(
-      "RUN ./node_modules/.bin/prisma generate",
+      /RUN (?:CHECKPOINT_DISABLE=1 )?\.\/node_modules\/\.bin\/prisma generate/u,
       "COPY --link src/lib/stale-refund-input.ts ./src/lib/\n"
-      + "RUN ./node_modules/.bin/prisma generate",
+      + "$&",
     );
+    expect(withStaleAdmission).not.toBe(dockerfile);
     expect(nonCanonicalBuildStageSources(
       withStaleAdmission,
       observed.paths,

@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import {
+  REFUND_AUTHORIZATION_CUTOVER_MODE,
   BUSINESS_STATE_READBACK_ROLE_GRANT_MODE,
   BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE,
   CANARY_REFUND_ROLE_RESTORE_MODE,
@@ -30,6 +31,17 @@ const inventory = Object.freeze({
   entries: Object.freeze([]),
   migrationCount: 41,
   migrationDigest: MIGRATION_DIGEST,
+});
+
+it("admits cutover only with an explicit application role and preserves old mode parsing", async () => {
+  const execute = vi.fn(() => Promise.resolve({ code: "TEST" }));
+  const dependencies = { readSourceCommit: () => Promise.resolve(COMMIT), loadMigrationInventory: () => Promise.resolve(inventory), execute };
+  await expect(runDatabaseBootstrapEntrypoint([REFUND_AUTHORIZATION_CUTOVER_MODE], baseEnv(), output(), dependencies)).resolves.toBe(64);
+  await expect(runDatabaseBootstrapEntrypoint([REFUND_AUTHORIZATION_CUTOVER_MODE], { ...baseEnv(), MIRA_DB_BOOTSTRAP_APPLICATION_ROLE: "mira_refund_canary" }, output(), dependencies)).resolves.toBe(64);
+  await expect(runDatabaseBootstrapEntrypoint([REFUND_AUTHORIZATION_CUTOVER_MODE], { ...baseEnv(), MIRA_DB_BOOTSTRAP_APPLICATION_ROLE: "test_existing_app" }, output(), dependencies)).resolves.toBe(0);
+  expect(execute).toHaveBeenCalledOnce();
+  expect(execute).toHaveBeenCalledWith(expect.objectContaining({ mode: REFUND_AUTHORIZATION_CUTOVER_MODE, cutoverApplicationRole: "test_existing_app" }), inventory);
+  await expect(runDatabaseBootstrapEntrypoint(["apply"], { ...baseEnv(), MIRA_DB_BOOTSTRAP_APPLICATION_ROLE: "test_existing_app" }, output(), dependencies)).resolves.toBe(64);
 });
 
 describe("exact database-bootstrap SALE lifecycle and producer modes", () => {

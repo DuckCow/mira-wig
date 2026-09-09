@@ -1,3 +1,4 @@
+import { refundArtifactEnvironment } from "./refund-artifact-environment.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -1354,6 +1355,7 @@ function cleanupExactLocalImageTag(tag: string): boolean {
 
 export async function verifyExistingRefundWorkerImage(
   image: string,
+  prospective = false,
 ): Promise<Record<string, unknown>> {
   requireCondition(
     image.length > 0
@@ -1395,10 +1397,14 @@ export async function verifyExistingRefundWorkerImage(
         === JSON.stringify(FORBIDDEN_CONTENT_PREFIXES),
       "FORBIDDEN_CONTENT_PREFIX_CONTRACT",
     );
-    const current = await readCurrentEximbayImageAuthority();
-    enforceCurrentSubject(current, context);
-    enforceCurrentArtifact(current, rawInspection);
-    enforceCurrentClosure(filesystem, current);
+    if (prospective) {
+      verifyProspectiveWorkerCapability(image, context.migrationInventory);
+    } else {
+      const current = await readCurrentEximbayImageAuthority();
+      enforceCurrentSubject(current, context);
+      enforceCurrentArtifact(current, rawInspection);
+      enforceCurrentClosure(filesystem, current);
+    }
 
     return Object.freeze({
       ok: true,
@@ -1436,12 +1442,25 @@ export async function verifyExistingRefundWorkerImage(
       workerWritableDirectoryPaths: filesystem.workerWritableDirectoryPaths,
       writeDeniedProbeCount: runtimeProof.writeDeniedProbeCount,
       writeAllowedProbeCount: runtimeProof.writeAllowedProbeCount,
-      currentImagePolicy: CURRENT_CONTRACT_VERSION,
+      currentImagePolicy: prospective ? "PROSPECTIVE_CAPABILITY_CAPTURE_NOT_POLICY_ACCEPTANCE" : CURRENT_CONTRACT_VERSION,
       dockerBuildInvocations: 0,
     });
   } finally {
     await context.cleanup();
   }
+}
+
+function verifyProspectiveWorkerCapability(image: string, inventory: RefundWorkerMigrationInventory): void {
+      requireCondition(inventory.migrationCount === 42
+        && inventory.migrationDigest === "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370", "PROSPECTIVE_MIGRATION_IDENTITY");
+      const child = captureContainerStatus(undefined, [
+        "run", "--rm", "--platform", PLATFORM, "--network", "none",
+        "--entrypoint", "/usr/local/bin/node", image,
+        "/app/src/lib/payment/refund/eximbay-refund-reentry.mjs",
+      ]);
+      const receipt: unknown = JSON.parse(child.stdout);
+      requireCondition(child.status === 1 && isRecord(receipt) && receipt.schema === "mira-refund-eximbay-reentry-result/v1"
+        && receipt.code === "CONFIG_MISMATCH" && receipt.ok === false, "PROSPECTIVE_REENTRY_GATE");
 }
 
 function verifyRuntimeClosure(
@@ -4168,12 +4187,7 @@ function run(command: string, args: readonly string[], timeout: number): void {
 }
 
 function strippedEnvironment(): NodeJS.ProcessEnv {
-  return {
-    NODE_ENV: "production",
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    DOCKER_HOST: process.env.DOCKER_HOST,
-  };
+  return refundArtifactEnvironment();
 }
 
 function boundedPrimaryError(error: unknown): Error {
@@ -4548,14 +4562,14 @@ if (isMain) {
     && process.argv[3] !== undefined;
   const captureContract = captureContractOnly || captureContractAndPublish;
   const verifyExistingImage = process.argv.length === 4
-    && process.argv[2] === "--verify-existing-image"
+    && ["--verify-existing-image", "--verify-prospective-image"].includes(process.argv[2] ?? "")
     && process.argv[3] !== undefined;
   if (process.argv.length > 2 && !captureContract && !verifyExistingImage) {
     throw new Error("IMAGE_VERIFIER_ARGUMENT_INVALID");
   }
   try {
     const result = verifyExistingImage
-      ? await verifyExistingRefundWorkerImage(process.argv[3] ?? "")
+      ? await verifyExistingRefundWorkerImage(process.argv[3] ?? "", process.argv[2] === "--verify-prospective-image")
       : await main(
         captureContract,
         captureContractAndPublish ? process.argv[3] : undefined,

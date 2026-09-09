@@ -1,3 +1,4 @@
+import { refundArtifactEnvironment } from "./refund-artifact-environment.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,7 +33,7 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
       "--tag", tag,
       "--file", "containers/refund-db-bootstrap/Dockerfile",
       context.directory,
-    ], { stdio: "inherit" });
+    ], { env: refundArtifactEnvironment(), stdio: "inherit" });
     const imageId = (await readFile(iidFile, "utf8")).trim();
     process.stdout.write(`${JSON.stringify({
       tag,
@@ -51,7 +52,7 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
 
 function requireLocalTagAbsent(tag: string): void {
   try {
-    execFileSync("docker", ["image", "inspect", tag], { stdio: "ignore" });
+    execFileSync("docker", ["image", "inspect", tag], { env: refundArtifactEnvironment(), stdio: "ignore" });
   } catch {
     return;
   }

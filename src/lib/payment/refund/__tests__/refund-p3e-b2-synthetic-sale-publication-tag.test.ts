@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -64,7 +65,10 @@ describe("P3E-B2 synthetic-sale publication tag authority", () => {
     );
     expect(deriveSyntheticSalePublicationTarget(BASELINE).tag)
       .not.toMatch(/^mira-synthetic-sale-review:/u);
-    expect(createHash("sha256").update(bootstrapOwner).digest("hex"))
+    const historicalBootstrapOwner = execFileSync("git", ["show", "35388a920ce6407e974d9dfe3cc97da52107f0e5:scripts/build-refund-db-bootstrap-image.mts"], { cwd: ROOT });
+    expect(bootstrapOwner).toContain("tag.slice(-12) !== sourceCommit.slice(0, 12)");
+    expect(bootstrapOwner).toContain("const TAG = /^asia-northeast3-docker");
+    expect(createHash("sha256").update(historicalBootstrapOwner).digest("hex"))
       .toBe("2aa4d40137891cdaf40db788bee455c814bb8a17e68127d7074fd9b0900b4006");
   });
 });

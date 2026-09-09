@@ -1,3 +1,4 @@
+import { refundArtifactEnvironment } from "./refund-artifact-environment.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -57,7 +58,7 @@ type CaBundleEvidence = Readonly<{
   nodeExtraCaCerts: null;
 }>;
 
-async function main(args: readonly string[] = process.argv.slice(2)): Promise<void> {
+export async function verifyRefundDbBootstrapImage(args: readonly string[], prospective = false) {
   const tag = args[0];
   const sourceCommit = args[1];
   if (!validInput(args, tag, sourceCommit)) {
@@ -65,7 +66,7 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
   }
   const labels = execFileSync("docker", [
     "image", "inspect", "--format", "{{json .Config.Labels}}", tag,
-  ], { encoding: "utf8", maxBuffer: 262_144 });
+  ], { env: refundArtifactEnvironment(), encoding: "utf8", maxBuffer: 262_144 });
   requireContains(labels, `"org.opencontainers.image.revision":"${sourceCommit}"`);
   requireContains(labels, '"mira.refund.default-mode":"check"');
   const packaged = await inspectPackagedBootstrap(tag);
@@ -90,8 +91,9 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
     "--input-type=module", "--eval",
     "import('/app/scripts/refund-db-bootstrap-entrypoint.mjs').then(async runtime => { const inventory = await runtime.defaultRuntimeDependencies.loadMigrationInventory(); process.stdout.write(JSON.stringify({ count: inventory.migrationCount, sha256: inventory.migrationDigest, marketPreconditionMode: runtime.SYNTHETIC_SALE_MARKET_PRECONDITION_MODE, failureCodes: runtime.BOOTSTRAP_FAILURE_CODES, proxyFailureClasses: runtime.PROXY_FAILURE_CLASSES, proxyTransportClasses: runtime.PROXY_TRANSPORT_CLASSES, sqlAdminRequestPhase: runtime.SQLADMIN_REQUEST_PHASE, sqlAdminRequestHost: runtime.SQLADMIN_REQUEST_HOST, proxyArguments: runtime.proxyArguments(), passwordProxyArguments: runtime.proxyArguments(false), proxyDiagnosticByteLimit: runtime.PROXY_DIAGNOSTIC_BYTE_LIMIT, producerResultByteLimit: runtime.PRODUCER_RESULT_BYTE_LIMIT, proxyStdio: runtime.PROXY_STDIO })); })",
   ]);
-  if (migrationInventory.stdout !==
-    '{"count":41,"sha256":"4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c","marketPreconditionMode":"materialize-synthetic-sale-market-precondition","failureCodes":["PROXY_START_FAILED","PROXY_EARLY_EXIT","PROXY_READY_TIMEOUT","DB_CONNECT_FAILED","LEDGER_READ_FAILED","LEDGER_REJECTED","ROLE_AUTHORITY_POSTCONDITION_FAILED","RUNTIME_LOCAL_FAILED","SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT","SECRET_METADATA_UNAVAILABLE","SECRET_VERSION_BASELINE_DRIFT","APPLICATION_PASSWORD_TRANSACTION_FAILED","APPLICATION_PASSWORD_LOGIN_FAILED","SECRET_VERSION_ADD_FAILED","SECRET_VERSION_ADD_AMBIGUOUS_ZERO","SECRET_VERSION_ADD_AMBIGUOUS_ONE","SECRET_VERSION_ADD_AMBIGUOUS_DRIFT","SECRET_VERSION_POSTCONDITION_FAILED"],"proxyFailureClasses":["PROXY_CREDENTIAL_SOURCE_FAILED","PROXY_SQLADMIN_PERMISSION_DENIED","PROXY_SQLADMIN_REQUEST_FAILED","PROXY_INSTANCE_CONFIG_FAILED","PROXY_LISTENER_FAILED","PROXY_EARLY_EXIT_UNCLASSIFIED"],"proxyTransportClasses":["TOKEN","DNS","CONNECT","TLS","TIMEOUT","RESET","OTHER"],"sqlAdminRequestPhase":"INSTANCE_METADATA","sqlAdminRequestHost":"sqladmin.googleapis.com","proxyArguments":["--structured-logs","--private-ip","--auto-iam-authn","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"passwordProxyArguments":["--structured-logs","--private-ip","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"proxyDiagnosticByteLimit":4096,"producerResultByteLimit":16384,"proxyStdio":["ignore","pipe","pipe"]}') {
+  const expectedInventory = expectedBootstrapInventory(prospective);
+  if (prospective) verifyProspectiveCutoverMode(tag);
+  if (migrationInventory.stdout !== JSON.stringify(expectedInventory)) {
     throw new Error("DB_BOOTSTRAP_MIGRATION_INVENTORY_INVALID");
   }
   const unknown = run(tag, ["--network=none", tag, "unknown"], false);
@@ -99,14 +101,14 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
     || unknown.stderr !== '{"ok":false,"code":"INVALID_BOOTSTRAP_RUNTIME_INPUT"}\n') {
     throw new Error("DB_BOOTSTRAP_UNKNOWN_MODE_NOT_FAIL_CLOSED");
   }
-  process.stdout.write(`${JSON.stringify({
+  return Object.freeze({
     ok: true,
     tag,
     sourceCommit,
     proxy: "2.22.0",
     prisma: "7.8.0",
-    migrationCount: 41,
-    migrationSha256: "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
+    migrationCount: expectedInventory.count,
+    migrationSha256: expectedInventory.sha256,
     diagnosticStageCount: 18,
     proxyFailureClassCount: 6,
     proxyTransportClassCount: 7,
@@ -116,7 +118,25 @@ async function main(args: readonly string[] = process.argv.slice(2)): Promise<vo
     producerResultTransport: packaged.producerResultTransport,
     unknownModeExit: 64,
     network: "none",
-  })}\n`);
+  });
+}
+
+function expectedBootstrapInventory(prospective: boolean): Record<string, unknown> {
+  const expectedInventory: unknown = JSON.parse('{"count":41,"sha256":"4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c","marketPreconditionMode":"materialize-synthetic-sale-market-precondition","failureCodes":["PROXY_START_FAILED","PROXY_EARLY_EXIT","PROXY_READY_TIMEOUT","DB_CONNECT_FAILED","LEDGER_READ_FAILED","LEDGER_REJECTED","ROLE_AUTHORITY_POSTCONDITION_FAILED","RUNTIME_LOCAL_FAILED","SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT","SECRET_METADATA_UNAVAILABLE","SECRET_VERSION_BASELINE_DRIFT","APPLICATION_PASSWORD_TRANSACTION_FAILED","APPLICATION_PASSWORD_LOGIN_FAILED","SECRET_VERSION_ADD_FAILED","SECRET_VERSION_ADD_AMBIGUOUS_ZERO","SECRET_VERSION_ADD_AMBIGUOUS_ONE","SECRET_VERSION_ADD_AMBIGUOUS_DRIFT","SECRET_VERSION_POSTCONDITION_FAILED"],"proxyFailureClasses":["PROXY_CREDENTIAL_SOURCE_FAILED","PROXY_SQLADMIN_PERMISSION_DENIED","PROXY_SQLADMIN_REQUEST_FAILED","PROXY_INSTANCE_CONFIG_FAILED","PROXY_LISTENER_FAILED","PROXY_EARLY_EXIT_UNCLASSIFIED"],"proxyTransportClasses":["TOKEN","DNS","CONNECT","TLS","TIMEOUT","RESET","OTHER"],"sqlAdminRequestPhase":"INSTANCE_METADATA","sqlAdminRequestHost":"sqladmin.googleapis.com","proxyArguments":["--structured-logs","--private-ip","--auto-iam-authn","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"passwordProxyArguments":["--structured-logs","--private-ip","--unix-socket=/cloudsql","--health-check","--http-address=127.0.0.1","--http-port=9801","--exit-zero-on-sigterm","mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"],"proxyDiagnosticByteLimit":4096,"producerResultByteLimit":16384,"proxyStdio":["ignore","pipe","pipe"]}');
+  if (!isRecord(expectedInventory)) throw new Error("DB_BOOTSTRAP_EXPECTATION_INVALID");
+  if (prospective) {
+    expectedInventory.count = 42;
+    expectedInventory.sha256 = "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370";
+  }
+  return expectedInventory;
+}
+
+function verifyProspectiveCutoverMode(tag: string): void {
+    const mode = run(tag, ["--network=none", "--entrypoint", "/usr/local/bin/node", tag,
+      "--input-type=module", "--eval", "import('/app/scripts/refund-db-bootstrap-entrypoint.mjs').then(m=>process.stdout.write(m.REFUND_AUTHORIZATION_CUTOVER_MODE))"]);
+    if (mode.stdout !== "apply-refund-authorization-cutover") throw new Error("DB_BOOTSTRAP_CUTOVER_MODE_MISSING");
+    const closed = run(tag, ["--network=none", tag, "apply-refund-authorization-cutover"], false);
+    if (closed.status !== 64) throw new Error("DB_BOOTSTRAP_CUTOVER_NOT_CLOSED");
 }
 
 async function inspectPackagedBootstrap(
@@ -131,7 +151,7 @@ async function inspectPackagedBootstrap(
   try {
     execFileSync("docker", [
       "create", "--platform=linux/amd64", "--name", containerName, tag,
-    ], { stdio: "ignore" });
+    ], { env: refundArtifactEnvironment(), stdio: "ignore" });
     created = true;
     copyFromContainer(containerName, `/app/${RUNTIME_PATH}`, join(directory, "runtime.json"));
     copyFromContainer(containerName, `/app/${POLICY_PATH}`, join(directory, "policy.json"));
@@ -150,7 +170,7 @@ async function inspectPackagedBootstrap(
   } finally {
     try {
       if (created) {
-        execFileSync("docker", ["container", "rm", containerName], { stdio: "ignore" });
+        execFileSync("docker", ["container", "rm", containerName], { env: refundArtifactEnvironment(), stdio: "ignore" });
       }
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -196,7 +216,7 @@ function copyFromContainer(
   source: string,
   destination: string,
 ): void {
-  execFileSync("docker", ["cp", `${containerName}:${source}`, destination], { stdio: "ignore" });
+  execFileSync("docker", ["cp", `${containerName}:${source}`, destination], { env: refundArtifactEnvironment(), stdio: "ignore" });
 }
 
 export function verifyPackagedRefundAuthority(
@@ -357,6 +377,7 @@ function run(
   requireSuccess = true,
 ): Readonly<{ status: number | null; stdout: string; stderr: string }> {
   const result = spawnSync("docker", ["run", "--rm", "--platform=linux/amd64", ...args], {
+    env: refundArtifactEnvironment(),
     encoding: "utf8",
     maxBuffer: 262_144,
   });
@@ -370,4 +391,9 @@ function requireContains(value: string, expected: string): void {
 }
 
 const entrypoint = process.argv[1];
-if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) await main();
+if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
+  const args = process.argv.slice(2);
+  const prospective = args[0] === "--prospective";
+  const result = await verifyRefundDbBootstrapImage(prospective ? args.slice(1) : args, prospective);
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+}

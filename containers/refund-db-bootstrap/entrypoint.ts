@@ -47,6 +47,14 @@ import {
   type RefundWorkerMigrationInventory,
 } from "../../src/lib/payment/refund/worker-migration-inventory.js";
 
+import {
+  applyRefundAuthorizationCutover,
+  REFUND_AUTHORIZATION_CUTOVER_MODE,
+  RefundAuthorizationCutoverFailure,
+  validCutoverApplicationRole,
+} from "../../scripts/refund-authorization-cutover.js";
+export { REFUND_AUTHORIZATION_CUTOVER_MODE } from "../../scripts/refund-authorization-cutover.js";
+
 const PROJECT_ID = "mira-refund-sandbox-0001";
 const REGION = "asia-northeast3";
 const INSTANCE = "mira-p3e-sbx-refund-pg18";
@@ -176,7 +184,7 @@ type SafeFailureDetails = Readonly<{
   proxyFailureClass?: ProxyFailureClass;
   validatedProducerResult?: ProducerResult;
 }> & Partial<SqlAdminRequestSubtype>;
-type SafeFailureRecord = Readonly<{
+type SafeFailureRecord = Readonly<{ code: "REFUND_AUTHORIZATION_CUTOVER_STOP"; phase: string; migrationState: string }> & SafeFailureDetails | Readonly<{
   code: BootstrapFailureCode;
   secretResourceName?: string;
   versionCount?: number;
@@ -214,7 +222,7 @@ class BootstrapStageFailure extends Error {
   }
 }
 
-export type BootstrapMode = "check" | "apply" | typeof APPLICATION_CREDENTIAL_MODE
+export type BootstrapMode = "check" | "apply" | typeof REFUND_AUTHORIZATION_CUTOVER_MODE | typeof APPLICATION_CREDENTIAL_MODE
   | typeof CANARY_CREDENTIAL_RECOVERY_MODE | typeof CANARY_ROLE_GRANT_MODE
   | typeof SYNTHETIC_SALE_ROLE_GRANT_MODE | typeof CANARY_REFUND_ROLE_RESTORE_MODE
   | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
@@ -236,6 +244,7 @@ export type RuntimeConfiguration = Readonly<{
   imageDigestUri: string;
   databaseUrl: string;
   producerInput?: ProducerInput;
+  cutoverApplicationRole?: string;
 }>;
 
 export type ProducerInput = Readonly<{
@@ -330,7 +339,7 @@ function parseMode(args: readonly string[]): BootstrapMode | null {
 
 function isBootstrapMode(value: string): value is BootstrapMode {
   return [
-    "check", "apply", CANARY_ROLE_GRANT_MODE, SYNTHETIC_SALE_ROLE_GRANT_MODE,
+    "check", "apply", REFUND_AUTHORIZATION_CUTOVER_MODE, CANARY_ROLE_GRANT_MODE, SYNTHETIC_SALE_ROLE_GRANT_MODE,
     CONTACTED_RECONCILIATION_ROLE_GRANT_MODE, BUSINESS_STATE_READBACK_ROLE_GRANT_MODE,
     BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE,
     CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE,
@@ -354,7 +363,8 @@ function parseConfiguration(
     || !matchesExactReadbackAuthority(mode, env)
     || !matchesExactSource(sourceCommit, embeddedSourceCommit)
     || !matchesExactImage(imageDigestUri)
-    || !matchesExactMigrations(env, inventory)) return null;
+    || !matchesInventoryAndCutoverRole(mode, env, inventory)) return null;
+  const cutoverApplicationRole = env.MIRA_DB_BOOTSTRAP_APPLICATION_ROLE;
   const producerInput = parseProducerInput(mode, env);
   if (isProducerMode(mode) && !producerInput) return null;
   return Object.freeze({
@@ -363,7 +373,16 @@ function parseConfiguration(
     imageDigestUri,
     databaseUrl: databaseUrl(mode),
     ...(producerInput ? { producerInput } : {}),
+    cutoverApplicationRole,
   });
+}
+
+function matchesInventoryAndCutoverRole(mode: BootstrapMode, env: BootstrapEnvironment, inventory: RefundWorkerMigrationInventory): boolean {
+  return matchesExactMigrations(env, inventory) && validCutoverRoleConfiguration(mode, env.MIRA_DB_BOOTSTRAP_APPLICATION_ROLE);
+}
+
+function validCutoverRoleConfiguration(mode: BootstrapMode, role: string | undefined): boolean {
+  return mode === REFUND_AUTHORIZATION_CUTOVER_MODE ? validCutoverApplicationRole(role) : role === undefined;
 }
 
 function parseProducerInput(mode: BootstrapMode, env: BootstrapEnvironment): ProducerInput | null {
@@ -479,6 +498,17 @@ async function runWithProxy(
   inventory: RefundWorkerMigrationInventory,
 ): Promise<Readonly<Record<string, unknown>>> {
   const mode = configuration.mode;
+  if (mode === REFUND_AUTHORIZATION_CUTOVER_MODE) {
+    return runProxySession(true, async () => {
+      const database = new Client({ connectionString: configuration.databaseUrl });
+      try {
+        await requireDatabaseConnection(() => database.connect());
+        return await applyRefundAuthorizationCutover(database, {
+          databaseName: DATABASE_NAME, applicationRole: configuration.cutoverApplicationRole ?? "",
+        }, inventory, () => deployPrismaMigrations(configuration.databaseUrl));
+      } finally { await database.end(); }
+    });
+  }
   if (mode === CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE) {
     return runProxySession(true, () => executeBusinessStateReadback(configuration.databaseUrl));
   }
@@ -1168,14 +1198,7 @@ async function applyDatabase(
     await before.end().catch(() => undefined);
   }
 
-  await requireSuccessfulChild(PRISMA_EXECUTABLE, [
-    "migrate",
-    "deploy",
-    "--config",
-    "/app/prisma.config.ts",
-    "--schema",
-    "/app/prisma/schema.prisma",
-  ], databaseUrlValue);
+  await deployPrismaMigrations(databaseUrlValue);
 
   const after = new Client({ connectionString: databaseUrlValue });
   try {
@@ -1194,6 +1217,18 @@ async function applyDatabase(
     completedMigrationCount: inventory.migrationCount,
     roleGrantPostcondition: "EXACT_EFFECTIVE_PRIVILEGES_VERIFIED",
   });
+}
+
+async function deployPrismaMigrations(databaseUrlValue: string): Promise<void> {
+  await requireSuccessfulChild(PRISMA_EXECUTABLE, [
+    "migrate",
+    "deploy",
+    "--config",
+    "/app/prisma.config.ts",
+    "--schema",
+    "/app/prisma/schema.prisma",
+  ], databaseUrlValue);
+
 }
 
 async function requireExactMigrationPrefix(
@@ -1261,6 +1296,9 @@ function ledgerRejected(): never {
 }
 
 function safeFailureRecord(error: unknown): SafeFailureRecord {
+  if (error instanceof RefundAuthorizationCutoverFailure) return Object.freeze({
+    code: "REFUND_AUTHORIZATION_CUTOVER_STOP", phase: error.phase, migrationState: error.migrationState,
+  });
   if (error instanceof BootstrapStageFailure) return error.record;
   if (error instanceof EximbayP3eDatabaseBootstrapError
     && (error.code === "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT"
@@ -1534,6 +1572,7 @@ async function requireSuccessfulChild(
 function childEnvironment(databaseUrlValue: string): NodeJS.ProcessEnv {
   return {
     DATABASE_URL: databaseUrlValue,
+    CHECKPOINT_DISABLE: "1",
     HOME: "/tmp/refund-db-bootstrap",
     NODE_ENV: "production",
     PATH: "/usr/local/bin:/usr/bin:/bin",

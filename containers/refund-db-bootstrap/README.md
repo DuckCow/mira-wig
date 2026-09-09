@@ -90,3 +90,34 @@ Go declaration, owns the standard-library `url.Error` format used here.
 
 Source definition, build, verification, and publication do not themselves authorize a database
 mode; every execution requires separate explicit human authority.
+
+## Prospective authorization cutover
+
+The B + minimal D successor packages 42 migrations, ending in
+`20260909090000_refund_execution_authorization`. Historical 41-migration images and their
+verifier retain their original meaning. Use `verify-refund-db-bootstrap-image.mts --prospective`
+for this successor; neither verifier invokes a live database mode.
+
+`apply-refund-authorization-cutover` is an attended, existing-database mode. The existing
+project/instance/database/source/image/task gates still apply. It additionally requires
+`MIRA_DB_BOOTSTRAP_APPLICATION_ROLE` to name the actual existing application principal.
+No production principal is supplied by the artifact. The mode admits only the exact 41-migration
+prefix or the fully installed 42-migration successor, with M's reviewed checksum and enabled
+enforcement. It calls the existing Prisma migration owner only for the former state, then
+the canonical credential-preserving restore transaction. Application grant permissions and
+their verifier run inside that same ACL transaction. Existing role passwords and secret
+references are not read, generated, rotated, cleared, or published by this mode.
+
+An ACL failure after M leaves M committed and admission closed. The bounded failure reports
+`phase` and `migrationState`; a later authorized invocation reads the ledger/schema again and
+can finish ACL installation without repeating M. Missing/unfinished/drifted ledger or schema
+is `AMBIGUOUS` and stops without repair. This is not the fresh-environment `apply` mode.
+The actual application's existing financial/session privileges remain its deployment owner's
+responsibility; the cutover verifies the new grant-table shape and the worker permission floor.
+
+Prepare and retain an image with
+`node --import tsx scripts/prepare-refund-artifact.mts prepare db-bootstrap /absolute/task-directory`.
+The directory must not exist. Build context, OCI bytes, checksums and receipts survive failure.
+Publication is a separate `publish /absolute/task-directory 1` operation and needs explicit
+repository authority. A second publication requires remote-outcome inspection and prospective
+retry authority; successful preparation never authorizes live migration or deployment.

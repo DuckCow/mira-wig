@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+import { refundArtifactEnvironment } from "./refund-artifact-environment.mjs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
@@ -11,6 +13,7 @@ const SOURCE_DATE_EPOCH = "1784764800";
 const PLATFORM = "linux/amd64";
 const directories: string[] = [];
 
+async function main() {
 try {
   const first = await buildOciLayout("first");
   const second = await buildOciLayout("second");
@@ -38,6 +41,8 @@ try {
     recursive: true,
     force: true,
   })));
+}
+
 }
 
 async function buildOciLayout(label: string) {
@@ -80,7 +85,7 @@ async function buildOciLayout(label: string) {
   });
 }
 
-async function readOciIdentity(directory: string) {
+export async function readOciIdentity(directory: string) {
   const indexBytes = await readFile(join(directory, "index.json"));
   const index = parseJson(indexBytes, "NONCANONICAL_OCI_INDEX");
   const parsedIndex = exactIndex(index);
@@ -312,12 +317,7 @@ function requireEqual(left: unknown, right: unknown, label: string): void {
 }
 
 function strippedEnvironment(): NodeJS.ProcessEnv {
-  return {
-    NODE_ENV: "production",
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    DOCKER_HOST: process.env.DOCKER_HOST,
-  };
+  return refundArtifactEnvironment();
 }
 
 function hasOnlyKeys(
@@ -331,3 +331,5 @@ function hasOnlyKeys(
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

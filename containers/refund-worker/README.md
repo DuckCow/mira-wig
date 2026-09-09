@@ -79,3 +79,28 @@ the `eximbay-canary-once` route.
 single deployment-bound synthetic CONTACTED attempt. It has no positional target input, HTTP
 listener, scan, retry loop, or financial-success meaning. Exit 0 means only that the installed
 checkout recovery owner returned one bounded disposition; it does not mean payment success.
+
+## Prospective B + minimal D artifact
+
+The current bundle owner has six entrypoints, including `eximbay-refund-reentry-once`.
+Its new path uses server admission and a durable grant selector; the image authority must not
+encode a particular Payment, Command or predecessor generation. The historical v20 policy
+and default verifier continue to describe their own bytes and 41-migration corpus.
+
+`node --import tsx scripts/prepare-refund-artifact.mts prepare worker /absolute/task-directory`
+uses the canonical context assembler and performs the two independent no-cache OCI builds
+required by R2A. The first OCI archive is then loaded for prospective verification, without a
+third smoke-image build. `--verify-prospective-image` also verifies an existing local image
+without rebuilding it. New verification includes the 42-migration identity and the packaged
+re-entry child's closed gate; it does not authorize admission or contact a provider.
+
+The task directory must not exist. It retains context archives/manifests, raw OCI identities,
+reusable bytes and successful build/verification receipts before publication.
+`node --import tsx scripts/prepare-refund-artifact.mts publish /absolute/task-directory 1`
+is a separate authorized effect. Push failure records an attempted publication and preserves
+the build. Read the remote outcome before a separately authorized second attempt using the
+same bytes/reference. Never overwrite historical tags or rebuild merely because push failed.
+
+Docker subprocesses accept only the existing safe environment plus validated `DOCKER_CONFIG`,
+`CLOUDSDK_CONFIG`, `DOCKER_CONTEXT` or local Unix `DOCKER_HOST`, and `BUILDX_BUILDER` controls.
+Use task-local configuration; global Docker/gcloud settings are not changed by the workflow.

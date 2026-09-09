@@ -45,6 +45,7 @@ const exactAssets = Object.freeze([
   "prisma/schema.prisma",
   "scripts/eximbay-p3e-database-bootstrap.ts",
   "scripts/refund-authorization-privileges.ts",
+  "scripts/refund-authorization-cutover.ts",
   "src/lib/payment/eximbay/checkout-recovery-state.ts",
   "src/lib/payment/refund/eximbay-contacted-reconciliation-selection.ts",
   "src/lib/payment/refund/worker-migration-inventory.ts",

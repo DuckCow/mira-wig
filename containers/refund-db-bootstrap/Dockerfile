@@ -4,12 +4,13 @@ ARG PROXY_EXECUTABLE_SHA256=12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad8
 FROM node:22.23.1-bookworm-slim@sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27 AS build
 WORKDIR /build
 COPY --link containers/refund-db-bootstrap/package.json containers/refund-db-bootstrap/package-lock.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY --link containers/refund-db-bootstrap/entrypoint.ts ./containers/refund-db-bootstrap/
 COPY --link containers/refund-db-bootstrap/application-credentials.ts ./containers/refund-db-bootstrap/
 COPY --link containers/refund-db-bootstrap/contacted-reconciliation-business-state-readback.ts ./containers/refund-db-bootstrap/
 COPY --link scripts/eximbay-p3e-database-bootstrap.ts ./scripts/
 COPY --link scripts/refund-authorization-privileges.ts ./scripts/
+COPY --link scripts/refund-authorization-cutover.ts ./scripts/
 COPY --link src/lib/payment/eximbay/checkout-recovery-state.ts ./src/lib/payment/eximbay/
 COPY --link src/lib/payment/refund/eximbay-contacted-reconciliation-selection.ts ./src/lib/payment/refund/
 COPY --link src/lib/payment/refund/worker-migration-inventory.ts ./src/lib/payment/refund/
@@ -28,7 +29,7 @@ COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf ./infra/refund-sa
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
 COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf ./infra/refund-sandbox/p3e-b2/eximbay-canary/
 COPY --link dist/eximbay-refund-canary-target-producer.mjs ./dist/
-RUN ./node_modules/.bin/prisma generate --config ./prisma.config.ts --schema ./prisma/schema.prisma \
+RUN CHECKPOINT_DISABLE=1 ./node_modules/.bin/prisma generate --config ./prisma.config.ts --schema ./prisma/schema.prisma \
   && ./node_modules/.bin/esbuild containers/refund-db-bootstrap/entrypoint.ts \
       --bundle --platform=node --target=node22 --format=esm --external:pg \
       --external:@prisma/client --external:@prisma/adapter-pg \
@@ -36,7 +37,7 @@ RUN ./node_modules/.bin/prisma generate --config ./prisma.config.ts --schema ./p
   && ./node_modules/.bin/esbuild scripts/eximbay-p3e-database-bootstrap.ts \
       --bundle --platform=node --target=node22 --format=esm --external:pg \
       --outfile=dist/eximbay-p3e-database-bootstrap.mjs \
-  && npm prune --omit=dev
+  && npm prune --omit=dev --no-audit --no-fund
 
 FROM gcr.io/cloud-sql-connectors/cloud-sql-proxy@sha256:b239a84edd20cfcf1fef20a8d297ac578a73e5cb0ba0eaaf5498782de4f9f861 AS proxy
 

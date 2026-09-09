@@ -1,3 +1,4 @@
+import { refundArtifactEnvironment } from "./refund-artifact-environment.mjs";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -67,12 +68,7 @@ async function manifestDigest(directory: string): Promise<string> {
 }
 
 function strippedEnvironment(): NodeJS.ProcessEnv {
-  return {
-    NODE_ENV: "production",
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    DOCKER_HOST: process.env.DOCKER_HOST,
-  };
+  return refundArtifactEnvironment();
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
