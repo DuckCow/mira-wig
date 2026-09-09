@@ -2,6 +2,9 @@ import type { MetadataRoute } from "next";
 import { siteBaseUrl } from "@/lib/market/seo";
 import type { PublicDiscoveryEnv } from "@/lib/public-discovery/policy";
 
+// Portable images receive their canonical origin at application runtime.
+export const dynamic = "force-dynamic";
+
 const NON_PUBLIC_ROUTE_PREFIXES = [
   "/admin",
   "/api",

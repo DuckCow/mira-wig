@@ -32,6 +32,10 @@ values passed through an ephemeral BuildKit secret mount, never real credentials
 No host `.env` is copied. Existing `next/font` assets are fetched at build time.
 Public `NEXT_PUBLIC_*` settings, if introduced later, require a rebuilt image;
 runtime environment changes cannot replace public values already inlined by Next.
+The existing robots and sitemap handlers explicitly run at request time so their
+canonical origin, server-owned indexing gate and active-market data are not frozen
+from synthetic build configuration. Their indexing and crawler rules are unchanged;
+public indexing remains OFF unless separately configured and authorized.
 
 An explicit tracked-file allowlist replaces the repository-root Docker context.
 It excludes tests, hidden paths, task evidence, credentials, Git metadata,
