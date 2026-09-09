@@ -6,6 +6,7 @@ import {
 } from "./src/lib/public-discovery/policy";
 
 const ACTIVE_EXIMBAY_SDK_MODES: readonly ["SANDBOX"] = Object.freeze(["SANDBOX"]);
+const PRIVATE_ADMIN_PROXY_ORIGIN = "localhost:8085";
 
 export const EXIMBAY_SDK_CSP_BOUNDARY = Object.freeze({
   origins: EXIMBAY_SDK_ORIGINS,
@@ -14,6 +15,11 @@ export const EXIMBAY_SDK_CSP_BOUNDARY = Object.freeze({
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  experimental: {
+    serverActions: {
+      allowedOrigins: [PRIVATE_ADMIN_PROXY_ORIGIN],
+    },
+  },
   headers() {
     return Promise.resolve(PRIVATE_HTML_ROUTE_PATTERNS.map((source) => ({
       source,
