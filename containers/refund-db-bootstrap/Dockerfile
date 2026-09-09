@@ -9,6 +9,7 @@ COPY --link containers/refund-db-bootstrap/entrypoint.ts ./containers/refund-db-
 COPY --link containers/refund-db-bootstrap/application-credentials.ts ./containers/refund-db-bootstrap/
 COPY --link containers/refund-db-bootstrap/contacted-reconciliation-business-state-readback.ts ./containers/refund-db-bootstrap/
 COPY --link scripts/eximbay-p3e-database-bootstrap.ts ./scripts/
+COPY --link scripts/refund-authorization-privileges.ts ./scripts/
 COPY --link src/lib/payment/eximbay/checkout-recovery-state.ts ./src/lib/payment/eximbay/
 COPY --link src/lib/payment/refund/eximbay-contacted-reconciliation-selection.ts ./src/lib/payment/refund/
 COPY --link src/lib/payment/refund/worker-migration-inventory.ts ./src/lib/payment/refund/

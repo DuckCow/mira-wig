@@ -18,10 +18,18 @@ const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn<() => Promise<AdminGuardResult>>(),
   loadWorklist: vi.fn<(input: RefundExecutionWorklistInput) => Promise<RefundExecutionWorklistResult>>(),
   redirect: vi.fn((path: string): never => { throw new Error(`REDIRECT:${path}`); }),
+  authorizationAction: vi.fn((): never => { throw new Error("UNEXPECTED_AUTHORIZATION_ACTION"); }),
 }));
 
 vi.mock("@/lib/admin", () => ({ requireAdmin: mocks.requireAdmin }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+// Next compiles these Client Component imports into RPC references. The page
+// unit test must not evaluate the server session/configuration behind that boundary.
+vi.mock("@/app/actions/admin/refund-execution-authorization", () => ({
+  issueRefundExecutionAuthorizationAction: mocks.authorizationAction,
+  readRefundExecutionAuthorizationsAction: mocks.authorizationAction,
+  revokeRefundExecutionAuthorizationAction: mocks.authorizationAction,
+}));
 vi.mock("@/lib/payment/refund/admin/execution-worklist", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payment/refund/admin/execution-worklist")>();
   return { ...actual, loadRefundExecutionWorklist: mocks.loadWorklist };
@@ -51,6 +59,7 @@ describe("admin refund execution page authorization", () => {
     expect(mocks.requireAdmin).toHaveBeenCalledTimes(1);
     expect(mocks.redirect).toHaveBeenCalledWith("/");
     expect(mocks.loadWorklist).not.toHaveBeenCalled();
+    expect(mocks.authorizationAction).not.toHaveBeenCalled();
   });
 
   it("authorizes before one loader call and supplies one server-owned read time", async () => {
@@ -69,6 +78,7 @@ describe("admin refund execution page authorization", () => {
     });
 
     expect(invocationOrder).toEqual(["guard", "loader"]);
+    expect(mocks.authorizationAction).not.toHaveBeenCalled();
     expect(mocks.loadWorklist).toHaveBeenCalledTimes(1);
     const [input] = mocks.loadWorklist.mock.calls[0];
     expect(input).toMatchObject({ status: "READY", pageSize: "20" });

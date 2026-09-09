@@ -226,7 +226,7 @@ async function continueReclaimedEximbayRefundExecution(
   return continueLeasedEximbayRefundExecution(client, reclaimed.lease, authorize, contact);
 }
 
-async function continueLeasedEximbayRefundExecution(
+export async function continueLeasedEximbayRefundExecution(
   client: PrismaClient,
   lease: Readonly<{ commandId: string; leaseGeneration: number; leaseToken: string }>,
   authorize: ReturnType<typeof createEximbayFirstRefundDispatchAuthorizer>,

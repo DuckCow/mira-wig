@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import bootstrapContract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v1.json";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/contacted-reconciliation-runtime-v1.json";
+import sourceCorrectionPolicy from "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json";
 
 const ROOT = process.cwd();
 const INFRA = join(ROOT, "infra/refund-sandbox/p3e-b2");
@@ -461,7 +463,10 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
     } as const;
     for (const [path, expected] of Object.entries(frozen)) {
-      expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expected);
+      // Frozen policy/SQL files stay checked out unchanged; source belongs to its sealed image tree.
+      const bytes = path.startsWith("infra/") ? readFileSync(join(ROOT, path))
+        : execFileSync("git", ["show", `${sourceCorrectionPolicy.sourceTree}:${path}`], { cwd: ROOT });
+      expect(sha256(bytes), path).toBe(expected);
     }
     expect(contract.image.supervisorSourceSha256).toBe(
       "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15",
@@ -477,7 +482,8 @@ describe("P3E-B2 fixed CONTACTED reconciliation Terraform runtime", () => {
         "c3f444c8e72a3c1b5987d44c145abc6e3b8405a8853b69b8ff45e96db10941d3",
     });
     for (const [path, expectedHash] of Object.entries(sourceHashes)) {
-      expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expectedHash);
+      const bytes = execFileSync("git", ["show", `${sourceCorrectionPolicy.sourceTree}:${path}`], { cwd: ROOT });
+      expect(sha256(bytes), path).toBe(expectedHash);
     }
     const currentPolicy = read("infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v18.json");
     expect(currentPolicy).toContain(sourceHashes[

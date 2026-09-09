@@ -1,13 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import {
-  EXIMBAY_REFUND_REENTRY_TARGET,
-  verifyExactConsumedEximbayRefundReentrySeal,
-} from "./eximbay-refund-reentry-authority";
-import {
-  parseEximbayRefundCanaryEnvironment,
-  type EximbayRefundCanaryEnvironment,
-} from "./eximbay-refund-canary-environment";
+import { hasEximbayRefundCanaryEffectConfiguration } from "./eximbay-refund-canary-environment";
+import { REFUND_AUTHORIZATION_GATE } from "./authorization/contract";
+import { requestRefundAuthorizationAdmission, type AdmittedRefundReentry } from "./authorization/worker-client";
+import { createEximbayFirstRefundDispatchAuthorizer } from "./providers/eximbay/authorize-first-dispatch";
+import { createEximbayRefundContactExecutor } from "./providers/eximbay/execute-contact";
 import { readExactEximbayRefundCanarySecret } from "./eximbay-refund-canary-secret-reader";
 import { createSingleShotEximbayCanaryTransport } from "./run-eximbay-refund-canary-once";
 import { createEximbayRefundPreflightConfig } from "./providers/eximbay/preflight-contract";
@@ -16,9 +13,7 @@ import {
   createEximbayRefundRestCredentials,
   type EximbayRefundRestFetch,
 } from "./providers/eximbay/authenticated-transport";
-import type { TossRefundCancellationPort } from "./providers/toss/refund-cancellation-http";
-import type { TossRefundLookupPort } from "./providers/toss/refund-lookup-http";
-import { createRefundExecutionWorkerRouter } from "./worker-router";
+import { continueLeasedEximbayRefundExecution } from "./worker-router";
 import type { RefundExecutionWorkerRouteOutcome } from "./worker-result-classification";
 import {
   runWithRefundProviderContactAdmission,
@@ -65,7 +60,7 @@ export type EximbayRefundReentryResult = Readonly<{
 export type EximbayRefundReentryDependencies = Readonly<{
   createDatabase: (env: RuntimeEnv) => PrismaClient;
   disconnectDatabase: (database: PrismaClient) => Promise<void>;
-  verifyHistoricalSeal: typeof verifyExactConsumedEximbayRefundReentrySeal;
+  admit: typeof requestRefundAuthorizationAdmission;
   readSecret: typeof readExactEximbayRefundCanarySecret;
   fetch: EximbayRefundRestFetch;
   runAdmission: (
@@ -81,7 +76,7 @@ export const defaultEximbayRefundReentryDependencies: EximbayRefundReentryDepend
       return new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
     },
     disconnectDatabase: (database) => database.$disconnect(),
-    verifyHistoricalSeal: verifyExactConsumedEximbayRefundReentrySeal,
+    admit: requestRefundAuthorizationAdmission,
     readSecret: readExactEximbayRefundCanarySecret,
     fetch: globalThis.fetch,
     runAdmission: (env, operation) => runWithRefundProviderContactAdmission(env, operation),
@@ -91,8 +86,7 @@ export async function runEximbayRefundReentryOnce(
   env: RuntimeEnv,
   dependencies: EximbayRefundReentryDependencies = defaultEximbayRefundReentryDependencies,
 ): Promise<EximbayRefundReentryResult> {
-  const authority = parseEximbayRefundCanaryEnvironment(env);
-  if (!authority) return result(false, "CONFIG_MISMATCH", zeroCounts());
+  if (env[REFUND_AUTHORIZATION_GATE] !== "ENABLED" || !hasEximbayRefundCanaryEffectConfiguration(env)) return result(false, "CONFIG_MISMATCH", zeroCounts());
   let database: PrismaClient;
   try {
     database = dependencies.createDatabase(env);
@@ -102,7 +96,7 @@ export async function runEximbayRefundReentryOnce(
   let operation: EximbayRefundReentryResult;
   let disconnectFailed = false;
   try {
-    operation = await runAdmitted(database, authority, env, dependencies);
+    operation = await runAdmitted(database, env, dependencies);
   } catch {
     operation = result(false, "INTERNAL_FAILURE", zeroCounts());
   } finally {
@@ -119,16 +113,12 @@ export async function runEximbayRefundReentryOnce(
 
 async function runAdmitted(
   database: PrismaClient,
-  authority: EximbayRefundCanaryEnvironment,
   env: RuntimeEnv,
   dependencies: EximbayRefundReentryDependencies,
 ): Promise<EximbayRefundReentryResult> {
   const admitted = await dependencies.runAdmission(env, async () => {
-    const seal = await dependencies.verifyHistoricalSeal(database, authority);
-    if (!seal || seal.commandId !== EXIMBAY_REFUND_REENTRY_TARGET.commandId
-      || seal.predecessorLeaseGeneration !== 2) {
-      return result(false, "TARGET_MISMATCH", zeroCounts());
-    }
+    const admitted = await dependencies.admit(env);
+    const authority = admitted.account;
     let transport: EximbayRefundRestFetch;
     try {
       const secret = await dependencies.readSecret({
@@ -142,7 +132,7 @@ async function runAdmitted(
     } catch {
       return result(false, "CREDENTIAL_UNAVAILABLE", zeroCounts());
     }
-    return executeExactTarget(database, authority, env, transport);
+    return executeAdmittedLease(database, admitted, transport);
   });
   if (admitted.outcome === "BUSY") {
     return result(false, "OVERLAP_SKIPPED", zeroCounts());
@@ -155,34 +145,21 @@ async function runAdmitted(
     : admitted.result;
 }
 
-async function executeExactTarget(
+async function executeAdmittedLease(
   database: PrismaClient,
-  authority: EximbayRefundCanaryEnvironment,
-  env: RuntimeEnv,
+  admitted: AdmittedRefundReentry,
   transport: EximbayRefundRestFetch,
 ): Promise<EximbayRefundReentryResult> {
   const singleShot = createSingleShotEximbayCanaryTransport(transport);
-  const route = createRefundExecutionWorkerRouter({
-    lookup: unreachableTossLookup,
-    cancellation: unreachableTossCancellation,
-    eximbay: {
-      config: createEximbayRefundPreflightConfig({
-        mode: "SANDBOX",
-        mid: authority.mid,
-        merchantAccountBindingId: authority.merchantAccountBindingId,
-        credentialGenerationBindingId: authority.credentialGenerationBindingId,
-      }),
-      retrieve: singleShot.retrieve,
-      lookup: singleShot.lookup,
-      cancellation: singleShot.cancellation,
-    },
+  const config = createEximbayRefundPreflightConfig({
+    mode: "SANDBOX", mid: admitted.account.mid,
+    merchantAccountBindingId: admitted.account.merchantAccountBindingId,
+    credentialGenerationBindingId: admitted.account.credentialGenerationBindingId,
   });
+  const authorize = createEximbayFirstRefundDispatchAuthorizer({ config, retrieve: singleShot.retrieve });
+  const contact = createEximbayRefundContactExecutor({ config, cancel: singleShot.cancellation });
   try {
-    const outcome = await route(database, Object.freeze({
-      commandId: EXIMBAY_REFUND_REENTRY_TARGET.commandId,
-      candidateClass: "UNCONTACTED",
-      provider: "EXIMBAY",
-    }), authority.consumedExecutionId, env);
+    const outcome = await continueLeasedEximbayRefundExecution(database, admitted.lease, authorize, contact);
     return routeResult(outcome, singleShot.counts);
   } catch {
     return result(false, contactCode(singleShot.counts), singleShot.counts);
@@ -260,10 +237,3 @@ function withCleanupFailure(
     cleanupFailures: Object.freeze([...operation.cleanupFailures, failure]),
   });
 }
-
-const unreachableTossLookup: TossRefundLookupPort = () => Promise.reject(
-  new Error("EXIMBAY_REFUND_REENTRY_TOSS_ROUTE_UNREACHABLE"),
-);
-const unreachableTossCancellation: TossRefundCancellationPort = () => Promise.reject(
-  new Error("EXIMBAY_REFUND_REENTRY_TOSS_ROUTE_UNREACHABLE"),
-);

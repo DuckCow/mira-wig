@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   assembleRefundWorkerBuildContext,
@@ -19,8 +21,13 @@ describe("refund worker migration inventory closure", () => {
       const authoritative = repository.entries.map(({ path, sha256 }) => ({ path, sha256 }));
       const selfCheck = refundWorkerMigrationSelfCheckProof(repository);
 
-      expect(repository.migrationCount).toBe(41);
-      expect(repository.migrationDigest).toBe(
+      expect(repository.migrationCount).toBe(42);
+      expect(repository.entries.at(-1)?.name).toBe("20260909090000_refund_execution_authorization");
+      const historical = createHash("sha256");
+      for (const entry of repository.entries.slice(0, -1)) {
+        historical.update(entry.name).update("\0").update(await readFile(entry.path)).update("\0");
+      }
+      expect(historical.digest("hex")).toBe(
         "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
       );
       expect(context.migrationInventory.entries).toEqual(repository.entries);

@@ -34,6 +34,7 @@ type AggregateContext = Readonly<{
   target: UncontactedRecoveryTarget;
   command: UncontactedRecoveryCommand;
 }>;
+type TakeoverState = AggregateContext & Readonly<{ capturedAt: Date }>;
 type TakeoverCandidate = Readonly<{
   generation: number;
   rawToken: string;
@@ -79,7 +80,7 @@ async function reclaimInTransaction(
   }
   const gateFailure = validateRecoveryGate(env);
   if (gateFailure) return gateFailure;
-  return persistTakeover(tx, locked, input);
+  return persistRefundExecutionTakeover(tx, locked, input);
 }
 
 async function lockAndLoad(
@@ -195,15 +196,18 @@ async function captureDatabaseTime(tx: RecoveryTx): Promise<Date> {
   return rows[0].capturedAt;
 }
 
-async function persistTakeover(
+// Shared persistence boundary. Migration M requires application-owned grant consumption
+// for the historical canary ordinal-zero lane; generic callers cannot bypass it.
+export async function persistRefundExecutionTakeover(
   tx: RecoveryTx,
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
   input: NormalizedReclaimUncontactedRefundExecutionInput,
+  eventId?: string,
 ): Promise<ReclaimUncontactedRefundExecutionResult> {
   const candidate = buildTakeoverCandidate(locked);
   const updated = await updateCommandByFullCas(tx, locked, input, candidate);
   if (updated !== 1) throw new UncontactedRecoveryCasConflictError();
-  await appendTakeoverEvent(tx, locked, candidate.generation);
+  await appendTakeoverEvent(tx, locked, candidate.generation, eventId);
   const leased = leaseSuccess(
     locked.command.id,
     locked.target.id,
@@ -221,7 +225,7 @@ async function persistTakeover(
 }
 
 function buildTakeoverCandidate(
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
 ): TakeoverCandidate {
   const rawToken = randomBytes(32).toString("hex");
   return Object.freeze({
@@ -234,7 +238,7 @@ function buildTakeoverCandidate(
 
 async function updateCommandByFullCas(
   tx: RecoveryTx,
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
   input: NormalizedReclaimUncontactedRefundExecutionInput,
   candidate: TakeoverCandidate,
 ): Promise<number> {
@@ -264,11 +268,13 @@ async function updateCommandByFullCas(
 
 async function appendTakeoverEvent(
   tx: RecoveryTx,
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
   generation: number,
+  eventId?: string,
 ): Promise<void> {
   await tx.refundExecutionCommandEvent.create({
     data: {
+      id: eventId,
       commandId: locked.command.id,
       eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
       leaseGeneration: generation,

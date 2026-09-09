@@ -789,6 +789,8 @@ describe("provider initiation ownership", () => {
     }
   });
 
+  // Whole-repository TypeScript analysis took 27s alone and 69s in the full
+  // parallel gate. Bound this one analysis at 120s without changing its scope.
   it("structurally limits the raw initiation capability to the committed CONTACTED owner", () => {
     const analysis = repositoryAnalysis();
 
@@ -798,7 +800,7 @@ describe("provider initiation ownership", () => {
     expect(analysis.productionFiles).toContain("src/lib/payment/providers/toss/adapter.ts");
     expect(analysis.productionFiles).toContain("scripts/payment-reconcile.ts");
     expect(analysis.productionFiles).toContain("containers/refund-worker/entrypoint.ts");
-  }, 60_000);
+  }, 120_000);
 
   it("freezes the exact live declaration inventory and reviewed ambient declarations", () => {
     const analysis = repositoryAnalysis();
@@ -1333,6 +1335,9 @@ function repositoryPolicy(): ArchitecturePolicy {
       ["InitiatePaymentAttemptExecution", "type"],
       ["initiatePaymentAttempt", "function"],
       ["initiatePaymentAttemptWithTransientAuthority", "function"],
+      // Installed by 88f4e1b: the synthetic-sale wrapper still delegates to this
+      // same CONTACTED owner; it neither returns nor exports the raw capability.
+      ["initiateSyntheticSalePaymentAttemptWithTransientAuthority", "function"],
     ]),
     canonicalCapabilityModule: PROVIDER_TYPES,
     canonicalCapabilityExport: "PaymentInitiationProvider",

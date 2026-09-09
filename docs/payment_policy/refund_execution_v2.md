@@ -1,5 +1,10 @@
 # Refund Execution Exact-Command Lease and Fencing - Policy Amendment v2
 
+Prospective source amendment: [durable refund execution authorization v1](refund_execution_authorization_v1.md)
+scopes post-M consumed-canary ordinal-zero re-entry and retires that lane's READY detour.
+Existing contact/result and separately authorized recovery retain their owners. No live activation is granted.
+
+
 - **Date:** 2026-07-16
 - **Status:** PROPOSED DESIGN LOCK - documentation only; normative only after review and commit.
 - **Amends:** `refund_execution_v1.md`

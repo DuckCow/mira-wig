@@ -87,6 +87,12 @@ export function parseEximbayRefundCanaryEnvironment(
   });
 }
 
+// Shared effect switches/task shape remain required by both reviewed one-shot lanes.
+// Financial target authority is selected separately (original seal or application grant).
+export function hasEximbayRefundCanaryEffectConfiguration(env: Readonly<Record<string, string | undefined>>): boolean {
+  return !hasForbiddenSurface(env) && exactActivation(env) && exactCloudRunTask(env);
+}
+
 function exactActivation(env: Readonly<Record<string, string | undefined>>): boolean {
   return REQUIRED_ENABLED.every((key) => env[key] === "ENABLED")
     && REQUIRED_ABSENT.every((key) => !env[key]?.trim());

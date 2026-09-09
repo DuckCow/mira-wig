@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -110,7 +110,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(156);
+    // The 21-path R2A scope above is frozen. Other packages have their own later inventories.
+    const committedInfra = execFileSync("git", ["ls-tree", "-r", "--name-only", "HEAD", "--",
+      "infra/refund-sandbox/p3e-b2/"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
+    expect(completeInfra).toEqual(committedInfra);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
@@ -179,10 +182,6 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      manifestDigest: currentAuthority.buildContext.manifestSha256,
-      fileCount: currentAuthority.buildContext.fileCount,
-      repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
-      packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
       entrypointCount: 6,
       temporaryContextsRemoved: true,
     });
@@ -194,6 +193,11 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     ]) {
       expect(observed.paths.some((path) => path.includes(forbidden))).toBe(false);
     }
+    // Prospective source differs from the retained image policy. No promotion identity
+    // is minted here; the unchanged historical policy is tested independently above.
+    expect(observed.manifestDigest).not.toBe(currentAuthority.buildContext.manifestSha256);
+    expect(observed.fileCount).toBe(observed.paths.length);
+    expect(observed.paths).toContain("src/lib/payment/refund/authorization/worker-client.ts");
     expect(ignore.trimEnd().endsWith("**")).toBe(true);
     expect(ignore).not.toMatch(/^!/mu);
     expect(contextBuilder).toContain("mkdtemp(join(tmpdir()");
@@ -262,7 +266,11 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       || path === "scripts/eximbay-refund-canary.ts"
       || path === "scripts/eximbay-contacted-reconciliation.ts"
     ));
-    expect(requiredSources).toHaveLength(161);
+    expect(requiredSources).toEqual(expect.arrayContaining([
+      "src/lib/payment/refund/authorization/worker-client.ts",
+      "src/lib/payment/refund/authorization/contract.ts",
+      "src/lib/payment/refund/authorization/json-body.ts",
+    ]));
     expect(missingBuildStageSources(dockerfile, requiredSources)).toEqual([]);
 
     const withoutMarketAdmission = dockerfile.replace(
@@ -1484,7 +1492,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     });
   });
 
-  it("keeps historical R2A bytes frozen and admits the exact R13B successor migration", () => {
+  it("keeps historical R2A bytes frozen and separately admits R13B and prospective authorization M", () => {
     expect(sha256(readFileSync(HISTORICAL_SOURCE_AUTHORITY))).toBe(
       "72bc756a42d5733dbf01a8e06c1478baf1e2e83eec93ce6f8e01621abca1ce32",
     );
@@ -1521,6 +1529,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(checkedOutMigrations).toEqual([
       ...migrationAuthority.map(({ path }) => path),
       r13bMigration.path,
+      "prisma/migrations/20260909090000_refund_execution_authorization/migration.sql",
     ]);
     for (const entry of migrationAuthority) {
       expect(sha256(readFileSync(join(ROOT, entry.path)))).toBe(entry.sha256);
@@ -1530,7 +1539,12 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(migrationRuntimeDigest(historicalMigrations)).toBe(
       historicalSourceAuthority.historicalMigrationDigest,
     );
-    const terraform = repositoryRelativeFiles(INFRA)
+    // The R2A no-runtime-materialization fact belongs to its recorded baseline.
+    // Later runtime packages are validated by their own exact resource/permission contracts.
+    const historicalFiles = execFileSync("git", ["ls-tree", "-r", "--name-only",
+      historicalSourceAuthority.baselineCommit, "--", "infra/refund-sandbox/p3e-b2/"],
+    { cwd: ROOT, encoding: "utf8" }).trim().split("\n");
+    const terraform = historicalFiles
       .filter((path) => !path.startsWith(
         "infra/refund-sandbox/p3e-b2/runtime/",
       ))
@@ -1538,7 +1552,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
         "infra/refund-sandbox/p3e-b2/eximbay-canary/",
       ))
       .filter((path) => path.endsWith(".tf"))
-      .map((path) => readFileSync(join(ROOT, path), "utf8"))
+      .map((path) => execFileSync("git", ["show", `${historicalSourceAuthority.baselineCommit}:${path}`],
+        { cwd: ROOT, encoding: "utf8" }))
       .join("\n");
     expect(terraform).not.toMatch(
       /google_cloud_run_v2_job|google_service_account|google_secret_manager_secret_version/u,

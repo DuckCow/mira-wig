@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -233,12 +234,7 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     const files = walk(INFRA)
       .map((path) => relative(INFRA, path).split(sep).join("/"))
       .sort();
-    const r1bFiles = files
-      .filter(isR1BPath)
-      .filter((path) => ![
-        "contracts/runtime-authority-v1.json",
-        "contracts/runtime-image-connection-v1.json",
-      ].includes(path));
+    const r1bFiles = files.filter(isR1BPath);
     expect(EXPECTED_R1B_FILES).toHaveLength(36);
     expect(new Set(EXPECTED_R1B_FILES).size).toBe(36);
     expect(r1bFiles).toEqual(EXPECTED_R1B_FILES);
@@ -254,8 +250,15 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(isR1BPath(
       "contracts/trusted-project-bootstrap-readiness-v2.json",
     )).toBe(false);
-    expect(files).toHaveLength(87);
-    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(49);
+    // These aggregate counts describe the deny-retirement checkpoint, not later packages.
+    const historicalFiles = execFileSync("git", ["ls-tree", "-r", "--name-only",
+      "9deabb88a22e8086237dea001efc080d79b5ffa3", "--", "infra/refund-sandbox/p3e-b2/"],
+    { cwd: ROOT, encoding: "utf8" }).trim().split("\n")
+      .map((path) => path.slice("infra/refund-sandbox/p3e-b2/".length));
+    expect(historicalFiles).toHaveLength(87);
+    expect(historicalFiles.filter((path) => !isR1BPath(path) && ![
+      "contracts/runtime-authority-v1.json", "contracts/runtime-image-connection-v1.json",
+    ].includes(path))).toHaveLength(49);
   });
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {
@@ -876,16 +879,8 @@ describe("P3E-B2-R1B foundation authority policy", () => {
 });
 
 function isR1BPath(path: string): boolean {
-  if ([
-    "contracts/attended-collector-core-v1.json",
-    "contracts/trusted-project-bootstrap-readiness-v1.json",
-    "contracts/trusted-project-bootstrap-readiness-v2.json",
-  ].includes(path)) {
-    return false;
-  }
-
   return [
-    "contracts/",
+    "contracts/foundation-",
     "foundation/",
     "foundation-deployer-authority/",
     "runtime-deferred/",

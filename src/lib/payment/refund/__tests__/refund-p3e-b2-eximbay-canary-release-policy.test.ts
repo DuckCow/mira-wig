@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -59,7 +60,8 @@ describe("P3E-B2 dormant Eximbay canary release authority", () => {
       materialization: "EXPLICIT_HUMAN_AUTHORITY", retirement: "EXPLICIT_HUMAN_AUTHORITY",
       preventDestroy: false, deletionProtection: false });
     for (const source of imagePolicy.canaryExecution.sourceFiles) {
-      expect(createHash("sha256").update(readFileSync(join(ROOT, source.path))).digest("hex"))
+      const sealedSource = execFileSync("git", ["show", `${imagePolicy.sourceTree}:${source.path}`], { cwd: ROOT });
+      expect(createHash("sha256").update(sealedSource).digest("hex"))
         .toBe(source.sha256);
     }
   });

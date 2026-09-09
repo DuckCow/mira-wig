@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Card } from "@/components/ui/Card";
+import { AuthorizationPanel } from "./AuthorizationPanel";
 import { requireAdmin } from "@/lib/admin";
 import {
   loadRefundExecutionWorklist,
@@ -54,7 +55,7 @@ export function RefundExecutionWorklistPage(
     <div className="space-y-6">
       <header>
         <h1 className="text-xl font-semibold text-gray-900">환불 운영 현황</h1>
-        <p className="mt-1 text-sm text-gray-500">환불 실행 명령과 현재 상태를 읽기 전용으로 확인합니다.</p>
+        <p className="mt-1 text-sm text-gray-500">환불 실행 상태를 확인하고 허용된 재진입 승인을 관리합니다.</p>
       </header>
       <Card>
         <WorklistFilters filters={view.filters} />
@@ -62,6 +63,7 @@ export function RefundExecutionWorklistPage(
       <Card>
         <WorklistRows rows={view.rows} />
       </Card>
+      <AuthorizationPanel />
       {view.nextHref ? (
         <div className="flex justify-end">
           <Link href={view.nextHref} className="text-sm font-medium text-blue-600 hover:underline">

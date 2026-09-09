@@ -81,7 +81,7 @@ describe("exact Eximbay refund re-entry authority", () => {
     const result = await runEximbayRefundReentryOnce({}, {
       createDatabase,
       disconnectDatabase: vi.fn(),
-      verifyHistoricalSeal: vi.fn(),
+      admit: vi.fn(),
       readSecret,
       fetch,
       runAdmission: vi.fn(),
@@ -98,20 +98,20 @@ describe("exact Eximbay refund re-entry authority", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("uses the consumed approval only as a read-only seal and stops before credentials on mismatch", async () => {
-    const verifyHistoricalSeal = vi.fn(() => Promise.resolve(null));
+  it("stops before credentials when authenticated admission rejects the grant", async () => {
+    const admit = vi.fn(() => Promise.reject(new Error("AUTHORIZATION_REJECTED")));
     const readSecret = vi.fn();
     const fetch = vi.fn();
     const result = await runEximbayRefundReentryOnce(reentryEnvironment(), {
       createDatabase: () => db,
       disconnectDatabase: () => Promise.resolve(),
-      verifyHistoricalSeal,
+      admit,
       readSecret,
       fetch,
       runAdmission: async (_env, operation) => ({ outcome: "ACQUIRED", result: await operation() }),
     });
-    expect(result.code).toBe("TARGET_MISMATCH");
-    expect(verifyHistoricalSeal).toHaveBeenCalledTimes(1);
+    expect(result.code).toBe("INTERNAL_FAILURE");
+    expect(admit).toHaveBeenCalledTimes(1);
     expect(readSecret).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
 
@@ -133,7 +133,7 @@ describe("exact Eximbay refund re-entry authority", () => {
     const result = await runEximbayRefundReentryOnce(reentryEnvironment(), {
       createDatabase: () => db,
       disconnectDatabase: () => Promise.reject(new Error("SYNTHETIC_DISCONNECT_FAILURE")),
-      verifyHistoricalSeal: vi.fn(),
+      admit: vi.fn(),
       readSecret: vi.fn(),
       fetch: vi.fn(),
       runAdmission: () => Promise.resolve({
@@ -147,12 +147,13 @@ describe("exact Eximbay refund re-entry authority", () => {
     });
   });
 
-  it("has one exact UNCONTACTED iteration and no retry, R2, or reconciliation route", () => {
+  it("continues the admitted lease once without target-specific reclaim, retry or R2", () => {
     const source = readFileSync(join(
       process.cwd(), "src/lib/payment/refund/run-eximbay-refund-reentry-once.ts",
     ), "utf8");
-    expect(source).toContain('candidateClass: "UNCONTACTED"');
-    expect(source).toContain("EXIMBAY_REFUND_REENTRY_TARGET.commandId");
+    expect(source).toContain("continueLeasedEximbayRefundExecution(database, admitted.lease");
+    expect(source).not.toContain("EXIMBAY_REFUND_REENTRY_TARGET");
+    expect(source).not.toContain("reclaimUncontacted");
     expect(source).not.toMatch(/\bwhile\s*\(|\bfor\s*\(|dependencies\.sleep/u);
     expect(source).not.toContain('candidateClass: "CONTACTED"');
     expect(source).not.toContain("R2_AUTHORIZED");
@@ -183,6 +184,7 @@ function operationResult(input: Readonly<{
 
 function reentryEnvironment(): Readonly<Record<string, string>> {
   return Object.freeze({
+    MIRA_REFUND_AUTHORIZATION_ENABLED: "ENABLED",
     DATABASE_URL: "postgresql://fixture:fixture@localhost:5432/refund_sandbox",
     MIRA_REFUND_EXIMBAY_CANARY_LANE: "EXIMBAY_SANDBOX_V1",
     MIRA_REFUND_EXIMBAY_CANARY_RELEASE_BINDING_DIGEST:

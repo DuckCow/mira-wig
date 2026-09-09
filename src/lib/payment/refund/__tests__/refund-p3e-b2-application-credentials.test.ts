@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import runtimeAuthority from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json";
 import {
   APPLICATION_CREDENTIAL_MODE,
   APPLICATION_ROLES,
@@ -485,7 +486,7 @@ describe("P3E-B2 application credential materialization", () => {
     expect(source.match(/addVersionOnce\(/gu)).toHaveLength(2);
   });
 
-  it("does not activate runtime or configure a provider boundary", () => {
+  it("keeps credential materialization separate from the exact preflight release and provider boundary", () => {
     const runtimeLocals = readFileSync(join(
       process.cwd(),
       "infra/refund-sandbox/p3e-b2/runtime/locals.tf",
@@ -494,9 +495,14 @@ describe("P3E-B2 application credential materialization", () => {
       process.cwd(),
       "containers/refund-db-bootstrap/application-credentials.ts",
     ), "utf8");
-    expect(runtimeLocals).toContain("runtime_apply_authorized   = false");
-    expect(runtimeLocals).toContain("^[1-9][0-9]{0,18}$");
+    expect(runtimeAuthority.applyEnforcement).toMatchObject({
+      authorized: true, callerOverride: "ABSENT", policy: "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED",
+    });
+    expect(runtimeLocals).toMatch(/^\s*runtime_apply_authorized\s*=\s*true\s*$/mu);
+    expect(runtimeLocals).toContain('var.preflight_database_secret_version_reference.version == "1"');
+    expect(runtimeAuthority.jobs.preflight.providerContact).toBe("FORBIDDEN");
     expect(credentialSource).not.toMatch(/EXIMBAY|provider[_-]credential/iu);
+    expect(credentialSource).not.toMatch(/run\.googleapis\.com|child_process|cloud_scheduler|jobs:run/iu);
   });
 
   it("generates credentials only after the live DB authority precheck", () => {

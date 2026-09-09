@@ -34,6 +34,7 @@ import {
 } from "../worker-migration-inventory";
 
 const ROOT = process.cwd();
+const CURRENT_MIGRATION_INVENTORY = await loadRefundWorkerMigrationInventory();
 const COMMIT = "a".repeat(40);
 const DIGEST = "b".repeat(64);
 const SENSITIVE_DIAGNOSTIC =
@@ -49,9 +50,8 @@ const VALID_ENV = Object.freeze({
   MIRA_DB_BOOTSTRAP_SOURCE_COMMIT: COMMIT,
   MIRA_DB_BOOTSTRAP_IMAGE_DIGEST_URI:
     `asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:${DIGEST}`,
-  MIRA_DB_BOOTSTRAP_MIGRATION_COUNT: "41",
-  MIRA_DB_BOOTSTRAP_MIGRATION_SHA256:
-    "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
+  MIRA_DB_BOOTSTRAP_MIGRATION_COUNT: String(CURRENT_MIGRATION_INVENTORY.migrationCount),
+  MIRA_DB_BOOTSTRAP_MIGRATION_SHA256: CURRENT_MIGRATION_INVENTORY.migrationDigest,
   CLOUD_RUN_JOB: "mira-p3e-sbx-refund-db-bootstrap",
   CLOUD_RUN_EXECUTION: "manual-future-execution",
   CLOUD_RUN_TASK_COUNT: "1",
@@ -1037,6 +1037,9 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     expect(dockerfile).toContain("RUN npm ci --legacy-peer-deps");
     expect(dockerfile).toContain('CMD ["check"]');
     expect(dockerfile).toContain("scripts/eximbay-p3e-database-bootstrap.ts");
+    expect(dockerfile).toContain("COPY --link scripts/refund-authorization-privileges.ts ./scripts/");
+    expect(readFileSync(join(ROOT, "scripts/build-refund-db-bootstrap-context.mts"), "utf8"))
+      .toContain('"scripts/refund-authorization-privileges.ts",');
     expect(dockerfile).toContain("COPY --link prisma ./prisma");
     expect(dockerfile).toContain(
       "COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt "
@@ -1058,15 +1061,21 @@ describe("P3E-B2 dormant database-bootstrap runtime", () => {
     });
   });
 
-  it("binds the exact 41-migration corpus", async () => {
+  it("binds prospective M while preserving the exact historical 41-migration corpus", async () => {
     const inventory = await loadRefundWorkerMigrationInventory();
-    expect(inventory).toMatchObject({
-      migrationCount: 41,
-      migrationDigest:
-        "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
-    });
+    expect(inventory.migrationCount).toBe(42);
     expect(inventory.entries.at(-1)?.name).toBe(
+      "20260909090000_refund_execution_authorization",
+    );
+    expect(inventory.entries.at(-2)?.name).toBe(
       "20260827090000_add_checkout_communication_locale",
+    );
+    const historical = createHash("sha256");
+    for (const entry of inventory.entries.slice(0, -1)) {
+      historical.update(entry.name).update("\0").update(readFileSync(join(ROOT, entry.path))).update("\0");
+    }
+    expect(historical.digest("hex")).toBe(
+      "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
     );
   });
 

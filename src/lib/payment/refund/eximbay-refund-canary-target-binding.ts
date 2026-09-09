@@ -78,17 +78,16 @@ async function inspectTarget(
   if (!binding || !bindingMatches(binding, attempt.id, family, input)) {
     throw new Error("EXIMBAY_CANARY_OPERATION_BINDING_MISMATCH");
   }
-  const targetBindingDigest = createHash("sha256").update(JSON.stringify([
-    "mira-refund-eximbay-sandbox-canary-target/v1",
-    command.id, attempt.id, attempt.payment.id, binding.id,
-    "EXIMBAY", "SANDBOX", attempt.amount, attempt.currency,
-    attempt.idempotencyKey, attempt.payment.providerOrderId, paymentKey,
-    attempt.payment.financialSucceededAt?.toISOString(),
-    family.key, family.fingerprint,
-    "READY", "PROCESSING", "REFUND_PENDING", "SUCCEEDED", "EXTERNAL", "FINALIZED",
-    0, null, input.merchantAccountBindingId, input.credentialGenerationBindingId,
-    input.syntheticProvenanceDigest, true, 1, false,
-  ]), "utf8").digest("hex");
+  const targetBindingDigest = calculateEximbayCanaryTargetDigest({
+    commandId: command.id, refundAttemptId: attempt.id, paymentId: attempt.payment.id,
+    providerOperationBindingId: binding.id, amount: attempt.amount, currency: attempt.currency,
+    idempotencyKey: attempt.idempotencyKey, providerOrderId: attempt.payment.providerOrderId,
+    providerPaymentKey: paymentKey, financialSucceededAt: attempt.payment.financialSucceededAt,
+    providerOperationFamilyKey: family.key, operationFamilyFingerprint: family.fingerprint,
+    merchantAccountBindingId: input.merchantAccountBindingId,
+    credentialGenerationBindingId: input.credentialGenerationBindingId,
+    syntheticProvenanceDigest: input.syntheticProvenanceDigest,
+  });
   return Object.freeze({
     commandId: command.id,
     refundAttemptId: attempt.id,
@@ -199,4 +198,37 @@ function validInput(input: EximbayRefundCanaryTargetSealInput): boolean {
 
 function nonempty(value: string | null): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+// Historical v1 bytes: READY/ordinal literals describe the original seal, not current eligibility.
+export type CanaryTargetDigestFacts = Readonly<{
+  commandId: string;
+  refundAttemptId: string;
+  paymentId: string;
+  providerOperationBindingId: string;
+  amount: number;
+  currency: string;
+  idempotencyKey: string;
+  providerOrderId: string | null;
+  providerPaymentKey: string;
+  financialSucceededAt: Date | null;
+  providerOperationFamilyKey: string;
+  operationFamilyFingerprint: string;
+  merchantAccountBindingId: string;
+  credentialGenerationBindingId: string;
+  syntheticProvenanceDigest: string;
+}>;
+
+export function calculateEximbayCanaryTargetDigest(facts: CanaryTargetDigestFacts): string {
+  return createHash("sha256").update(JSON.stringify([
+    "mira-refund-eximbay-sandbox-canary-target/v1",
+    facts.commandId, facts.refundAttemptId, facts.paymentId, facts.providerOperationBindingId,
+    "EXIMBAY", "SANDBOX", facts.amount, facts.currency,
+    facts.idempotencyKey, facts.providerOrderId, facts.providerPaymentKey,
+    facts.financialSucceededAt?.toISOString(),
+    facts.providerOperationFamilyKey, facts.operationFamilyFingerprint,
+    "READY", "PROCESSING", "REFUND_PENDING", "SUCCEEDED", "EXTERNAL", "FINALIZED",
+    0, null, facts.merchantAccountBindingId, facts.credentialGenerationBindingId,
+    facts.syntheticProvenanceDigest, true, 1, false,
+  ]), "utf8").digest("hex");
 }

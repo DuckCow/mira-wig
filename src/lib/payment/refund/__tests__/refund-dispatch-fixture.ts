@@ -1,3 +1,4 @@
+import { deleteRetainedRefundTestHistory } from "./retained-refund-test-history";
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
@@ -570,6 +571,7 @@ async function cleanupDispatchAuthorities(
       select: { id: true },
     }),
   );
+  await collectCleanupMutation(cleanupErrors, () => deleteRetainedRefundTestHistory(commandIds));
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } })
   ));

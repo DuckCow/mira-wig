@@ -5,6 +5,8 @@ import { Client } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import contract from
   "../../../../../infra/refund-sandbox/p3e-b2/contracts/business-state-readback-runtime-v1.json";
+import bootstrapContract from
+  "../../../../../infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v1.json";
 import {
   applyBusinessStateReadbackRoleGrants,
   BUSINESS_STATE_READBACK_REQUIRED_SYSTEM_MEMBERSHIP,
@@ -234,11 +236,13 @@ describe("CONTACTED reconciliation business-state readback source policy", () =>
     expect(locals).toContain('"apply-business-state-readback-role-grants",');
     expect(locals).toContain('"revoke-business-state-readback-role-grants",');
     expect(locals).toContain("], var.bootstrap_mode)");
-    expect(locals).toContain("job_source_commit    = var.source_commit");
-    expect(locals).toContain("job_image_digest_uri = var.bootstrap_image_digest_uri");
+    expect(locals).toMatch(/^\s*job_source_commit\s*=\s*var\.source_commit\s*$/mu);
+    expect(locals).toMatch(/^\s*job_image_digest_uri\s*=\s*var\.bootstrap_image_digest_uri\s*$/mu);
     expect(checks).toContain("var.temporary_cloud_sql_access_authorized");
-    expect(variables).toContain("81e785448f834f4176cd5153eb3cbdf6d79d936c");
-    expect(variables).toContain(
+    expect(variables).toContain(`var.source_commit == "${bootstrapContract.image.sourceCommit}"`);
+    expect(variables).toContain(`var.bootstrap_image_digest_uri == "${bootstrapContract.image.digestUri}"`);
+    expect(contract.runtime.sourceCommit).toBe("81e785448f834f4176cd5153eb3cbdf6d79d936c");
+    expect(contract.runtime.imageDigestUri).toContain(
       "sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2",
     );
     expect(variables).not.toContain('variable "readback_source_commit"');
@@ -318,13 +322,15 @@ function verifierFailureDatabase(events: string[]): Client {
   const database = new Client();
   const query = vi.fn((statement: string) => {
     const normalized = statement.trim();
-    if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(normalized)) {
       events.push(normalized);
       return Promise.resolve({ rows: [] });
     }
     if (statement.includes('current_database() AS "databaseName"')) {
       return Promise.resolve({ rows: [{ databaseName: "refund_sandbox" }] });
     }
+    // This legacy verifier-failure fixture represents the pre-M authority.
+    if (statement.includes("AS installed")) return Promise.resolve({ rows: [{ installed: false }] });
     if (statement.includes('count(*)::int AS count')) {
       return Promise.resolve({ rows: [{ count: 1 }] });
     }

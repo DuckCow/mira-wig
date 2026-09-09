@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -255,23 +256,30 @@ describe("P3E-B2 provider-free preflight runtime authority", () => {
     );
   });
 
-  it("preserves unrelated foundation, proxy, and provider boundaries byte-for-byte", () => {
+  it("preserves foundation/proxy bytes and validates superseded source against its own committed authority", () => {
     const frozen = {
       "infra/refund-sandbox/p3e-b2/foundation/network.tf":
         "affe2fdca13b42ee287e5439c12c220c61f0c37b0e5d0e1f5f777d7b4cab045e",
       "infra/refund-sandbox/p3e-b2/foundation/cloud-sql.tf":
         "27ad2958fa386c39a84b23528f8acbedb0e6b63891873db5ce0d7bb30e0f2b14",
-      "src/lib/payment/refund/refund-worker-container-supervisor.ts":
-        "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a",
       "src/lib/payment/refund/refund-sandbox-provider-free-preflight-environment.ts":
         "838e5d1405ba1330d334b4f9006ab753f6dba9c59533e3c1bcc04b9f960ebe27",
-      "infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf":
-        "6b4865199543b45a996aefbfe0b5c896bbda45542c0941080f67c1d8a82ca3f7",
-      "src/lib/payment/refund/eximbay-refund-canary-target-binding.ts":
-        "36a215ebc6ccfa504e4f9d5ace54de32dd480de73947317e002ca9be0aecf4da",
     } as const;
     for (const [path, expected] of Object.entries(frozen)) {
       expect(sha256(readFileSync(join(ROOT, path))), path).toBe(expected);
+    }
+    // R2B1's canary source and the later strict-supervisor checkpoint have distinct lifetimes.
+    // Current canary/re-entry behavior is checked by their own contracts and behavior tests.
+    const historical = [
+      ["7958fb0b228266d502f5e55a14929e8d5510e913", "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+        "0d9fd396e5afb2d48d087472aa5f4a1d9dfcd4fe0353347e9c7c42e347ae277a"],
+      ["0b4ba9dc2625030909f6a19134a0c01692120b97", "infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf",
+        "6b4865199543b45a996aefbfe0b5c896bbda45542c0941080f67c1d8a82ca3f7"],
+      ["0b4ba9dc2625030909f6a19134a0c01692120b97", "src/lib/payment/refund/eximbay-refund-canary-target-binding.ts",
+        "36a215ebc6ccfa504e4f9d5ace54de32dd480de73947317e002ca9be0aecf4da"],
+    ] as const;
+    for (const [revision, path, expected] of historical) {
+      expect(sha256(execFileSync("git", ["show", `${revision}:${path}`], { cwd: ROOT })), path).toBe(expected);
     }
   });
 

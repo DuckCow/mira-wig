@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { calculateEximbayCanaryTargetDigest } from "./eximbay-refund-canary-target-binding";
 import {
   OrderStatus,
   PaymentAdapterExecutionKind,
@@ -144,7 +144,7 @@ function targetMatches(command: Target, capturedAt: Date): boolean {
   const family = deriveEximbayRefundOperationFamily(
     attempt.idempotencyKey, paymentKey, attempt.amount, attempt.currency,
   );
-  const historicalTargetDigest = canaryTargetBindingDigest({
+  const historicalTargetDigest = calculateEximbayCanaryTargetDigest({
     commandId: command.id,
     refundAttemptId: attempt.id,
     paymentId: payment.id,
@@ -317,38 +317,6 @@ function environmentMatchesRetainedSeal(authority: EximbayRefundCanaryEnvironmen
     authority.credentialGenerationBindingId === target.credentialGenerationBindingId,
     authority.mid === target.mid,
   ].every(Boolean);
-}
-
-type CanaryTargetDigestFacts = Readonly<{
-  commandId: string;
-  refundAttemptId: string;
-  paymentId: string;
-  providerOperationBindingId: string;
-  amount: number;
-  currency: string;
-  idempotencyKey: string;
-  providerOrderId: string | null;
-  providerPaymentKey: string;
-  financialSucceededAt: Date | null;
-  providerOperationFamilyKey: string;
-  operationFamilyFingerprint: string;
-  merchantAccountBindingId: string;
-  credentialGenerationBindingId: string;
-  syntheticProvenanceDigest: string;
-}>;
-
-function canaryTargetBindingDigest(facts: CanaryTargetDigestFacts): string {
-  return createHash("sha256").update(JSON.stringify([
-    "mira-refund-eximbay-sandbox-canary-target/v1",
-    facts.commandId, facts.refundAttemptId, facts.paymentId, facts.providerOperationBindingId,
-    "EXIMBAY", "SANDBOX", facts.amount, facts.currency,
-    facts.idempotencyKey, facts.providerOrderId, facts.providerPaymentKey,
-    facts.financialSucceededAt?.toISOString(),
-    facts.providerOperationFamilyKey, facts.operationFamilyFingerprint,
-    "READY", "PROCESSING", "REFUND_PENDING", "SUCCEEDED", "EXTERNAL", "FINALIZED",
-    0, null, facts.merchantAccountBindingId, facts.credentialGenerationBindingId,
-    facts.syntheticProvenanceDigest, true, 1, false,
-  ]), "utf8").digest("hex");
 }
 
 async function captureDatabaseTime(tx: Prisma.TransactionClient): Promise<Date> {

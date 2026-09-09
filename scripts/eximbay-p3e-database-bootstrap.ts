@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "pg";
+import {
+  applyRefundAuthorizationPrivilegeFloor, hasRefundAuthorizationMigration,
+  AUTHORIZATION_UPDATE_COLUMNS, verifyRefundAuthorizationEntryPoints,
+} from "./refund-authorization-privileges";
 
 export const EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION =
   "EXPLICIT_EXIMBAY_P3E_SANDBOX_DATABASE_BOOTSTRAP" as const;
@@ -355,6 +359,7 @@ export async function applyEximbayP3eCanaryRoleGrants(
     await dependencies.verifyExactLedger(database);
     await requireApprovalMigration(database);
     await dependencies.executeArtifact(database, artifact, sql);
+    await applyRefundAuthorizationPrivilegeFloor(database);
     await dependencies.beforePostcondition(database);
     await verifyExactEffectivePrivileges(database);
     await database.query("COMMIT");
@@ -607,6 +612,7 @@ async function executeRoleGrantTransaction(
     await dependencies.verifyExactLedger(database);
     await requireApprovalMigration(database);
     await execute();
+    await applyRefundAuthorizationPrivilegeFloor(database);
     await dependencies.beforePostcondition(database);
     await verify(database);
     await database.query("COMMIT");
@@ -653,6 +659,7 @@ export async function bootstrapEximbayP3eDatabaseRoles(
         : source;
       await dependencies.executeArtifact(database, artifact, executableSql);
     }
+    await applyRefundAuthorizationPrivilegeFloor(database);
     await dependencies.beforePostcondition(database);
     await verifyExactEffectivePrivileges(database);
     await database.query("COMMIT");
@@ -1113,7 +1120,10 @@ async function verifyRole(
       SELECT
         relation.relname AS "tableName",
         attribute.attname AS "columnName",
-        has_column_privilege($1, relation.oid, attribute.attnum, 'UPDATE') AS "update"
+        has_column_privilege($1, relation.oid, attribute.attnum, 'UPDATE') AS "update",
+        has_column_privilege($1, relation.oid, attribute.attnum, 'SELECT') AS "select",
+        has_column_privilege($1, relation.oid, attribute.attnum, 'INSERT') AS "insert",
+        has_column_privilege($1, relation.oid, attribute.attnum, 'REFERENCES') AS "references"
       FROM pg_class relation
       JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
       JOIN pg_attribute attribute ON attribute.attrelid = relation.oid
@@ -1135,10 +1145,12 @@ async function verifyRole(
       ORDER BY relation.relname
     `, [role]);
 
+  const postAuthorization = await hasRefundAuthorizationMigration(database);
   requireRoleSafety(safety.rows);
-  requireTablePrivileges(role, profile, tables.rows);
-  requireColumnPrivileges(role, profile, columns.rows);
+  requireTablePrivileges(role, profile, tables.rows, postAuthorization);
+  requireColumnPrivileges(role, profile, columns.rows, postAuthorization);
   requireNoSequencePrivileges(sequences.rows);
+  if (postAuthorization) await verifyRefundAuthorizationEntryPoints(database, role);
 }
 
 export function requireRoleSafety(rows: readonly RoleSafetyRow[]): void {
@@ -1182,9 +1194,10 @@ function requireTablePrivileges(
   role: RuntimeRole,
   profile: PrivilegeProfile,
   rows: readonly TablePrivilegeRow[],
+  postAuthorization: boolean,
 ): void {
   for (const row of rows) {
-    const expected = tablePrivilegeExpectation(role, profile, row.tableName);
+    const expected = tablePrivilegeExpectation(role, profile, row.tableName, postAuthorization);
     for (const key of TABLE_PRIVILEGE_KEYS) {
       if (row[key] !== expected[key]) failPostcondition();
     }
@@ -1205,6 +1218,7 @@ function tablePrivilegeExpectation(
   role: RuntimeRole,
   profile: PrivilegeProfile,
   tableName: string,
+  postAuthorization: boolean,
 ): Omit<TablePrivilegeRow, "tableName"> {
   const canary = role === "mira_refund_canary";
   const sale = canary && profile === "SYNTHETIC_SALE";
@@ -1212,7 +1226,7 @@ function tablePrivilegeExpectation(
   return Object.freeze({
     select: expectedSelect.has(tableName),
     insert: canary && insertPrivileges(profile).has(tableName),
-    update: canary && CANARY_TABLE_UPDATE.has(tableName),
+    update: canary && !postAuthorization && CANARY_TABLE_UPDATE.has(tableName),
     delete: sale && SYNTHETIC_SALE_DELETE.has(tableName),
     truncate: false,
     references: false,
@@ -1237,18 +1251,30 @@ function requireColumnPrivileges(
   role: RuntimeRole,
   profile: PrivilegeProfile,
   rows: readonly ColumnPrivilegeRow[],
+  postAuthorization: boolean,
 ): void {
   for (const row of rows) {
+    const expectedUpdate = expectedColumnUpdate(role, profile, row, postAuthorization);
+    if (row.update !== expectedUpdate) failPostcondition();
+    if (postAuthorization) requireOtherColumnPrivileges(role, profile, row);
+  }
+}
+
+function expectedColumnUpdate(role: RuntimeRole, profile: PrivilegeProfile, row: ColumnPrivilegeRow, postAuthorization: boolean): boolean {
     const exactColumn = `${row.tableName}.${row.columnName}`;
-    const temporaryUpdate = hasTemporaryColumnUpdate(profile, row.tableName, exactColumn);
-    const canonicalUpdate = CANARY_TABLE_UPDATE.has(row.tableName)
+    const narrowed = postAuthorization && CANARY_TABLE_UPDATE.has(row.tableName);
+    const temporaryUpdate = !narrowed && hasTemporaryColumnUpdate(profile, row.tableName, exactColumn);
+    const canonicalUpdate = (narrowed ? AUTHORIZATION_UPDATE_COLUMNS.has(exactColumn) : CANARY_TABLE_UPDATE.has(row.tableName))
       || CANARY_ROW_LOCK_UPDATE_COLUMNS.has(exactColumn)
       || (row.tableName === "EximbayRefundSandboxCanaryApproval"
         && CANARY_APPROVAL_UPDATE_COLUMNS.has(row.columnName));
-    const expectedUpdate = role === "mira_refund_canary"
+    return role === "mira_refund_canary"
       && (canonicalUpdate || temporaryUpdate);
-    if (row.update !== expectedUpdate) failPostcondition();
-  }
+}
+
+function requireOtherColumnPrivileges(role: RuntimeRole, profile: PrivilegeProfile, row: ColumnPrivilegeRow): void {
+  const expected = tablePrivilegeExpectation(role, profile, row.tableName, true);
+  if (row.select !== expected.select || row.insert !== expected.insert || row.references) failPostcondition();
 }
 
 function hasTemporaryColumnUpdate(
@@ -1304,6 +1330,9 @@ type ColumnPrivilegeRow = Readonly<{
   tableName: string;
   columnName: string;
   update: boolean;
+  select: boolean;
+  insert: boolean;
+  references: boolean;
 }>;
 
 type SequencePrivilegeRow = Readonly<{
