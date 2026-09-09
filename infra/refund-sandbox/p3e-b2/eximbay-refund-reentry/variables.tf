@@ -78,3 +78,18 @@ variable "eximbay_api_key_secret_version" {
     error_message = "Existing Eximbay SANDBOX credential secret version 1 is required."
   }
 }
+
+variable "authorization_installation" {
+  description = "Select the retained B worker with issuance/admission OFF and no execution-specific grant selector."
+  type        = bool
+  default     = false
+}
+variable "authorization_admission_url" {
+  description = "Actual private application's admission URL from creation readback; absent while OAuth/application deployment is pending."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.authorization_admission_url == null ? true : can(regex("^https://[^/?# ]+\\.run\\.app/api/payments/refunds/reentry/admission$", var.authorization_admission_url))
+    error_message = "Only the actual Cloud Run HTTPS admission URL is allowed."
+  }
+}

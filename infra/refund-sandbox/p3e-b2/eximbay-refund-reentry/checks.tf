@@ -16,7 +16,7 @@ check "immutable_successor_alignment" {
 
 check "exact_reentry_runtime" {
   assert {
-    condition = (
+    condition = var.authorization_installation || (
       local.release_image_digest_uri == local.contract.image.digestUri &&
       local.contract.image.imagePolicySha256 == "2bf2887cc6bead7336dea8a36dc25fba695434674a272623f57299be42ad4cd8" &&
       local.contract.exactTarget.commandId == "cmtsdrrxk00010ss6we7g8qe7" &&
@@ -51,5 +51,18 @@ check "zero_automatic_provider_effects" {
       local.contract.executionAuthority.providerContact == "ABSENT"
     )
     error_message = "This successor may be materialized or executed only under later separate human authority."
+  }
+}
+
+check "exact_authorization_installation" {
+  assert {
+    condition = !var.authorization_installation || (
+      filesha256("${path.module}/../eximbay-canary/image-policy-v21.json") == "cf3ddeb02aca04f6240bc0a72827581a648c48359746b17ffbcb98d308b2c2d3" &&
+      local.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:3a3ff821ef1de81c1bf8c7565aab0f78fa68a8245024e9ae685b5e2b015d2aa4" &&
+      local.command == "eximbay-refund-reentry-once" && local.task_count == 1 && local.parallelism == 1 && local.max_retries == 0 && local.task_timeout_seconds == 180 &&
+      lookup(local.authority_environment, "MIRA_REFUND_AUTHORIZATION_ENABLED", "") == "DISABLED" &&
+      !contains(keys(local.authority_environment), "MIRA_REFUND_AUTHORIZATION_ID")
+    )
+    error_message = "The exact retained B worker must remain dormant, with admission disabled and grant selection absent."
   }
 }
