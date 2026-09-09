@@ -1,0 +1,256 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-db-bootstrap-runtime/v2",
+  "status": "PROSPECTIVE_ARTIFACT_VERIFIED_CUTOVER_BINDING_PENDING",
+  "parentAuthoritySha256": "a3af68fb395886c83074f49f48e7c476fe957ff5e147ab058f92f374a95e4a45",
+  "source": {
+    "acceptedFinancialCommit": "35388a920ce6407e974d9dfe3cc97da52107f0e5",
+    "correctionCommit": "8dc0233557615ca95a649d40ee83c13c83b6a435",
+    "correctionTree": "0b3067c300fd4ad08d40c88cd1eb95c9dfd8fba0"
+  },
+  "buildContext": {
+    "manifestSha256": "d2e0eea57aa3b1b11e8351e99e0a0f3908c2cff613544e3f0bd32b3f975405aa",
+    "fileCount": 71,
+    "migrationCount": 42,
+    "migrationSha256": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370"
+  },
+  "image": {
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6",
+    "manifestDigest": "sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6",
+    "manifestSize": 7007,
+    "configDigest": "sha256:a02a49ab525633ecc6d62c59b334ecc39007d7c511e1eb9297732e565da289c0",
+    "platform": "linux/amd64",
+    "orderedLayers": [
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+        "size": 28232643,
+        "diffId": "sha256:81f823b9617547261c907396f63f770deaa554748ff739bedfa650e3bb74595a"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+        "size": 3311,
+        "diffId": "sha256:aa7bf5b94b92bc0951fa6a85f909392c3e1ed27b4c2fa82bc77fa84122a08416"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+        "size": 49937657,
+        "diffId": "sha256:96a9284da7b47faab75998a33dc2e56874756555b92480d023585ff8a6d153fd"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+        "size": 1712633,
+        "diffId": "sha256:a4bc3d2a20bafc5e6c89c5e2285579f620f118f81b5413c62edee3d2380bdaa2"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+        "size": 446,
+        "diffId": "sha256:f7d704e9049824a8bb8860609b030e2cfd2c380484325cda609bb4d578d0db3a"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:7ed649a2cc43ca265420b05e56315bcac4e839b6b5e0a1c5366e051f7d2bc974",
+        "size": 218,
+        "diffId": "sha256:a6e18dce03b02d3a7c5b75d6601f30a4bf25bce51059eacc01aa1b2777cd3130"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:18af6c940dabe125a14a10ae02e6416385049569933b5bb9fc56fffff0233331",
+        "size": 93,
+        "diffId": "sha256:2643d684e2c26e8bde22d64454535c06bd2925ddcec5883d8bad68e8fd34b70a"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:c9c245c58da269e6f93e4b5d3fad6451f228283879cf74fd2db534b8e0cce207",
+        "size": 16264812,
+        "diffId": "sha256:1cb2bc2adb99cefcbf4182721226bdf4cd860137ec9b1c67e28b62ec921d1001"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:1b60a0393c3856c9bcc6a08c7e4384edc3a583e93064d11a344541252a50334d",
+        "size": 129490,
+        "diffId": "sha256:9034e82f47ca639c1be2874b64ef5dec26a82428743846ef0817815c0a82ecc8"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:bf74e21a8697bfdcece8f076273d6e3cd8b4314c4a438520ac523390931fdece",
+        "size": 61944,
+        "diffId": "sha256:3a84a2a20f28add38b609ff149a459a4bef2df517b0313ef1c351a76f0e20f61"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:39a7519947d4befab0524ea7fe053288834f666b7a7e731574297c085fd1e108",
+        "size": 93868124,
+        "diffId": "sha256:c2dee4443c367995f4e646f691d28fb14c6700161bcb62f4e9f5747b044927a0"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:d0d57df7a392943ff15117581ac5087058a91052e397cca3bef7de566706a6ea",
+        "size": 308,
+        "diffId": "sha256:0c597e8326aa62e7a11dc9bb579f67643b65df105280bb1431681203a2c0c36f"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:a0780ef785d187e36a1ebe66b12c5a50b0f63b815be9658162f32d7384dddf0a",
+        "size": 388,
+        "diffId": "sha256:1b0ef1a66e4d60e3f7aae3bcd6c1b7eef3fa394606012d4feaf48063df27c8d3"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:c3cbb9183308b1518efb9747cd2f4f18ca8a2599879a9fcc0bc62a3ff9ac597a",
+        "size": 29742,
+        "diffId": "sha256:0b5b408536bc097c96812f7bf113c11f818172acb07adbbadc61566f9996d841"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:b94b58718d28d5135aefa05ee61938cfd2b3ca0f1e61775435f65ec41f1323d1",
+        "size": 893,
+        "diffId": "sha256:28029efb6ccff35176de283e67a4dbfc8262775cb1201372e84c4f1408a1d3f8"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:cd819c311313983d680e61cd60b9288b9f44ddb35d71f178ab3e177263bc2fc2",
+        "size": 1175,
+        "diffId": "sha256:804b16c5dc99be015f566d7e475905f64a9d87052c1062ceb805236df6eb6944"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:b90d3f7dcc72e5cd5b1288ee26d37574b3d20e3eb4db34c454b8d275cf30844d",
+        "size": 850,
+        "diffId": "sha256:55920ceb91ecffe358fceeaf818acab0376f4d71e783d9a194e3338cf7550351"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:f548bbb28c3f8da7cc4f2e22c1f62025e82f7be44890ed22884fb19982ff7032",
+        "size": 1003,
+        "diffId": "sha256:3b01a1f33cbe382e7114fc8a17ba5accd923b7cfb16e0225d40cb04f3c2cf9c2"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:d2b572c7fcf4b88665563a484646894de77d022e895cfd8df6a8d571e43074d1",
+        "size": 912,
+        "diffId": "sha256:8cb074f3a8fc4b7e57a3e74a5a6e4a215eb6fd54f89af2c0506420e794a41bba"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:d57425661c80f26856f0063e134078079809b0d621d667331f68b0703fa9d62d",
+        "size": 1074,
+        "diffId": "sha256:b02a81dd96479959c4531564478d6e1e4c2d94d710f253076a22ad4c53caef39"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:90c325bfdf19badeab445a25127a506fbf1a7270e1f9af0fc68021b21d8fd89b",
+        "size": 6228,
+        "diffId": "sha256:14140bc3b06024a0cc22c1a6d8b48d6d9d6c5efcedb75bb72273ee386c13352c"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:91bcdcbd8a0f4a9d22a48165d62a6feda5663a9b80172c7d890459128a57a2b2",
+        "size": 4017,
+        "diffId": "sha256:8fd9ad00b5429cf2851e03385c6d87979762a064ec0094e1258f60aa53ef5e27"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:70dad4cb1227ab3f3ff150d7545feea3ca248df320dd93111d596c69bfcc3149",
+        "size": 1092,
+        "diffId": "sha256:672a15156ad742222e0c67bce17d8978547fe1defa3c5a2e5c1828c0f418ce9c"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:a75e054ae8cc21f9c6ce25b6af6ab10ea7808ec2ec72d8d0ce786ec31ffdfcfa",
+        "size": 1172,
+        "diffId": "sha256:7095ebb10b6b6afcac1c39eecfb59cebe2f75a59575762cbae2c700da313704a"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:c548a362d8674a1e8650ae1f017a26296f1c45f56336280221da39d3a97c40c2",
+        "size": 1382,
+        "diffId": "sha256:5e526885ac2cacaa50c48c92ce2cfff3b650509f112f2f19d8fe453c05b7145b"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:0369907a27ca7290d3cd8e0041417f21ec24bcf0170feb36201b2e84a5b2989f",
+        "size": 16265972,
+        "diffId": "sha256:3e83aaeda644b8700f0c0d10028ff53103b4f72bb98b11c82f8ed3bd6af8389a"
+      }
+    ],
+    "ociIndexSha256": "8f5ad63630a569a58f6bc9f12b6a6d599067b2d4bedd41fa1daaf2c83f464365",
+    "reusableArchiveSha256": "6d77b632bdc9004284193e9f0088956395f15162ada3d86d3ab688bc03077483",
+    "verificationReceiptSha256": "82cca37653b7e03285248b517f0e4df2873ba40a2750f1843d42988d81af08e9",
+    "remoteVerificationReceiptSha256": "2fa962c0e857ad43666430ee09a0a54ffb49a7a94d7e39c41d6deb3ba70130ac"
+  },
+  "migrations": {
+    "count": 42,
+    "sha256": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370",
+    "terminal": "20260909090000_refund_execution_authorization",
+    "terminalSha256": "f7b628e27e9f84faf6c56f263c713468e736a551d510138fe7a16471eaaf2ee1",
+    "historicalPrefixCount": 41,
+    "historicalPrefixSha256": "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
+  },
+  "cutover": {
+    "mode": "apply-refund-authorization-cutover",
+    "owner": "containers/refund-db-bootstrap/entrypoint.ts",
+    "helper": "scripts/refund-authorization-cutover.ts",
+    "helperSha256": "66516af1106c795ca7ed3ee4ca4b991f8ce1c537bd2be0aebb6965d41902c2af",
+    "databaseName": "refund_sandbox",
+    "databaseSelection": "EXISTING_EXPLICIT_SANDBOX_TARGET_GATES_ONLY",
+    "applicationRole": {
+      "environmentVariable": "MIRA_DB_BOOTSTRAP_APPLICATION_ROLE",
+      "value": null,
+      "status": "PENDING_ACTUAL_EXISTING_APPLICATION_ROLE"
+    },
+    "migrationOwner": "EXISTING_PRISMA_MIGRATE_DEPLOY",
+    "ledgerAdmission": [
+      "EXACT_COMPLETED_HISTORICAL_41_PREFIX",
+      "EXACT_COMPLETED_42_WITH_ENABLED_ENFORCEMENT"
+    ],
+    "ambiguousOutcome": "STOP_WITHOUT_INITIALIZATION_OR_LEDGER_REPAIR",
+    "aclOwner": "restoreCanaryRefundRoleGrants",
+    "applicationAclOwner": "grantRefundAuthorizationApplicationAccess",
+    "aclTransaction": "WORKER_RESTORE_AND_APPLICATION_GRANT_POSTCONDITIONS_TOGETHER",
+    "postMigrationAclFailure": "M_COMMITTED_REQUIRES_AUTHORIZED_ACL_RESUMPTION",
+    "credentialMutation": false,
+    "credentialReferenceMutation": false,
+    "freshEnvironmentInitialization": false,
+    "businessRowMutation": false,
+    "providerContact": false
+  },
+  "verification": {
+    "localOfflineImagePassed": true,
+    "existingDatabaseSyntheticCredentialTestsPassed": true,
+    "remoteManifestConfigAndEveryLayerMatched": true,
+    "legacyProducerAuthority": "PACKAGED_V2_RUNTIME_V9_POLICY_BYTES_UNCHANGED_NO_NEW_TARGET_AUTHORITY",
+    "defaultMode": "check"
+  },
+  "configurationOwnership": {
+    "terraformRoot": "infra/refund-sandbox/p3e-b2/database-bootstrap",
+    "backendPrefix": "p3e-b2/database-bootstrap",
+    "additionalTerraformRoots": [],
+    "resourceOwner": "EXISTING_ROOT_ONLY",
+    "currentRootBytes": "UNCHANGED_HISTORICAL",
+    "modeAndApplicationRoleForwarding": "PENDING_REVIEWED_CHANGE_AT_EXISTING_RESOURCE_OWNER",
+    "newImageSelectedInLiveJob": false,
+    "executionTaskTemplate": null,
+    "configurationExecutable": false
+  },
+  "pending": [
+    "CONFIRMED_APPLICATION_PACKAGING_AND_COMPATIBLE_APPLICATION_ARTIFACT",
+    "ACTUAL_APPLICATION_DATABASE_ROLE_AND_EXISTING_EFFECTIVE_PRIVILEGES",
+    "LATER_AUTHORIZED_LIVE_LEDGER_AND_ENFORCEMENT_READBACK",
+    "ADMISSION_CLOSURE_AND_INVOCATION_DRAIN",
+    "EXACT_MODE_ROLE_IMAGE_SOURCE_INVENTORY_BINDING_AT_EXISTING_BOOTSTRAP_OWNER",
+    "COMPATIBLE_WORKER_SERVICE_SUBJECT_AUDIENCE_AND_RELEASE_POLICY",
+    "EXPLICIT_LATER_CUTOVER_AUTHORITY"
+  ],
+  "authority": {
+    "databaseConnection": "ABSENT",
+    "cloudRunExecution": "ABSENT",
+    "iamChange": "ABSENT",
+    "deployment": "ABSENT",
+    "grantOperations": "ABSENT",
+    "productionActivation": "ABSENT"
+  }
+}

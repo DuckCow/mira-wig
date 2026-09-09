@@ -1,0 +1,160 @@
+{
+  "contractVersion": "mira-refund-eximbay-canary-image-policy/v21",
+  "status": "PROSPECTIVE_ARTIFACT_VERIFIED_RUNTIME_BINDING_PENDING",
+  "parentAuthoritySha256": "2bf2887cc6bead7336dea8a36dc25fba695434674a272623f57299be42ad4cd8",
+  "source": {
+    "acceptedFinancialCommit": "35388a920ce6407e974d9dfe3cc97da52107f0e5",
+    "correctionCommit": "8dc0233557615ca95a649d40ee83c13c83b6a435",
+    "correctionTree": "0b3067c300fd4ad08d40c88cd1eb95c9dfd8fba0"
+  },
+  "buildContext": {
+    "manifestSha256": "46728bfca2353f57d067d7e62048c7db36410192a6943aa612ab1ac5461e931f",
+    "fileCount": 216,
+    "migrationCount": 42,
+    "migrationSha256": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370",
+    "repositoryGraphInputCount": 166,
+    "packagedGraphInputCount": 374,
+    "entrypointCount": 6
+  },
+  "artifact": {
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:3a3ff821ef1de81c1bf8c7565aab0f78fa68a8245024e9ae685b5e2b015d2aa4",
+    "manifestDigest": "sha256:3a3ff821ef1de81c1bf8c7565aab0f78fa68a8245024e9ae685b5e2b015d2aa4",
+    "manifestSize": 3731,
+    "configDigest": "sha256:053566a61a106257d48fe96e26d5875b0a3b7d2f4173f66f0087c10062747a23",
+    "platform": "linux/amd64",
+    "orderedLayers": [
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+        "size": 28232643,
+        "diffId": "sha256:81f823b9617547261c907396f63f770deaa554748ff739bedfa650e3bb74595a"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+        "size": 3311,
+        "diffId": "sha256:aa7bf5b94b92bc0951fa6a85f909392c3e1ed27b4c2fa82bc77fa84122a08416"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+        "size": 49937657,
+        "diffId": "sha256:96a9284da7b47faab75998a33dc2e56874756555b92480d023585ff8a6d153fd"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+        "size": 1712633,
+        "diffId": "sha256:a4bc3d2a20bafc5e6c89c5e2285579f620f118f81b5413c62edee3d2380bdaa2"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+        "size": 446,
+        "diffId": "sha256:f7d704e9049824a8bb8860609b030e2cfd2c380484325cda609bb4d578d0db3a"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:7a0f3103071d6d07d6d8f98138cf6871c08222838c43e602f35c77c225f4b43e",
+        "size": 91,
+        "diffId": "sha256:d67b6c10286ad1b8feb203890fe95767c6f6c84b0cf2bc75efe8edb04e87255e"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:a2a3a9b7b60270735ae499098bc7e8db8bb4d118f9aed173358390dd1b24b338",
+        "size": 16264795,
+        "diffId": "sha256:25715056075bdafc0f52262d801da0918459d344dff26bd159a6b9ca508fd954"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:b8d89882b77b901953d13651895afc6101214fda012dfa57462d37cc4c6c5a5d",
+        "size": 129487,
+        "diffId": "sha256:6049414f2e2c645848b70ac57d59cafbedc7d9145e84fe6ab528eaf727ff20ea"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:60bf92c6ca302e089e3b76fffdac94454fef2b7899f9e7ba332157e4fffb8e69",
+        "size": 2176313,
+        "diffId": "sha256:6d93777c25f467f981ae2ec0228bb373c5245458d0ed947939f00cd1d11876b1"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:96d618de872a185c6630acc913d455bed4690dddfa0a7f8069c3722ea3f6de3b",
+        "size": 20450,
+        "diffId": "sha256:3c9af61c2626a65a815e888c4df4ea4d51e1538a76b7f127a00c462fb6553708"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:1b1c840c5cee311975d3ce74da1f58be9917b11a05b405b7b99ee184e2338c06",
+        "size": 28125042,
+        "diffId": "sha256:ba855516c768354245528105d8bb8cd5bf6692b009f3e20652ee249047d0c491"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:40aeca70334379163473e31868d37f6de09c9d6d8124e247a156be0ca1097f51",
+        "size": 47237,
+        "diffId": "sha256:9d16c6ec0f8503359ce81bc75295e2d3ff692198d5e31eed5a2854f7613efcb9"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:1f495a29f0c448689bd4157e032bd71f72bf964deaf7f6d907d939baa49b3dad",
+        "size": 3449047,
+        "diffId": "sha256:67de4d69abed6e7df3ef186dd533fff8cdac4a183a7392ec174e56e27136c230"
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:12c72a5dac0a3dcb5e7111fe670ecd1db4be93ddcfd9bf023c8d8d43843050a2",
+        "size": 16266870,
+        "diffId": "sha256:0f4909b57d4a253639af5d2f6b2bddeeb75efb1ea651d7985920e7b4b55853a0"
+      }
+    ],
+    "ociIndexSha256": "c41a8d7353f2363968c9e3051dd7eb5daa8800c700ef2da41efb8431575c3372",
+    "reusableArchiveSha256": "dfbb3147566132edb03f1286674c61316101e55f44fc0017bef826a62ae47008",
+    "verificationReceiptSha256": "d8f39ae3e9159911331844467bd348126b1ec213f8db2832737a7e65444c00d1",
+    "remoteVerificationReceiptSha256": "d37226308d644c3b671776c06009322f0b06db732a6791af3b1c2ac6cde416aa"
+  },
+  "capability": {
+    "authorizationContract": "docs/payment_policy/refund_execution_authorization_v1.md",
+    "authorizationContractSha256": "26b9c79c5bb87c86e50919f5a24588579f3ed3883f8d71a27e407eb49938e2c6",
+    "command": "eximbay-refund-reentry-once",
+    "targetSelection": "EXTERNAL_DURABLE_AUTHORIZATION_GRANT",
+    "targetIndependent": true,
+    "noConfigurationOutcome": "CONFIG_MISMATCH",
+    "noConfigurationExit": 1,
+    "providerContactDuringVerification": 0,
+    "migrations": {
+      "count": 42,
+      "sha256": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370",
+      "terminal": "20260909090000_refund_execution_authorization",
+      "terminalSha256": "f7b628e27e9f84faf6c56f263c713468e736a551d510138fe7a16471eaaf2ee1",
+      "historicalPrefixCount": 41,
+      "historicalPrefixSha256": "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
+    }
+  },
+  "verification": {
+    "twoIndependentNoCacheOciBuildsMatch": true,
+    "reproducibilityReceiptSha256": "2d4b31d6d8fb8fdff4b1d352d48a66202f59244cddd1b9ec1ab38a8f793a4878",
+    "localOfflineCapabilityPassed": true,
+    "remoteManifestConfigAndEveryLayerMatched": true,
+    "runtimeUser": "65532:65532",
+    "applicationClosureCount": 185,
+    "applicationMetadataManifestSha256": "ac44e2fb6b7fc1fc8374de4d2d342da8d7a3283c5a4de0e4c24557c78b6275f8",
+    "applicationContentManifestSha256": "79ddbf3af68872d4c902fda96aed4baecf886c3adea76cd06f45bd34feb70a20",
+    "forbiddenExecutables": 0,
+    "forbiddenContent": 0,
+    "rootOwnershipViolations": 0
+  },
+  "authority": {
+    "artifactIdentity": "VERIFIED",
+    "serverReleasePolicy": "PENDING_NOT_EXECUTABLE",
+    "executionTaskTemplate": null,
+    "applicationArtifact": null,
+    "workerServiceSubjectUid": null,
+    "authorizationAudience": null,
+    "grantSelector": null,
+    "deployment": "ABSENT",
+    "grantOperations": "ABSENT",
+    "financialExecution": "ABSENT",
+    "historicalV20Meaning": "UNCHANGED_NO_RETROACTIVE_REBINDING"
+  }
+}
