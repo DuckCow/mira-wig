@@ -10,8 +10,9 @@ dependencies. The final image additionally includes `.next/static`, `public`,
 editorial content, the traced admin diagnostic fixture and the generated Prisma
 client. It reuses the repository lockfile and the worker/bootstrap's pinned Node
 22.23.1 base. No dependency upgrade, migration, bootstrap or financial command
-runs at application startup. The entrypoint is `node server.js`, UID/GID 65532,
-port 8080; only the Next cache needs writable storage.
+runs at application startup. The pinned Node base's `docker-entrypoint.sh`
+executes `node server.js`, UID/GID 65532, port 8080; only the Next cache needs
+writable storage.
 
 ## Build and retention
 

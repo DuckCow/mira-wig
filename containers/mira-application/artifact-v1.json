@@ -1,0 +1,198 @@
+{
+  "formatVersion": "mira-application-artifact/v1",
+  "status": "ARTIFACT_PREPARED_PUBLISHED_AND_BYTE_VERIFIED",
+  "authority": "ARTIFACT_ONLY_NO_DEPLOYMENT_OR_FINANCIAL_ACTIVATION",
+  "intendedFirstIntegrationEnvironment": "EXISTING_GCP_SANDBOX",
+  "finalProductionPlatform": "UNSELECTED",
+  "baseline": {
+    "acceptedFinancialSource": "35388a920ce6407e974d9dfe3cc97da52107f0e5",
+    "integrationCorrection": "8dc0233557615ca95a649d40ee83c13c83b6a435",
+    "completedArtifactMetadata": "0312175d3d63157c7bfae8b09c11ce30450a697f"
+  },
+  "application": {
+    "image": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/mira-application@sha256:fcb14ae7e75aa1577434512192e44fa0ebe8b2f2b082b86fec49d66c4a83168a",
+    "tag": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/mira-application:p3e-b2-3d66ca446876",
+    "sourceCommit": "3d66ca446876788df7e7e947d6b7ec52149afa38",
+    "sourceTree": "ed974f0178ad0c9892fff627fee5930d8891266c",
+    "platform": "linux/amd64",
+    "nextVersion": "16.2.7",
+    "nodeBase": "node:22.23.1-bookworm-slim@sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27",
+    "contextSha256": "62fa5379ebd096bffc500d71a55bf807518eee4f06b0d25ec468ed82177b73c6",
+    "contextFileCount": 563,
+    "manifest": {
+      "kind": "manifests",
+      "selector": "p3e-b2-3d66ca446876",
+      "sha256": "sha256:fcb14ae7e75aa1577434512192e44fa0ebe8b2f2b082b86fec49d66c4a83168a",
+      "size": 2575,
+      "matches": true
+    },
+    "config": {
+      "mediaType": "application/vnd.oci.image.config.v1+json",
+      "digest": "sha256:e74b374753680de5ccb3f13195e0dc60f4dbf68f0649bb2b069fcae7d183f657",
+      "size": 9937,
+      "platform": null,
+      "annotations": null
+    },
+    "orderedLayers": [
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+        "size": 28232643,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+        "size": 3311,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+        "size": 49937657,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+        "size": 1712633,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+        "size": 446,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:c20fbd43947a0c83b9c60ee39c214ba368e7bb349d3a9e64695d91a037f08e90",
+        "size": 93,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:d7b8b2b8e35a333fc837422835e821f801f460273875ae5a236c681c4710a56b",
+        "size": 23358539,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:353793c0cb2f463f4f180da3a0b3d31cce0d0283bf9e94504b68b94283504c60",
+        "size": 735406,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:fbae0a2a8e808a65d69acf42ac04ef3ad87632205c2bc0f905aa6f7185815106",
+        "size": 1552316,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:944b0adfbd4ec88cdca5ef015b74cc0d19beaaa9d351c414347d388b7e4fc212",
+        "size": 998,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:064ccd5703fb947116a6e23e4ca2d5755c7ae7c88c5c8ff49ef74df3c794ef63",
+        "size": 3449065,
+        "platform": null,
+        "annotations": null
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:08bf6bcf69d985eec74545d91e00f8b24e914d7da3b95628b558f9c8b7091464",
+        "size": 194,
+        "platform": null,
+        "annotations": null
+      }
+    ],
+    "archiveSha256": "ff912c03a0709716567ef357d58482edd3e95241de6825bb4b7f66cdb24e3913",
+    "archiveRelativeToRepository": ".local-review/mira-refund-application-artifact-prepare-01/application-2/image.oci.tar",
+    "retainedVerificationSha256": "b56a49b4daa86f1be28b5bd8109073f9d2468943ac46c136863c740b5b2011a2",
+    "remoteVerificationSha256": "e019fe282da894e913094a7e13710c941f8d8e525a71b754bfd1a1022f81875b"
+  },
+  "runtime": {
+    "baseEntrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "command": [
+      "node",
+      "server.js"
+    ],
+    "user": "65532:65532",
+    "port": 8080,
+    "defaultAuthorizationGate": "DISABLED",
+    "releaseManifestInImage": false,
+    "startupMigration": false,
+    "adminAndAdmission": "EXISTING_MIRA_AUTHENTICATED_APPLICATION_BOUNDARIES",
+    "publicMetadataConfiguration": "SERVER_OWNED_RUNTIME_ROBOTS_AND_SITEMAP"
+  },
+  "reusedUnchanged": [
+    {
+      "component": "worker",
+      "image": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:3a3ff821ef1de81c1bf8c7565aab0f78fa68a8245024e9ae685b5e2b015d2aa4",
+      "sourceCommit": "8dc0233557615ca95a649d40ee83c13c83b6a435",
+      "configDigest": "sha256:053566a61a106257d48fe96e26d5875b0a3b7d2f4173f66f0087c10062747a23",
+      "archiveSha256": "dfbb3147566132edb03f1286674c61316101e55f44fc0017bef826a62ae47008",
+      "committedMetadata": "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v21.json",
+      "committedMetadataSha256": "cf3ddeb02aca04f6240bc0a72827581a648c48359746b17ffbcb98d308b2c2d3"
+    },
+    {
+      "component": "bootstrap",
+      "image": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6",
+      "sourceCommit": "8dc0233557615ca95a649d40ee83c13c83b6a435",
+      "configDigest": "sha256:a02a49ab525633ecc6d62c59b334ecc39007d7c511e1eb9297732e565da289c0",
+      "archiveSha256": "6d77b632bdc9004284193e9f0088956395f15162ada3d86d3ab688bc03077483",
+      "committedMetadata": "infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v2.json",
+      "committedMetadataSha256": "96970db5cb05de5a979ad8ca240f86d354922759f04a1498edcf2bf247fc455a"
+    }
+  ],
+  "validation": {
+    "applicationCandidateBuilds": 2,
+    "applicationPublicationInitialInvocations": 1,
+    "applicationPublicationRetries": 0,
+    "workerBootstrapBuildsContextRegenerationsAndPublications": 0,
+    "providerFreeDeltaTestsPassed": 72,
+    "finalOfflineArtifactChecksPassed": 12,
+    "remoteManifestConfigAndAllLayersMatch": true
+  },
+  "pendingDeploymentRequirements": [
+    "ACTUAL_APPLICATION_URL_AND_EXACT_ADMISSION_AUDIENCE",
+    "APPLICATION_SERVICE_ACCOUNT_AND_EXECUTION_READ_ACCESS",
+    "VERIFIED_WORKER_SERVICE_ACCOUNT_NUMERIC_SUBJECT_AND_EMAIL",
+    "ACTUAL_APPLICATION_DATABASE_PRINCIPAL_AND_EFFECTIVE_FULL_APPLICATION_PRIVILEGES",
+    "RUNTIME_AUTH_SECRET_DELIVERY_AND_OAUTH_CALLBACK_CONFIGURATION",
+    "EXACT_EXECUTION_TEMPLATE_READBACK",
+    "REVIEWED_SERVER_OWNED_RELEASE_FILE_DELIVERY_AND_BYTE_HASH",
+    "AUTHORIZED_M_COMMIT_IMMEDIATE_ENFORCEMENT_AND_COMPATIBLE_ACL_SEQUENCE"
+  ],
+  "notGranted": [
+    "LIVE_DB_ACCESS_OR_MIGRATION",
+    "IAM_OR_TERRAFORM_LIVE_CHANGES",
+    "APPLICATION_DEPLOYMENT",
+    "ADMIN_ACCOUNT_OR_ROLE_MUTATION",
+    "GRANT_ISSUANCE_REVOCATION_CONSUMPTION_OR_LEASE_TAKEOVER",
+    "WORKER_OR_PROVIDER_EXECUTION",
+    "PAYMENT_SALE_REFUND_CANCELLATION_RECOVERY",
+    "PRODUCTION_ACTIVATION",
+    "GIT_PUSH"
+  ],
+  "historicalUnknownsPreserved": {
+    "earlierPrismaCheckpointHelperLaunches": 13,
+    "actualCheckpointTransmission": "UNKNOWN",
+    "additionalInterruptedHistoricalWorkerTestContexts": "0_TO_6_NOT_DIRECTLY_INSTRUMENTED"
+  }
+}
