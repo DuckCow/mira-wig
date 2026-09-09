@@ -48,7 +48,7 @@ export async function publishRetainedArtifact(
   push: (tag: string) => Promise<void>,
 ): Promise<void> {
   const artifact = await readRetainedArtifact(directory);
-  if (!/^asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/refund-(worker|db-bootstrap):p3e-b2-[0-9a-f]{12}$/u.test(artifact.tag)
+  if (!/^asia-northeast3-docker\.pkg\.dev\/mira-refund-sandbox-0001\/mira-p3e-sbx-refund-images\/(refund-(worker|db-bootstrap)|mira-application):p3e-b2-[0-9a-f]{12}$/u.test(artifact.tag)
     || !/^sha256:[0-9a-f]{64}$/u.test(artifact.manifestDigest)
     || await fileSha256(artifact.archive) !== artifact.archiveSha256) throw new Error("RETAINED_ARTIFACT_INVALID");
   await writeReceipt(directory, `publication-${attempt}-attempt.json`, { tag: artifact.tag, manifestDigest: artifact.manifestDigest, attemptedAt: new Date().toISOString() });

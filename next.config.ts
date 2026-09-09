@@ -13,6 +13,7 @@ export const EXIMBAY_SDK_CSP_BOUNDARY = Object.freeze({
 });
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   headers() {
     return Promise.resolve(PRIVATE_HTML_ROUTE_PATTERNS.map((source) => ({
       source,
