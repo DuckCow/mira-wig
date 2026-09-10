@@ -1,0 +1,21 @@
+{
+  "sha256": "c94117d2813c480941e3c28c516b1ad9d72c5219e247e655fcb508e92b0c6fa3",
+  "workerImage": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740",
+  "jobUid": "ef7774c4-1c8d-429d-8aeb-e5646a7275c0",
+  "jobGeneration": "3",
+  "executionCount": 1,
+  "onlyTaskTemplateDelta": "image",
+  "authorizationEnabled": "DISABLED",
+  "actualGrantSelectorAbsent": true,
+  "formatVersion": "mira-refund-config-correction-binding/v1",
+  "sourceCommit": "39e9beb06de04d8f74c205c1b08cb6e4c00854b8",
+  "imageBindingCommit": "73af648",
+  "releaseSecretVersion": "projects/925882331349/secrets/mira-p3e-sbx-refund-reentry-release/versions/3",
+  "applicationRevision": "mira-p3e-sbx-application-00006-2hr",
+  "applicationImage": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/mira-application@sha256:edf57a2efde2a836647f8609ad60599b8c8c03c5cb8d06ca5c30b75b5f6d9093",
+  "applicationImageChanged": false,
+  "workerExecutionsThisTask": 0,
+  "financialGenerationTransitions": 0,
+  "authorizationMutations": 0,
+  "providerContacts": 0
+}

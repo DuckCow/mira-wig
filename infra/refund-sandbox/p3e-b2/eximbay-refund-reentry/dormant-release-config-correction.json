@@ -1,0 +1,103 @@
+{
+  "formatVersion": "mira-refund-reentry-release/v1",
+  "audience": "https://mira-p3e-sbx-application-d3siyrz5ra-du.a.run.app/api/payments/refunds/reentry/admission",
+  "jobName": "projects/mira-refund-sandbox-0001/locations/asia-northeast3/jobs/mira-eximbay-refund-canary",
+  "serviceAccountSubject": "106848526924955591809",
+  "serviceAccountEmail": "mira-eximbay-canary@mira-refund-sandbox-0001.iam.gserviceaccount.com",
+  "mid": "1849705C64",
+  "merchantAccountBindingId": "783244bb25ed5c7506bd3589e8b252e683c65f265068673dbe4d18e415477893",
+  "credentialGenerationBindingId": "2c03724ab5f9746b50815e888ef1619719b5ab1590ac69873487d337ffd50c73",
+  "secretResource": "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key",
+  "secretVersion": "1",
+  "executionTemplate": {
+    "containers": [
+      {
+        "image": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740",
+        "args": [
+          "eximbay-refund-reentry-once"
+        ],
+        "env": [
+          {
+            "name": "MIRA_REFUND_AUTHORIZATION_ENABLED",
+            "value": "DISABLED"
+          },
+          {
+            "name": "REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED",
+            "value": "ENABLED"
+          },
+          {
+            "name": "REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED",
+            "value": "ENABLED"
+          },
+          {
+            "name": "DATABASE_URL",
+            "valueSource": {
+              "secretKeyRef": {
+                "secret": "mira-p3e-sbx-canary-database-url",
+                "version": "1"
+              }
+            }
+          },
+          {
+            "name": "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED",
+            "value": "ENABLED"
+          },
+          {
+            "name": "CHECKPOINT_DISABLE",
+            "value": "1"
+          },
+          {
+            "name": "MIRA_REFUND_REENTRY_ADMISSION_URL",
+            "value": "https://mira-p3e-sbx-application-d3siyrz5ra-du.a.run.app/api/payments/refunds/reentry/admission"
+          },
+          {
+            "name": "REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED",
+            "value": "ENABLED"
+          },
+          {
+            "name": "MIRA_REFUND_REENTRY_JOB_NAME",
+            "value": "projects/mira-refund-sandbox-0001/locations/asia-northeast3/jobs/mira-eximbay-refund-canary"
+          },
+          {
+            "name": "REFUND_EXECUTION_LEASE_ENABLED",
+            "value": "ENABLED"
+          },
+          {
+            "name": "REFUND_EXECUTION_WORKER_ENABLED",
+            "value": "ENABLED"
+          },
+          {
+            "name": "REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME",
+            "value": "mira-refund-sandbox-0001:asia-northeast3:mira-p3e-sbx-refund-pg18"
+          },
+          {
+            "name": "MIRA_REFUND_AUTHORIZATION_ID",
+            "value": "${GRANT_ID}"
+          }
+        ],
+        "resources": {
+          "limits": {
+            "cpu": "1000m",
+            "memory": "512Mi"
+          }
+        }
+      }
+    ],
+    "maxRetries": 0,
+    "timeout": "180s",
+    "serviceAccount": "mira-eximbay-canary@mira-refund-sandbox-0001.iam.gserviceaccount.com",
+    "executionEnvironment": "EXECUTION_ENVIRONMENT_GEN2",
+    "vpcAccess": {
+      "egress": "PRIVATE_RANGES_ONLY",
+      "networkInterfaces": [
+        {
+          "network": "projects/mira-refund-sandbox-0001/global/networks/mira-p3e-sbx-refund-vpc",
+          "subnetwork": "projects/mira-refund-sandbox-0001/regions/asia-northeast3/subnetworks/mira-p3e-sbx-refund-ane3",
+          "tags": [
+            "refund-provider-free"
+          ]
+        }
+      ]
+    }
+  }
+}
