@@ -22,7 +22,7 @@ import {
   EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
   EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
 } from "../eximbay-contacted-reconciliation-environment";
-import { EXIMBAY_REFUND_REENTRY_TARGET } from "../eximbay-refund-reentry-authority";
+import { parseEximbayRefundCanaryEnvironment } from "../eximbay-refund-canary-environment";
 import type { EximbayRefundReentryResult } from "../run-eximbay-refund-reentry-once";
 
 const INSTANCE = "sample-project:asia-northeast3:refund-db";
@@ -62,30 +62,10 @@ const CONTACTED_RECONCILIATION_ENV = Object.freeze({
 const REFUND_REENTRY_ENV = Object.freeze({
   REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
   DATABASE_URL,
-  MIRA_REFUND_EXIMBAY_CANARY_LANE: "EXIMBAY_SANDBOX_V1",
-  MIRA_REFUND_EXIMBAY_CANARY_RELEASE_BINDING_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.releaseBindingDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_JOB_BINDING_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.canaryJobBindingDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_PREFLIGHT_JOB_BINDING_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.preflightJobBindingDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_IMAGE_BINDING_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.imageBindingDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_SECRET_GENERATION_BINDING_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.secretGenerationBindingDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_TARGET_BINDING_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.targetBindingDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_SYNTHETIC_PROVENANCE_DIGEST:
-    EXIMBAY_REFUND_REENTRY_TARGET.syntheticProvenanceDigest,
-  MIRA_REFUND_EXIMBAY_CANARY_NO_CUSTOMER_PII_ATTESTED: "TRUE",
-  MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE:
-    "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key",
-  MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: "1",
-  EXIMBAY_SANDBOX_MID: "1849705C64",
-  EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING:
-    EXIMBAY_REFUND_REENTRY_TARGET.merchantAccountBindingId,
-  EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING:
-    EXIMBAY_REFUND_REENTRY_TARGET.credentialGenerationBindingId,
+  MIRA_REFUND_AUTHORIZATION_ENABLED: "ENABLED",
+  MIRA_REFUND_AUTHORIZATION_ID: "synthetic-grant",
+  MIRA_REFUND_REENTRY_ADMISSION_URL: "https://sample.invalid/api/payments/refunds/reentry/admission",
+  MIRA_REFUND_REENTRY_JOB_NAME: "projects/sample-project/locations/asia-northeast3/jobs/refund-worker",
   REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
   REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED: "ENABLED",
   REFUND_EXECUTION_LEASE_ENABLED: "ENABLED",
@@ -230,6 +210,41 @@ describe("refund worker container supervisor", () => {
     });
     expect(harness.stdout).toEqual([terminal]);
     expect(harness.stderr).toEqual([]);
+  });
+
+  it("rejects the B + minimal D fixture under the stale canary contract", () => {
+    expect(parseEximbayRefundCanaryEnvironment(REFUND_REENTRY_ENV)).toBeNull();
+  });
+
+  it.each([
+    { REFUND_EXECUTION_WORKER_ENABLED: undefined },
+    { REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED: "DISABLED" },
+    { REFUND_EXECUTION_LEASE_ENABLED: undefined },
+    { REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED: undefined },
+    { REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED: undefined },
+    { REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED: undefined },
+    { CLOUD_RUN_TASK_COUNT: "2" },
+    { CLOUD_RUN_TASK_INDEX: "1" },
+    { CLOUD_RUN_TASK_ATTEMPT: "1" },
+    { EXIMBAY_SANDBOX_API_KEY: "forbidden-inline-key" },
+    { EXIMBAY_BASE_URL: "https://sample.invalid" },
+    { REFUND_EXECUTION_CLAIM_ENABLED: "ENABLED" },
+    { DATABASE_URL: "malformed" },
+    { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: "wrong-instance" },
+    { PGHOST: "override" },
+    { CSQL_PROXY_ADDRESS: "override" },
+  ])("fails closed before any spawn for required re-entry config %j", async (delta) => {
+    const harness = supervisorHarness([], { readiness: true });
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"],
+      { ...REFUND_REENTRY_ENV, ...delta },
+      harness.output,
+      harness.dependencies,
+    )).toBe(1);
+    expect(harness.spawnCalls).toEqual([]);
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({
+      hostResult: { code: "CONFIG_INVALID", childProcessState: "NOT_STARTED", proxyLifecycle: "NOT_STARTED" },
+    });
   });
 
   it("reports a trustworthy re-entry child success separately from clean host cleanup", async () => {

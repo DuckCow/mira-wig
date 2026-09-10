@@ -11,7 +11,7 @@ import {
 import {
   parseCanonicalRefundCloudSqlDatabaseUrl,
 } from "./refund-sandbox-provider-free-preflight-environment";
-import { parseEximbayRefundCanaryEnvironment } from "./eximbay-refund-canary-environment";
+import { hasEximbayRefundCanaryEffectConfiguration, parseEximbayRefundCanaryEnvironment } from "./eximbay-refund-canary-environment";
 import {
   EXIMBAY_CONTACTED_RECONCILIATION_CHECKOUT_SESSION_ID,
   EXIMBAY_CONTACTED_RECONCILIATION_RUN_ID,
@@ -213,7 +213,7 @@ async function runEximbayRefundReentryOnce(
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
   dependencies: RefundWorkerContainerSupervisorDependencies,
 ): Promise<number> {
-  if (!parseEximbayRefundCanaryEnvironment(env)) {
+  if (!hasEximbayRefundCanaryEffectConfiguration(env)) {
     return writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "NOT_STARTED");
   }
   const binding = validateDatabaseBinding(env);
