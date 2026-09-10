@@ -14,7 +14,7 @@ locals {
   service_account_id             = "mira-eximbay-canary"
   job_name                       = "mira-eximbay-refund-canary"
   command                        = "eximbay-refund-reentry-once"
-  release_image_digest_uri       = var.authorization_installation ? "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:3a3ff821ef1de81c1bf8c7565aab0f78fa68a8245024e9ae685b5e2b015d2aa4" : "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:e7d3cf8599c49a73e0199f3cea9e7a3b57efd9403fef9191b4b6f3be2f045ff0"
+  release_image_digest_uri       = var.authorization_installation ? "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740" : "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:e7d3cf8599c49a73e0199f3cea9e7a3b57efd9403fef9191b4b6f3be2f045ff0"
   cloud_sql_instance_resource    = "projects/mira-refund-sandbox-0001/instances/mira-p3e-sbx-refund-pg18"
   api_key_secret_resource        = "projects/mira-refund-sandbox-0001/secrets/mira-p3e-sbx-eximbay-api-key"
   cloud_sql_condition_expression = "resource.name == '${local.cloud_sql_instance_resource}' && resource.service == 'sqladmin.googleapis.com'"

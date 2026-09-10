@@ -57,8 +57,8 @@ check "zero_automatic_provider_effects" {
 check "exact_authorization_installation" {
   assert {
     condition = !var.authorization_installation || (
-      filesha256("${path.module}/../eximbay-canary/image-policy-v21.json") == "cf3ddeb02aca04f6240bc0a72827581a648c48359746b17ffbcb98d308b2c2d3" &&
-      local.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:3a3ff821ef1de81c1bf8c7565aab0f78fa68a8245024e9ae685b5e2b015d2aa4" &&
+      filesha256("${path.module}/../eximbay-canary/image-policy-v22.json") == "32f0ecb5f18727b6c85d65861633093b91098c7d32b4162cd76c8ab73a5e2a51" &&
+      local.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740" &&
       local.command == "eximbay-refund-reentry-once" && local.task_count == 1 && local.parallelism == 1 && local.max_retries == 0 && local.task_timeout_seconds == 180 &&
       lookup(local.authority_environment, "MIRA_REFUND_AUTHORIZATION_ENABLED", "") == "DISABLED" &&
       !contains(keys(local.authority_environment), "MIRA_REFUND_AUTHORIZATION_ID")

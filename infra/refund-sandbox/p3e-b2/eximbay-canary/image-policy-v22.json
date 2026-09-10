@@ -1,0 +1,136 @@
+{
+  "contractVersion": "mira-refund-eximbay-canary-image-policy/v22",
+  "status": "VERIFIED_CONFIG_INVALID_CORRECTION_DORMANT_ONLY",
+  "parentPolicySha256": "cf3ddeb02aca04f6240bc0a72827581a648c48359746b17ffbcb98d308b2c2d3",
+  "source": {
+    "correctionCommit": "39e9beb06de04d8f74c205c1b08cb6e4c00854b8",
+    "correctionTree": "1d49f001574e2c1e053d1bd2d9542ad77663e0c0"
+  },
+  "buildContext": {
+    "manifestSha256": "c713350fbe75f1764f3a8459baeedb079a491d807304d4cb13ea5fbd9c5f36ad",
+    "fileCount": 216,
+    "migrationCount": 42,
+    "migrationSha256": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370"
+  },
+  "artifact": {
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740",
+    "manifestDigest": "sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740",
+    "configDigest": "sha256:6692e270be31d90187f6639c879fc5211f39fe065e9eaa1a8094f6b58c5eb5c2",
+    "orderedLayers": [
+      {
+        "kind": "blobs",
+        "selector": "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+        "sha256": "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+        "size": 28232643,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+        "sha256": "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+        "size": 3311,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+        "sha256": "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+        "size": 49937657,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+        "sha256": "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+        "size": 1712633,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+        "sha256": "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+        "size": 446,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:7a0f3103071d6d07d6d8f98138cf6871c08222838c43e602f35c77c225f4b43e",
+        "sha256": "sha256:7a0f3103071d6d07d6d8f98138cf6871c08222838c43e602f35c77c225f4b43e",
+        "size": 91,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:a2a3a9b7b60270735ae499098bc7e8db8bb4d118f9aed173358390dd1b24b338",
+        "sha256": "sha256:a2a3a9b7b60270735ae499098bc7e8db8bb4d118f9aed173358390dd1b24b338",
+        "size": 16264795,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:b8d89882b77b901953d13651895afc6101214fda012dfa57462d37cc4c6c5a5d",
+        "sha256": "sha256:b8d89882b77b901953d13651895afc6101214fda012dfa57462d37cc4c6c5a5d",
+        "size": 129487,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:cf437d7ae8808c72410191b62881fae8fa8a88090ba17e0fcb06defc1d4a3e64",
+        "sha256": "sha256:cf437d7ae8808c72410191b62881fae8fa8a88090ba17e0fcb06defc1d4a3e64",
+        "size": 2176345,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:96d618de872a185c6630acc913d455bed4690dddfa0a7f8069c3722ea3f6de3b",
+        "sha256": "sha256:96d618de872a185c6630acc913d455bed4690dddfa0a7f8069c3722ea3f6de3b",
+        "size": 20450,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:1b1c840c5cee311975d3ce74da1f58be9917b11a05b405b7b99ee184e2338c06",
+        "sha256": "sha256:1b1c840c5cee311975d3ce74da1f58be9917b11a05b405b7b99ee184e2338c06",
+        "size": 28125042,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:40aeca70334379163473e31868d37f6de09c9d6d8124e247a156be0ca1097f51",
+        "sha256": "sha256:40aeca70334379163473e31868d37f6de09c9d6d8124e247a156be0ca1097f51",
+        "size": 47237,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:1f495a29f0c448689bd4157e032bd71f72bf964deaf7f6d907d939baa49b3dad",
+        "sha256": "sha256:1f495a29f0c448689bd4157e032bd71f72bf964deaf7f6d907d939baa49b3dad",
+        "size": 3449047,
+        "matches": true
+      },
+      {
+        "kind": "blobs",
+        "selector": "sha256:12c72a5dac0a3dcb5e7111fe670ecd1db4be93ddcfd9bf023c8d8d43843050a2",
+        "sha256": "sha256:12c72a5dac0a3dcb5e7111fe670ecd1db4be93ddcfd9bf023c8d8d43843050a2",
+        "size": 16266870,
+        "matches": true
+      }
+    ],
+    "archiveSha256": "fe93cb1a1676aa6c1e073a4a6da665449b25ed13286026cca23a36d79f124edd"
+  },
+  "verification": {
+    "twoIndependentNoCacheOciBuildsMatch": true,
+    "canonicalOfflineVerificationPassed": true,
+    "remoteManifestConfigAndEveryLayerMatched": true,
+    "verifiedReceiptSha256": "11e7c17da13d5a2f850a060b136b985659d2171799e0e2cb106e7dd0a0dc5163",
+    "remoteReceiptSha256": "6b3b511702c2af072451260ff94e101dd195c88f9519bfe426a302f77d40fbd2",
+    "reproducibilityReceiptSha256": "ff81bf95aa0403fd3f0528bb73d6f788c809ef015dde3255341b1d953f17fde3"
+  },
+  "authority": {
+    "dormantBinding": "AUTHORIZED_BY_MIRA_REFUND_WORKER_CONFIG_INVALID_CORRECTION_01",
+    "workerExecution": "ABSENT",
+    "grantMutation": "ABSENT",
+    "providerContact": "ABSENT",
+    "historicalPolicies": "UNCHANGED"
+  }
+}
