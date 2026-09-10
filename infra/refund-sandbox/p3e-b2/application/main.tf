@@ -100,7 +100,7 @@ resource "google_cloud_run_v2_service" "application" {
     }
     containers {
       name       = "application"
-      image      = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/mira-application@sha256:fcb14ae7e75aa1577434512192e44fa0ebe8b2f2b082b86fec49d66c4a83168a"
+      image      = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/mira-application@sha256:390be6023fe206642f36c420fb4e38814935ecc3a8dc9ce2af4acfa00a4e253e"
       depends_on = ["cloud-sql-proxy"]
       ports { container_port = 8080 }
       resources { limits = { cpu = "1", memory = "1Gi" } }
