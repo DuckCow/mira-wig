@@ -5,6 +5,7 @@ import { sameJson, templateForGrant, type RefundReentryRelease } from "./release
 export type RuntimeIdentityPort = Readonly<{
   verifyIdToken(token: string, audience: string): Promise<unknown>;
   getExecution(name: string): Promise<unknown>;
+  listExecutionTasks(executionName: string): Promise<unknown>;
 }>;
 
 // The production seam uses signed Google identity and the immutable control-plane
@@ -18,6 +19,13 @@ export const googleRuntimeIdentity: RuntimeIdentityPort = {
     const client = await new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] }).getClient();
     const response = await client.request<unknown>({
       url: `https://run.googleapis.com/v2/${name}`, method: "GET", timeout: 10_000, retry: false,
+    });
+    return response.data;
+  },
+  async listExecutionTasks(executionName) {
+    const client = await new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] }).getClient();
+    const response = await client.request<unknown>({
+      url: `https://run.googleapis.com/v2/${executionName}/tasks`, method: "GET", timeout: 10_000, retry: false,
     });
     return response.data;
   },
@@ -42,6 +50,8 @@ export class VerifiedRefundExecution {
       requireIdentity(identity, release);
       const execution = await port.getExecution(executionName);
       requireExecution(execution, executionName, grantId, release);
+      const tasks = await port.listExecutionTasks(executionName);
+      requireExecutionVpc(tasks, executionName, release);
       return new VerifiedRefundExecution(release.serviceAccountSubject, executionName, execution.uid, release.digest, grantId);
     } catch {
       // SDK errors can contain request credentials. Expose only the bounded failure.
@@ -65,6 +75,23 @@ function requireExecution(value: unknown, name: string, grantId: string, release
   if (!record(value) || !uuid(value.uid)) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   const valid = [value.name === name, value.taskCount === 1, value.parallelism === 1,
     value.completionTime === undefined, value.deleteTime === undefined,
-    sameJson(value.template, templateForGrant(release, grantId))].every(Boolean);
+    sameJson(value.template, executionTemplateForGrant(release, grantId))].every(Boolean);
   if (!valid) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+}
+
+function requireExecutionVpc(value: unknown, executionName: string, release: RefundReentryRelease): void {
+  if (!record(value) || !Array.isArray(value.tasks) || value.tasks.length !== 1 || !record(value.tasks[0])) {
+    throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+  }
+  const task = value.tasks[0];
+  if (task.execution !== executionName || task.index !== 0 || !sameJson(task.vpcAccess, release.executionTemplate.vpcAccess)) {
+    throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+  }
+}
+
+function executionTemplateForGrant(release: RefundReentryRelease, grantId: string): unknown {
+  const template = templateForGrant(release, grantId);
+  if (!record(template)) throw new RefundAuthorizationError("CONFIG_INVALID");
+  const { vpcAccess: _vpcAccess, ...executionTemplate } = template;
+  return executionTemplate;
 }

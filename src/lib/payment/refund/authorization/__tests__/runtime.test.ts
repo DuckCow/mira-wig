@@ -16,6 +16,7 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const getExecution = vi.fn(port.getExecution);
     await expect(VerifiedRefundExecution.verify("forged-token", executionName, grantId, release, {
       verifyIdToken: () => Promise.reject(new Error("SDK request with secret bearer")), getExecution,
+      listExecutionTasks: vi.fn(),
     })).rejects.toThrow(/^EXECUTION_UNVERIFIED$/u);
     expect(getExecution).not.toHaveBeenCalled();
   });
@@ -45,8 +46,24 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 
+  it("accepts Execution without vpcAccess only when its sole Task proves the reviewed VPC", async () => {
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, port)).resolves.toMatchObject({ grantId });
+  });
+
+  it.each([
+    { tasks: [{ execution: executionName, index: 0, vpcAccess: { egress: "ALL_TRAFFIC" } }] },
+    { tasks: [{ execution: executionName, index: 0 }] },
+    { tasks: [] },
+  ])("fails closed when Task VPC evidence is insufficient or wrong", async (taskReadback) => {
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, listExecutionTasks: () => Promise.resolve(taskReadback),
+    })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
   it("rejects another job before external access and compares every reviewed template field", async () => {
-    const port = { verifyIdToken: vi.fn(), getExecution: vi.fn() };
+    const port = { verifyIdToken: vi.fn(), getExecution: vi.fn(), listExecutionTasks: vi.fn() };
     await expect(VerifiedRefundExecution.verify("token", "projects/other/locations/a/jobs/b/executions/c", grantId, release, port)).rejects.toThrow();
     expect(port.verifyIdToken).not.toHaveBeenCalled();
     expect(sameJson(templateForGrant(release, grantId), { ...release.executionTemplate, timeout: "3600s" })).toBe(false);

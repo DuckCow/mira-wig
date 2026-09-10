@@ -55,7 +55,7 @@ resource "google_project_iam_custom_role" "execution_reader" {
   project     = local.project
   role_id     = "miraRefundExecutionReader"
   title       = "Mira refund Execution reader"
-  permissions = ["run.executions.get"]
+  permissions = ["run.executions.get", "run.tasks.list"]
 }
 variable "auth_configuration" {
   description = "Actual OAuth client ID and explicit secret versions; null leaves application deployment pending. No secret payloads."

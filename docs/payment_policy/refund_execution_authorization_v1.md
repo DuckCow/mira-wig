@@ -74,8 +74,10 @@ remain explicitly ENABLED; other execution switches, inline provider keys and LI
 surfaces remain absent. Native task count/index/attempt must be 1/0/0. The admission URL is also the
 ID-token audience. The application checks signed issuer/audience/expiry, immutable service
 account subject and verified email, then GETs the named immutable Execution with its own
-`run.executions.get` authority. Name is only a locator. Exact job, UID, task/parallelism and
-full task template must match; completed/deleted executions are rejected. A unique execution
+`run.executions.get` authority and lists its sole Task with `run.tasks.list`. Name is only a locator.
+Exact job, UID, task/parallelism and every Execution-returned task-template field must match;
+the Task's output-only `vpcAccess` must exactly match the reviewed VPC configuration because
+Cloud Run v2 omits it from the Execution template. Completed/deleted executions are rejected. A unique execution
 name and UUID cannot consume two grants. The worker makes one admission HTTP request and
 validates the server's response over HTTPS. The release identity is never accepted from an
 unverified worker image/environment claim.

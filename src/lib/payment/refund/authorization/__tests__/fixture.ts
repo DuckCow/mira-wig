@@ -40,6 +40,7 @@ export const release = parseRefundReentryRelease({
   mid: "MIRA-SBX", merchantAccountBindingId: "merchant-v1", credentialGenerationBindingId: "credential-v1",
   secretResource: "projects/synthetic-refund-test/secrets/test-api-key", secretVersion: "1",
   executionTemplate: { serviceAccount: "worker@synthetic-refund-test.iam.gserviceaccount.com", maxRetries: 0, timeout: "180s",
+    vpcAccess: { egress: "PRIVATE_RANGES_ONLY", networkInterfaces: [{ network: "projects/synthetic-refund-test/global/networks/refund", subnetwork: "projects/synthetic-refund-test/regions/asia-northeast3/subnetworks/refund" }] },
     containers: [{ image: `example.test/refund-test@sha256:${"b".repeat(64)}`, resources: { limits: { cpu: "1", memory: "512Mi" } },
       env: [{ name: "MIRA_REFUND_AUTHORIZATION_ID", value: "${GRANT_ID}" }, { name: "DATABASE_URL", valueSource: { secretKeyRef: { secret: "test-db", version: "1" } } }] }] },
 }, "a".repeat(64)); // Synthetic fixture identity, never a promotion artifact.
@@ -128,7 +129,16 @@ export function issueInput(target: Target) {
 export function runtimePort(grantId: string, executionName: string, uid = randomUUID()): RuntimeIdentityPort {
   return { verifyIdToken: () => Promise.resolve({ sub: release.serviceAccountSubject, email: release.serviceAccountEmail,
     email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
-  getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: templateForGrant(release, grantId) }) };
+  getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: executionTemplateForGrant(grantId) }),
+  listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0, vpcAccess: release.executionTemplate["vpcAccess"] }] }) };
+}
+
+function executionTemplateForGrant(grantId: string): Record<string, unknown> {
+  const template = templateForGrant(release, grantId);
+  if (!template || typeof template !== "object" || Array.isArray(template)) throw new Error("TEST_TEMPLATE_REQUIRED");
+  const executionTemplate: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(template)) if (key !== "vpcAccess") executionTemplate[key] = value;
+  return executionTemplate;
 }
 export function verified(grantId: string) {
   const name = `${release.jobName}/executions/test-${randomUUID()}`;
