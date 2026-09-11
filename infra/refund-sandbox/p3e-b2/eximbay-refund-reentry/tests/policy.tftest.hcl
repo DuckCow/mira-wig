@@ -53,6 +53,28 @@ run "admit_exact_dormant_refund_reentry_successor" {
   }
 }
 
+run "admit_authorization_ready_worker_template" {
+  command = plan
+  variables {
+    authorization_installation = true
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.canary.name == "mira-eximbay-refund-canary" &&
+      google_cloud_run_v2_job.canary.template[0].task_count == 1 &&
+      google_cloud_run_v2_job.canary.template[0].parallelism == 1 &&
+      google_cloud_run_v2_job.canary.template[0].template[0].max_retries == 0 &&
+      google_cloud_run_v2_job.canary.template[0].template[0].timeout == "180s" &&
+      google_cloud_run_v2_job.canary.template[0].template[0].containers[0].image == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740" &&
+      google_cloud_run_v2_job.canary.template[0].template[0].containers[0].args == tolist(["eximbay-refund-reentry-once"]) &&
+      one([for env in google_cloud_run_v2_job.canary.template[0].template[0].containers[0].env : env.value if env.name == "MIRA_REFUND_AUTHORIZATION_ENABLED"]) == "ENABLED" &&
+      length([for env in google_cloud_run_v2_job.canary.template[0].template[0].containers[0].env : env if env.name == "MIRA_REFUND_AUTHORIZATION_ID"]) == 0
+    )
+    error_message = "The authorization-ready worker must enable its gate while retaining a grant-free template."
+  }
+}
+
 run "reject_provider_contact_authority" {
   command = plan
   variables {

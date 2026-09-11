@@ -15,9 +15,11 @@ import { acquireRefundExecutionLease } from "../../acquire-lease";
 import { runEximbayRefundReentryOnce, defaultEximbayRefundReentryDependencies } from "../../run-eximbay-refund-reentry-once";
 import { consumeRefundExecutionAuthorization } from "../admission";
 import { record } from "../contract";
+import { createRefundAuthorizationAdmissionHandler } from "../http";
+import { parseAdmissionReceipt } from "../worker-client";
 import { restoreCanaryRefundRoleGrants, verifyExactEffectivePrivileges } from "../../../../../../scripts/eximbay-p3e-database-bootstrap";
 import {
-  setupRoles, teardownRoles, cleanupTargets, targetFixture, issueInput, adminService, verified, release, loadRelease, enabled, workerEnvironment,
+  setupRoles, teardownRoles, cleanupTargets, targetFixture, issueInput, adminService, verified, release, loadRelease, enabled, workerEnvironmentForGrant, runtimePort,
   appRole, prismaFor, pgFor, roleUrl, bootstrapInput, restoreDependencies, fixtures, type Target,
 } from "./fixture";
 
@@ -141,11 +143,34 @@ describe("post-M lane constraints under the actual shared worker role", () => {
 });
 
 describe("admitted lease continuation preserves restricted financial writers", () => {
+  it("reproduces kq55l's disabled worker gate before worker admission or provider work", async () => {
+    const target = await targetFixture(2);
+    const grant = await adminService(app).issue(issueInput(target));
+    const admissions = vi.fn();
+    const provider = vi.fn();
+    const before = await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } });
+    const command = await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } });
+    const events = await db.refundExecutionCommandEvent.count({ where: { commandId: target.commandId } });
+
+    const result = await runWorker(grant.id, provider, {
+      ...workerEnvironmentForGrant(grant.id), MIRA_REFUND_AUTHORIZATION_ENABLED: "DISABLED",
+    }, admissions);
+
+    expect(result).toMatchObject({ ok: false, code: "CONFIG_MISMATCH", preflightRetrieveCount: 0, cancellationCount: 0 });
+    expect(admissions).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+    expect(await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } })).toMatchObject({ consumedAt: before.consumedAt, consumedLeaseEventId: before.consumedLeaseEventId });
+    expect(await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } })).toMatchObject({ leaseGeneration: command.leaseGeneration });
+    expect(await db.refundExecutionCommandEvent.count({ where: { commandId: target.commandId } })).toBe(events);
+  });
+
   it.each([1, 2])("uses the same executable for a synthetic target at predecessor generation %i", async (generation) => {
     const target = await targetFixture(generation); const grant = await adminService(app).issue(issueInput(target));
     const fetch = await successTransport(target);
-    const run = await runWorker(grant.id, fetch);
+    const admissions = vi.fn();
+    const run = await runWorker(grant.id, fetch, undefined, admissions);
     expect(run).toMatchObject({ ok: true, code: "KNOWN_SUCCESS", preflightRetrieveCount: 1, cancellationCount: 1, reconciliationLookupCount: 0 });
+    expect(admissions).toHaveBeenCalledTimes(1);
     const row = await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } });
     expect(row).toMatchObject({ status: "DONE", dispatchAttempt: 1, leaseGeneration: generation + 1, leaseOwner: null, leaseTokenHash: null });
     expect((await db.refundAttempt.findUniqueOrThrow({ where: { id: target.refundAttemptId } })).status).toBe("SUCCEEDED");
@@ -159,7 +184,15 @@ describe("admitted lease continuation preserves restricted financial writers", (
       await expect(client.query('SELECT id FROM "PaymentOutbox"')).rejects.toThrow(/permission denied/u);
     } finally { await client.end(); }
     expect(await db.paymentOutbox.count({ where: { dedupKey: outbox.dedupKey } })).toBe(1);
-    expect((await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } })).consumedAt).toBeInstanceOf(Date);
+    const consumed = await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } });
+    expect(consumed.consumedAt).toBeInstanceOf(Date);
+    const event = await db.refundExecutionCommandEvent.findUniqueOrThrow({ where: { id: consumed.consumedLeaseEventId ?? "missing" } });
+    expect(event).toMatchObject({ commandId: target.commandId, eventType: "LEASE_ACQUIRED", leaseGeneration: generation + 1, dispatchAttempt: 0 });
+    const replayAdmissions = vi.fn(); const replayProvider = vi.fn();
+    const replay = await runWorker(grant.id, replayProvider, undefined, replayAdmissions);
+    expect(replay).toMatchObject({ ok: false, code: "INTERNAL_FAILURE", preflightRetrieveCount: 0, cancellationCount: 0 });
+    expect(replayAdmissions).toHaveBeenCalledTimes(1);
+    expect(replayProvider).not.toHaveBeenCalled();
   });
 
   it("preserves separately authorized ordinal-one reclaim without another grant, retrieve or dispatch", async () => {
@@ -214,10 +247,27 @@ describe("admitted lease continuation preserves restricted financial writers", (
   }, 15_000);
 });
 
-async function runWorker(grantId: string, fetch: typeof globalThis.fetch) {
-  return runEximbayRefundReentryOnce({ ...workerEnvironment, DATABASE_URL: roleUrl("mira_refund_canary") }, {
+async function runWorker(
+  grantId: string,
+  fetch: typeof globalThis.fetch,
+  environment = workerEnvironmentForGrant(grantId),
+  admissions = vi.fn(),
+) {
+  return runEximbayRefundReentryOnce({ ...environment, DATABASE_URL: roleUrl("mira_refund_canary") }, {
     ...defaultEximbayRefundReentryDependencies,
-    admit: async () => ({ ...await consumeRefundExecutionAuthorization(app, await verified(grantId), loadRelease, enabled), account: release }),
+    admit: async () => {
+      admissions();
+      const executionName = `${release.jobName}/executions/${environment.CLOUD_RUN_EXECUTION}`;
+      const handler = createRefundAuthorizationAdmissionHandler({
+        database: app, loadRelease, env: enabled, runtime: runtimePort(grantId, executionName),
+      });
+      const response = await handler(new Request(release.audience, {
+        method: "POST", headers: { authorization: "Bearer synthetic.signed.token" },
+        body: JSON.stringify({ grantId, executionName }),
+      }));
+      expect(response.status).toBe(200);
+      return parseAdmissionReceipt(await response.json(), grantId);
+    },
     readSecret: () => Promise.resolve("synthetic-api-key"), fetch,
   });
 }

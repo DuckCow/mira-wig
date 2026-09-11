@@ -31,7 +31,7 @@ locals {
     REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED = "ENABLED"
   }
   authority_environment = var.authorization_installation ? merge({
-    MIRA_REFUND_AUTHORIZATION_ENABLED         = "DISABLED"
+    MIRA_REFUND_AUTHORIZATION_ENABLED         = "ENABLED"
     MIRA_REFUND_REENTRY_JOB_NAME              = "projects/${var.project_id}/locations/${local.region}/jobs/${local.job_name}"
     REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME = var.cloud_sql_instance_connection_name
     CHECKPOINT_DISABLE                        = "1"

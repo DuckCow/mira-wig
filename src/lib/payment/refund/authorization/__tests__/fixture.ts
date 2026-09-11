@@ -18,12 +18,6 @@ import {
 import { AUTHORIZATION_COMMAND_UPDATE, grantRefundAuthorizationApplicationAccess } from "../../../../../../scripts/refund-authorization-privileges";
 
 export const enabled = { MIRA_REFUND_AUTHORIZATION_ENABLED: "ENABLED", MIRA_REFUND_REENTRY_RELEASE_SHA256: "a".repeat(64) };
-export const workerEnvironment = { ...enabled,
-  REFUND_EXECUTION_WORKER_ENABLED: "ENABLED", REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED: "ENABLED",
-  REFUND_EXECUTION_LEASE_ENABLED: "ENABLED", REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED: "ENABLED",
-  REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED: "ENABLED", REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED: "ENABLED",
-  CLOUD_RUN_TASK_COUNT: "1", CLOUD_RUN_TASK_INDEX: "0", CLOUD_RUN_TASK_ATTEMPT: "0",
-};
 export const appRole = "mira_refund_authorization_test_app";
 export const issuerId = `refund_authorization_admin_${randomUUID()}`;
 export const bootstrapInput = { admission: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION, environment: "SANDBOX", targetDatabaseName: "wig_platform_test" } as const;
@@ -42,7 +36,19 @@ export const release = parseRefundReentryRelease({
   executionTemplate: { serviceAccount: "worker@synthetic-refund-test.iam.gserviceaccount.com", maxRetries: 0, timeout: "180s",
     vpcAccess: { egress: "PRIVATE_RANGES_ONLY", networkInterfaces: [{ network: "projects/synthetic-refund-test/global/networks/refund", subnetwork: "projects/synthetic-refund-test/regions/asia-northeast3/subnetworks/refund" }] },
     containers: [{ image: `example.test/refund-test@sha256:${"b".repeat(64)}`, resources: { limits: { cpu: "1", memory: "512Mi" } },
-      env: [{ name: "MIRA_REFUND_AUTHORIZATION_ID", value: "${GRANT_ID}" }, { name: "DATABASE_URL", valueSource: { secretKeyRef: { secret: "test-db", version: "1" } } }] }] },
+      env: [
+        { name: "MIRA_REFUND_AUTHORIZATION_ENABLED", value: "ENABLED" },
+        { name: "REFUND_EXECUTION_WORKER_ENABLED", value: "ENABLED" },
+        { name: "REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED", value: "ENABLED" },
+        { name: "REFUND_EXECUTION_LEASE_ENABLED", value: "ENABLED" },
+        { name: "REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED", value: "ENABLED" },
+        { name: "REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED", value: "ENABLED" },
+        { name: "REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED", value: "ENABLED" },
+        { name: "MIRA_REFUND_REENTRY_ADMISSION_URL", value: "https://mira.example.test/api/payments/refunds/reentry/admission" },
+        { name: "MIRA_REFUND_REENTRY_JOB_NAME", value: "projects/synthetic-refund-test/locations/asia-northeast3/jobs/reentry-test" },
+        { name: "MIRA_REFUND_AUTHORIZATION_ID", value: "${GRANT_ID}" },
+        { name: "DATABASE_URL", valueSource: { secretKeyRef: { secret: "test-db", version: "1" } } },
+      ] }] },
 }, "a".repeat(64)); // Synthetic fixture identity, never a promotion artifact.
 export const loadRelease = (digest: string) => digest === release.digest ? Promise.resolve(release) : Promise.reject(new Error("TEST_RELEASE_MISMATCH"));
 export const fixtures: DispatchFixture[] = [];
@@ -131,6 +137,54 @@ export function runtimePort(grantId: string, executionName: string, uid = random
     email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
   getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: executionTemplateForGrant(grantId) }),
   listExecutionTasks: () => Promise.resolve({ tasks: [{ name: `${executionName}/tasks/0`, execution: executionName, index: 0, vpcAccess: release.executionTemplate["vpcAccess"] }] }) };
+}
+
+export function workerEnvironmentForGrant(grantId: string): Readonly<Record<string, string>> {
+  const environment: Record<string, string> = {
+    CLOUD_RUN_JOB: "reentry-test",
+    CLOUD_RUN_EXECUTION: "reentry-test-execution",
+    CLOUD_RUN_TASK_COUNT: "1",
+    CLOUD_RUN_TASK_INDEX: "0",
+    CLOUD_RUN_TASK_ATTEMPT: "0",
+  };
+  for (const entry of workerTemplateEnvironment(grantId)) {
+    environment[entry.name] = entry.value;
+  }
+  return Object.freeze(environment);
+}
+
+type WorkerEnvironmentEntry = { name: string; value: string };
+
+function workerTemplateEnvironment(grantId: string): WorkerEnvironmentEntry[] {
+  const template = templateForGrant(release, grantId);
+  if (!isRecord(template)) throw new Error("TEST_TEMPLATE_REQUIRED");
+  const containers = recordValue(template, "containers");
+  if (!Array.isArray(containers) || containers.length !== 1) throw new Error("TEST_TEMPLATE_REQUIRED");
+  const container = firstItem(containers);
+  if (!isRecord(container)) throw new Error("TEST_TEMPLATE_REQUIRED");
+  const environment = recordValue(container, "env");
+  if (!Array.isArray(environment)) throw new Error("TEST_TEMPLATE_REQUIRED");
+  return workerEnvironmentEntries(environment);
+}
+
+function isWorkerEnvironmentEntry(value: unknown): value is WorkerEnvironmentEntry {
+  return isRecord(value) && typeof value.name === "string" && typeof value.value === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function recordValue(record: Record<string, unknown>, key: string): unknown {
+  return record[key];
+}
+
+function firstItem(values: readonly unknown[]): unknown {
+  return values[0];
+}
+
+function workerEnvironmentEntries(values: readonly unknown[]): WorkerEnvironmentEntry[] {
+  return values.filter(isWorkerEnvironmentEntry);
 }
 
 function executionTemplateForGrant(grantId: string): Record<string, unknown> {

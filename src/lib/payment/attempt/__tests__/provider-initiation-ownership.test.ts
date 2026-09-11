@@ -821,6 +821,32 @@ describe("provider initiation ownership", () => {
     expect(analysis.violations).toEqual([]);
   }, 60_000);
 
+  it("excludes repository-root .local-review evidence without concealing genuine source ownership violations", () => {
+    const fixture = createArchitectureFixture({
+      "raw.ts": "export interface RawProvider { initiate(input: string): Promise<void> }\nexport declare const provider: RawProvider;\n",
+      "owner.ts": "import { provider } from './raw';\nexport async function owner() { await provider.initiate('ok'); }\n",
+      "src/real-violation.ts": "import { provider } from '../raw';\nexport async function violation() { await provider.initiate('no'); }\n",
+      ".local-review/retained-copy.d.ts": "declare global { interface RetainedEvidence { readonly copied: string } }\nexport {};\n",
+    }, {
+      owner: "owner.ts",
+      canonicalCapabilityModule: "raw.ts",
+      canonicalCapabilityExport: "RawProvider",
+      restrictedModuleTargets: new Set(["raw.ts"]),
+      capabilityExportAllowances: new Map([["raw.ts", new Set(["provider"])]]),
+      liveRepository: false,
+    });
+    const discovered = discoverAnalysisSourceFiles(fixture.root)
+      .map((path) => normalizedRelative(fixture.root, path));
+    const analysis = analyzeProgram(createStrictFixtureProgram(fixture.root), fixture.root, fixture.policy);
+
+    expect(discovered).toEqual(expect.arrayContaining(["owner.ts", "raw.ts", "src/real-violation.ts"]));
+    expect(discovered).not.toContain(".local-review/retained-copy.d.ts");
+    expect(analysis.productionFiles).toContain("src/real-violation.ts");
+    expect(analysis.declarationFiles).toEqual([]);
+    expect(analysis.violations).toContain("CALL src/real-violation.ts");
+    expect(analysis.violations).not.toEqual(expect.arrayContaining([expect.stringContaining(".local-review/")]));
+  }, 30_000);
+
   it.each(DECLARATION_POLICY_REJECTION_CASES)(
     "rejects declaration-file policy bypass through $name",
     (testCase) => {
@@ -1460,6 +1486,7 @@ function excludedRepositoryDirectory(root: string, path: string): boolean {
   return new Set([
     ".git",
     ".next",
+    ".local-review",
     "node_modules",
     "coverage",
     "dist",

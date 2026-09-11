@@ -80,7 +80,7 @@ variable "eximbay_api_key_secret_version" {
 }
 
 variable "authorization_installation" {
-  description = "Select the retained B worker with issuance/admission OFF and no execution-specific grant selector."
+  description = "Select the retained B worker with its authorization gate configured and no execution-specific grant selector."
   type        = bool
   default     = false
 }

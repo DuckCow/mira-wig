@@ -60,9 +60,9 @@ check "exact_authorization_installation" {
       filesha256("${path.module}/../eximbay-canary/image-policy-v22.json") == "32f0ecb5f18727b6c85d65861633093b91098c7d32b4162cd76c8ab73a5e2a51" &&
       local.release_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:314a7a882241cdf80461a6c0800475862be3d25c9cff6aa2e1a86dc20c0f8740" &&
       local.command == "eximbay-refund-reentry-once" && local.task_count == 1 && local.parallelism == 1 && local.max_retries == 0 && local.task_timeout_seconds == 180 &&
-      lookup(local.authority_environment, "MIRA_REFUND_AUTHORIZATION_ENABLED", "") == "DISABLED" &&
+      lookup(local.authority_environment, "MIRA_REFUND_AUTHORIZATION_ENABLED", "") == "ENABLED" &&
       !contains(keys(local.authority_environment), "MIRA_REFUND_AUTHORIZATION_ID")
     )
-    error_message = "The exact retained B worker must remain dormant, with admission disabled and grant selection absent."
+    error_message = "The exact retained B worker must keep its authorization gate configured while grant selection remains absent."
   }
 }
