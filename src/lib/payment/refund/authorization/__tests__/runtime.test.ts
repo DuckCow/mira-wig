@@ -17,6 +17,10 @@ function withoutEgress(value: Record<string, unknown>): Record<string, unknown> 
   return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "egress"));
 }
 
+function taskReadback(execution: string, vpcAccess: unknown, taskExecution: unknown = execution): Record<string, unknown> {
+  return { name: `${execution}/tasks/0`, execution: taskExecution, index: 0, vpcAccess };
+}
+
 describe("server-owned execution identity and bounded HTTP data", () => {
   it("requires signed Google identity before consulting immutable execution configuration", async () => {
     const port = runtimePort(grantId, executionName);
@@ -61,7 +65,7 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const actualVpc = withoutEgress(expectedVpc);
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
       ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0, vpcAccess: actualVpc }] }),
+      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName, actualVpc, "synthetic-run")] }),
     })).resolves.toMatchObject({ grantId });
   });
 
@@ -75,14 +79,13 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const port = runtimePort(grantId, executionName);
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
       ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0,
-        vpcAccess: { ...expectedVpc, egress: "ALL_TRAFFIC" } }] }),
+      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName, { ...expectedVpc, egress: "ALL_TRAFFIC" })] }),
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 
   it.each([
-    { tasks: [{ execution: executionName, index: 0, vpcAccess: { egress: "ALL_TRAFFIC" } }] },
-    { tasks: [{ execution: executionName, index: 0 }] },
+    { tasks: [taskReadback(executionName, { egress: "ALL_TRAFFIC" })] },
+    { tasks: [taskReadback(executionName, undefined)] },
     { tasks: [] },
   ])("fails closed when Task VPC evidence is insufficient or wrong", async (taskReadback) => {
     const port = runtimePort(grantId, executionName);
@@ -99,7 +102,7 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const port = runtimePort(grantId, executionName);
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, allTrafficRelease, {
       ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0, vpcAccess: actualVpc }] }),
+      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName, actualVpc)] }),
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 
@@ -115,8 +118,25 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const port = runtimePort(grantId, executionName);
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
       ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0,
-        vpcAccess: { ...expectedVpc, networkInterfaces: [{ ...interfaces[0], ...changed }] } }] }),
+      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName,
+        { ...expectedVpc, networkInterfaces: [{ ...interfaces[0], ...changed }] })] }),
+    })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it.each([
+    ["another project", "projects/other/locations/asia-northeast3/jobs/reentry-test/executions/synthetic-run/tasks/0"],
+    ["another location", "projects/synthetic-refund-test/locations/other/jobs/reentry-test/executions/synthetic-run/tasks/0"],
+    ["another Execution", `${release.jobName}/executions/other/tasks/0`],
+    ["another Job", "projects/synthetic-refund-test/locations/asia-northeast3/jobs/other/executions/synthetic-run/tasks/0"],
+    ["malformed name", "synthetic-run"],
+    ["missing task segment", executionName],
+    ["extra path segment", `${executionName}/tasks/0/extra`],
+  ])("fails closed when Task name has %s", async (_case, name) => {
+    const port = runtimePort(grantId, executionName);
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port,
+      listExecutionTasks: () => Promise.resolve({ tasks: [{ ...taskReadback(executionName, expectedVpc), name }] }),
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 

@@ -84,10 +84,16 @@ function requireExecutionVpc(value: unknown, executionName: string, release: Ref
     throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   }
   const task = value.tasks[0];
-  if (task.execution !== executionName || task.index !== 0
+  if (taskParentExecution(task.name) !== executionName || task.index !== 0
     || !sameJson(normalizeTaskVpcAccess(task.vpcAccess), release.executionTemplate.vpcAccess)) {
     throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   }
+}
+
+function taskParentExecution(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  const match = /^(projects\/[^/]+\/locations\/[^/]+\/jobs\/[^/]+\/executions\/[^/]+)\/tasks\/[^/]+$/u.exec(name);
+  return match?.[1] ?? null;
 }
 
 function normalizeTaskVpcAccess(value: unknown): unknown {

@@ -130,7 +130,7 @@ export function runtimePort(grantId: string, executionName: string, uid = random
   return { verifyIdToken: () => Promise.resolve({ sub: release.serviceAccountSubject, email: release.serviceAccountEmail,
     email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
   getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: executionTemplateForGrant(grantId) }),
-  listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0, vpcAccess: release.executionTemplate["vpcAccess"] }] }) };
+  listExecutionTasks: () => Promise.resolve({ tasks: [{ name: `${executionName}/tasks/0`, execution: executionName, index: 0, vpcAccess: release.executionTemplate["vpcAccess"] }] }) };
 }
 
 function executionTemplateForGrant(grantId: string): Record<string, unknown> {
