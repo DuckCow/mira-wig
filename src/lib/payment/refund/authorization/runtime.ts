@@ -84,9 +84,17 @@ function requireExecutionVpc(value: unknown, executionName: string, release: Ref
     throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   }
   const task = value.tasks[0];
-  if (task.execution !== executionName || task.index !== 0 || !sameJson(task.vpcAccess, release.executionTemplate.vpcAccess)) {
+  if (task.execution !== executionName || task.index !== 0
+    || !sameJson(normalizeTaskVpcAccess(task.vpcAccess), release.executionTemplate.vpcAccess)) {
     throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   }
+}
+
+function normalizeTaskVpcAccess(value: unknown): unknown {
+  if (!record(value) || Object.hasOwn(value, "egress")) return value;
+  // Cloud Run v2 Task readback omits its PRIVATE_RANGES_ONLY default. Only that
+  // one omitted field is normalized; every other reviewed VPC field stays exact.
+  return { ...value, egress: "PRIVATE_RANGES_ONLY" };
 }
 
 function executionTemplateForGrant(release: RefundReentryRelease, grantId: string): unknown {

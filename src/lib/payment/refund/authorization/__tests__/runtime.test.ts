@@ -9,6 +9,14 @@ import { release, runtimePort } from "./fixture";
 const grantId = "synthetic-grant";
 const executionName = `${release.jobName}/executions/synthetic-run`;
 
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function withoutEgress(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "egress"));
+}
+
 describe("server-owned execution identity and bounded HTTP data", () => {
   it("requires signed Google identity before consulting immutable execution configuration", async () => {
     const port = runtimePort(grantId, executionName);
@@ -46,9 +54,30 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 
-  it("accepts Execution without vpcAccess only when its sole Task proves the reviewed VPC", async () => {
+  it("normalizes only an omitted Task PRIVATE_RANGES_ONLY egress before strict VPC comparison", async () => {
     const port = runtimePort(grantId, executionName);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, port)).resolves.toMatchObject({ grantId });
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
+    const actualVpc = withoutEgress(expectedVpc);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port,
+      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0, vpcAccess: actualVpc }] }),
+    })).resolves.toMatchObject({ grantId });
+  });
+
+  it("accepts an explicit matching Task egress", async () => {
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, runtimePort(grantId, executionName))).resolves.toMatchObject({ grantId });
+  });
+
+  it("fails closed for explicit ALL_TRAFFIC with otherwise exact Task VPC", async () => {
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port,
+      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0,
+        vpcAccess: { ...expectedVpc, egress: "ALL_TRAFFIC" } }] }),
+    })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 
   it.each([
@@ -59,6 +88,35 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const port = runtimePort(grantId, executionName);
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
       ...port, listExecutionTasks: () => Promise.resolve(taskReadback),
+    })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it("fails closed when omitted Task egress conflicts with an ALL_TRAFFIC release", async () => {
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
+    const allTrafficRelease = { ...release, executionTemplate: { ...release.executionTemplate, vpcAccess: { ...expectedVpc, egress: "ALL_TRAFFIC" } } };
+    const actualVpc = withoutEgress(expectedVpc);
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, allTrafficRelease, {
+      ...port,
+      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0, vpcAccess: actualVpc }] }),
+    })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it.each([
+    ["network", { network: "projects/synthetic-refund-test/global/networks/other" }],
+    ["subnetwork", { subnetwork: "projects/synthetic-refund-test/regions/asia-northeast3/subnetworks/other" }],
+    ["tags", { tags: ["other"] }],
+  ])("fails closed when Task VPC %s differs", async (_field, changed) => {
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
+    const interfaces = expectedVpc.networkInterfaces;
+    if (!Array.isArray(interfaces) || interfaces.length !== 1 || !record(interfaces[0])) throw new Error("TEST_VPC_INTERFACE_REQUIRED");
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port,
+      listExecutionTasks: () => Promise.resolve({ tasks: [{ execution: executionName, index: 0,
+        vpcAccess: { ...expectedVpc, networkInterfaces: [{ ...interfaces[0], ...changed }] } }] }),
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 

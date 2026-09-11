@@ -56,6 +56,10 @@ export async function prepareMiraApplication(directory: string, buildEnvironment
   if (capture("docker", ["image", "inspect", "--format", "{{.Id}}", tag]) !== `sha256:${identity.childManifestRawSha256}`) {
     throw new Error("APPLICATION_LOADED_MANIFEST_MISMATCH");
   }
+  await writeReceipt(directory, "verified.json", { sourceCommit, sourceTree, tag, contextSha256: context.sha256,
+    contextFileCount: context.entries.length, archive, archiveSha256: await fileSha256(archive), identity,
+    manifestDigest: `sha256:${identity.childManifestRawSha256}`, loadedManifestMatches: true,
+    deploymentAuthority: "ABSENT" });
 }
 
 async function requireSyntheticBuildEnvironment(file: string) {
