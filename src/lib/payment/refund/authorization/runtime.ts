@@ -75,8 +75,86 @@ function requireExecution(value: unknown, name: string, grantId: string, release
   if (!record(value) || !uuid(value.uid)) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   const valid = [value.name === name, value.taskCount === 1, value.parallelism === 1,
     value.completionTime === undefined, value.deleteTime === undefined,
-    sameJson(value.template, executionTemplateForGrant(release, grantId))].every(Boolean);
+    sameExecutionTemplate(value.template, executionTemplateForGrant(release, grantId))].every(Boolean);
   if (!valid) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+}
+
+// Cloud Run permits an Execution's env entries to be returned in a different order
+// from the reviewed TaskTemplate. Array position is not an env identity; every other
+// TaskTemplate array (for example args) remains compared by sameJson in this boundary.
+function sameExecutionTemplate(actual: unknown, expected: unknown): boolean {
+  if (!record(actual) || !record(expected) || !Array.isArray(actual.containers) || !Array.isArray(expected.containers)
+    || actual.containers.length !== expected.containers.length) return false;
+  const { containers: actualContainers, ...actualRest } = actual;
+  const { containers: expectedContainers, ...expectedRest } = expected;
+  return sameJson(actualRest, expectedRest)
+    && actualContainers.every((container, index) => sameExecutionContainer(container, expectedContainers[index]));
+}
+
+function sameExecutionContainer(actual: unknown, expected: unknown): boolean {
+  if (!record(actual) || !record(expected)) return false;
+  const { env: actualEnv, ...actualRest } = actual;
+  const { env: expectedEnv, ...expectedRest } = expected;
+  return sameJson(actualRest, expectedRest) && sameEnvironment(actualEnv, expectedEnv);
+}
+
+type EnvironmentValue = Readonly<{ kind: "literal"; value: string } | { kind: "secret"; secret: string; version: string }>;
+
+function sameEnvironment(actual: unknown, expected: unknown): boolean {
+  const actualEntries = environmentEntries(actual);
+  const expectedEntries = environmentEntries(expected);
+  if (!actualEntries || !expectedEntries || actualEntries.size !== expectedEntries.size) return false;
+  return [...actualEntries].every(([name, value]) => sameJson(value, expectedEntries.get(name)));
+}
+
+function environmentEntries(value: unknown): Map<string, EnvironmentValue> | null {
+  if (!Array.isArray(value)) return null;
+  const entries = new Map<string, EnvironmentValue>();
+  for (const entry of value) {
+    const parsed = parseEnvironmentEntry(entry);
+    if (!parsed || entries.has(parsed.name)) return null;
+    entries.set(parsed.name, parsed.value);
+  }
+  return entries;
+}
+
+function parseEnvironmentEntry(value: unknown): Readonly<{ name: string; value: EnvironmentValue }> | null {
+  const name = environmentName(value);
+  if (!name || !record(value)) return null;
+  return Object.hasOwn(value, "value") ? literalEnvironmentEntry(value, name) : secretEnvironmentEntry(value, name);
+}
+
+function environmentName(value: unknown): string | null {
+  if (!record(value) || typeof value.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value.name)) return null;
+  return value.name;
+}
+
+function literalEnvironmentEntry(value: Record<string, unknown>, name: string): Readonly<{ name: string; value: EnvironmentValue }> | null {
+  if (!exactKeys(value, ["name", "value"]) || typeof value.value !== "string") return null;
+  return { name, value: { kind: "literal", value: value.value } };
+}
+
+function secretEnvironmentEntry(value: Record<string, unknown>, name: string): Readonly<{ name: string; value: EnvironmentValue }> | null {
+  const selector = environmentSecretSelector(value);
+  if (!selector) return null;
+  const { secret, version } = selector;
+  if (typeof secret !== "string" || typeof version !== "string" || !validSecretSelector(secret, version)) return null;
+  return { name, value: { kind: "secret", secret, version } };
+}
+
+function environmentSecretSelector(value: Record<string, unknown>): Record<string, unknown> | null {
+  if (!exactKeys(value, ["name", "valueSource"]) || !record(value.valueSource) || !exactKeys(value.valueSource, ["secretKeyRef"])) return null;
+  const selector = value.valueSource.secretKeyRef;
+  return record(selector) && exactKeys(selector, ["secret", "version"]) ? selector : null;
+}
+
+function validSecretSelector(secret: string, version: string): boolean {
+  return /^[A-Za-z0-9_-]+$/u.test(secret) && /^(?:[1-9]\d*|latest)$/u.test(version);
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function requireExecutionVpc(value: unknown, executionName: string, release: RefundReentryRelease): void {

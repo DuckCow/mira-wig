@@ -141,6 +141,35 @@ export function runtimePort(grantId: string, executionName: string, uid = random
   listExecutionTasks: () => Promise.resolve({ tasks: [task] }) };
 }
 
+// PARTIAL_RETAINED_EVIDENCE: local rvhbh evidence preserves the first four raw
+// env positions, omitted Task.index and omitted Task VPC egress. The execution
+// name, UID and remaining fixture fields below are deliberately synthetic.
+export function rvhbhLiveShapedRuntimePort(grantId: string, executionName: string, uid = randomUUID()): RuntimeIdentityPort {
+  const template = executionTemplateForGrant(grantId);
+  const containers = template.containers;
+  if (!Array.isArray(containers) || containers.length !== 1 || !isRecord(containers[0]) || !Array.isArray(containers[0].env)) {
+    throw new Error("TEST_TEMPLATE_REQUIRED");
+  }
+  const env = retainedRvhbhEnvironmentOrder(containers[0].env);
+  const expectedVpc = release.executionTemplate.vpcAccess;
+  if (!isRecord(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
+  const { egress: _egress, ...vpcAccess } = expectedVpc;
+  return {
+    verifyIdToken: () => Promise.resolve({ sub: release.serviceAccountSubject, email: release.serviceAccountEmail,
+      email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
+    getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1,
+      template: { ...template, containers: [{ ...containers[0], env }] } }),
+    listExecutionTasks: () => Promise.resolve({ tasks: [{ name: `${executionName}/tasks/synthetic-rvhbh-task0`, vpcAccess }] }),
+  };
+}
+
+function retainedRvhbhEnvironmentOrder(values: readonly unknown[]): unknown[] {
+  const knownPrefix = ["REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED", "REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED", "DATABASE_URL", "MIRA_REFUND_AUTHORIZATION_ENABLED"];
+  const byName = new Map(values.map((value) => [isRecord(value) && typeof value.name === "string" ? value.name : "", value]));
+  const prefix = knownPrefix.map((name) => byName.get(name)).filter((value): value is unknown => value !== undefined);
+  return [...prefix, ...values.filter((value) => !isRecord(value) || typeof value.name !== "string" || !knownPrefix.includes(value.name))];
+}
+
 export function workerEnvironmentForGrant(grantId: string): Readonly<Record<string, string>> {
   const environment: Record<string, string> = {
     CLOUD_RUN_JOB: "reentry-test",

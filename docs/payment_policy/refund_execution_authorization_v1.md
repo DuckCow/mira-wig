@@ -75,7 +75,15 @@ surfaces remain absent. Native task count/index/attempt must be 1/0/0. The admis
 ID-token audience. The application checks signed issuer/audience/expiry, immutable service
 account subject and verified email, then GETs the named immutable Execution with its own
 `run.executions.get` authority and lists its sole Task with `run.tasks.list`. Name is only a locator.
-Exact job, UID, task/parallelism and every Execution-returned task-template field must match.
+Exact job, UID, task/parallelism and every Execution-returned task-template field must match. Cloud Run may return the
+`containers[].env` collection in an order different from the reviewed TaskTemplate. At that API boundary only, each
+collection is first fail-closed validated as unique, supported entries: a valid nonempty name paired with exactly one
+literal value or one `secretKeyRef` carrying exact secret and version identity. Duplicate names, missing or extra names,
+malformed/ambiguous representations, literal/source substitutions, and any value or selector drift fail. Valid entries
+are then compared by unique name and exact semantic value/source; their array position is not an authorization fact.
+All other arrays, including command/args, remain position-sensitive. This is not generic JSON normalization: unknown
+fields remain material, field-specific default rules remain limited to the documented Task fields, and reviewed release
+bytes and historical bindings are never rewritten.
 Exact Task parent identity comes from the output-only Task's fully-qualified `name`, whose
 `projects/{project}/locations/{location}/jobs/{job}/executions/{execution}` parent must exactly
 equal the already-verified Execution resource name; Task `execution` serialization is not an

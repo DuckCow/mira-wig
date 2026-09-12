@@ -4,7 +4,7 @@ import { parseRefundReentryRelease, templateForGrant, sameJson } from "../releas
 import { readAuthorizationJson } from "../json-body";
 import { parseAdmissionReceipt, requestRefundAuthorizationAdmission } from "../worker-client";
 import { calculateEximbayCanaryTargetDigest } from "../../eximbay-refund-canary-target-binding";
-import { release, runtimePort } from "./fixture";
+import { release, runtimePort, rvhbhLiveShapedRuntimePort } from "./fixture";
 
 const grantId = "synthetic-grant";
 const executionName = `${release.jobName}/executions/synthetic-run`;
@@ -23,6 +23,36 @@ function taskReadback(execution: string, vpcAccess: unknown, taskExecution: unkn
 
 function taskWithoutIndex(execution: string, vpcAccess: unknown): Record<string, unknown> {
   return { name: `${execution}/tasks/mira-eximbay-refund-canary-9cj5h-task0`, vpcAccess };
+}
+
+function executionTemplateFor(releaseValue: typeof release, id = grantId): Record<string, unknown> {
+  const template = templateForGrant(releaseValue, id);
+  if (!record(template)) throw new Error("TEST_TEMPLATE_REQUIRED");
+  const { vpcAccess: _vpcAccess, ...executionTemplate } = template;
+  return executionTemplate;
+}
+
+function templateWithEnvironment(releaseValue: typeof release, entries: unknown[], id = grantId): Record<string, unknown> {
+  const template = executionTemplateFor(releaseValue, id);
+  if (!Array.isArray(template.containers) || template.containers.length !== 1 || !record(template.containers[0])) throw new Error("TEST_CONTAINER_REQUIRED");
+  return { ...template, containers: [{ ...template.containers[0], env: entries }] };
+}
+
+async function verifyExecutionTemplate(template: Record<string, unknown>, releaseValue = release) {
+  const port = runtimePort(grantId, executionName);
+  const original = await port.getExecution(executionName);
+  if (!record(original)) throw new Error("TEST_EXECUTION_REQUIRED");
+  return VerifiedRefundExecution.verify("token", executionName, grantId, releaseValue, {
+    ...port, getExecution: () => Promise.resolve({ ...original, template }),
+  });
+}
+
+function environmentFor(releaseValue = release, id = grantId): unknown[] {
+  const template = executionTemplateFor(releaseValue, id);
+  if (!Array.isArray(template.containers) || template.containers.length !== 1 || !record(template.containers[0]) || !Array.isArray(template.containers[0].env)) {
+    throw new Error("TEST_ENV_REQUIRED");
+  }
+  return template.containers[0].env;
 }
 
 describe("server-owned execution identity and bounded HTTP data", () => {
@@ -60,6 +90,53 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
       ...port, getExecution: () => Promise.resolve({ ...original, ...changed }),
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it("accepts semantically identical unique env entries in a different order", async () => {
+    const env = environmentFor();
+    await expect(verifyExecutionTemplate(templateWithEnvironment(release, env))).resolves.toMatchObject({ grantId });
+    await expect(verifyExecutionTemplate(templateWithEnvironment(release, [...env.slice(1), env[0]]))).resolves.toMatchObject({ grantId });
+  });
+
+  it.each([
+    ["changed literal", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "MIRA_REFUND_AUTHORIZATION_ENABLED" ? { ...entry, value: "DISABLED" } : entry)],
+    ["missing name", (env: unknown[]) => env.filter((entry) => !record(entry) || entry.name !== "REFUND_EXECUTION_LEASE_ENABLED")],
+    ["extra name", (env: unknown[]) => [...env, { name: "UNREVIEWED", value: "ENABLED" }]],
+    ["duplicate observed name", (env: unknown[]) => [...env, env[0]]],
+    ["literal replaced by secret reference", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "MIRA_REFUND_AUTHORIZATION_ENABLED" ? { name: entry.name, valueSource: { secretKeyRef: { secret: "test-db", version: "1" } } } : entry)],
+    ["secret reference replaced by literal", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "DATABASE_URL" ? { name: entry.name, value: "postgresql://not-equivalent" } : entry)],
+    ["wrong secret identity", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "DATABASE_URL" ? { name: entry.name, valueSource: { secretKeyRef: { secret: "other-db", version: "1" } } } : entry)],
+    ["wrong secret version", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "DATABASE_URL" ? { name: entry.name, valueSource: { secretKeyRef: { secret: "test-db", version: "2" } } } : entry)],
+    ["malformed entry", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "DATABASE_URL" ? { name: entry.name, valueSource: { secretKeyRef: { secret: "test-db" } } } : entry)],
+    ["ambiguous value representation", (env: unknown[]) => env.map((entry) => record(entry) && entry.name === "MIRA_REFUND_AUTHORIZATION_ENABLED" ? { ...entry, valueSource: { secretKeyRef: { secret: "test-db", version: "1" } } } : entry)],
+  ])("rejects env %s", async (_case, mutate: (env: unknown[]) => unknown[]) => {
+    await expect(verifyExecutionTemplate(templateWithEnvironment(release, mutate(environmentFor())))).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it("rejects duplicate expected env names before any name-keyed comparison", async () => {
+    const env = environmentFor();
+    const template = executionTemplateFor(release);
+    if (!Array.isArray(template.containers) || !record(template.containers[0])) throw new Error("TEST_CONTAINER_REQUIRED");
+    const duplicateRelease = { ...release, executionTemplate: { ...release.executionTemplate,
+      containers: [{ ...template.containers[0], env: [...env, env[0]] }] } };
+    await expect(verifyExecutionTemplate(executionTemplateFor(duplicateRelease), duplicateRelease)).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it("keeps args position-sensitive while env entries remain name-keyed", async () => {
+    const template = executionTemplateFor(release);
+    if (!Array.isArray(template.containers) || !record(template.containers[0])) throw new Error("TEST_CONTAINER_REQUIRED");
+    const orderedRelease = { ...release, executionTemplate: { ...release.executionTemplate,
+      containers: [{ ...template.containers[0], args: ["first", "second"] }] } };
+    await expect(verifyExecutionTemplate(executionTemplateFor(orderedRelease), orderedRelease)).resolves.toMatchObject({ grantId });
+    const reordered = executionTemplateFor(orderedRelease);
+    const containers = reordered.containers;
+    if (!Array.isArray(containers) || !record(containers[0])) throw new Error("TEST_CONTAINER_REQUIRED");
+    await expect(verifyExecutionTemplate({ ...reordered, containers: [{ ...containers[0], args: ["second", "first"] }] }, orderedRelease)).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it("accepts the documented partial-rvhbh live-shaped representation through the real verifier", async () => {
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release,
+      rvhbhLiveShapedRuntimePort(grantId, executionName))).resolves.toMatchObject({ grantId, executionId: executionName });
   });
 
   it("normalizes only an omitted Task PRIVATE_RANGES_ONLY egress before strict VPC comparison", async () => {
