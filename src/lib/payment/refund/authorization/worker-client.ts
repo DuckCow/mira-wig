@@ -1,6 +1,6 @@
 import { readAuthorizationJson } from "./json-body";
 import { GoogleAuth } from "google-auth-library";
-import { digest, identifier, record, RefundAuthorizationError, requireAuthorizationEnabled, type AuthorizationEnv } from "./contract";
+import { digest, identifier, record, REFUND_REENTRY_ADMISSION_AUTH_HEADER, RefundAuthorizationError, requireAuthorizationEnabled, type AuthorizationEnv } from "./contract";
 import type { RefundExecutionLeaseHandle } from "../lease-contract";
 
 export type AdmittedRefundReentry = Readonly<{
@@ -18,7 +18,7 @@ export async function requestRefundAuthorizationAdmission(env: AuthorizationEnv)
   // One request only. A lost response is inspected administratively; never re-consumed.
   const response = await fetch(input.audience, {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(20_000),
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { [REFUND_REENTRY_ADMISSION_AUTH_HEADER]: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ grantId: input.grantId, executionName: input.executionName }),
   });
   if (!response.ok) throw new RefundAuthorizationError("PERSISTENCE_CONFLICT");

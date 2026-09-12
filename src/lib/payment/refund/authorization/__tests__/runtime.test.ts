@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { VerifiedRefundExecution } from "../runtime";
+import { RefundExecutionVerificationError, VerifiedRefundExecution } from "../runtime";
 import { parseRefundReentryRelease, templateForGrant, sameJson } from "../release";
 import { readAuthorizationJson } from "../json-body";
 import { parseAdmissionReceipt, requestRefundAuthorizationAdmission } from "../worker-client";
@@ -63,8 +63,32 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     await expect(VerifiedRefundExecution.verify("forged-token", executionName, grantId, release, {
       verifyIdToken: () => Promise.reject(new Error("SDK request with secret bearer")), getExecution,
       listExecutionTasks: vi.fn(),
-    })).rejects.toThrow(/^EXECUTION_UNVERIFIED$/u);
+    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "TOKEN_VERIFICATION" } satisfies Partial<RefundExecutionVerificationError>);
     expect(getExecution).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes execution read failure from execution identity/template mismatch without changing its public code", async () => {
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, getExecution: () => Promise.reject(new Error("synthetic execution read failure")),
+    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "EXECUTION_LOOKUP" } satisfies Partial<RefundExecutionVerificationError>);
+
+    const execution = await port.getExecution(executionName);
+    if (!record(execution)) throw new Error("TEST_EXECUTION_REQUIRED");
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, getExecution: () => Promise.resolve({ ...execution, taskCount: 2 }),
+    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "EXECUTION_VERIFICATION" } satisfies Partial<RefundExecutionVerificationError>);
+  });
+
+  it("distinguishes Task read failure from Task VPC evidence mismatch without changing its public code", async () => {
+    const port = runtimePort(grantId, executionName);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, listExecutionTasks: () => Promise.reject(new Error("synthetic task read failure")),
+    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "TASK_LOOKUP" } satisfies Partial<RefundExecutionVerificationError>);
+
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, listExecutionTasks: () => Promise.resolve({ tasks: [] }),
+    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "TASK_VERIFICATION" } satisfies Partial<RefundExecutionVerificationError>);
   });
 
   it.each([

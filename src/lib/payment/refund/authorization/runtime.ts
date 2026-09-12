@@ -8,6 +8,22 @@ export type RuntimeIdentityPort = Readonly<{
   listExecutionTasks(executionName: string): Promise<unknown>;
 }>;
 
+export type RefundExecutionVerificationFailureStage =
+  | "TOKEN_VERIFICATION"
+  | "EXECUTION_LOOKUP"
+  | "EXECUTION_VERIFICATION"
+  | "TASK_LOOKUP"
+  | "TASK_VERIFICATION";
+
+// This preserves the public failure code while carrying only an allowlisted
+// diagnostic stage to the in-process HTTP boundary.
+export class RefundExecutionVerificationError extends RefundAuthorizationError {
+  constructor(readonly stage: RefundExecutionVerificationFailureStage) {
+    super("EXECUTION_UNVERIFIED");
+    this.name = "RefundExecutionVerificationError";
+  }
+}
+
 // The production seam uses signed Google identity and the immutable control-plane
 // Execution resource. Body/env strings are only locators. No network occurs on import.
 export const googleRuntimeIdentity: RuntimeIdentityPort = {
@@ -44,19 +60,28 @@ export class VerifiedRefundExecution {
     port: RuntimeIdentityPort = googleRuntimeIdentity,
   ): Promise<VerifiedRefundExecution> {
     if (!executionName.startsWith(`${release.jobName}/executions/`)
-      || !/\/executions\/[a-z0-9-]+$/u.test(executionName) || executionName.length > 255) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
-    try {
-      const identity = await port.verifyIdToken(token, release.audience);
-      requireIdentity(identity, release);
-      const execution = await port.getExecution(executionName);
-      requireExecution(execution, executionName, grantId, release);
-      const tasks = await port.listExecutionTasks(executionName);
-      requireExecutionVpc(tasks, executionName, release);
-      return new VerifiedRefundExecution(release.serviceAccountSubject, executionName, execution.uid, release.digest, grantId);
-    } catch {
-      // SDK errors can contain request credentials. Expose only the bounded failure.
-      throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+      || !/\/executions\/[a-z0-9-]+$/u.test(executionName) || executionName.length > 255) {
+      throw new RefundExecutionVerificationError("EXECUTION_VERIFICATION");
     }
+    const identity = await verificationStage("TOKEN_VERIFICATION", () => port.verifyIdToken(token, release.audience));
+    await verificationStage("TOKEN_VERIFICATION", () => requireIdentity(identity, release));
+    const execution = await verificationStage("EXECUTION_LOOKUP", () => port.getExecution(executionName));
+    const verifiedExecution = await verificationStage("EXECUTION_VERIFICATION", () => verifiedExecutionValue(execution, executionName, grantId, release));
+    const tasks = await verificationStage("TASK_LOOKUP", () => port.listExecutionTasks(executionName));
+    await verificationStage("TASK_VERIFICATION", () => requireExecutionVpc(tasks, executionName, release));
+    return new VerifiedRefundExecution(release.serviceAccountSubject, executionName, verifiedExecution.uid, release.digest, grantId);
+  }
+}
+
+async function verificationStage<T>(
+  stage: RefundExecutionVerificationFailureStage,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    // SDK errors can contain request credentials. Expose only a bounded stage.
+    throw new RefundExecutionVerificationError(stage);
   }
 }
 
@@ -77,6 +102,11 @@ function requireExecution(value: unknown, name: string, grantId: string, release
     value.completionTime === undefined, value.deleteTime === undefined,
     sameExecutionTemplate(value.template, executionTemplateForGrant(release, grantId))].every(Boolean);
   if (!valid) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+}
+
+function verifiedExecutionValue(value: unknown, name: string, grantId: string, release: RefundReentryRelease): Record<string, unknown> & { uid: string } {
+  requireExecution(value, name, grantId, release);
+  return value;
 }
 
 // Cloud Run permits an Execution's env entries to be returned in a different order

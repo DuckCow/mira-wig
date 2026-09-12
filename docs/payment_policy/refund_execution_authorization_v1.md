@@ -106,6 +106,27 @@ bounded error, without bearer/credential data. Configuration is server-owned and
 be writable by the worker/requester. Deployment review must establish the SA-to-job IAM
 restriction and absence of impersonation/alternate-job authority. This is not attestation
 of arbitrary malicious code with provider credentials or superuser-proof auditing.
+
+### Admission diagnostic events
+
+The application-owned admission handler writes two best-effort, non-authoritative structured
+Cloud Run log events. `refund_reentry_admission_entered` is emitted on handler entry; a
+rejected application request emits one `refund_reentry_admission_rejected` record for its
+first failing stage and fixed safe reason. Events contain only the fixed route/method,
+an already-provided valid Cloud Trace ID when present, and allowlisted stage/reason values.
+`traceId` is an application field for correlation search, not a claim of automatic Cloud
+Logging trace association. Verifier stages distinguish token verification, Execution lookup,
+Execution identity/template verification, Task lookup, and Task VPC verification while retaining
+the same public `EXECUTION_UNVERIFIED` result.
+They never include bearer or serverless-authorization headers, token claims, request bodies,
+cookies, grants, database URLs, secret values, or verifier payloads. Logging failure is
+ignored and cannot change the HTTP response, authorization decision, grant consumption, or
+financial progression. Public response status and body remain unchanged.
+
+A Cloud Run platform-level rejection can occur before handler entry and consequently has no
+application event. Conversely, absence of an application event is not alone proof of a
+platform rejection until logging delivery is established.
+
 The immutable Execution/UUID facts follow the [Google Execution API](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs.executions);
 ID tokens follow [Google service authentication](https://docs.cloud.google.com/run/docs/authenticating/service-to-service).
 

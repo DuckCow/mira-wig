@@ -1,6 +1,6 @@
 import { requireOwnedRefundTestCluster } from "../../__tests__/retained-refund-test-history";
 import { randomUUID } from "node:crypto";
-import { beforeAll, afterAll, afterEach, describe, it, expect } from "vitest";
+import { beforeAll, afterAll, afterEach, describe, it, expect, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
 import { createRefundAuthorizationAdmin } from "../admin";
@@ -134,13 +134,16 @@ describe("authenticated durable refund authorization on real PostgreSQL", () => 
   it("executes the real HTTP boundary with the partial-rvhbh env order and omitted Task defaults, and rejects a caller actor/image claim", async () => {
     const target = await targetFixture(); const grant = await adminService(app).issue(issueInput(target));
     const executionName = `${release.jobName}/executions/http-${randomUUID()}`;
-    const handler = createRefundAuthorizationAdmissionHandler({ database: app, loadRelease, env: enabled, runtime: rvhbhLiveShapedRuntimePort(grant.id, executionName, randomUUID()) });
+    const diagnostics = { emit: vi.fn() };
+    const handler = createRefundAuthorizationAdmissionHandler({ database: app, diagnostics, loadRelease, env: enabled, runtime: rvhbhLiveShapedRuntimePort(grant.id, executionName, randomUUID()) });
     const body = { grantId: grant.id, executionName };
     const request = (extra = {}) => new Request(release.audience, { method: "POST", headers: { authorization: "Bearer synthetic.token" }, body: JSON.stringify({ ...body, ...extra }) });
     expect((await handler(request({ actor: release.serviceAccountSubject, image: "trusted" }))).status).toBe(400);
     const response = await handler(request());
     expect(response.status).toBe(200); expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(await response.json()).toMatchObject({ ok: true, grantId: grant.id, lease: { commandId: target.commandId, leaseGeneration: 2 } });
+    expect(diagnostics.emit).toHaveBeenCalledTimes(3);
+    expect(diagnostics.emit.mock.calls[2]?.[0]).toMatchObject({ event: "refund_reentry_admission_entered", route: "refund_reentry_admission", method: "POST" });
     expect((await handler(request())).status).toBe(409);
   });
 });

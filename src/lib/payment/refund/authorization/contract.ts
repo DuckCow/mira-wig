@@ -2,6 +2,7 @@ export const REFUND_AUTHORIZATION_MIGRATION = "20260909090000_refund_execution_a
 export const REFUND_REENTRY_OPERATION = "EXIMBAY_SANDBOX_BOUND_ORDINAL_ZERO_REENTRY";
 export const REFUND_AUTHORIZATION_TTL_MS = 30 * 60 * 1000;
 export const REFUND_AUTHORIZATION_GATE = "MIRA_REFUND_AUTHORIZATION_ENABLED";
+export const REFUND_REENTRY_ADMISSION_AUTH_HEADER = "Authorization";
 export type AuthorizationEnv = Readonly<Record<string, string | undefined>>;
 export type AuthorizationErrorCode =
   | "FEATURE_DISABLED" | "CONFIG_INVALID" | "UNAUTHORIZED" | "INVALID_INPUT"
