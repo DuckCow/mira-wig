@@ -21,6 +21,10 @@ function taskReadback(execution: string, vpcAccess: unknown, taskExecution: unkn
   return { name: `${execution}/tasks/0`, execution: taskExecution, index: 0, vpcAccess };
 }
 
+function taskWithoutIndex(execution: string, vpcAccess: unknown): Record<string, unknown> {
+  return { name: `${execution}/tasks/mira-eximbay-refund-canary-9cj5h-task0`, vpcAccess };
+}
+
 describe("server-owned execution identity and bounded HTTP data", () => {
   it("requires signed Google identity before consulting immutable execution configuration", async () => {
     const port = runtimePort(grantId, executionName);
@@ -73,6 +77,24 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, runtimePort(grantId, executionName))).resolves.toMatchObject({ grantId });
   });
 
+  it("canonicalizes only an absent Task index to ordinal zero", async () => {
+    const port = runtimePort(grantId, executionName);
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, listExecutionTasks: () => Promise.resolve({ tasks: [taskWithoutIndex(executionName, expectedVpc)] }),
+    })).resolves.toMatchObject({ grantId });
+  });
+
+  it.each([
+    [1], [-1], [0.5], [null], ["0"], [true], [{}], [[]],
+  ])("rejects an explicit non-canonical Task index %j", async (index) => {
+    const port = runtimePort(grantId, executionName);
+    const expectedVpc = release.executionTemplate.vpcAccess;
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
+      ...port, listExecutionTasks: () => Promise.resolve({ tasks: [{ ...taskReadback(executionName, expectedVpc), index }] }),
+    })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
   it("fails closed for explicit ALL_TRAFFIC with otherwise exact Task VPC", async () => {
     const expectedVpc = release.executionTemplate.vpcAccess;
     if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
@@ -87,6 +109,7 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     { tasks: [taskReadback(executionName, { egress: "ALL_TRAFFIC" })] },
     { tasks: [taskReadback(executionName, undefined)] },
     { tasks: [] },
+    { tasks: [taskReadback(executionName, undefined), taskReadback(executionName, undefined)] },
   ])("fails closed when Task VPC evidence is insufficient or wrong", async (taskReadback) => {
     const port = runtimePort(grantId, executionName);
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {

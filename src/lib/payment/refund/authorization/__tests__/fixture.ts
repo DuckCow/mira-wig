@@ -132,11 +132,13 @@ export function issueInput(target: Target) {
   return { issuanceRequestId: randomUUID(), commandId: target.commandId, expectedPredecessorGeneration: target.generation,
     confirmedTargetBindingDigest: target.targetBindingDigest, releasePolicyDigest: release.digest };
 }
-export function runtimePort(grantId: string, executionName: string, uid = randomUUID()): RuntimeIdentityPort {
+export function runtimePort(grantId: string, executionName: string, uid = randomUUID(), omitTaskIndex = false): RuntimeIdentityPort {
+  const task: Record<string, unknown> = { name: `${executionName}/tasks/0`, execution: executionName, vpcAccess: release.executionTemplate["vpcAccess"] };
+  if (!omitTaskIndex) task.index = 0;
   return { verifyIdToken: () => Promise.resolve({ sub: release.serviceAccountSubject, email: release.serviceAccountEmail,
     email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
   getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: executionTemplateForGrant(grantId) }),
-  listExecutionTasks: () => Promise.resolve({ tasks: [{ name: `${executionName}/tasks/0`, execution: executionName, index: 0, vpcAccess: release.executionTemplate["vpcAccess"] }] }) };
+  listExecutionTasks: () => Promise.resolve({ tasks: [task] }) };
 }
 
 export function workerEnvironmentForGrant(grantId: string): Readonly<Record<string, string>> {
@@ -194,9 +196,9 @@ function executionTemplateForGrant(grantId: string): Record<string, unknown> {
   for (const [key, value] of Object.entries(template)) if (key !== "vpcAccess") executionTemplate[key] = value;
   return executionTemplate;
 }
-export function verified(grantId: string) {
+export function verified(grantId: string, omitTaskIndex = false) {
   const name = `${release.jobName}/executions/test-${randomUUID()}`;
-  return VerifiedRefundExecution.verify("synthetic-signed-token", name, grantId, release, runtimePort(grantId, name));
+  return VerifiedRefundExecution.verify("synthetic-signed-token", name, grantId, release, runtimePort(grantId, name, randomUUID(), omitTaskIndex));
 }
 export async function seedGrant(target: Target, issuedAt: Date, expiresAt: Date) {
   return db.refundExecutionAuthorization.create({ data: { issuanceRequestId: randomUUID(), commandId: target.commandId, expectedPredecessorGeneration: target.generation, releasePolicyDigest: release.digest,

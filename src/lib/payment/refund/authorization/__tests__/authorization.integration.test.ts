@@ -131,10 +131,10 @@ describe("authenticated durable refund authorization on real PostgreSQL", () => 
     expect((await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } })).consumedAt).toBeNull();
   });
 
-  it("executes the real HTTP boundary with a verified runtime and rejects a caller actor/image claim", async () => {
+  it("executes the real HTTP boundary with an omitted Task-index proto default and rejects a caller actor/image claim", async () => {
     const target = await targetFixture(); const grant = await adminService(app).issue(issueInput(target));
     const executionName = `${release.jobName}/executions/http-${randomUUID()}`;
-    const handler = createRefundAuthorizationAdmissionHandler({ database: app, loadRelease, env: enabled, runtime: runtimePort(grant.id, executionName) });
+    const handler = createRefundAuthorizationAdmissionHandler({ database: app, loadRelease, env: enabled, runtime: runtimePort(grant.id, executionName, randomUUID(), true) });
     const body = { grantId: grant.id, executionName };
     const request = (extra = {}) => new Request(release.audience, { method: "POST", headers: { authorization: "Bearer synthetic.token" }, body: JSON.stringify({ ...body, ...extra }) });
     expect((await handler(request({ actor: release.serviceAccountSubject, image: "trusted" }))).status).toBe(400);

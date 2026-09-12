@@ -81,7 +81,12 @@ Exact Task parent identity comes from the output-only Task's fully-qualified `na
 equal the already-verified Execution resource name; Task `execution` serialization is not an
 identity authority. The Task's output-only `vpcAccess` must exactly match the reviewed VPC
 configuration because Cloud Run v2 omits it from the Execution template; only an omitted Task
-`egress` is normalized to its documented `PRIVATE_RANGES_ONLY` default. Completed/deleted executions are rejected. A unique execution
+`egress` is normalized to its documented `PRIVATE_RANGES_ONLY` default. `Task.index` is an
+ordinal identity field: only an absent raw `index` property is canonicalized to numeric `0`,
+because ProtoJSON may omit that implicit numeric default for the sole ordinal-zero Task. A
+present index must be a numeric integer and must still equal `0`; null, strings, booleans,
+fractions and nonzero values fail closed. This API-boundary rule is field-specific: generic
+missing-field or falsy-value normalization is forbidden. Completed/deleted executions are rejected. A unique execution
 name and UUID cannot consume two grants. The worker makes one admission HTTP request and
 validates the server's response over HTTPS. The release identity is never accepted from an
 unverified worker image/environment claim.

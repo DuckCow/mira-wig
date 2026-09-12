@@ -168,7 +168,7 @@ describe("admitted lease continuation preserves restricted financial writers", (
     const target = await targetFixture(generation); const grant = await adminService(app).issue(issueInput(target));
     const fetch = await successTransport(target);
     const admissions = vi.fn();
-    const run = await runWorker(grant.id, fetch, undefined, admissions);
+    const run = await runWorker(grant.id, fetch, undefined, admissions, true);
     expect(run).toMatchObject({ ok: true, code: "KNOWN_SUCCESS", preflightRetrieveCount: 1, cancellationCount: 1, reconciliationLookupCount: 0 });
     expect(admissions).toHaveBeenCalledTimes(1);
     const row = await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } });
@@ -252,6 +252,7 @@ async function runWorker(
   fetch: typeof globalThis.fetch,
   environment = workerEnvironmentForGrant(grantId),
   admissions = vi.fn(),
+  omitTaskIndex = false,
 ) {
   return runEximbayRefundReentryOnce({ ...environment, DATABASE_URL: roleUrl("mira_refund_canary") }, {
     ...defaultEximbayRefundReentryDependencies,
@@ -259,7 +260,7 @@ async function runWorker(
       admissions();
       const executionName = `${release.jobName}/executions/${environment.CLOUD_RUN_EXECUTION}`;
       const handler = createRefundAuthorizationAdmissionHandler({
-        database: app, loadRelease, env: enabled, runtime: runtimePort(grantId, executionName),
+        database: app, loadRelease, env: enabled, runtime: runtimePort(grantId, executionName, randomUUID(), omitTaskIndex),
       });
       const response = await handler(new Request(release.audience, {
         method: "POST", headers: { authorization: "Bearer synthetic.signed.token" },

@@ -84,10 +84,18 @@ function requireExecutionVpc(value: unknown, executionName: string, release: Ref
     throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   }
   const task = value.tasks[0];
-  if (taskParentExecution(task.name) !== executionName || task.index !== 0
+  if (taskParentExecution(task.name) !== executionName || canonicalTaskIndex(task) !== 0
     || !sameJson(normalizeTaskVpcAccess(task.vpcAccess), release.executionTemplate.vpcAccess)) {
     throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
   }
+}
+
+function canonicalTaskIndex(task: Record<string, unknown>): number {
+  if (!Object.hasOwn(task, "index")) return 0;
+  if (typeof task.index !== "number" || !Number.isInteger(task.index)) {
+    throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+  }
+  return task.index;
 }
 
 function taskParentExecution(name: unknown): string | null {
