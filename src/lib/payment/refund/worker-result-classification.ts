@@ -186,11 +186,12 @@ export function classifyEximbayAuthorizationWorkerFailure(
 export function classifyEximbayContactWorkerResult(
   result: Readonly<{
     ok: true;
-    state: "SUCCEEDED" | "WAITING_EVIDENCE";
+    state: "SUCCEEDED" | "WAITING_EVIDENCE" | "PARKED";
     replayed: boolean;
   }> | Readonly<{ ok: false; code: string }>,
 ): RefundExecutionWorkerRouteOutcome {
   if (result.ok) {
+    if (result.state === "PARKED") return MANUAL;
     return result.state === "SUCCEEDED" ? classifyWorkerSuccess(result.replayed) : TEMPORARY;
   }
   if (result.code === "COMMAND_NOT_FOUND_OR_INELIGIBLE") return RACE_SKIPPED;
