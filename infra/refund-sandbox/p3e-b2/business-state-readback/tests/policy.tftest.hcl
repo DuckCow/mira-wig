@@ -119,7 +119,7 @@ run "refund_readiness_only_graph_is_exact_and_fixed" {
       google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].max_retries == 0 &&
       google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].timeout == "180s" &&
       google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].service_account == "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam.gserviceaccount.com" &&
-      google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].containers[0].image == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
+      google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].containers[0].image == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:0bbb1c65c3626b25cf00d685a9844bd28ccddf237f7342dab11d6b37edb9a855" &&
       google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].containers[0].args == tolist(["refund-readiness-business-state-readback"]) &&
       google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].containers[0].name == "refund-readiness-readback" &&
       google_cloud_run_v2_job.refund_readiness["runtime"].template[0].template[0].containers[0].resources[0].limits == tomap({ cpu = "1", memory = "512Mi" }) &&
@@ -142,8 +142,8 @@ run "refund_readiness_only_graph_is_exact_and_fixed" {
         "google_service_account.readback[\"runtime\"]",
         "google_sql_user.readback[\"runtime\"]",
       ]) &&
-      output.readback_manifest.readiness_source_commit == "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f" &&
-      output.readback_manifest.readiness_source_tree == "b385135a18b4af09970d9b52cfe7a950e322bb46" &&
+      output.readback_manifest.readiness_source_commit == "4299288d2ca7bdfffde6d6edc455f44c68d00ec0" &&
+      output.readback_manifest.readiness_source_tree == "b864dc0491b7e5395f1d6d47fb40faebbe27e3fb" &&
       output.readback_manifest.execution_on_apply == false
     )
     error_message = "The refund-readiness gate must own only the shared four-address identity plus its exact fixed Job."

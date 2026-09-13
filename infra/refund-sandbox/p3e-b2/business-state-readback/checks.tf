@@ -91,11 +91,11 @@ check "refund_readiness_machine_contract_alignment" {
       local.readiness_contract.materialization.executionOnApply == false &&
       local.readiness_contract.runtime.job == "mira-p3e-sbx-refund-readiness-readback" &&
       local.readiness_contract.runtime.command == "refund-readiness-business-state-readback" &&
-      local.readiness_contract.runtime.imageDigestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
-      local.readiness_contract.runtime.imageManifestDigest == "sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
-      local.readiness_contract.runtime.imageConfigDigest == "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c" &&
-      local.readiness_contract.runtime.sourceCommit == "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f" &&
-      local.readiness_contract.runtime.sourceTree == "b385135a18b4af09970d9b52cfe7a950e322bb46" &&
+      local.readiness_contract.runtime.imageDigestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:0bbb1c65c3626b25cf00d685a9844bd28ccddf237f7342dab11d6b37edb9a855" &&
+      local.readiness_contract.runtime.imageManifestDigest == "sha256:0bbb1c65c3626b25cf00d685a9844bd28ccddf237f7342dab11d6b37edb9a855" &&
+      local.readiness_contract.runtime.imageConfigDigest == "sha256:9c74bc89748d6ffcccd24bdbbfc26bfa2b190d266814d179bf218814243c07fd" &&
+      local.readiness_contract.runtime.sourceCommit == "4299288d2ca7bdfffde6d6edc455f44c68d00ec0" &&
+      local.readiness_contract.runtime.sourceTree == "b864dc0491b7e5395f1d6d47fb40faebbe27e3fb" &&
       local.readiness_contract.runtime.serviceAccount == local.service_account_email &&
       local.readiness_contract.runtime.databaseUser == local.iam_database_username &&
       local.readiness_contract.runtime.taskCount == local.task_count &&

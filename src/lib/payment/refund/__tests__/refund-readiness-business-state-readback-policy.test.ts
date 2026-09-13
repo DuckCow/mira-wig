@@ -134,11 +134,11 @@ describe("refund-readiness readback privilege policy", () => {
         job: "mira-p3e-sbx-refund-readiness-readback",
         command: "refund-readiness-business-state-readback",
         imageDigestUri:
-          "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892",
+          "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:0bbb1c65c3626b25cf00d685a9844bd28ccddf237f7342dab11d6b37edb9a855",
         imageConfigDigest:
-          "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c",
-        sourceCommit: "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f",
-        sourceTree: "b385135a18b4af09970d9b52cfe7a950e322bb46",
+          "sha256:9c74bc89748d6ffcccd24bdbbfc26bfa2b190d266814d179bf218814243c07fd",
+        sourceCommit: "4299288d2ca7bdfffde6d6edc455f44c68d00ec0",
+        sourceTree: "b864dc0491b7e5395f1d6d47fb40faebbe27e3fb",
         taskCount: 1,
         parallelism: 1,
         maxRetries: 0,
@@ -161,7 +161,7 @@ describe("refund-readiness readback privilege policy", () => {
     expect(sha256(readFileSync(join(CONTRACTS, "database-bootstrap-runtime-v3.json"), "utf8")))
       .toBe("8a8bc4e55c5f67e293db35e2b3bf263182a5168c8c32a9299005611863960826");
     expect(sha256(readFileSync(join(CONTRACTS, "refund-readiness-readback-runtime-v1.json"), "utf8")))
-      .toBe("b1678bb977c67bfa01521064cd135d968adfebfcadfd20cad446886868bfbf22");
+      .toBe("c167dd2d296bc07a9cefd9011705465df6b79a60bbc9e99b87da4c989e074739");
   });
 
   it("owns separate finite Jobs, shared identity addresses, and no execution-on-apply", () => {
