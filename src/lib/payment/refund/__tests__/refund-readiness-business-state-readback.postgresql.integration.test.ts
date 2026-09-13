@@ -90,7 +90,7 @@ describe.sequential("refund-readiness readback disposable PostgreSQL privileges"
     if (clusterRoot) await rm(clusterRoot, { recursive: true, force: true });
   }, 30_000);
 
-  it("executes a READY fixed-target snapshot as repeatable-read/read-only with zero writes", async () => {
+  it("executes a READY mixed-history snapshot as repeatable-read/read-only with zero writes", async () => {
     const before = await businessCounts(adminUrl);
     const database = new Client({ connectionString: roleUrl });
     await database.connect();
@@ -107,7 +107,9 @@ describe.sequential("refund-readiness readback disposable PostgreSQL privileges"
         transactionReadOnly: true,
         currentGeneration: 2,
         authorizationInventory: {
+          rowsTotal: 12,
           currentGenerationUnusedExpired: 1,
+          currentGenerationRevoked: 11,
           nextRequirement: "REVOKE_EXPIRED_THEN_ISSUE_ONE_FRESH_AUTHORIZATION",
         },
         leaseState: { state: "EXPIRED", blocksNextExecution: false },
@@ -115,6 +117,10 @@ describe.sequential("refund-readiness readback disposable PostgreSQL privileges"
         exactTargetAlreadyRefunded: "NO",
         duplicateRefundRisk: "NONE",
         durableHistoryCoherent: "YES",
+        proposedOneShotEffectUpperBounds: {
+          AUTHORIZATION_ISSUANCES_MAX: { max: 1 },
+          AUTHORIZATION_REVOCATIONS_MAX: { max: 1 },
+        },
         readyForOneShotLiveRefundAuthorityDecision: true,
         providerEffects: 0,
         durableWrites: 0,
@@ -288,6 +294,55 @@ async function seedExactReadyState(database: Client): Promise<void> {
         'admin-fixed', clock_timestamp() - interval '20 minutes',
         clock_timestamp() - interval '10 minutes'
       );
+      INSERT INTO "RefundExecutionAuthorization" (
+        "id", "issuanceRequestId", "commandId", "refundAttemptId",
+        "providerOperationBindingId", "targetBindingDigest", "expectedPredecessorGeneration",
+        "operationClass", "releasePolicyDigest", "issuedByUserId", "issuedAt", "expiresAt",
+        "revokedAt", "revokedByUserId"
+      ) VALUES
+        (
+          'authorization-historical-1', '00000000-0000-4000-8000-000000000002',
+          'cmtsdrrxk00010ss6we7g8qe7',
+          'eximbay-canary-7f9188b209f5f8504df28fe300e53aba980859e8',
+          'cmtsdrs0900030ss6qwxcgar6',
+          'e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c', 2,
+          'EXIMBAY_SANDBOX_BOUND_ORDINAL_ZERO_REENTRY',
+          '48eabfff63ec506721913f9f7566cbd4ee12474ba629460560a9b6bbb4a2312a',
+          'admin-fixed', clock_timestamp() - interval '25 minutes',
+          clock_timestamp() - interval '5 minutes', clock_timestamp() - interval '10 minutes',
+          'admin-fixed'
+        ),
+        (
+          'authorization-historical-2', '00000000-0000-4000-8000-000000000003',
+          'cmtsdrrxk00010ss6we7g8qe7',
+          'eximbay-canary-7f9188b209f5f8504df28fe300e53aba980859e8',
+          'cmtsdrs0900030ss6qwxcgar6',
+          'e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c', 2,
+          'EXIMBAY_SANDBOX_BOUND_ORDINAL_ZERO_REENTRY',
+          'c94117d2813c480941e3c28c516b1ad9d72c5219e247e655fcb508e92b0c6fa3',
+          'admin-fixed', clock_timestamp() - interval '25 minutes',
+          clock_timestamp() - interval '5 minutes', clock_timestamp() - interval '10 minutes',
+          'admin-fixed'
+        );
+      INSERT INTO "RefundExecutionAuthorization" (
+        "id", "issuanceRequestId", "commandId", "refundAttemptId",
+        "providerOperationBindingId", "targetBindingDigest", "expectedPredecessorGeneration",
+        "operationClass", "releasePolicyDigest", "issuedByUserId", "issuedAt", "expiresAt",
+        "revokedAt", "revokedByUserId"
+      )
+      SELECT
+        'authorization-current-revoked-' || series,
+        ('00000000-0000-4000-8000-' || lpad((series + 3)::text, 12, '0'))::uuid,
+        'cmtsdrrxk00010ss6we7g8qe7',
+        'eximbay-canary-7f9188b209f5f8504df28fe300e53aba980859e8',
+        'cmtsdrs0900030ss6qwxcgar6',
+        'e9fc5296fa962cefbcfe17fd57f23c637ede5ed02408450146425ce2dbc1953c', 2,
+        'EXIMBAY_SANDBOX_BOUND_ORDINAL_ZERO_REENTRY',
+        '5ee57ccdbedc79e0837df0491b9c5942fa47fa8462f1332f3766adfd24750be6',
+        'admin-fixed', clock_timestamp() - interval '25 minutes',
+        clock_timestamp() - interval '5 minutes', clock_timestamp() - interval '10 minutes',
+        'admin-fixed'
+      FROM generate_series(1, 9) AS series;
     `);
   } finally {
     await database.query("SET session_replication_role = origin");

@@ -562,15 +562,19 @@ function classifyAuthorizations(
   const summaries = rows.map((row) => {
     const rowGeneration = integerOrNull(row.expectedPredecessorGeneration);
     const expiredAtSnapshot = dateValue(row.expiresAt).getTime() <= capturedAt.getTime();
-    const exact = row.commandId === target.commandId
+    const consumed = row.consumedAt instanceof Date;
+    const revoked = row.revokedAt instanceof Date;
+    const state = consumed ? "CONSUMED" : revoked ? "REVOKED" : expiredAtSnapshot ? "EXPIRED" : "UNUSED";
+    const structurallyExact = row.commandId === target.commandId
       && row.refundAttemptId === target.refundAttemptId
       && row.providerOperationBindingId === target.providerOperationBindingId
       && row.targetBindingDigest === target.targetBindingDigest
       && row.operationClass === REFUND_REENTRY_OPERATION
-      && row.releasePolicyDigest === target.executionReleasePolicyDigest;
-    const consumed = row.consumedAt instanceof Date;
-    const revoked = row.revokedAt instanceof Date;
-    const state = consumed ? "CONSUMED" : revoked ? "REVOKED" : expiredAtSnapshot ? "EXPIRED" : "UNUSED";
+      && rowGeneration !== null && rowGeneration >= 1 && rowGeneration <= 2_147_483_646
+      && (generation === null || rowGeneration <= generation)
+      && typeof row.releasePolicyDigest === "string" && SHA256.test(row.releasePolicyDigest);
+    const currentRelease = row.releasePolicyDigest === target.executionReleasePolicyDigest;
+    const exact = structurallyExact && (state === "REVOKED" || currentRelease);
     const current = generation !== null && rowGeneration === generation;
     return Object.freeze({
       id: stringValue(row.id),

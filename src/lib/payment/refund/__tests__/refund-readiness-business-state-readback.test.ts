@@ -50,6 +50,10 @@ const CLAIMED = new Date("2026-09-08T08:00:00.000Z");
 const LEASE_ONE = new Date("2026-09-08T08:07:50.494Z");
 const LEASE_TWO = new Date("2026-09-08T08:20:00.000Z");
 const TARGET = REFUND_READINESS_FIXED_TARGET;
+const HISTORICAL_RELEASE_DIGESTS = Object.freeze([
+  "48eabfff63ec506721913f9f7566cbd4ee12474ba629460560a9b6bbb4a2312a",
+  "c94117d2813c480941e3c28c516b1ad9d72c5219e247e655fcb508e92b0c6fa3",
+]);
 
 describe("fixed Eximbay refund-readiness business-state readback", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -118,6 +122,115 @@ describe("fixed Eximbay refund-readiness business-state readback", () => {
     ]));
     expect(calls[0]?.sql).toBe(REFUND_READINESS_SQL.begin);
     expect(calls.at(-1)?.sql).toBe(REFUND_READINESS_SQL.commit);
+  });
+
+  it("preserves revoked historical releases while bounding one expired-slot replacement", async () => {
+    const fixture = readyFixture();
+    const expired = fixture.authorizations[0];
+    const revokedAt = new Date(SNAPSHOT.getTime() - 30_000);
+    const historical = HISTORICAL_RELEASE_DIGESTS.map((releasePolicyDigest, index) => (
+      historicalAuthorization(expired, `authorization-historical-${index + 1}`, {
+        releasePolicyDigest,
+        revokedAt,
+      })
+    ));
+    const current = Array.from({ length: 9 }, (_, index) => historicalAuthorization(
+      expired,
+      `authorization-current-revoked-${index + 1}`,
+      { revokedAt },
+    ));
+    const result = await readRefundReadinessBusinessState(queryFixture({
+      ...fixture,
+      authorizations: [expired, ...historical, ...current],
+    }).query);
+
+    expect(result).toMatchObject({
+      terminalResult: "READY",
+      readyForOneShotLiveRefundAuthorityDecision: true,
+      authorizationInventory: {
+        rowsTotal: 12,
+        currentGenerationUnusedUnexpired: 0,
+        currentGenerationUnusedExpired: 1,
+        currentGenerationRevoked: 11,
+        currentGenerationConsumed: 0,
+        nextRequirement: "REVOKE_EXPIRED_THEN_ISSUE_ONE_FRESH_AUTHORIZATION",
+        preExecutionRevocationRequired: true,
+      },
+      proposedOneShotEffectUpperBounds: {
+        AUTHORIZATION_ISSUANCES_MAX: { max: 1 },
+        AUTHORIZATION_REVOCATIONS_MAX: { max: 1 },
+      },
+    });
+    expect(result.terminalResult).not.toBe("AUTHORIZATION_STATE_AMBIGUOUS");
+    expect(result.authorizationInventory.rows.slice(1, 3)).toEqual([
+      expect.objectContaining({
+        releasePolicyDigest: HISTORICAL_RELEASE_DIGESTS[0],
+        state: "REVOKED",
+        exact: true,
+        usableUnderCurrentInstalledSource: false,
+      }),
+      expect.objectContaining({
+        releasePolicyDigest: HISTORICAL_RELEASE_DIGESTS[1],
+        state: "REVOKED",
+        exact: true,
+        usableUnderCurrentInstalledSource: false,
+      }),
+    ]);
+  });
+
+  it("keeps corrupted revoked authorization identities fail closed", async () => {
+    const cases = [
+      { targetBindingDigest: "b".repeat(64) },
+      { expectedPredecessorGeneration: "2" },
+      { expectedPredecessorGeneration: 0 },
+      { expectedPredecessorGeneration: 3 },
+      { operationClass: "UNSUPPORTED_OPERATION" },
+      { releasePolicyDigest: "invalid-historical-release-digest" },
+    ];
+    for (const corruption of cases) {
+      const fixture = readyFixture();
+      const expired = fixture.authorizations[0];
+      const corrupted = historicalAuthorization(expired, "authorization-corrupted", {
+        releasePolicyDigest: HISTORICAL_RELEASE_DIGESTS[0],
+        revokedAt: new Date(SNAPSHOT.getTime() - 30_000),
+        ...corruption,
+      });
+      const result = await readRefundReadinessBusinessState(queryFixture({
+        ...fixture,
+        authorizations: [expired, corrupted],
+      }).query);
+      expect(result.terminalResult).toBe("AUTHORIZATION_STATE_AMBIGUOUS");
+      expect(result.readyForOneShotLiveRefundAuthorityDecision).toBe(false);
+    }
+  });
+
+  it("keeps a non-revoked obsolete-release authorization fail closed", async () => {
+    const fixture = readyFixture();
+    const obsolete = historicalAuthorization(
+      fixture.authorizations[0],
+      "authorization-obsolete-active",
+      {
+        releasePolicyDigest: HISTORICAL_RELEASE_DIGESTS[0],
+        expiresAt: new Date(SNAPSHOT.getTime() + 60_000),
+      },
+    );
+    const result = await readRefundReadinessBusinessState(queryFixture({
+      ...fixture,
+      authorizations: [obsolete],
+    }).query);
+
+    expect(result).toMatchObject({
+      terminalResult: "AUTHORIZATION_STATE_AMBIGUOUS",
+      readyForOneShotLiveRefundAuthorityDecision: false,
+      authorizationInventory: {
+        currentGenerationUnusedUnexpired: 0,
+        nextRequirement: "BLOCKED",
+      },
+    });
+    expect(result.authorizationInventory.rows[0]).toMatchObject({
+      exact: false,
+      usableUnderCurrentInstalledSource: false,
+    });
   });
 
   it("uses database snapshot time for authorization and lease expiry", async () => {
@@ -385,6 +498,14 @@ function readyFixture(): Fixture {
     ],
     outbox: [],
   });
+}
+
+function historicalAuthorization(
+  source: Readonly<Record<string, unknown>>,
+  id: string,
+  changes: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({ ...source, id, ...changes });
 }
 
 function queryFixture(fixture: Fixture, failureSql?: string): Readonly<{
