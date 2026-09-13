@@ -7,7 +7,7 @@ import {
   type RefundAdmissionDiagnosticLogger,
 } from "../http";
 import type { RuntimeIdentityPort } from "../runtime";
-import { enabled, release, runtimePort } from "./fixture";
+import { enabled, release } from "./fixture";
 
 const executionName = `${release.jobName}/executions/observability-test`;
 
@@ -21,7 +21,6 @@ function runtimeThatRejects(): RuntimeIdentityPort {
   return {
     verifyIdToken: vi.fn(() => Promise.reject(new Error("synthetic token rejection"))),
     getExecution: vi.fn(() => Promise.reject(new Error("must not reach execution lookup"))),
-    listExecutionTasks: vi.fn(() => Promise.reject(new Error("must not list tasks"))),
   };
 }
 
@@ -66,7 +65,6 @@ describe("refund admission diagnostic boundary", () => {
     ]);
     expect(runtime.verifyIdToken).not.toHaveBeenCalled();
     expect(runtime.getExecution).not.toHaveBeenCalled();
-    expect(runtime.listExecutionTasks).not.toHaveBeenCalled();
   });
 
   it("keeps runtime verifier rejection public output unchanged and records its single safe stage", async () => {
@@ -84,43 +82,6 @@ describe("refund admission diagnostic boundary", () => {
     expect(events[1]).toMatchObject({ event: "refund_reentry_admission_rejected", stage: "TOKEN_VERIFICATION", reason: "EXECUTION_UNVERIFIED" });
     expect(runtime.verifyIdToken).toHaveBeenCalledTimes(1);
     expect(runtime.getExecution).not.toHaveBeenCalled();
-  });
-
-  it("correlates a safe Task lookup diagnostic without changing the public rejection", async () => {
-    const { events, diagnostics } = capturedLogger();
-    const base = runtimeThatRejects();
-    const valid = runtimePort("synthetic-grant", executionName);
-    const runtime: RuntimeIdentityPort = {
-      ...base,
-      verifyIdToken: () => Promise.resolve({
-        sub: release.serviceAccountSubject, email: release.serviceAccountEmail, email_verified: true,
-        aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300,
-      }),
-      getExecution: valid.getExecution,
-      listExecutionTasks: (_name, lookupDiagnostics) => {
-        void lookupDiagnostics?.({
-          event: "refund_reentry_task_lookup", operation: "LIST_TASKS", executionName,
-          phase: "API_REQUEST", result: "FAILURE", elapsedMs: 7, failureClass: "HTTP_403", httpStatus: 403,
-        });
-        return Promise.reject(new Error("synthetic-task-lookup-failure"));
-      },
-    };
-    const response = await handler(diagnostics, runtime)(new Request(release.audience, {
-      method: "POST",
-      headers: {
-        [REFUND_REENTRY_ADMISSION_AUTH_HEADER]: "Bearer synthetic.token",
-        "x-cloud-trace-context": "0123456789abcdef0123456789abcdef/123;o=1",
-      },
-      body: validBody(),
-    }));
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ ok: false, code: "EXECUTION_UNVERIFIED" });
-    expect(events).toContainEqual(expect.objectContaining({
-      event: "refund_reentry_task_lookup", traceId: "0123456789abcdef0123456789abcdef",
-      phase: "API_REQUEST", result: "FAILURE", failureClass: "HTTP_403", httpStatus: 403,
-    }));
-    expect(events.at(-1)).toMatchObject({ event: "refund_reentry_admission_rejected", stage: "TASK_LOOKUP", reason: "EXECUTION_UNVERIFIED" });
   });
 
   it("records release-load rejection without exposing release or request values", async () => {

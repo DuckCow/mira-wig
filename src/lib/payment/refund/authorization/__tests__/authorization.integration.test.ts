@@ -6,7 +6,6 @@ import { db } from "@/lib/db";
 import { createRefundAuthorizationAdmin } from "../admin";
 import { consumeRefundExecutionAuthorization } from "../admission";
 import { createRefundAuthorizationAdmissionHandler } from "../http";
-import type { TaskLookupDiagnosticSink } from "../runtime";
 import {
   setupRoles, teardownRoles, cleanupTargets, targetFixture, issueInput, adminService, verified,
   loadRelease, release, enabled, issuerId, appRole, prismaFor, pgFor, rawConsumption, seedGrant, rvhbhLiveShapedRuntimePort,
@@ -132,7 +131,7 @@ describe("authenticated durable refund authorization on real PostgreSQL", () => 
     expect((await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } })).consumedAt).toBeNull();
   });
 
-  it("executes the real HTTP boundary with the partial-rvhbh env order and omitted Task defaults, and rejects a caller actor/image claim", async () => {
+  it("executes the real HTTP boundary with the partial-rvhbh env order and rejects a caller actor/image claim", async () => {
     const target = await targetFixture(); const grant = await adminService(app).issue(issueInput(target));
     const executionName = `${release.jobName}/executions/http-${randomUUID()}`;
     const diagnostics = { emit: vi.fn() };
@@ -148,19 +147,24 @@ describe("authenticated durable refund authorization on real PostgreSQL", () => 
     expect((await handler(request())).status).toBe(409);
   });
 
-  it("keeps a Task lookup rejection outside durable admission while retaining its safe diagnostic", async () => {
+  it("keeps an Execution verification rejection outside every durable admission and financial effect", async () => {
     const target = await targetFixture(); const grant = await adminService(app).issue(issueInput(target));
-    const executionName = `${release.jobName}/executions/task-lookup-${randomUUID()}`;
+    const executionName = `${release.jobName}/executions/execution-rejection-${randomUUID()}`;
     const base = rvhbhLiveShapedRuntimePort(grant.id, executionName, randomUUID());
+    const execution = await base.getExecution(executionName);
+    if (typeof execution !== "object" || execution === null || Array.isArray(execution)) throw new Error("TEST_EXECUTION_REQUIRED");
     const runtime = {
       ...base,
-      listExecutionTasks: (_name: string, lookupDiagnostics?: TaskLookupDiagnosticSink) => {
-        void lookupDiagnostics?.({
-          event: "refund_reentry_task_lookup", operation: "LIST_TASKS", executionName,
-          phase: "API_REQUEST", result: "FAILURE", elapsedMs: 1, failureClass: "HTTP_403", httpStatus: 403,
-        });
-        return Promise.reject(new Error("synthetic-task-lookup-failure"));
-      },
+      getExecution: () => Promise.resolve({ ...execution, parallelism: 2 }),
+    };
+    const before = {
+      grant: await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } }),
+      command: await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } }),
+      eventCount: await db.refundExecutionCommandEvent.count({ where: { commandId: target.commandId } }),
+      dispatchCount: await db.refundExecutionDispatchAttempt.count({ where: { commandId: target.commandId } }),
+      attempt: await db.refundAttempt.findUniqueOrThrow({ where: { id: target.refundAttemptId } }),
+      order: await db.order.findUniqueOrThrow({ where: { id: target.fixture.orderId } }),
+      payment: await db.payment.findUniqueOrThrow({ where: { id: target.paymentId } }),
     };
     const diagnostics = { emit: vi.fn() };
     const handler = createRefundAuthorizationAdmissionHandler({ database: app, diagnostics, loadRelease, env: enabled, runtime });
@@ -171,10 +175,16 @@ describe("authenticated durable refund authorization on real PostgreSQL", () => 
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ ok: false, code: "EXECUTION_UNVERIFIED" });
-    const stored = await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } });
-    expect(stored.consumedAt).toBeNull();
-    expect((await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } })).leaseGeneration).toBe(target.generation);
-    expect(diagnostics.emit).toHaveBeenCalledWith(expect.objectContaining({ event: "refund_reentry_task_lookup", result: "FAILURE", failureClass: "HTTP_403" }));
+    expect(await db.refundExecutionAuthorization.findUniqueOrThrow({ where: { id: grant.id } })).toEqual(before.grant);
+    expect(await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: target.commandId } })).toEqual(before.command);
+    expect(await db.refundExecutionCommandEvent.count({ where: { commandId: target.commandId } })).toBe(before.eventCount);
+    expect(await db.refundExecutionDispatchAttempt.count({ where: { commandId: target.commandId } })).toBe(before.dispatchCount);
+    expect(await db.refundAttempt.findUniqueOrThrow({ where: { id: target.refundAttemptId } })).toEqual(before.attempt);
+    expect(await db.order.findUniqueOrThrow({ where: { id: target.fixture.orderId } })).toEqual(before.order);
+    expect(await db.payment.findUniqueOrThrow({ where: { id: target.paymentId } })).toEqual(before.payment);
+    expect(diagnostics.emit).toHaveBeenCalledWith(expect.objectContaining({
+      event: "refund_reentry_admission_rejected", stage: "EXECUTION_VERIFICATION", reason: "EXECUTION_UNVERIFIED",
+    }));
   });
 });
 

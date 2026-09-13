@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RefundExecutionVerificationError, VerifiedRefundExecution } from "../runtime";
+import { createGoogleRuntimeIdentity, RefundExecutionVerificationError, VerifiedRefundExecution } from "../runtime";
 import { parseRefundReentryRelease, templateForGrant, sameJson } from "../release";
 import { readAuthorizationJson } from "../json-body";
 import { parseAdmissionReceipt, requestRefundAuthorizationAdmission } from "../worker-client";
@@ -13,18 +13,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function withoutEgress(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "egress"));
-}
-
-function taskReadback(execution: string, vpcAccess: unknown, taskExecution: unknown = execution): Record<string, unknown> {
-  return { name: `${execution}/tasks/0`, execution: taskExecution, index: 0, vpcAccess };
-}
-
-function taskWithoutIndex(execution: string, vpcAccess: unknown): Record<string, unknown> {
-  return { name: `${execution}/tasks/mira-eximbay-refund-canary-9cj5h-task0`, vpcAccess };
-}
-
 function executionTemplateFor(releaseValue: typeof release, id = grantId): Record<string, unknown> {
   const template = templateForGrant(releaseValue, id);
   if (!record(template)) throw new Error("TEST_TEMPLATE_REQUIRED");
@@ -36,6 +24,12 @@ function templateWithEnvironment(releaseValue: typeof release, entries: unknown[
   const template = executionTemplateFor(releaseValue, id);
   if (!Array.isArray(template.containers) || template.containers.length !== 1 || !record(template.containers[0])) throw new Error("TEST_CONTAINER_REQUIRED");
   return { ...template, containers: [{ ...template.containers[0], env: entries }] };
+}
+
+function templateWithContainer(releaseValue: typeof release, changed: Record<string, unknown>): Record<string, unknown> {
+  const template = executionTemplateFor(releaseValue);
+  if (!Array.isArray(template.containers) || template.containers.length !== 1 || !record(template.containers[0])) throw new Error("TEST_CONTAINER_REQUIRED");
+  return { ...template, containers: [{ ...template.containers[0], ...changed }] };
 }
 
 async function verifyExecutionTemplate(template: Record<string, unknown>, releaseValue = release) {
@@ -62,7 +56,6 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     const getExecution = vi.fn(port.getExecution);
     await expect(VerifiedRefundExecution.verify("forged-token", executionName, grantId, release, {
       verifyIdToken: () => Promise.reject(new Error("SDK request with secret bearer")), getExecution,
-      listExecutionTasks: vi.fn(),
     })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "TOKEN_VERIFICATION" } satisfies Partial<RefundExecutionVerificationError>);
     expect(getExecution).not.toHaveBeenCalled();
   });
@@ -80,15 +73,11 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "EXECUTION_VERIFICATION" } satisfies Partial<RefundExecutionVerificationError>);
   });
 
-  it("distinguishes Task read failure from Task VPC evidence mismatch without changing its public code", async () => {
+  it("exposes only OIDC and Execution GET seams and verifies without a Task API owner", async () => {
     const port = runtimePort(grantId, executionName);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port, listExecutionTasks: () => Promise.reject(new Error("synthetic task read failure")),
-    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "TASK_LOOKUP" } satisfies Partial<RefundExecutionVerificationError>);
-
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port, listExecutionTasks: () => Promise.resolve({ tasks: [] }),
-    })).rejects.toMatchObject({ code: "EXECUTION_UNVERIFIED", stage: "TASK_VERIFICATION" } satisfies Partial<RefundExecutionVerificationError>);
+    expect(Object.keys(port).sort()).toEqual(["getExecution", "verifyIdToken"]);
+    expect(Object.keys(createGoogleRuntimeIdentity()).sort()).toEqual(["getExecution", "verifyIdToken"]);
+    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, port)).resolves.toMatchObject({ grantId });
   });
 
   it.each([
@@ -114,6 +103,16 @@ describe("server-owned execution identity and bounded HTTP data", () => {
     await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
       ...port, getExecution: () => Promise.resolve({ ...original, ...changed }),
     })).rejects.toThrow("EXECUTION_UNVERIFIED");
+  });
+
+  it.each([
+    ["service account", { ...executionTemplateFor(release), serviceAccount: "other@synthetic-refund-test.iam.gserviceaccount.com" }],
+    ["max retries", { ...executionTemplateFor(release), maxRetries: 1 }],
+    ["timeout", { ...executionTemplateFor(release), timeout: "181s" }],
+    ["image", templateWithContainer(release, { image: `example.test/other@sha256:${"c".repeat(64)}` })],
+    ["resources", templateWithContainer(release, { resources: { limits: { cpu: "2", memory: "512Mi" } } })],
+  ])("rejects material Execution template drift in %s", async (_field, template) => {
+    await expect(verifyExecutionTemplate(template)).rejects.toThrow("EXECUTION_UNVERIFIED");
   });
 
   it("accepts semantically identical unique env entries in a different order", async () => {
@@ -163,109 +162,8 @@ describe("server-owned execution identity and bounded HTTP data", () => {
       rvhbhLiveShapedRuntimePort(grantId, executionName))).resolves.toMatchObject({ grantId, executionId: executionName });
   });
 
-  it("normalizes only an omitted Task PRIVATE_RANGES_ONLY egress before strict VPC comparison", async () => {
-    const port = runtimePort(grantId, executionName);
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
-    const actualVpc = withoutEgress(expectedVpc);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName, actualVpc, "synthetic-run")] }),
-    })).resolves.toMatchObject({ grantId });
-  });
-
-  it("accepts an explicit matching Task egress", async () => {
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, runtimePort(grantId, executionName))).resolves.toMatchObject({ grantId });
-  });
-
-  it("canonicalizes only an absent Task index to ordinal zero", async () => {
-    const port = runtimePort(grantId, executionName);
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port, listExecutionTasks: () => Promise.resolve({ tasks: [taskWithoutIndex(executionName, expectedVpc)] }),
-    })).resolves.toMatchObject({ grantId });
-  });
-
-  it.each([
-    [1], [-1], [0.5], [null], ["0"], [true], [{}], [[]],
-  ])("rejects an explicit non-canonical Task index %j", async (index) => {
-    const port = runtimePort(grantId, executionName);
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port, listExecutionTasks: () => Promise.resolve({ tasks: [{ ...taskReadback(executionName, expectedVpc), index }] }),
-    })).rejects.toThrow("EXECUTION_UNVERIFIED");
-  });
-
-  it("fails closed for explicit ALL_TRAFFIC with otherwise exact Task VPC", async () => {
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
-    const port = runtimePort(grantId, executionName);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName, { ...expectedVpc, egress: "ALL_TRAFFIC" })] }),
-    })).rejects.toThrow("EXECUTION_UNVERIFIED");
-  });
-
-  it.each([
-    { tasks: [taskReadback(executionName, { egress: "ALL_TRAFFIC" })] },
-    { tasks: [taskReadback(executionName, undefined)] },
-    { tasks: [] },
-    { tasks: [taskReadback(executionName, undefined), taskReadback(executionName, undefined)] },
-  ])("fails closed when Task VPC evidence is insufficient or wrong", async (taskReadback) => {
-    const port = runtimePort(grantId, executionName);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port, listExecutionTasks: () => Promise.resolve(taskReadback),
-    })).rejects.toThrow("EXECUTION_UNVERIFIED");
-  });
-
-  it("fails closed when omitted Task egress conflicts with an ALL_TRAFFIC release", async () => {
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
-    const allTrafficRelease = { ...release, executionTemplate: { ...release.executionTemplate, vpcAccess: { ...expectedVpc, egress: "ALL_TRAFFIC" } } };
-    const actualVpc = withoutEgress(expectedVpc);
-    const port = runtimePort(grantId, executionName);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, allTrafficRelease, {
-      ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName, actualVpc)] }),
-    })).rejects.toThrow("EXECUTION_UNVERIFIED");
-  });
-
-  it.each([
-    ["network", { network: "projects/synthetic-refund-test/global/networks/other" }],
-    ["subnetwork", { subnetwork: "projects/synthetic-refund-test/regions/asia-northeast3/subnetworks/other" }],
-    ["tags", { tags: ["other"] }],
-  ])("fails closed when Task VPC %s differs", async (_field, changed) => {
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    if (!record(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
-    const interfaces = expectedVpc.networkInterfaces;
-    if (!Array.isArray(interfaces) || interfaces.length !== 1 || !record(interfaces[0])) throw new Error("TEST_VPC_INTERFACE_REQUIRED");
-    const port = runtimePort(grantId, executionName);
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [taskReadback(executionName,
-        { ...expectedVpc, networkInterfaces: [{ ...interfaces[0], ...changed }] })] }),
-    })).rejects.toThrow("EXECUTION_UNVERIFIED");
-  });
-
-  it.each([
-    ["another project", "projects/other/locations/asia-northeast3/jobs/reentry-test/executions/synthetic-run/tasks/0"],
-    ["another location", "projects/synthetic-refund-test/locations/other/jobs/reentry-test/executions/synthetic-run/tasks/0"],
-    ["another Execution", `${release.jobName}/executions/other/tasks/0`],
-    ["another Job", "projects/synthetic-refund-test/locations/asia-northeast3/jobs/other/executions/synthetic-run/tasks/0"],
-    ["malformed name", "synthetic-run"],
-    ["missing task segment", executionName],
-    ["extra path segment", `${executionName}/tasks/0/extra`],
-  ])("fails closed when Task name has %s", async (_case, name) => {
-    const port = runtimePort(grantId, executionName);
-    const expectedVpc = release.executionTemplate.vpcAccess;
-    await expect(VerifiedRefundExecution.verify("token", executionName, grantId, release, {
-      ...port,
-      listExecutionTasks: () => Promise.resolve({ tasks: [{ ...taskReadback(executionName, expectedVpc), name }] }),
-    })).rejects.toThrow("EXECUTION_UNVERIFIED");
-  });
-
   it("rejects another job before external access and compares every reviewed template field", async () => {
-    const port = { verifyIdToken: vi.fn(), getExecution: vi.fn(), listExecutionTasks: vi.fn() };
+    const port = { verifyIdToken: vi.fn(), getExecution: vi.fn() };
     await expect(VerifiedRefundExecution.verify("token", "projects/other/locations/a/jobs/b/executions/c", grantId, release, port)).rejects.toThrow();
     expect(port.verifyIdToken).not.toHaveBeenCalled();
     expect(sameJson(templateForGrant(release, grantId), { ...release.executionTemplate, timeout: "3600s" })).toBe(false);

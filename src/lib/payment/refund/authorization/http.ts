@@ -5,7 +5,7 @@ import { digest, exactFields, identifier, REFUND_REENTRY_ADMISSION_AUTH_HEADER, 
 import { type LoadRefundReentryRelease } from "./release";
 import {
   RefundExecutionVerificationError, VerifiedRefundExecution,
-  type RuntimeIdentityPort, type TaskLookupDiagnosticEvent, type TaskLookupDiagnosticSink,
+  type RuntimeIdentityPort,
 } from "./runtime";
 
 const ADMISSION_ROUTE = "refund_reentry_admission";
@@ -19,8 +19,6 @@ export type RefundAdmissionFailureStage =
   | "TOKEN_VERIFICATION"
   | "EXECUTION_LOOKUP"
   | "EXECUTION_VERIFICATION"
-  | "TASK_LOOKUP"
-  | "TASK_VERIFICATION"
   | "AUTHORIZATION_ADMISSION";
 
 type RefundAdmissionContext = Readonly<{ route: typeof ADMISSION_ROUTE; method: typeof ADMISSION_METHOD; traceId?: string }>;
@@ -34,8 +32,7 @@ type RefundAdmissionLifecycleDiagnosticEvent = Readonly<{
   reason?: AuthorizationDiagnosticReason;
 }>;
 
-export type RefundAdmissionDiagnosticEvent = RefundAdmissionLifecycleDiagnosticEvent
-  | Readonly<TaskLookupDiagnosticEvent & Pick<RefundAdmissionContext, "traceId">>;
+export type RefundAdmissionDiagnosticEvent = RefundAdmissionLifecycleDiagnosticEvent;
 
 type AuthorizationDiagnosticReason =
   | "GATE_DISABLED"
@@ -75,7 +72,6 @@ export function createRefundAuthorizationAdmissionHandler(dependencies: Readonly
       const release = await dependencies.loadRelease(configuredReleaseDigest(dependencies.env));
       const execution = await VerifiedRefundExecution.verify(
         bearer.slice(7), input.executionName, input.grantId, release, dependencies.runtime,
-        taskLookupDiagnostics(diagnostics, context),
       );
       const admitted = await consumeRefundExecutionAuthorization(dependencies.database, execution, dependencies.loadRelease, dependencies.env);
       return reply({ ok: true, ...admitted, account: {
@@ -123,10 +119,6 @@ function rejectionEvent(
   reason: AuthorizationDiagnosticReason,
 ): RefundAdmissionDiagnosticEvent {
   return { event: "refund_reentry_admission_rejected", ...context, stage, reason };
-}
-
-function taskLookupDiagnostics(logger: RefundAdmissionDiagnosticLogger, context: RefundAdmissionContext): TaskLookupDiagnosticSink {
-  return (event) => safeEmit(logger, context.traceId ? { ...event, traceId: context.traceId } : event);
 }
 
 function safeEmit(logger: RefundAdmissionDiagnosticLogger, event: RefundAdmissionDiagnosticEvent): void {

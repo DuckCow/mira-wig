@@ -56,9 +56,11 @@ The closed manifest fields are `formatVersion: mira-refund-reentry-release/v1`, 
 `jobName`, `serviceAccountSubject`, `serviceAccountEmail`, `mid`,
 `merchantAccountBindingId`, `credentialGenerationBindingId`, `secretResource`,
 `secretVersion`, and `executionTemplate`. There is no real manifest/hash supplied by this
-source task. The template is the complete reviewed Cloud Run v2 **Execution TaskTemplate**,
-including defaults returned by the API, immutable image digest, command/args, environment,
-database and secret references/versions, resources, networking and effect gates.
+source task. The template is the complete reviewed Cloud Run v2 Job TaskTemplate, including
+immutable image digest, command/args, environment, database and secret references/versions,
+resources, networking and effect gates. Admission compares every field returned in the
+immutable Execution template; reviewed VPC fields remain deployment/readback assurance because
+Cloud Run omits them from that Execution representation.
 Only the `MIRA_REFUND_AUTHORIZATION_ID` environment value is `${GRANT_ID}` and substituted
 with the selected grant ID. One container, zero retries, 180-second timeout, one task and
 parallelism one are required. Review must include the exact complete effect/credential
@@ -74,30 +76,25 @@ remain explicitly ENABLED; other execution switches, inline provider keys and LI
 surfaces remain absent. Native task count/index/attempt must be 1/0/0. The admission URL is also the
 ID-token audience. The application checks signed issuer/audience/expiry, immutable service
 account subject and verified email, then GETs the named immutable Execution with its own
-`run.executions.get` authority and lists its sole Task with `run.tasks.list`. Name is only a locator.
-Exact job, UID, task/parallelism and every Execution-returned task-template field must match. Cloud Run may return the
+`run.executions.get` authority. Name is only a locator. Exact job, UID, task/parallelism and every
+Execution-returned task-template field must match. Cloud Run may return the
 `containers[].env` collection in an order different from the reviewed TaskTemplate. At that API boundary only, each
 collection is first fail-closed validated as unique, supported entries: a valid nonempty name paired with exactly one
 literal value or one `secretKeyRef` carrying exact secret and version identity. Duplicate names, missing or extra names,
 malformed/ambiguous representations, literal/source substitutions, and any value or selector drift fail. Valid entries
 are then compared by unique name and exact semantic value/source; their array position is not an authorization fact.
 All other arrays, including command/args, remain position-sensitive. This is not generic JSON normalization: unknown
-fields remain material, field-specific default rules remain limited to the documented Task fields, and reviewed release
-bytes and historical bindings are never rewritten.
-Exact Task parent identity comes from the output-only Task's fully-qualified `name`, whose
-`projects/{project}/locations/{location}/jobs/{job}/executions/{execution}` parent must exactly
-equal the already-verified Execution resource name; Task `execution` serialization is not an
-identity authority. The Task's output-only `vpcAccess` must exactly match the reviewed VPC
-configuration because Cloud Run v2 omits it from the Execution template; only an omitted Task
-`egress` is normalized to its documented `PRIVATE_RANGES_ONLY` default. `Task.index` is an
-ordinal identity field: only an absent raw `index` property is canonicalized to numeric `0`,
-because ProtoJSON may omit that implicit numeric default for the sole ordinal-zero Task. A
-present index must be a numeric integer and must still equal `0`; null, strings, booleans,
-fractions and nonzero values fail closed. This API-boundary rule is field-specific: generic
-missing-field or falsy-value normalization is forbidden. Completed/deleted executions are rejected. A unique execution
-name and UUID cannot consume two grants. The worker makes one admission HTTP request and
-validates the server's response over HTTPS. The release identity is never accepted from an
-unverified worker image/environment claim.
+fields remain material, and reviewed release bytes and historical bindings are never rewritten. Completed/deleted
+executions are rejected. A unique execution name and UUID cannot consume two grants. The worker makes one admission
+HTTP request and validates the server's response over HTTPS. The release identity is never accepted from an unverified
+worker image/environment claim.
+
+Worker Job VPC/network correctness is deployment/readback assurance. Live financial admission does not call the Cloud
+Run Task API or dynamically re-attest Task cardinality, parent, index or `Task.vpcAccess`. The reviewed Job uses Direct
+VPC, its reviewed network/subnetwork/egress/tags and the private Cloud SQL path. The worker and application runtime
+service accounts cannot update the reviewed Job; no non-administrative routine Job invoker is currently installed.
+Trusted administrative/deployment authority remains outside that runtime trust boundary. Any future routine invocation
+principal must preserve the same Job-update separation. Worker-native task count/index/attempt checks remain fail closed.
 
 This uses the existing Google identity mechanism (`google-auth-library`), not a new token
 issuer. External identity/control-plane boundaries are replaceable in tests; PostgreSQL
@@ -115,9 +112,8 @@ rejected application request emits one `refund_reentry_admission_rejected` recor
 first failing stage and fixed safe reason. Events contain only the fixed route/method,
 an already-provided valid Cloud Trace ID when present, and allowlisted stage/reason values.
 `traceId` is an application field for correlation search, not a claim of automatic Cloud
-Logging trace association. Verifier stages distinguish token verification, Execution lookup,
-Execution identity/template verification, Task lookup, and Task VPC verification while retaining
-the same public `EXECUTION_UNVERIFIED` result.
+Logging trace association. Verifier stages distinguish token verification, Execution lookup and
+Execution identity/template verification while retaining the same public `EXECUTION_UNVERIFIED` result.
 They never include bearer or serverless-authorization headers, token claims, request bodies,
 cookies, grants, database URLs, secret values, or verifier payloads. Logging failure is
 ignored and cannot change the HTTP response, authorization decision, grant consumption, or
@@ -126,14 +122,6 @@ financial progression. Public response status and body remain unchanged.
 A Cloud Run platform-level rejection can occur before handler entry and consequently has no
 application event. Conversely, absence of an application event is not alone proof of a
 platform rejection until logging delivery is established.
-
-`ListTasks` additionally emits one best-effort, non-authoritative
-`refund_reentry_task_lookup` event for each completed lookup attempt. It contains only the
-fixed operation name, Execution parent, `AUTH_CLIENT` or `API_REQUEST` phase, bounded elapsed
-milliseconds, success result count, or an allowlisted failure class and numeric HTTP status.
-The admission handler adds its existing trace ID when available. Credential material, headers,
-response bodies, raw errors, and error messages are not emitted; logging cannot alter the
-lookup result, verifier decision, public response, or durable admission path.
 
 The immutable Execution/UUID facts follow the [Google Execution API](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs.executions);
 ID tokens follow [Google service authentication](https://docs.cloud.google.com/run/docs/authenticating/service-to-service).

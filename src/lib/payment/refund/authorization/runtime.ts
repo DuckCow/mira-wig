@@ -5,62 +5,12 @@ import { sameJson, templateForGrant, type RefundReentryRelease } from "./release
 export type RuntimeIdentityPort = Readonly<{
   verifyIdToken(token: string, audience: string): Promise<unknown>;
   getExecution(name: string): Promise<unknown>;
-  listExecutionTasks(executionName: string, diagnostics?: TaskLookupDiagnosticSink): Promise<unknown>;
-}>;
-
-export type TaskLookupDiagnosticPhase = "AUTH_CLIENT" | "API_REQUEST";
-export type TaskLookupFailureClass =
-  | "AUTH_CLIENT_FAILURE"
-  | "HTTP_403"
-  | "HTTP_404"
-  | "HTTP_4XX"
-  | "HTTP_5XX"
-  | "TIMEOUT"
-  | "TRANSPORT"
-  | "UNKNOWN_SAFE_FAILURE";
-
-export type TaskLookupDiagnosticEvent =
-  | Readonly<{
-    event: "refund_reentry_task_lookup";
-    operation: "LIST_TASKS";
-    executionName: string;
-    phase: "AUTH_CLIENT";
-    result: "FAILURE";
-    elapsedMs: number;
-    failureClass: "AUTH_CLIENT_FAILURE";
-  }>
-  | Readonly<{
-    event: "refund_reentry_task_lookup";
-    operation: "LIST_TASKS";
-    executionName: string;
-    phase: "API_REQUEST";
-    result: "SUCCESS";
-    elapsedMs: number;
-    resultCount: number | null;
-  }>
-  | Readonly<{
-    event: "refund_reentry_task_lookup";
-    operation: "LIST_TASKS";
-    executionName: string;
-    phase: "API_REQUEST";
-    result: "FAILURE";
-    elapsedMs: number;
-    failureClass: Exclude<TaskLookupFailureClass, "AUTH_CLIENT_FAILURE">;
-    httpStatus?: number;
-  }>;
-
-export type TaskLookupDiagnosticSink = (event: TaskLookupDiagnosticEvent) => void | Promise<void>;
-export type TaskLookupRequest = () => Promise<unknown>;
-export type GoogleRuntimeIdentityDependencies = Readonly<{
-  acquireListTasksRequest?: (executionName: string) => Promise<TaskLookupRequest>;
 }>;
 
 export type RefundExecutionVerificationFailureStage =
   | "TOKEN_VERIFICATION"
   | "EXECUTION_LOOKUP"
-  | "EXECUTION_VERIFICATION"
-  | "TASK_LOOKUP"
-  | "TASK_VERIFICATION";
+  | "EXECUTION_VERIFICATION";
 
 // This preserves the public failure code while carrying only an allowlisted
 // diagnostic stage to the in-process HTTP boundary.
@@ -73,8 +23,7 @@ export class RefundExecutionVerificationError extends RefundAuthorizationError {
 
 // The production seam uses signed Google identity and the immutable control-plane
 // Execution resource. Body/env strings are only locators. No network occurs on import.
-export function createGoogleRuntimeIdentity(dependencies: GoogleRuntimeIdentityDependencies = {}): RuntimeIdentityPort {
-  const acquireListTasksRequest = dependencies.acquireListTasksRequest ?? productionListTasksRequest;
+export function createGoogleRuntimeIdentity(): RuntimeIdentityPort {
   return {
     async verifyIdToken(token, audience) {
       const ticket = await new OAuth2Client().verifyIdToken({ idToken: token, audience });
@@ -87,118 +36,10 @@ export function createGoogleRuntimeIdentity(dependencies: GoogleRuntimeIdentityD
       });
       return response.data;
     },
-    listExecutionTasks(executionName, diagnostics) {
-      return observeListTasks(executionName, diagnostics, acquireListTasksRequest);
-    },
   };
 }
 
 export const googleRuntimeIdentity = createGoogleRuntimeIdentity();
-
-async function productionListTasksRequest(executionName: string): Promise<TaskLookupRequest> {
-  const client = await new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] }).getClient();
-  return async () => {
-    const response = await client.request<unknown>({
-      url: `https://run.googleapis.com/v2/${executionName}/tasks`, method: "GET", timeout: 10_000, retry: false,
-    });
-    return response.data;
-  };
-}
-
-async function observeListTasks(
-  executionName: string, diagnostics: TaskLookupDiagnosticSink | undefined,
-  acquireRequest: (executionName: string) => Promise<TaskLookupRequest>,
-): Promise<unknown> {
-  const startedAt = Date.now();
-  let request: TaskLookupRequest;
-  try {
-    request = await acquireRequest(executionName);
-  } catch (error) {
-    safelyEmitTaskLookupDiagnostic(diagnostics, {
-      event: "refund_reentry_task_lookup", operation: "LIST_TASKS", executionName,
-      phase: "AUTH_CLIENT", result: "FAILURE", elapsedMs: boundedElapsedMs(startedAt), failureClass: "AUTH_CLIENT_FAILURE",
-    });
-    throw error;
-  }
-  try {
-    const value = await request();
-    safelyEmitTaskLookupDiagnostic(diagnostics, {
-      event: "refund_reentry_task_lookup", operation: "LIST_TASKS", executionName,
-      phase: "API_REQUEST", result: "SUCCESS", elapsedMs: boundedElapsedMs(startedAt), resultCount: taskResultCount(value),
-    });
-    return value;
-  } catch (error) {
-    safelyEmitTaskLookupDiagnostic(diagnostics, taskLookupFailureEvent(executionName, startedAt, error));
-    throw error;
-  }
-}
-
-function taskLookupFailureEvent(executionName: string, startedAt: number, error: unknown): TaskLookupDiagnosticEvent {
-  const httpStatus = errorHttpStatus(error);
-  const failureClass = taskLookupFailureClass(error, httpStatus);
-  const common = {
-    event: "refund_reentry_task_lookup" as const, operation: "LIST_TASKS" as const, executionName,
-    phase: "API_REQUEST" as const, result: "FAILURE" as const, elapsedMs: boundedElapsedMs(startedAt), failureClass,
-  };
-  return httpStatus === null ? common : { ...common, httpStatus };
-}
-
-function taskLookupFailureClass(error: unknown, httpStatus: number | null): Exclude<TaskLookupFailureClass, "AUTH_CLIENT_FAILURE"> {
-  return httpFailureClass(httpStatus) ?? timeoutFailureClass(error) ?? transportFailureClass(error) ?? "UNKNOWN_SAFE_FAILURE";
-}
-
-function httpFailureClass(httpStatus: number | null): Exclude<TaskLookupFailureClass, "AUTH_CLIENT_FAILURE" | "TIMEOUT" | "TRANSPORT" | "UNKNOWN_SAFE_FAILURE"> | null {
-  if (httpStatus === 403) return "HTTP_403";
-  if (httpStatus === 404) return "HTTP_404";
-  if (httpStatus !== null && httpStatus >= 400 && httpStatus < 500) return "HTTP_4XX";
-  return httpStatus !== null && httpStatus >= 500 ? "HTTP_5XX" : null;
-}
-
-function timeoutFailureClass(error: unknown): "TIMEOUT" | null {
-  const values = [errorName(error), errorCode(error)];
-  return ["TimeoutError", "ETIMEDOUT", "ESOCKETTIMEDOUT", "ECONNABORTED"].some((value) => values.includes(value)) ? "TIMEOUT" : null;
-}
-
-function transportFailureClass(error: unknown): "TRANSPORT" | null {
-  return ["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "EPIPE"].includes(errorCode(error) ?? "") ? "TRANSPORT" : null;
-}
-
-function errorHttpStatus(error: unknown): number | null {
-  if (!record(error)) return null;
-  const response = record(error.response) ? error.response.status : undefined;
-  return validHttpStatus(response) ?? validHttpStatus(error.status) ?? validHttpStatus(error.code);
-}
-
-function validHttpStatus(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599 ? value : null;
-}
-
-function errorCode(error: unknown): string | null {
-  return record(error) && typeof error.code === "string" ? error.code : null;
-}
-
-function errorName(error: unknown): string | null {
-  if (error instanceof Error) return error.name;
-  return record(error) && typeof error.name === "string" ? error.name : null;
-}
-
-function taskResultCount(value: unknown): number | null {
-  return record(value) && Array.isArray(value.tasks) ? value.tasks.length : null;
-}
-
-function boundedElapsedMs(startedAt: number): number {
-  const elapsed = Math.trunc(Date.now() - startedAt);
-  if (!Number.isFinite(elapsed)) return 60_000;
-  return Math.min(Math.max(elapsed, 0), 60_000);
-}
-
-function safelyEmitTaskLookupDiagnostic(diagnostics: TaskLookupDiagnosticSink | undefined, event: TaskLookupDiagnosticEvent): void {
-  if (!diagnostics) return;
-  try {
-    const emitted = diagnostics(event);
-    if (emitted) void emitted.catch(() => {});
-  } catch { /* Diagnostics are never an execution-verification dependency. */ }
-}
 
 // Private constructor prevents ordinary callers from supplying an actor/image string
 // as a verified context. Tests replace only the two actual external identity seams.
@@ -210,7 +51,7 @@ export class VerifiedRefundExecution {
 
   static async verify(
     token: string, executionName: string, grantId: string, release: RefundReentryRelease,
-    port: RuntimeIdentityPort = googleRuntimeIdentity, taskLookupDiagnostics?: TaskLookupDiagnosticSink,
+    port: RuntimeIdentityPort = googleRuntimeIdentity,
   ): Promise<VerifiedRefundExecution> {
     if (!executionName.startsWith(`${release.jobName}/executions/`)
       || !/\/executions\/[a-z0-9-]+$/u.test(executionName) || executionName.length > 255) {
@@ -220,8 +61,6 @@ export class VerifiedRefundExecution {
     await verificationStage("TOKEN_VERIFICATION", () => requireIdentity(identity, release));
     const execution = await verificationStage("EXECUTION_LOOKUP", () => port.getExecution(executionName));
     const verifiedExecution = await verificationStage("EXECUTION_VERIFICATION", () => verifiedExecutionValue(execution, executionName, grantId, release));
-    const tasks = await verificationStage("TASK_LOOKUP", () => port.listExecutionTasks(executionName, taskLookupDiagnostics));
-    await verificationStage("TASK_VERIFICATION", () => requireExecutionVpc(tasks, executionName, release));
     return new VerifiedRefundExecution(release.serviceAccountSubject, executionName, verifiedExecution.uid, release.digest, grantId);
   }
 }
@@ -338,38 +177,6 @@ function validSecretSelector(secret: string, version: string): boolean {
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
-}
-
-function requireExecutionVpc(value: unknown, executionName: string, release: RefundReentryRelease): void {
-  if (!record(value) || !Array.isArray(value.tasks) || value.tasks.length !== 1 || !record(value.tasks[0])) {
-    throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
-  }
-  const task = value.tasks[0];
-  if (taskParentExecution(task.name) !== executionName || canonicalTaskIndex(task) !== 0
-    || !sameJson(normalizeTaskVpcAccess(task.vpcAccess), release.executionTemplate.vpcAccess)) {
-    throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
-  }
-}
-
-function canonicalTaskIndex(task: Record<string, unknown>): number {
-  if (!Object.hasOwn(task, "index")) return 0;
-  if (typeof task.index !== "number" || !Number.isInteger(task.index)) {
-    throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
-  }
-  return task.index;
-}
-
-function taskParentExecution(name: unknown): string | null {
-  if (typeof name !== "string") return null;
-  const match = /^(projects\/[^/]+\/locations\/[^/]+\/jobs\/[^/]+\/executions\/[^/]+)\/tasks\/[^/]+$/u.exec(name);
-  return match?.[1] ?? null;
-}
-
-function normalizeTaskVpcAccess(value: unknown): unknown {
-  if (!record(value) || Object.hasOwn(value, "egress")) return value;
-  // Cloud Run v2 Task readback omits its PRIVATE_RANGES_ONLY default. Only that
-  // one omitted field is normalized; every other reviewed VPC field stays exact.
-  return { ...value, egress: "PRIVATE_RANGES_ONLY" };
 }
 
 function executionTemplateForGrant(release: RefundReentryRelease, grantId: string): unknown {

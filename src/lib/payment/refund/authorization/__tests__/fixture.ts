@@ -132,18 +132,15 @@ export function issueInput(target: Target) {
   return { issuanceRequestId: randomUUID(), commandId: target.commandId, expectedPredecessorGeneration: target.generation,
     confirmedTargetBindingDigest: target.targetBindingDigest, releasePolicyDigest: release.digest };
 }
-export function runtimePort(grantId: string, executionName: string, uid = randomUUID(), omitTaskIndex = false): RuntimeIdentityPort {
-  const task: Record<string, unknown> = { name: `${executionName}/tasks/0`, execution: executionName, vpcAccess: release.executionTemplate["vpcAccess"] };
-  if (!omitTaskIndex) task.index = 0;
+export function runtimePort(grantId: string, executionName: string, uid = randomUUID()): RuntimeIdentityPort {
   return { verifyIdToken: () => Promise.resolve({ sub: release.serviceAccountSubject, email: release.serviceAccountEmail,
     email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
-  getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: executionTemplateForGrant(grantId) }),
-  listExecutionTasks: () => Promise.resolve({ tasks: [task] }) };
+  getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1, template: executionTemplateForGrant(grantId) }) };
 }
 
 // PARTIAL_RETAINED_EVIDENCE: local rvhbh evidence preserves the first four raw
-// env positions, omitted Task.index and omitted Task VPC egress. The execution
-// name, UID and remaining fixture fields below are deliberately synthetic.
+// Execution env positions. The execution name, UID and remaining fixture fields
+// below are deliberately synthetic.
 export function rvhbhLiveShapedRuntimePort(grantId: string, executionName: string, uid = randomUUID()): RuntimeIdentityPort {
   const template = executionTemplateForGrant(grantId);
   const containers = template.containers;
@@ -151,15 +148,11 @@ export function rvhbhLiveShapedRuntimePort(grantId: string, executionName: strin
     throw new Error("TEST_TEMPLATE_REQUIRED");
   }
   const env = retainedRvhbhEnvironmentOrder(containers[0].env);
-  const expectedVpc = release.executionTemplate.vpcAccess;
-  if (!isRecord(expectedVpc)) throw new Error("TEST_VPC_REQUIRED");
-  const { egress: _egress, ...vpcAccess } = expectedVpc;
   return {
     verifyIdToken: () => Promise.resolve({ sub: release.serviceAccountSubject, email: release.serviceAccountEmail,
       email_verified: true, aud: release.audience, iss: "https://accounts.google.com", exp: Date.now() / 1000 + 300 }),
     getExecution: () => Promise.resolve({ name: executionName, uid, taskCount: 1, parallelism: 1,
       template: { ...template, containers: [{ ...containers[0], env }] } }),
-    listExecutionTasks: () => Promise.resolve({ tasks: [{ name: `${executionName}/tasks/synthetic-rvhbh-task0`, vpcAccess }] }),
   };
 }
 
@@ -225,9 +218,9 @@ function executionTemplateForGrant(grantId: string): Record<string, unknown> {
   for (const [key, value] of Object.entries(template)) if (key !== "vpcAccess") executionTemplate[key] = value;
   return executionTemplate;
 }
-export function verified(grantId: string, omitTaskIndex = false) {
+export function verified(grantId: string) {
   const name = `${release.jobName}/executions/test-${randomUUID()}`;
-  return VerifiedRefundExecution.verify("synthetic-signed-token", name, grantId, release, runtimePort(grantId, name, randomUUID(), omitTaskIndex));
+  return VerifiedRefundExecution.verify("synthetic-signed-token", name, grantId, release, runtimePort(grantId, name));
 }
 export async function seedGrant(target: Target, issuedAt: Date, expiresAt: Date) {
   return db.refundExecutionAuthorization.create({ data: { issuanceRequestId: randomUUID(), commandId: target.commandId, expectedPredecessorGeneration: target.generation, releasePolicyDigest: release.digest,
