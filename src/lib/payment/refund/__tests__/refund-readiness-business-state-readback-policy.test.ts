@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
 import { describe, expect, it, vi } from "vitest";
+import bootstrapV3Contract from
+  "../../../../../infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v3.json";
+import readinessRuntimeContract from
+  "../../../../../infra/refund-sandbox/p3e-b2/contracts/refund-readiness-readback-runtime-v1.json";
 import {
   applyRefundReadinessReadbackRoleGrants,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
@@ -28,6 +32,8 @@ import {
 const ROOT = process.cwd();
 const INFRA = join(ROOT, "containers/refund-db-bootstrap/refund-readiness-readback");
 const HISTORICAL = join(ROOT, "infra/refund-sandbox/p3e-b2/business-state-readback");
+const CONTRACTS = join(ROOT, "infra/refund-sandbox/p3e-b2/contracts");
+const BOOTSTRAP_TERRAFORM = join(ROOT, "infra/refund-sandbox/p3e-b2/database-bootstrap");
 const INPUT = Object.freeze<EximbayP3eDatabaseBootstrapInput>({
   admission: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
   environment: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
@@ -76,6 +82,113 @@ describe("refund-readiness readback privilege policy", () => {
       .toBe("a67dab48542dad2fd5f98efaff5264f8ee0cd481874612f070c53a80db3d85d1");
     expect(sha256(readFileSync(join(HISTORICAL, "database-role-revoke.sql"), "utf8")))
       .toBe("e88f8f693be752a31bb5b90a0ebebdbff06c760139f19066d39838b847a5a543");
+  });
+
+  it("binds the exact successor bootstrap and readiness runtime machine contracts", () => {
+    expect(bootstrapV3Contract).toMatchObject({
+      contractVersion: "mira-refund-p3e-b2-db-bootstrap-runtime/v3",
+      source: {
+        commit: "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f",
+        tree: "b385135a18b4af09970d9b52cfe7a950e322bb46",
+      },
+      image: {
+        manifestDigest:
+          "sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892",
+        configDigest:
+          "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c",
+      },
+      iam: {
+        temporaryAccessRequiredModes: [
+          "apply-refund-readiness-readback-role-grants",
+          "revoke-refund-readiness-readback-role-grants",
+        ],
+      },
+      boundaries: { terraformExecutionOwner: false },
+    });
+    expect(bootstrapV3Contract.job.terraformModeSelector.allowedModes).toEqual([
+      "check",
+      "apply",
+      "apply-canary-role-grants",
+      "apply-synthetic-sale-role-grants",
+      "apply-contacted-reconciliation-role-grants",
+      "apply-business-state-readback-role-grants",
+      "revoke-business-state-readback-role-grants",
+      "apply-refund-readiness-readback-role-grants",
+      "revoke-refund-readiness-readback-role-grants",
+      "contacted-reconciliation-business-state-readback",
+      "materialize-synthetic-sale-market-precondition",
+      "restore-canary-refund-role-grants",
+      "materialize-eximbay-canary-target",
+      "issue-eximbay-canary-approval",
+      "materialize-application-credentials",
+      "recover-canary-application-credential",
+    ]);
+    expect(readinessRuntimeContract).toMatchObject({
+      materialization: {
+        variable: "refund_readiness_runtime_materialized",
+        default: false,
+        mutuallyExclusiveWith: "runtime_materialized",
+        executionOnApply: false,
+      },
+      runtime: {
+        job: "mira-p3e-sbx-refund-readiness-readback",
+        command: "refund-readiness-business-state-readback",
+        imageDigestUri:
+          "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892",
+        imageConfigDigest:
+          "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c",
+        sourceCommit: "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f",
+        sourceTree: "b385135a18b4af09970d9b52cfe7a950e322bb46",
+        taskCount: 1,
+        parallelism: 1,
+        maxRetries: 0,
+      },
+      authority: {
+        fixedTargetOwner: "COMPILED_RUNTIME",
+        operatorSelectableTarget: false,
+        genericQuery: false,
+        arbitrarySql: false,
+      },
+      resourceGraph: {
+        jobAddress: 'google_cloud_run_v2_job.refund_readiness["runtime"]',
+        materializedResourceCount: 5,
+      },
+    });
+    expect(sha256(readFileSync(join(CONTRACTS, "database-bootstrap-runtime-v1.json"), "utf8")))
+      .toBe("a3af68fb395886c83074f49f48e7c476fe957ff5e147ab058f92f374a95e4a45");
+    expect(sha256(readFileSync(join(CONTRACTS, "database-bootstrap-runtime-v2.json"), "utf8")))
+      .toBe("96970db5cb05de5a979ad8ca240f86d354922759f04a1498edcf2bf247fc455a");
+    expect(sha256(readFileSync(join(CONTRACTS, "database-bootstrap-runtime-v3.json"), "utf8")))
+      .toBe("8a8bc4e55c5f67e293db35e2b3bf263182a5168c8c32a9299005611863960826");
+    expect(sha256(readFileSync(join(CONTRACTS, "refund-readiness-readback-runtime-v1.json"), "utf8")))
+      .toBe("b1678bb977c67bfa01521064cd135d968adfebfcadfd20cad446886868bfbf22");
+  });
+
+  it("owns separate finite Jobs, shared identity addresses, and no execution-on-apply", () => {
+    const bootstrapMain = readFileSync(join(BOOTSTRAP_TERRAFORM, "main.tf"), "utf8");
+    const bootstrapSource = ["variables.tf", "locals.tf", "checks.tf", "outputs.tf"]
+      .map((name) => readFileSync(join(BOOTSTRAP_TERRAFORM, name), "utf8")).join("\n");
+    const readbackSource = ["variables.tf", "locals.tf", "checks.tf", "main.tf", "outputs.tf"]
+      .map((name) => readFileSync(join(HISTORICAL, name), "utf8")).join("\n");
+    expect(sha256(bootstrapMain)).toBe(
+      "863f8106fb6cfc816287c46c0e53181f9b122ec1cf7e8f4da893c126b77bf904",
+    );
+    expect(bootstrapSource).toContain('"apply-refund-readiness-readback-role-grants"');
+    expect(bootstrapSource).toContain('"revoke-refund-readiness-readback-role-grants"');
+    expect(bootstrapSource).toContain("temporary_cloud_sql_access_authorized");
+    expect(readbackSource).toContain('resource "google_cloud_run_v2_job" "readback"');
+    expect(readbackSource).toContain('resource "google_cloud_run_v2_job" "refund_readiness"');
+    expect(readbackSource).toContain("for_each = local.historical_runtime_instances");
+    expect(readbackSource).toContain("for_each = local.readiness_runtime_instances");
+    expect(readbackSource).toContain(
+      "var.runtime_materialized || var.refund_readiness_runtime_materialized",
+    );
+    expect(readbackSource).not.toMatch(
+      /google_cloud_run_v2_job_execution|null_resource|terraform_data|local-exec|remote-exec|scheduler|workflow|eventarc|automatic_invoker/iu,
+    );
+    expect(readbackSource).not.toMatch(
+      /MIRA_REFUND_READBACK_(?:PAYMENT|ORDER|REFUND_ATTEMPT|COMMAND|TARGET|SQL|TABLE|FILTER|PROVIDER)/u,
+    );
   });
 
   it.each([

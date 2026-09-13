@@ -1,0 +1,69 @@
+{
+  "contractVersion": "mira-refund-p3e-b2-db-bootstrap-runtime/v3",
+  "status": "SOURCE_DEFINED_EXACT_SUCCESSOR",
+  "source": {
+    "commit": "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f",
+    "tree": "b385135a18b4af09970d9b52cfe7a950e322bb46"
+  },
+  "image": {
+    "digestUri": "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892",
+    "manifestDigest": "sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892",
+    "configDigest": "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c",
+    "platform": "linux/amd64"
+  },
+  "migrations": {
+    "count": 42,
+    "sha256": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370"
+  },
+  "job": {
+    "name": "mira-p3e-sbx-refund-db-bootstrap",
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "terraformModeSelector": {
+      "input": "bootstrap_mode",
+      "owner": "TERRAFORM",
+      "allowedModes": [
+        "check",
+        "apply",
+        "apply-canary-role-grants",
+        "apply-synthetic-sale-role-grants",
+        "apply-contacted-reconciliation-role-grants",
+        "apply-business-state-readback-role-grants",
+        "revoke-business-state-readback-role-grants",
+        "apply-refund-readiness-readback-role-grants",
+        "revoke-refund-readiness-readback-role-grants",
+        "contacted-reconciliation-business-state-readback",
+        "materialize-synthetic-sale-market-precondition",
+        "restore-canary-refund-role-grants",
+        "materialize-eximbay-canary-target",
+        "issue-eximbay-canary-approval",
+        "materialize-application-credentials",
+        "recover-canary-application-credential"
+      ],
+      "defaultMode": "check",
+      "jobArgumentsBinding": [
+        "var.bootstrap_mode"
+      ],
+      "executionOverrideSurface": "ABSENT"
+    },
+    "automaticTrigger": "NONE"
+  },
+  "iam": {
+    "temporaryCloudSqlAccessDefault": false,
+    "temporaryAuthorizedRoles": [
+      "roles/cloudsql.client",
+      "roles/cloudsql.instanceUser"
+    ],
+    "temporaryAccessRequiredModes": [
+      "apply-refund-readiness-readback-role-grants",
+      "revoke-refund-readiness-readback-role-grants"
+    ]
+  },
+  "boundaries": {
+    "terraformExecutionOwner": false,
+    "cloudRunJobInvocation": "SEPARATELY_HUMAN_AUTHORIZED",
+    "databaseAclExecution": "SEPARATELY_HUMAN_AUTHORIZED",
+    "providerContact": 0
+  }
+}

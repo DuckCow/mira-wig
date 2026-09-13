@@ -45,6 +45,9 @@ variable "bootstrap_mode" {
       "issue-eximbay-canary-approval",
       "materialize-application-credentials",
       "recover-canary-application-credential",
+      ], var.bootstrap_mode) || contains([
+      "apply-refund-readiness-readback-role-grants",
+      "revoke-refund-readiness-readback-role-grants",
     ], var.bootstrap_mode)
     error_message = "bootstrap_mode must be one exact mode admitted by the current immutable bootstrap artifact."
   }
@@ -84,7 +87,11 @@ variable "source_commit" {
   default     = "8293f62b3817c37f82820a055b1ba68d62e50f85"
 
   validation {
-    condition     = var.source_commit == "8293f62b3817c37f82820a055b1ba68d62e50f85" || var.source_commit == "8dc0233557615ca95a649d40ee83c13c83b6a435"
+    condition = (
+      var.source_commit == "8293f62b3817c37f82820a055b1ba68d62e50f85" ||
+      var.source_commit == "8dc0233557615ca95a649d40ee83c13c83b6a435" ||
+      var.source_commit == "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    )
     error_message = "source_commit must be the exact current reviewed bootstrap source commit."
   }
 }
@@ -95,7 +102,11 @@ variable "bootstrap_image_digest_uri" {
   default     = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8"
 
   validation {
-    condition     = var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8" || var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6"
+    condition = (
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:16ae30742f869cc8feff9f65e7ded9654524d3b015bbc2a88296ec0c613f58c8" ||
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6" ||
+      var.bootstrap_image_digest_uri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+    )
     error_message = "bootstrap_image_digest_uri must be the exact current reviewed bootstrap digest."
   }
 }
@@ -122,6 +133,12 @@ variable "foundation_handoff" {
 
 variable "refund_authorization_installation" {
   description = "Select the exact retained B authorization bootstrap artifact and existing-database cutover capability."
+  type        = bool
+  default     = false
+}
+
+variable "refund_readiness_installation" {
+  description = "Select the exact v3 bootstrap artifact that owns the refund-readiness ACL lifecycle modes."
   type        = bool
   default     = false
 }

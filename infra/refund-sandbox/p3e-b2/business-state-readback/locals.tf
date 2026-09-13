@@ -1,5 +1,6 @@
 locals {
-  contract = jsondecode(file("${path.module}/../contracts/business-state-readback-runtime-v1.json"))
+  contract           = jsondecode(file("${path.module}/../contracts/business-state-readback-runtime-v1.json"))
+  readiness_contract = jsondecode(file("${path.module}/../contracts/refund-readiness-readback-runtime-v1.json"))
 
   project_id                         = "mira-refund-sandbox-0001"
   region                             = "asia-northeast3"
@@ -8,6 +9,8 @@ locals {
   iam_database_username              = "${local.service_account_id}@${local.project_id}.iam"
   job_name                           = "mira-p3e-sbx-contacted-readback"
   command                            = "contacted-reconciliation-business-state-readback"
+  readiness_job_name                 = local.readiness_contract.runtime.job
+  readiness_command                  = local.readiness_contract.runtime.command
   cloud_sql_instance_name            = "mira-p3e-sbx-refund-pg18"
   cloud_sql_instance_resource_name   = "projects/${local.project_id}/instances/${local.cloud_sql_instance_name}"
   cloud_sql_instance_connection_name = "${local.project_id}:${local.region}:${local.cloud_sql_instance_name}"
@@ -21,7 +24,9 @@ locals {
   task_timeout_seconds               = 180
   cpu                                = "1"
   memory                             = "512Mi"
-  runtime_instances                  = var.runtime_materialized ? { runtime = true } : {}
+  runtime_instances                  = var.runtime_materialized || var.refund_readiness_runtime_materialized ? { runtime = true } : {}
+  historical_runtime_instances       = var.runtime_materialized ? { runtime = true } : {}
+  readiness_runtime_instances        = var.refund_readiness_runtime_materialized ? { runtime = true } : {}
   source_commit                      = var.source_commit
   bootstrap_image_digest_uri         = var.bootstrap_image_digest_uri
   cloud_sql_condition_expression     = "resource.name == '${local.cloud_sql_instance_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
@@ -39,5 +44,16 @@ locals {
     MIRA_CONTACTED_RECONCILIATION_READBACK_CHECKOUT_SESSION_ID = "cmthg2mzu000001s6iuvx7u5x"
     MIRA_CONTACTED_RECONCILIATION_READBACK_EXECUTION           = "mira-p3e-sbx-contacted-reconciliation-vnnsq"
     MIRA_CONTACTED_RECONCILIATION_READBACK_EXECUTION_UID       = "87d659b0-a6a3-4353-9678-c18f629df434"
+  }
+  readiness_fixed_environment = {
+    MIRA_DB_BOOTSTRAP_PROJECT_ID               = local.project_id
+    MIRA_DB_BOOTSTRAP_REGION                   = local.region
+    MIRA_DB_BOOTSTRAP_INSTANCE_CONNECTION_NAME = local.cloud_sql_instance_connection_name
+    MIRA_DB_BOOTSTRAP_DATABASE_NAME            = local.database_name
+    MIRA_DB_BOOTSTRAP_IAM_DATABASE_USERNAME    = local.iam_database_username
+    MIRA_DB_BOOTSTRAP_SOURCE_COMMIT            = local.readiness_contract.runtime.sourceCommit
+    MIRA_DB_BOOTSTRAP_IMAGE_DIGEST_URI         = local.readiness_contract.runtime.imageDigestUri
+    MIRA_DB_BOOTSTRAP_MIGRATION_COUNT          = "42"
+    MIRA_DB_BOOTSTRAP_MIGRATION_SHA256         = "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370"
   }
 }

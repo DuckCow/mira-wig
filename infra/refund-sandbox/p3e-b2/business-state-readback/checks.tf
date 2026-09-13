@@ -8,6 +8,13 @@ check "materialization_gate" {
   }
 }
 
+check "runtime_gates_mutually_exclusive" {
+  assert {
+    condition     = !(var.runtime_materialized && var.refund_readiness_runtime_materialized)
+    error_message = "The historical CONTACTED and refund-readiness readback runtimes are mutually exclusive."
+  }
+}
+
 check "machine_contract_alignment" {
   assert {
     condition = (
@@ -59,5 +66,61 @@ check "strict_runtime_shape" {
       local.network_tags == ["refund-provider-free"]
     )
     error_message = "The readback must remain one-task, zero-retry, bounded, and provider-free."
+  }
+}
+
+check "historical_contract_unchanged" {
+  assert {
+    condition     = filesha256("${path.module}/../contracts/business-state-readback-runtime-v1.json") == "c4422516e08f7bc19dc8a803f4cbb08b8e0cf13797cf7c6164d8ee6f9e722b70"
+    error_message = "The historical CONTACTED readback machine contract must remain byte-exact."
+  }
+}
+
+check "refund_readiness_machine_contract_alignment" {
+  assert {
+    condition = (
+      local.readiness_contract.contractVersion == "mira-refund-p3e-b2-refund-readiness-readback-runtime/v1" &&
+      local.readiness_contract.status == "SOURCE_DEFINED_DEFAULT_DISABLED" &&
+      local.readiness_contract.terraform.root == "infra/refund-sandbox/p3e-b2/business-state-readback" &&
+      local.readiness_contract.terraform.backendConfig == "business-state-readback.gcs.tfbackend" &&
+      local.readiness_contract.terraform.backendBucket == local.contract.terraform.backendBucket &&
+      local.readiness_contract.terraform.backendPrefix == local.contract.terraform.backendPrefix &&
+      local.readiness_contract.materialization.variable == "refund_readiness_runtime_materialized" &&
+      local.readiness_contract.materialization.default == false &&
+      local.readiness_contract.materialization.mutuallyExclusiveWith == "runtime_materialized" &&
+      local.readiness_contract.materialization.executionOnApply == false &&
+      local.readiness_contract.runtime.job == "mira-p3e-sbx-refund-readiness-readback" &&
+      local.readiness_contract.runtime.command == "refund-readiness-business-state-readback" &&
+      local.readiness_contract.runtime.imageDigestUri == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
+      local.readiness_contract.runtime.imageManifestDigest == "sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
+      local.readiness_contract.runtime.imageConfigDigest == "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c" &&
+      local.readiness_contract.runtime.sourceCommit == "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f" &&
+      local.readiness_contract.runtime.sourceTree == "b385135a18b4af09970d9b52cfe7a950e322bb46" &&
+      local.readiness_contract.runtime.serviceAccount == local.service_account_email &&
+      local.readiness_contract.runtime.databaseUser == local.iam_database_username &&
+      local.readiness_contract.runtime.taskCount == local.task_count &&
+      local.readiness_contract.runtime.parallelism == local.parallelism &&
+      local.readiness_contract.runtime.maxRetries == local.max_retries &&
+      local.readiness_contract.runtime.timeoutSeconds == local.task_timeout_seconds &&
+      local.readiness_contract.runtime.network == local.network_resource_name &&
+      local.readiness_contract.runtime.subnetwork == local.subnetwork_resource_name &&
+      local.readiness_contract.runtime.networkTags == local.network_tags &&
+      local.readiness_contract.runtime.egress == "ALL_TRAFFIC" &&
+      local.readiness_contract.authority.fixedTargetOwner == "COMPILED_RUNTIME" &&
+      local.readiness_contract.authority.operatorSelectableTarget == false &&
+      local.readiness_contract.authority.genericQuery == false &&
+      local.readiness_contract.authority.arbitrarySql == false &&
+      local.readiness_contract.authority.providerSecretAccess == false &&
+      local.readiness_contract.resourceGraph.sharedAddresses == [
+        "google_project_iam_member.cloud_sql_client[\"runtime\"]",
+        "google_project_iam_member.cloud_sql_instance_user[\"runtime\"]",
+        "google_service_account.readback[\"runtime\"]",
+        "google_sql_user.readback[\"runtime\"]",
+      ] &&
+      local.readiness_contract.resourceGraph.jobAddress == "google_cloud_run_v2_job.refund_readiness[\"runtime\"]" &&
+      local.readiness_contract.resourceGraph.materializedResourceCount == 5 &&
+      local.readiness_contract.resourceGraph.materializedSortedAddressSha256 == "18b376c8d28e22f1bd06166f2db9f231d4f22e14c27c00149f6f47f0a9a1dcd0"
+    )
+    error_message = "The refund-readiness readback machine contract must remain exact and execution-free."
   }
 }

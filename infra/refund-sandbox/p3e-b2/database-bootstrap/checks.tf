@@ -25,7 +25,7 @@ check "exact_foundation_handoff" {
 
 check "exact_machine_contract" {
   assert {
-    condition = var.refund_authorization_installation || (
+    condition = var.refund_authorization_installation || var.refund_readiness_installation || (
       local.contract.contractVersion == "mira-refund-p3e-b2-db-bootstrap-runtime/v1" &&
       local.contract.status == "SOURCE_DEFINED_AUTHORITY_RETIREMENT_TARGET" &&
       local.contract.resourceGraph.resourceCount == 3 &&
@@ -191,5 +191,62 @@ check "exact_refund_authorization_installation" {
       (var.bootstrap_mode == "check" || var.temporary_cloud_sql_access_authorized)
     ) : var.bootstrap_mode != "apply-refund-authorization-cutover"
     error_message = "Only the retained v2 artifact, exact application role, 42 inventory and bounded attended cutover/restoration are allowed."
+  }
+}
+
+check "single_successor_installation" {
+  assert {
+    condition     = !(var.refund_authorization_installation && var.refund_readiness_installation)
+    error_message = "The v2 refund-authorization and v3 refund-readiness bootstrap artifacts are mutually exclusive."
+  }
+}
+
+check "exact_refund_readiness_installation" {
+  assert {
+    condition = var.refund_readiness_installation ? (
+      var.source_commit == local.readiness_contract.source.commit &&
+      var.bootstrap_image_digest_uri == local.readiness_contract.image.digestUri &&
+      local.readiness_contract.contractVersion == "mira-refund-p3e-b2-db-bootstrap-runtime/v3" &&
+      local.readiness_contract.status == "SOURCE_DEFINED_EXACT_SUCCESSOR" &&
+      local.readiness_contract.source.tree == "b385135a18b4af09970d9b52cfe7a950e322bb46" &&
+      local.readiness_contract.image.manifestDigest == "sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
+      local.readiness_contract.image.configDigest == "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c" &&
+      local.readiness_contract.migrations.count == local.migration_count &&
+      local.readiness_contract.migrations.sha256 == local.migration_sha256 &&
+      local.readiness_contract.job.name == local.job_name &&
+      local.readiness_contract.job.taskCount == 1 &&
+      local.readiness_contract.job.parallelism == 1 &&
+      local.readiness_contract.job.maxRetries == 0 &&
+      local.readiness_contract.job.terraformModeSelector.input == "bootstrap_mode" &&
+      local.readiness_contract.job.terraformModeSelector.owner == "TERRAFORM" &&
+      local.readiness_contract.job.terraformModeSelector.defaultMode == "check" &&
+      local.readiness_contract.job.terraformModeSelector.jobArgumentsBinding == ["var.bootstrap_mode"] &&
+      local.readiness_contract.job.terraformModeSelector.executionOverrideSurface == "ABSENT" &&
+      contains(local.readiness_contract.job.terraformModeSelector.allowedModes, var.bootstrap_mode) &&
+      local.readiness_contract.iam.temporaryCloudSqlAccessDefault == false &&
+      local.readiness_contract.iam.temporaryAuthorizedRoles == [
+        "roles/cloudsql.client",
+        "roles/cloudsql.instanceUser",
+      ] &&
+      local.readiness_contract.iam.temporaryAccessRequiredModes == [
+        "apply-refund-readiness-readback-role-grants",
+        "revoke-refund-readiness-readback-role-grants",
+      ] &&
+      local.readiness_contract.boundaries.terraformExecutionOwner == false
+      ) : !contains([
+        "apply-refund-readiness-readback-role-grants",
+        "revoke-refund-readiness-readback-role-grants",
+    ], var.bootstrap_mode)
+    error_message = "Only the exact v3 source/image contract may own either refund-readiness ACL lifecycle mode."
+  }
+}
+
+check "historical_bootstrap_contracts_unchanged" {
+  assert {
+    condition = (
+      filesha256("${path.module}/../contracts/database-bootstrap-runtime-v1.json") == "a3af68fb395886c83074f49f48e7c476fe957ff5e147ab058f92f374a95e4a45" &&
+      filesha256("${path.module}/../contracts/database-bootstrap-runtime-v2.json") == "96970db5cb05de5a979ad8ca240f86d354922759f04a1498edcf2bf247fc455a"
+    )
+    error_message = "The historical v1 and v2 bootstrap contracts must remain byte-exact."
   }
 }

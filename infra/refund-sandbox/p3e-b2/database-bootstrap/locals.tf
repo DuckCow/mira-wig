@@ -1,5 +1,6 @@
 locals {
   contract                  = jsondecode(file("${path.module}/../contracts/database-bootstrap-runtime-v1.json"))
+  readiness_contract        = jsondecode(file("${path.module}/../contracts/database-bootstrap-runtime-v3.json"))
   region                    = "asia-northeast3"
   service_account_id        = "${var.resource_prefix}-db-bootstrap"
   service_account_email     = "${local.service_account_id}@${var.project_id}.iam.gserviceaccount.com"
@@ -11,8 +12,9 @@ locals {
   job_name                  = "${var.resource_prefix}-refund-db-bootstrap"
   network_tags              = ["refund-provider-free"]
   backend_prefix            = "p3e-b2/database-bootstrap"
-  migration_count           = var.refund_authorization_installation ? 42 : 41
-  migration_sha256          = var.refund_authorization_installation ? "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370" : "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
+  successor_installation    = var.refund_authorization_installation || var.refund_readiness_installation
+  migration_count           = local.successor_installation ? 42 : 41
+  migration_sha256          = local.successor_installation ? "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370" : "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
   cloud_sql_condition       = "resource.name == '${local.cloud_sql_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
   cloud_sql_roles = var.temporary_cloud_sql_access_authorized ? {
     client = {
@@ -28,6 +30,8 @@ locals {
   readback_role_lifecycle_mode = contains([
     "apply-business-state-readback-role-grants",
     "revoke-business-state-readback-role-grants",
+    "apply-refund-readiness-readback-role-grants",
+    "revoke-refund-readiness-readback-role-grants",
   ], var.bootstrap_mode)
   materialize_target_mode = var.bootstrap_mode == "materialize-eximbay-canary-target"
   issue_approval_mode     = var.bootstrap_mode == "issue-eximbay-canary-approval"

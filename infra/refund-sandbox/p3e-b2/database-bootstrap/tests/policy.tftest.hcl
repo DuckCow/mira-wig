@@ -109,7 +109,7 @@ run "exact_retired_bootstrap_authority_shape" {
     condition = (
       output.bootstrap_manifest.default_mode == "check" &&
       output.bootstrap_manifest.selected_mode == "check" &&
-      output.bootstrap_manifest.allowed_modes == [
+      output.bootstrap_manifest.allowed_modes == tolist([
         "check",
         "apply",
         "apply-canary-role-grants",
@@ -124,7 +124,7 @@ run "exact_retired_bootstrap_authority_shape" {
         "issue-eximbay-canary-approval",
         "materialize-application-credentials",
         "recover-canary-application-credential",
-      ] &&
+      ]) &&
       output.bootstrap_manifest.explicit_mutating_mode == "apply" &&
       output.bootstrap_manifest.grant_only_mode == "apply-canary-role-grants" &&
       output.bootstrap_manifest.contacted_reconciliation_grant == "apply-contacted-reconciliation-role-grants" &&
@@ -325,6 +325,128 @@ run "readback_mode_alone_does_not_materialize_iam" {
   }
 
   expect_failures = [check.business_state_readback_role_lifecycle_reentry]
+}
+
+run "bind_refund_readiness_grant_to_exact_v3_successor" {
+  command = plan
+
+  variables {
+    refund_readiness_installation         = true
+    source_commit                         = "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    bootstrap_image_digest_uri            = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+    bootstrap_mode                        = "apply-refund-readiness-readback-role-grants"
+    temporary_cloud_sql_access_authorized = true
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args == tolist(["apply-refund-readiness-readback-role-grants"]) &&
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].image == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
+      output.bootstrap_manifest.contract_version == "mira-refund-p3e-b2-db-bootstrap-runtime/v3" &&
+      output.bootstrap_manifest.source_commit == "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f" &&
+      output.bootstrap_manifest.source_tree == "b385135a18b4af09970d9b52cfe7a950e322bb46" &&
+      output.bootstrap_manifest.image_manifest_digest == "sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892" &&
+      output.bootstrap_manifest.image_config_digest == "sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c" &&
+      output.bootstrap_manifest.refund_readiness_readback_grant == "apply-refund-readiness-readback-role-grants" &&
+      output.bootstrap_manifest.refund_readiness_readback_revoke == "revoke-refund-readiness-readback-role-grants" &&
+      length(google_project_iam_member.cloud_sql_access) == 2
+    )
+    error_message = "The readiness grant must bind only the exact v3 source/image and temporary Cloud SQL re-entry."
+  }
+}
+
+run "bind_refund_readiness_revoke_to_exact_v3_successor" {
+  command = plan
+
+  variables {
+    refund_readiness_installation         = true
+    source_commit                         = "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    bootstrap_image_digest_uri            = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+    bootstrap_mode                        = "revoke-refund-readiness-readback-role-grants"
+    temporary_cloud_sql_access_authorized = true
+  }
+
+  assert {
+    condition = (
+      google_cloud_run_v2_job.bootstrap.template[0].template[0].containers[0].args == tolist(["revoke-refund-readiness-readback-role-grants"]) &&
+      output.bootstrap_manifest.selected_mode == "revoke-refund-readiness-readback-role-grants" &&
+      length(google_project_iam_member.cloud_sql_access) == 2
+    )
+    error_message = "The readiness revoke must bind only the exact v3 mode and temporary Cloud SQL re-entry."
+  }
+}
+
+run "reject_refund_readiness_grant_without_temporary_access" {
+  command = plan
+
+  variables {
+    refund_readiness_installation = true
+    source_commit                 = "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    bootstrap_image_digest_uri    = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+    bootstrap_mode                = "apply-refund-readiness-readback-role-grants"
+  }
+
+  expect_failures = [check.business_state_readback_role_lifecycle_reentry]
+}
+
+run "reject_refund_readiness_revoke_without_temporary_access" {
+  command = plan
+
+  variables {
+    refund_readiness_installation = true
+    source_commit                 = "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    bootstrap_image_digest_uri    = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+    bootstrap_mode                = "revoke-refund-readiness-readback-role-grants"
+  }
+
+  expect_failures = [check.business_state_readback_role_lifecycle_reentry]
+}
+
+run "reject_refund_readiness_mode_without_v3_selection" {
+  command = plan
+
+  variables {
+    bootstrap_mode = "apply-refund-readiness-readback-role-grants"
+  }
+
+  expect_failures = [check.business_state_readback_role_lifecycle_reentry, check.exact_refund_readiness_installation]
+}
+
+run "reject_wrong_v3_source" {
+  command = plan
+
+  variables {
+    refund_readiness_installation = true
+    source_commit                 = "8293f62b3817c37f82820a055b1ba68d62e50f85"
+    bootstrap_image_digest_uri    = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+  }
+
+  expect_failures = [check.exact_refund_readiness_installation]
+}
+
+run "reject_wrong_v3_manifest" {
+  command = plan
+
+  variables {
+    refund_readiness_installation = true
+    source_commit                 = "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    bootstrap_image_digest_uri    = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:f5c316cdac0dd4f6f64c2d129cf7f9eea57265861683334fa3e078b4ddb827c6"
+  }
+
+  expect_failures = [check.exact_refund_readiness_installation]
+}
+
+run "reject_both_successor_installations" {
+  command = plan
+
+  variables {
+    refund_authorization_installation = true
+    refund_readiness_installation     = true
+    source_commit                     = "d9b51dce0e0e16eb273aeb19caff802fe99f4b3f"
+    bootstrap_image_digest_uri        = "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-db-bootstrap@sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892"
+  }
+
+  expect_failures = [check.single_successor_installation, check.exact_refund_authorization_installation]
 }
 
 run "bind_canonical_refund_grants_restore_mode_to_job_args" {

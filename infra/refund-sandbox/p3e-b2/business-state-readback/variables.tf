@@ -1,5 +1,11 @@
 variable "runtime_materialized" {
-  description = "Explicit attended materialization gate for the fixed business-state readback runtime."
+  description = "Explicit attended materialization gate for the frozen CONTACTED business-state readback runtime."
+  type        = bool
+  default     = false
+}
+
+variable "refund_readiness_runtime_materialized" {
+  description = "Explicit attended materialization gate for the separate fixed refund-readiness readback runtime."
   type        = bool
   default     = false
 }

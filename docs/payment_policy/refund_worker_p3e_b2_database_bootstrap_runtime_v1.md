@@ -34,7 +34,7 @@ RESIDUAL RISKS:
 MACHINE-OWNED RESPONSIBILITIES:
 - validate target/source/image/migration/task identities before Proxy spawn;
 - use private automatic IAM authentication and an exact Unix socket;
-- keep check read-only and require explicit apply, grant-only, or credential-materialization modes;
+- keep check read-only and require explicit apply, finite grant/revoke, or credential-materialization modes;
 - enforce the initial `(0,0)` secret-version gate, the exact canary-only `(1,0)` recovery gate,
   at-most-once publication and safe ambiguity stop;
 - verify migration prefix and exact postconditions.
@@ -60,7 +60,8 @@ BOUNDED RE-ENTRY:
 
 - Terraform root: `infra/refund-sandbox/p3e-b2/database-bootstrap`.
 - Backend prefix: `p3e-b2/database-bootstrap` in the existing refund state bucket.
-- Machine contract: `infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v1.json`.
+- Machine contracts: frozen v1/v2 authorities plus exact successor
+  `infra/refund-sandbox/p3e-b2/contracts/database-bootstrap-runtime-v3.json`.
 - Image: `containers/refund-db-bootstrap`.
 - Deterministic context/build owners: `scripts/build-refund-db-bootstrap-context.mts` and
   `scripts/build-refund-db-bootstrap-image.mts`.
@@ -159,6 +160,18 @@ reconstructs the reviewed historical plus canary grant sources. Neither mode is 
 command surface, and both retain the exact ledger and exhaustive privilege postconditions. Mode
 selection remains independent from the separate default-false temporary Cloud SQL IAM gate.
 
+The exact v3 successor adds only
+`apply-refund-readiness-readback-role-grants` and
+`revoke-refund-readiness-readback-role-grants`. It is bound to source commit
+`d9b51dce0e0e16eb273aeb19caff802fe99f4b3f`, tree
+`b385135a18b4af09970d9b52cfe7a950e322bb46`, image manifest
+`sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892`, and image config
+`sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c`.
+Both modes require the unchanged default-false temporary Cloud SQL access authorization.
+Terraform owns only the dormant bootstrap Job configuration; it does not execute either database
+ACL command. The readiness Job is separately owned by the `business-state-readback` root and its
+execution remains separately human-authorized.
+
 Future `check` connects only after separate human authorization and reads the migration ledger. It
 accepts an empty schema or an exact completed prefix with matching checksums, no unknown entry, no
 unfinished migration and no rollback. Future explicit `apply` rechecks that state, runs exactly
@@ -192,6 +205,8 @@ BOOTSTRAP_IMAGE: CURRENT_MODE_INDEPENDENT_16AE307_EXACT_DIGEST_BOUND
 PREDECESSOR_BOOTSTRAP_IMAGE: HISTORICAL_BD8137D_PROVENANCE_ONLY
 CONTACTED_RECONCILIATION_GRANT_MODE: AVAILABLE_SEPARATELY_AUTHORIZED
 CANONICAL_REFUND_GRANT_RESTORE_MODE: AVAILABLE_SEPARATELY_AUTHORIZED
+REFUND_READINESS_GRANT_MODE: V3_AVAILABLE_SEPARATELY_AUTHORIZED
+REFUND_READINESS_REVOKE_MODE: V3_AVAILABLE_SEPARATELY_AUTHORIZED
 BOOTSTRAP_SERVICE_ACCOUNT: RETAINED_DORMANT
 APPLICATION_SECRET_VERSIONS: EXISTING_1_1_UNCHANGED
 FUTURE_EXECUTION_REENTRY: SEPARATELY_AUTHORIZED_DEFAULT_FALSE_INPUT_TRUE_REQUIRED

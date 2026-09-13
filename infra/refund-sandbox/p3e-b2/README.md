@@ -448,18 +448,27 @@ while committed `business-state-readback.gcs.tfbackend` freezes those exact two 
 generic backend input. A later first initialization may create the normal initial empty state
 object at that prefix; this source does not create or access it.
 
-The sole lifecycle gate remains `runtime_materialized`, default false. Setting only that gate to
-true selects the source-owned immutable bootstrap successor digest
+The historical lifecycle gate remains `runtime_materialized`, default false. Setting only that
+gate to true preserves the frozen CONTACTED Job address, name, mode, configuration, target, and
+source-owned immutable bootstrap digest
 `sha256:42d84d38a0edd5bf4b0e5931521a250add24e17e72446e15799babaf8b35a0d2`
 from source `81e785448f834f4176cd5153eb3cbdf6d79d936c` and materializes exactly five
-purpose-specific resources. Normal operator workflow has no artifact override: compatibility
+purpose-specific resources. The separate default-false
+`refund_readiness_runtime_materialized` gate reuses the same four identity/IAM/database-user
+addresses and instead owns Job `google_cloud_run_v2_job.refund_readiness["runtime"]`, fixed mode
+`refund-readiness-business-state-readback`, and manifest
+`sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892`.
+The two gates are mutually exclusive, and both false owns zero readback resources. Normal operator
+workflow has no artifact override: compatibility
 inputs accept only those exact current identities, and mutable tags or arbitrary source/image
-values fail closed. Setting the gate false owns zero resources.
+values fail closed.
 
 Terraform plan/apply can materialize or retire this configuration under separate authority, but
 does not execute the Job or read business state. The fixed target, strict read-only database
 authority, provider-secret absence, one-task/zero-retry shape, and lack of scheduler, trigger,
-invoker, or execution-on-apply hook remain unchanged.
+invoker, or execution-on-apply hook remain unchanged. Setup uses the separately authorized v3
+bootstrap grant mode; Job execution remains a separate human authorization; cleanup uses the v3
+revoke mode before the readiness gate is returned to false.
 
 ## Dormant database-bootstrap runtime boundary
 
@@ -514,6 +523,17 @@ resource, or payment-provider configuration exists. The separate bootstrap image
 Prisma CLI, exact 41-migration corpus, `pg`, and existing hashed role/grant runner. Automatic IAM
 database authentication is isolated to that image and uses both `--private-ip` and
 `--auto-iam-authn` over `/cloudsql`.
+
+The finite `refund_readiness_installation` selector admits successor contract
+`contracts/database-bootstrap-runtime-v3.json` only with source commit
+`d9b51dce0e0e16eb273aeb19caff802fe99f4b3f`, tree
+`b385135a18b4af09970d9b52cfe7a950e322bb46`, manifest
+`sha256:aa4cc4e3ef1497769c726ad8187c9806f69bbca6e09f9ae8f010c5c313343892`, and config
+`sha256:32b248d06e0ed1faf9325a58c006033ba9e2d987a3bc5fee4b66b1b07c2ef10c`.
+It adds only `apply-refund-readiness-readback-role-grants` and
+`revoke-refund-readiness-readback-role-grants`; both require the existing explicit temporary
+Cloud SQL access gate. The v1/v2 contracts remain byte-exact historical authorities, `check`
+remains the default, and selecting any mode never executes the Job.
 
 The explicit attended `materialize-synthetic-sale-market-precondition` mode first requires the
 exact migration ledger, then transactionally creates the one exact `US`/`USD` sandbox Market only
