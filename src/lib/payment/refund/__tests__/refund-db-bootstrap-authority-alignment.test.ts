@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { build } from "esbuild";
 import { describe, expect, it } from "vitest";
+import { assembleRefundDbBootstrapBuildContext } from
+  "../../../../../scripts/build-refund-db-bootstrap-context.mjs";
 import {
   verifyPackagedProducerResultTransport,
   verifyPackagedRefundAuthority,
@@ -16,6 +19,25 @@ const PRODUCER_AUTHORITY = Buffer.from([
 ].join("\n"));
 
 describe("refund database-bootstrap authority alignment", () => {
+  it("bundles the packaged entrypoint from the exact deterministic context", async () => {
+    const context = await assembleRefundDbBootstrapBuildContext();
+    try {
+      const result = await build({
+        absWorkingDir: context.directory,
+        entryPoints: ["containers/refund-db-bootstrap/entrypoint.ts"],
+        bundle: true,
+        write: false,
+        platform: "node",
+        target: "node22",
+        format: "esm",
+        external: ["pg", "@prisma/client", "@prisma/adapter-pg"],
+      });
+      expect(result.outputFiles).toHaveLength(1);
+    } finally {
+      await context.cleanup();
+    }
+  });
+
   it("packages only the current refund runtime and image-policy inputs", () => {
     const contextOwner = read("scripts/build-refund-db-bootstrap-context.mts").toString("utf8");
     const dockerfile = read("containers/refund-db-bootstrap/Dockerfile").toString("utf8");

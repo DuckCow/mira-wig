@@ -19,6 +19,7 @@ COPY --link src/lib/payment/refund/invariants.ts ./src/lib/payment/refund/
 COPY --link src/lib/payment/refund/providers/eximbay/preflight-contract.ts ./src/lib/payment/refund/providers/eximbay/
 COPY --link src/lib/payment/refund/uncontacted-recovery-event-history.ts ./src/lib/payment/refund/
 COPY --link src/lib/payment/refund/worker-migration-inventory.ts ./src/lib/payment/refund/
+COPY --link src/lib/payment/providers/eximbay/errors.ts ./src/lib/payment/providers/eximbay/
 COPY --link src/lib/payment/providers/eximbay/types.ts ./src/lib/payment/providers/eximbay/
 COPY --link src/lib/payment/providers/eximbay/validation.ts ./src/lib/payment/providers/eximbay/
 COPY --link prisma.config.ts ./
