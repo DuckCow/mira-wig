@@ -3,7 +3,10 @@ import type { PrismaClient } from "@prisma/client";
 import { consumeRefundExecutionAuthorization } from "./admission";
 import { digest, exactFields, identifier, REFUND_REENTRY_ADMISSION_AUTH_HEADER, RefundAuthorizationError, requireAuthorizationEnabled, type AuthorizationEnv } from "./contract";
 import { type LoadRefundReentryRelease } from "./release";
-import { RefundExecutionVerificationError, VerifiedRefundExecution, type RuntimeIdentityPort } from "./runtime";
+import {
+  RefundExecutionVerificationError, VerifiedRefundExecution,
+  type RuntimeIdentityPort, type TaskLookupDiagnosticEvent, type TaskLookupDiagnosticSink,
+} from "./runtime";
 
 const ADMISSION_ROUTE = "refund_reentry_admission";
 const ADMISSION_METHOD = "POST";
@@ -20,7 +23,9 @@ export type RefundAdmissionFailureStage =
   | "TASK_VERIFICATION"
   | "AUTHORIZATION_ADMISSION";
 
-export type RefundAdmissionDiagnosticEvent = Readonly<{
+type RefundAdmissionContext = Readonly<{ route: typeof ADMISSION_ROUTE; method: typeof ADMISSION_METHOD; traceId?: string }>;
+
+type RefundAdmissionLifecycleDiagnosticEvent = Readonly<{
   event: "refund_reentry_admission_entered" | "refund_reentry_admission_rejected";
   route: typeof ADMISSION_ROUTE;
   method: typeof ADMISSION_METHOD;
@@ -28,6 +33,9 @@ export type RefundAdmissionDiagnosticEvent = Readonly<{
   stage?: RefundAdmissionFailureStage;
   reason?: AuthorizationDiagnosticReason;
 }>;
+
+export type RefundAdmissionDiagnosticEvent = RefundAdmissionLifecycleDiagnosticEvent
+  | Readonly<TaskLookupDiagnosticEvent & Pick<RefundAdmissionContext, "traceId">>;
 
 type AuthorizationDiagnosticReason =
   | "GATE_DISABLED"
@@ -65,7 +73,10 @@ export function createRefundAuthorizationAdmissionHandler(dependencies: Readonly
         throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
       }
       const release = await dependencies.loadRelease(configuredReleaseDigest(dependencies.env));
-      const execution = await VerifiedRefundExecution.verify(bearer.slice(7), input.executionName, input.grantId, release, dependencies.runtime);
+      const execution = await VerifiedRefundExecution.verify(
+        bearer.slice(7), input.executionName, input.grantId, release, dependencies.runtime,
+        taskLookupDiagnostics(diagnostics, context),
+      );
       const admitted = await consumeRefundExecutionAuthorization(dependencies.database, execution, dependencies.loadRelease, dependencies.env);
       return reply({ ok: true, ...admitted, account: {
         mid: release.mid, merchantAccountBindingId: release.merchantAccountBindingId,
@@ -80,7 +91,7 @@ export function createRefundAuthorizationAdmissionHandler(dependencies: Readonly
   };
 }
 
-function diagnosticContext(request: Request): Readonly<{ route: typeof ADMISSION_ROUTE; method: typeof ADMISSION_METHOD; traceId?: string }> {
+function diagnosticContext(request: Request): RefundAdmissionContext {
   const traceId = cloudTraceId(request.headers.get("x-cloud-trace-context"));
   return traceId ? { route: ADMISSION_ROUTE, method: ADMISSION_METHOD, traceId } : { route: ADMISSION_ROUTE, method: ADMISSION_METHOD };
 }
@@ -91,7 +102,7 @@ function cloudTraceId(value: string | null): string | undefined {
 }
 
 function rejectionForError(
-  context: Readonly<{ route: typeof ADMISSION_ROUTE; method: typeof ADMISSION_METHOD; traceId?: string }>,
+  context: RefundAdmissionContext,
   error: RefundAuthorizationError,
 ): RefundAdmissionDiagnosticEvent {
   if (error instanceof RefundExecutionVerificationError) {
@@ -107,11 +118,15 @@ function rejectionForError(
 }
 
 function rejectionEvent(
-  context: Readonly<{ route: typeof ADMISSION_ROUTE; method: typeof ADMISSION_METHOD; traceId?: string }>,
+  context: RefundAdmissionContext,
   stage: RefundAdmissionFailureStage,
   reason: AuthorizationDiagnosticReason,
 ): RefundAdmissionDiagnosticEvent {
   return { event: "refund_reentry_admission_rejected", ...context, stage, reason };
+}
+
+function taskLookupDiagnostics(logger: RefundAdmissionDiagnosticLogger, context: RefundAdmissionContext): TaskLookupDiagnosticSink {
+  return (event) => safeEmit(logger, context.traceId ? { ...event, traceId: context.traceId } : event);
 }
 
 function safeEmit(logger: RefundAdmissionDiagnosticLogger, event: RefundAdmissionDiagnosticEvent): void {

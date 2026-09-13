@@ -127,6 +127,14 @@ A Cloud Run platform-level rejection can occur before handler entry and conseque
 application event. Conversely, absence of an application event is not alone proof of a
 platform rejection until logging delivery is established.
 
+`ListTasks` additionally emits one best-effort, non-authoritative
+`refund_reentry_task_lookup` event for each completed lookup attempt. It contains only the
+fixed operation name, Execution parent, `AUTH_CLIENT` or `API_REQUEST` phase, bounded elapsed
+milliseconds, success result count, or an allowlisted failure class and numeric HTTP status.
+The admission handler adds its existing trace ID when available. Credential material, headers,
+response bodies, raw errors, and error messages are not emitted; logging cannot alter the
+lookup result, verifier decision, public response, or durable admission path.
+
 The immutable Execution/UUID facts follow the [Google Execution API](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs.executions);
 ID tokens follow [Google service authentication](https://docs.cloud.google.com/run/docs/authenticating/service-to-service).
 

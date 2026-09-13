@@ -286,6 +286,9 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     ]);
   });
 
+  // This is a deterministic subprocess/context proof, not an image performance SLO.
+  // Under the normal parallel suite it exceeded Vitest's 5s default (5.72s observed),
+  // so retain a finite case-local budget with headroom for concurrent test work.
   it("rejects repository-context COPY operands outside canonical context", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const proof = spawnSync(
@@ -320,7 +323,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       withStaleAdmission,
       observed.paths,
     )).toEqual(["src/lib/stale-refund-input.ts"]);
-  });
+  }, 15_000);
 
   it("generates distinct valid collision-resistant proof-image tags", () => {
     const first = createProofImageTag();
