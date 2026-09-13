@@ -8,12 +8,19 @@ RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY --link containers/refund-db-bootstrap/entrypoint.ts ./containers/refund-db-bootstrap/
 COPY --link containers/refund-db-bootstrap/application-credentials.ts ./containers/refund-db-bootstrap/
 COPY --link containers/refund-db-bootstrap/contacted-reconciliation-business-state-readback.ts ./containers/refund-db-bootstrap/
+COPY --link containers/refund-db-bootstrap/refund-readiness-business-state-readback.ts ./containers/refund-db-bootstrap/
 COPY --link scripts/eximbay-p3e-database-bootstrap.ts ./scripts/
 COPY --link scripts/refund-authorization-privileges.ts ./scripts/
 COPY --link scripts/refund-authorization-cutover.ts ./scripts/
 COPY --link src/lib/payment/eximbay/checkout-recovery-state.ts ./src/lib/payment/eximbay/
 COPY --link src/lib/payment/refund/eximbay-contacted-reconciliation-selection.ts ./src/lib/payment/refund/
+COPY --link src/lib/payment/refund/eximbay-refund-canary-target-binding.ts ./src/lib/payment/refund/
+COPY --link src/lib/payment/refund/invariants.ts ./src/lib/payment/refund/
+COPY --link src/lib/payment/refund/providers/eximbay/preflight-contract.ts ./src/lib/payment/refund/providers/eximbay/
+COPY --link src/lib/payment/refund/uncontacted-recovery-event-history.ts ./src/lib/payment/refund/
 COPY --link src/lib/payment/refund/worker-migration-inventory.ts ./src/lib/payment/refund/
+COPY --link src/lib/payment/providers/eximbay/types.ts ./src/lib/payment/providers/eximbay/
+COPY --link src/lib/payment/providers/eximbay/validation.ts ./src/lib/payment/providers/eximbay/
 COPY --link prisma.config.ts ./
 COPY --link prisma ./prisma
 COPY --link infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql ./infra/refund-sandbox/p3e-b2/runtime-deferred/
@@ -21,6 +28,8 @@ COPY --link infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql 
 COPY --link infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/contacted-reconciliation/
 COPY --link infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/
 COPY --link infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/
+COPY --link containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql ./containers/refund-db-bootstrap/refund-readiness-readback/
+COPY --link containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql ./containers/refund-db-bootstrap/refund-readiness-readback/
 COPY --link infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/
 COPY --link infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json ./infra/refund-sandbox/p3e-b2/contracts/
 COPY --link infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json ./infra/refund-sandbox/p3e-b2/contracts/
@@ -70,6 +79,8 @@ COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/datab
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql ./infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql
+COPY --link --from=build /build/containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql ./containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql
+COPY --link --from=build /build/containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql ./containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql ./infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/contracts ./infra/refund-sandbox/p3e-b2/contracts
 COPY --link --from=build /build/infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json ./infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v9.json

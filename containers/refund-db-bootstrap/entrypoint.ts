@@ -28,9 +28,16 @@ import {
   type FixedReadbackQuery,
 } from "./contacted-reconciliation-business-state-readback.js";
 import {
+  REFUND_READINESS_BUSINESS_STATE_READBACK_JOB,
+  REFUND_READINESS_BUSINESS_STATE_READBACK_MODE,
+  REFUND_READINESS_BUSINESS_STATE_READBACK_ROLE,
+  readRefundReadinessBusinessState,
+} from "./refund-readiness-business-state-readback.js";
+import {
   applyBusinessStateReadbackRoleGrants,
   applyContactedReconciliationRoleGrants,
   applyEximbayP3eCanaryRoleGrants,
+  applyRefundReadinessReadbackRoleGrants,
   applySyntheticSaleRoleGrants,
   defaultEximbayP3eDatabaseBootstrapDependencies,
   EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
@@ -38,6 +45,7 @@ import {
   EximbayP3eDatabaseBootstrapError,
   materializeSyntheticSaleMarketPrecondition,
   revokeBusinessStateReadbackRoleGrants,
+  revokeRefundReadinessReadbackRoleGrants,
   restoreCanaryRefundRoleGrants,
   verifyExactEffectivePrivileges,
 } from
@@ -83,6 +91,10 @@ export const BUSINESS_STATE_READBACK_ROLE_GRANT_MODE =
   "apply-business-state-readback-role-grants" as const;
 export const BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE =
   "revoke-business-state-readback-role-grants" as const;
+export const REFUND_READINESS_READBACK_ROLE_GRANT_MODE =
+  "apply-refund-readiness-readback-role-grants" as const;
+export const REFUND_READINESS_READBACK_ROLE_REVOKE_MODE =
+  "revoke-refund-readiness-readback-role-grants" as const;
 export const SYNTHETIC_SALE_MARKET_PRECONDITION_MODE =
   "materialize-synthetic-sale-market-precondition" as const;
 export const CANARY_REFUND_ROLE_RESTORE_MODE = "restore-canary-refund-role-grants" as const;
@@ -228,7 +240,10 @@ export type BootstrapMode = "check" | "apply" | typeof REFUND_AUTHORIZATION_CUTO
   | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
   | typeof BUSINESS_STATE_READBACK_ROLE_GRANT_MODE
   | typeof BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE
+  | typeof REFUND_READINESS_READBACK_ROLE_GRANT_MODE
+  | typeof REFUND_READINESS_READBACK_ROLE_REVOKE_MODE
   | typeof CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE
+  | typeof REFUND_READINESS_BUSINESS_STATE_READBACK_MODE
   | typeof SYNTHETIC_SALE_MARKET_PRECONDITION_MODE
   | typeof MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE | typeof ISSUE_EXIMBAY_CANARY_APPROVAL_MODE;
 
@@ -342,7 +357,10 @@ function isBootstrapMode(value: string): value is BootstrapMode {
     "check", "apply", REFUND_AUTHORIZATION_CUTOVER_MODE, CANARY_ROLE_GRANT_MODE, SYNTHETIC_SALE_ROLE_GRANT_MODE,
     CONTACTED_RECONCILIATION_ROLE_GRANT_MODE, BUSINESS_STATE_READBACK_ROLE_GRANT_MODE,
     BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE,
+    REFUND_READINESS_READBACK_ROLE_GRANT_MODE,
+    REFUND_READINESS_READBACK_ROLE_REVOKE_MODE,
     CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE,
+    REFUND_READINESS_BUSINESS_STATE_READBACK_MODE,
     SYNTHETIC_SALE_MARKET_PRECONDITION_MODE,
     CANARY_REFUND_ROLE_RESTORE_MODE, MATERIALIZE_EXIMBAY_CANARY_TARGET_MODE,
     ISSUE_EXIMBAY_CANARY_APPROVAL_MODE, APPLICATION_CREDENTIAL_MODE,
@@ -420,7 +438,7 @@ function boundedJson(value: string | undefined): string | null {
 }
 
 function matchesExactTarget(mode: BootstrapMode, env: BootstrapEnvironment): boolean {
-  const databaseUsername = mode === CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE
+  const databaseUsername = isBusinessStateReadbackMode(mode)
     ? CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_ROLE
     : IAM_DATABASE_USERNAME;
   return env.MIRA_DB_BOOTSTRAP_PROJECT_ID === PROJECT_ID
@@ -433,6 +451,8 @@ function matchesExactTarget(mode: BootstrapMode, env: BootstrapEnvironment): boo
 function matchesExactTask(mode: BootstrapMode, env: BootstrapEnvironment): boolean {
   const jobName = mode === CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE
     ? CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_JOB
+    : mode === REFUND_READINESS_BUSINESS_STATE_READBACK_MODE
+      ? REFUND_READINESS_BUSINESS_STATE_READBACK_JOB
     : JOB_NAME;
   return env.CLOUD_RUN_JOB === jobName
     && isNonblank(env.CLOUD_RUN_EXECUTION)
@@ -488,6 +508,7 @@ function hasForbiddenEnvironment(env: BootstrapEnvironment): boolean {
     || key === "GOOGLE_APPLICATION_CREDENTIALS"
     || key.startsWith("PG")
     || key.startsWith("CSQL_PROXY_")
+    || key.startsWith("MIRA_REFUND_READBACK_")
     || key.startsWith("TOSS_")
     || key.startsWith("EXIMBAY_")
   ));
@@ -511,6 +532,9 @@ async function runWithProxy(
   }
   if (mode === CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE) {
     return runProxySession(true, () => executeBusinessStateReadback(configuration.databaseUrl));
+  }
+  if (mode === REFUND_READINESS_BUSINESS_STATE_READBACK_MODE) {
+    return runProxySession(true, () => executeRefundReadinessReadback(configuration.databaseUrl));
   }
   if (isProducerMode(mode)) {
     return runProducerProxySession(configuration, inventory);
@@ -937,11 +961,15 @@ function isAclLifecycleMode(
   | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
   | typeof BUSINESS_STATE_READBACK_ROLE_GRANT_MODE
   | typeof BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE
+  | typeof REFUND_READINESS_READBACK_ROLE_GRANT_MODE
+  | typeof REFUND_READINESS_READBACK_ROLE_REVOKE_MODE
   | typeof CANARY_REFUND_ROLE_RESTORE_MODE {
   return mode === SYNTHETIC_SALE_ROLE_GRANT_MODE
     || mode === CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
     || mode === BUSINESS_STATE_READBACK_ROLE_GRANT_MODE
     || mode === BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE
+    || mode === REFUND_READINESS_READBACK_ROLE_GRANT_MODE
+    || mode === REFUND_READINESS_READBACK_ROLE_REVOKE_MODE
     || mode === CANARY_REFUND_ROLE_RESTORE_MODE;
 }
 
@@ -952,6 +980,8 @@ async function executeAclLifecycleMode(
     | typeof CONTACTED_RECONCILIATION_ROLE_GRANT_MODE
     | typeof BUSINESS_STATE_READBACK_ROLE_GRANT_MODE
     | typeof BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE
+    | typeof REFUND_READINESS_READBACK_ROLE_GRANT_MODE
+    | typeof REFUND_READINESS_READBACK_ROLE_REVOKE_MODE
     | typeof CANARY_REFUND_ROLE_RESTORE_MODE,
 ): Promise<Readonly<Record<string, unknown>>> {
   const database = new Client({ connectionString: databaseUrlValue });
@@ -977,7 +1007,11 @@ async function executeAclLifecycleMode(
           ? await applyBusinessStateReadbackRoleGrants(database, input, dependencies)
           : mode === BUSINESS_STATE_READBACK_ROLE_REVOKE_MODE
             ? await revokeBusinessStateReadbackRoleGrants(database, input, dependencies)
-          : await restoreCanaryRefundRoleGrants(database, input, dependencies);
+            : mode === REFUND_READINESS_READBACK_ROLE_GRANT_MODE
+              ? await applyRefundReadinessReadbackRoleGrants(database, input, dependencies)
+              : mode === REFUND_READINESS_READBACK_ROLE_REVOKE_MODE
+                ? await revokeRefundReadinessReadbackRoleGrants(database, input, dependencies)
+                : await restoreCanaryRefundRoleGrants(database, input, dependencies);
     return Object.freeze({
       code: result.code,
       mode,
@@ -1005,6 +1039,22 @@ async function executeBusinessStateReadback(
       return result.rows;
     };
     return await readContactedReconciliationBusinessState(query);
+  } finally {
+    await database.end().catch(() => undefined);
+  }
+}
+
+async function executeRefundReadinessReadback(
+  databaseUrlValue: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  const database = new Client({ connectionString: databaseUrlValue });
+  try {
+    await requireDatabaseConnection(() => database.connect());
+    const query: FixedReadbackQuery = async (sql, parameters = []) => {
+      const result = await database.query<Record<string, unknown>>(sql, [...parameters]);
+      return result.rows;
+    };
+    return await readRefundReadinessBusinessState(query);
   } finally {
     await database.end().catch(() => undefined);
   }
@@ -1657,10 +1707,15 @@ function minimalProxyEnvironment(): NodeJS.ProcessEnv {
 
 function databaseUrl(mode: BootstrapMode): string {
   const socket = `/cloudsql/${CONNECTION_NAME}`;
-  const username = mode === CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE
-    ? CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_ROLE
+  const username = isBusinessStateReadbackMode(mode)
+    ? REFUND_READINESS_BUSINESS_STATE_READBACK_ROLE
     : IAM_DATABASE_USERNAME;
   return `postgresql://${encodeURIComponent(username)}@localhost/${DATABASE_NAME}?host=${encodeURIComponent(socket)}`;
+}
+
+function isBusinessStateReadbackMode(mode: BootstrapMode): boolean {
+  return mode === CONTACTED_RECONCILIATION_BUSINESS_STATE_READBACK_MODE
+    || mode === REFUND_READINESS_BUSINESS_STATE_READBACK_MODE;
 }
 
 function invalidInput(output: Output): number {

@@ -20,7 +20,9 @@ export type EximbayP3eBootstrapArtifactId =
   | "SYNTHETIC_SALE_ROLE_GRANT_DELTA"
   | "CONTACTED_RECONCILIATION_ROLE_GRANT_DELTA"
   | "BUSINESS_STATE_READBACK_ROLE_GRANT_DELTA"
-  | "BUSINESS_STATE_READBACK_ROLE_REVOKE_DELTA";
+  | "BUSINESS_STATE_READBACK_ROLE_REVOKE_DELTA"
+  | "REFUND_READINESS_READBACK_ROLE_GRANT_DELTA"
+  | "REFUND_READINESS_READBACK_ROLE_REVOKE_DELTA";
 
 export type EximbayP3eBootstrapArtifact = Readonly<{
   id: EximbayP3eBootstrapArtifactId;
@@ -95,6 +97,28 @@ export const BUSINESS_STATE_READBACK_ROLE_REVOKE_ARTIFACT = Object.freeze({
   sha256: "e88f8f693be752a31bb5b90a0ebebdbff06c760139f19066d39838b847a5a543",
 } satisfies EximbayP3eBootstrapArtifact);
 
+export const REFUND_READINESS_READBACK_ROLE_GRANT_ARTIFACT = Object.freeze({
+  id: "REFUND_READINESS_READBACK_ROLE_GRANT_DELTA",
+  repositoryPath:
+    "containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql",
+  absolutePath: resolve(
+    repositoryRoot,
+    "containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql",
+  ),
+  sha256: "774c9ebeb47bc539a56f2d30ff9b03e491499f104895c8c93f239882422f034a",
+} satisfies EximbayP3eBootstrapArtifact);
+
+export const REFUND_READINESS_READBACK_ROLE_REVOKE_ARTIFACT = Object.freeze({
+  id: "REFUND_READINESS_READBACK_ROLE_REVOKE_DELTA",
+  repositoryPath:
+    "containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql",
+  absolutePath: resolve(
+    repositoryRoot,
+    "containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql",
+  ),
+  sha256: "5cd51d1045fcb03a19af4a170c779275d638d443224ce3c2ed2f933f36d81d84",
+} satisfies EximbayP3eBootstrapArtifact);
+
 type RuntimeRole = "mira_refund_preflight" | "mira_refund_canary";
 type AdmittedDatabaseName = "refund_sandbox" | "wig_platform_test";
 
@@ -160,6 +184,8 @@ export type SyntheticSaleRoleGrantResult = Readonly<{
     | "CONTACTED_RECONCILIATION_ROLE_GRANTS_COMPLETE"
     | "BUSINESS_STATE_READBACK_ROLE_GRANTS_COMPLETE"
     | "BUSINESS_STATE_READBACK_ROLE_REVOKED"
+    | "REFUND_READINESS_READBACK_ROLE_GRANTS_COMPLETE"
+    | "REFUND_READINESS_READBACK_ROLE_REVOKED"
     | "CANARY_REFUND_ROLE_GRANTS_RESTORED";
   artifacts: readonly Readonly<{
     id: EximbayP3eBootstrapArtifactId;
@@ -195,6 +221,8 @@ export type EximbayP3eDatabaseBootstrapErrorCode =
   | "CONTACTED_RECONCILIATION_DELTA_INTEGRITY_FAILURE"
   | "BUSINESS_STATE_READBACK_DELTA_INTEGRITY_FAILURE"
   | "BUSINESS_STATE_READBACK_REVOKE_INTEGRITY_FAILURE"
+  | "REFUND_READINESS_READBACK_DELTA_INTEGRITY_FAILURE"
+  | "REFUND_READINESS_READBACK_REVOKE_INTEGRITY_FAILURE"
   | "SYNTHETIC_SALE_MARKET_PRECONDITION_CONFLICT"
   | "HISTORICAL_AUTHORITY_SHAPE_INVALID"
   | "ROLE_AUTHORITY_EXECUTION_FAILED"
@@ -463,6 +491,50 @@ export async function revokeBusinessStateReadbackRoleGrants(
   }, verifyRetiredBusinessStateReadbackEffectivePrivileges,
   "BUSINESS_STATE_READBACK_ROLE_REVOKED", [
     BUSINESS_STATE_READBACK_ROLE_REVOKE_ARTIFACT,
+  ]);
+}
+
+export async function applyRefundReadinessReadbackRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sql = await readAndVerifyArtifact(
+    REFUND_READINESS_READBACK_ROLE_GRANT_ARTIFACT,
+    dependencies.readArtifact,
+  );
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await dependencies.executeArtifact(
+      database,
+      REFUND_READINESS_READBACK_ROLE_GRANT_ARTIFACT,
+      renderReadbackAuthority(sql, input.targetDatabaseName),
+    );
+  }, verifyExactRefundReadinessReadbackEffectivePrivileges,
+  "REFUND_READINESS_READBACK_ROLE_GRANTS_COMPLETE", [
+    REFUND_READINESS_READBACK_ROLE_GRANT_ARTIFACT,
+  ]);
+}
+
+export async function revokeRefundReadinessReadbackRoleGrants(
+  database: Client,
+  input: EximbayP3eDatabaseBootstrapInput,
+  dependencies: EximbayP3eCanaryRoleGrantDependencies,
+): Promise<SyntheticSaleRoleGrantResult> {
+  requireAdmittedInput(input);
+  const sql = await readAndVerifyArtifact(
+    REFUND_READINESS_READBACK_ROLE_REVOKE_ARTIFACT,
+    dependencies.readArtifact,
+  );
+  return executeRoleGrantTransaction(database, input, dependencies, async () => {
+    await dependencies.executeArtifact(
+      database,
+      REFUND_READINESS_READBACK_ROLE_REVOKE_ARTIFACT,
+      renderReadbackAuthority(sql, input.targetDatabaseName),
+    );
+  }, verifyRetiredBusinessStateReadbackEffectivePrivileges,
+  "REFUND_READINESS_READBACK_ROLE_REVOKED", [
+    REFUND_READINESS_READBACK_ROLE_REVOKE_ARTIFACT,
   ]);
 }
 
@@ -765,7 +837,11 @@ function integrityError(
           ? "BUSINESS_STATE_READBACK_DELTA_INTEGRITY_FAILURE"
           : artifactId === "BUSINESS_STATE_READBACK_ROLE_REVOKE_DELTA"
             ? "BUSINESS_STATE_READBACK_REVOKE_INTEGRITY_FAILURE"
-          : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
+            : artifactId === "REFUND_READINESS_READBACK_ROLE_GRANT_DELTA"
+              ? "REFUND_READINESS_READBACK_DELTA_INTEGRITY_FAILURE"
+              : artifactId === "REFUND_READINESS_READBACK_ROLE_REVOKE_DELTA"
+                ? "REFUND_READINESS_READBACK_REVOKE_INTEGRITY_FAILURE"
+                : "EXIMBAY_DELTA_INTEGRITY_FAILURE",
   );
 }
 
@@ -786,6 +862,14 @@ function renderHistoricalAuthority(source: string, databaseName: AdmittedDatabas
     throw new EximbayP3eDatabaseBootstrapError("HISTORICAL_AUTHORITY_SHAPE_INVALID");
   }
   return source.replaceAll(token, `DATABASE ${quoteIdentifier(databaseName)}`);
+}
+
+function renderReadbackAuthority(source: string, databaseName: AdmittedDatabaseName): string {
+  const token = "DATABASE refund_sandbox";
+  if (source.split(token).length - 1 !== 1) {
+    throw new EximbayP3eDatabaseBootstrapError("HISTORICAL_AUTHORITY_SHAPE_INVALID");
+  }
+  return source.replace(token, `DATABASE ${quoteIdentifier(databaseName)}`);
 }
 
 export async function verifyExactEffectivePrivileges(
@@ -832,6 +916,87 @@ const BUSINESS_STATE_READBACK_SELECT_COLUMNS = new Set([
   "Order.id", "Order.checkoutSessionId", "Order.paymentId", "Order.status",
   "Order.createdAt", "Order.updatedAt",
 ]);
+
+export const REFUND_READINESS_READBACK_SELECT_COLUMNS = new Set([
+  "CheckoutSession.id", "CheckoutSession.communicationLocale",
+  "Payment.id", "Payment.checkoutSessionId", "Payment.provider", "Payment.mode",
+  "Payment.adapterExecutionKind", "Payment.status", "Payment.attemptLifecycle",
+  "Payment.amount", "Payment.currency", "Payment.providerOrderId",
+  "Payment.providerPaymentKey", "Payment.financialSucceededAt",
+  "Order.id", "Order.checkoutSessionId", "Order.paymentId", "Order.currency",
+  "Order.totalAmount", "Order.status",
+  "RefundAttempt.id", "RefundAttempt.orderId", "RefundAttempt.paymentId",
+  "RefundAttempt.amount", "RefundAttempt.currency", "RefundAttempt.status",
+  "RefundAttempt.reason",
+  "RefundAttempt.actorType", "RefundAttempt.actorUserId", "RefundAttempt.provider",
+  "RefundAttempt.mode", "RefundAttempt.providerRefundId", "RefundAttempt.idempotencyKey",
+  "RefundAttempt.requestedAt", "RefundAttempt.processedAt", "RefundAttempt.failedAt",
+  "RefundAttempt.failureCode", "RefundAttempt.safeFailureMessage",
+  "RefundAttempt.createdAt",
+  "RefundExecutionCommand.id", "RefundExecutionCommand.refundAttemptId",
+  "RefundExecutionCommand.status", "RefundExecutionCommand.availableAt",
+  "RefundExecutionCommand.leaseOwner", "RefundExecutionCommand.leaseUntil",
+  "RefundExecutionCommand.leaseGeneration", "RefundExecutionCommand.leaseTokenHash",
+  "RefundExecutionCommand.dispatchAttempt", "RefundExecutionCommand.lastSafeErrorCode",
+  "RefundExecutionCommand.lastSafeErrorMessage",
+  "EximbayRefundSandboxCanaryApproval.id", "EximbayRefundSandboxCanaryApproval.formatVersion",
+  "EximbayRefundSandboxCanaryApproval.provider", "EximbayRefundSandboxCanaryApproval.mode",
+  "EximbayRefundSandboxCanaryApproval.commandId",
+  "EximbayRefundSandboxCanaryApproval.targetBindingDigest",
+  "EximbayRefundSandboxCanaryApproval.consumedAt",
+  "RefundExecutionProviderOperationBinding.id",
+  "RefundExecutionProviderOperationBinding.refundAttemptId",
+  "RefundExecutionProviderOperationBinding.provider",
+  "RefundExecutionProviderOperationBinding.mode",
+  "RefundExecutionProviderOperationBinding.providerOperationKey",
+  "RefundExecutionProviderOperationBinding.operationKeyAlgorithmVersion",
+  "RefundExecutionProviderOperationBinding.wireContractVersion",
+  "RefundExecutionProviderOperationBinding.wireRequestFingerprint",
+  "RefundExecutionProviderOperationBinding.merchantAccountBindingId",
+  "RefundExecutionProviderOperationBinding.credentialGenerationBindingId",
+  "RefundExecutionAuthorization.id", "RefundExecutionAuthorization.commandId",
+  "RefundExecutionAuthorization.refundAttemptId",
+  "RefundExecutionAuthorization.providerOperationBindingId",
+  "RefundExecutionAuthorization.targetBindingDigest",
+  "RefundExecutionAuthorization.expectedPredecessorGeneration",
+  "RefundExecutionAuthorization.operationClass", "RefundExecutionAuthorization.releasePolicyDigest",
+  "RefundExecutionAuthorization.issuedAt", "RefundExecutionAuthorization.expiresAt",
+  "RefundExecutionAuthorization.revokedAt", "RefundExecutionAuthorization.consumedAt",
+  "RefundExecutionAuthorization.consumedLeaseEventId",
+  "RefundExecutionCommandEvent.id", "RefundExecutionCommandEvent.commandId",
+  "RefundExecutionCommandEvent.eventType", "RefundExecutionCommandEvent.leaseGeneration",
+  "RefundExecutionCommandEvent.dispatchAttempt", "RefundExecutionCommandEvent.occurredAt",
+  "RefundExecutionCommandEvent.createdAt",
+  "RefundExecutionDispatchAttempt.id", "RefundExecutionDispatchAttempt.commandId",
+  "RefundExecutionDispatchAttempt.state", "RefundExecutionDispatchAttempt.contactMarkedAt",
+  "RefundExecutionEximbayPreflightObservation.id",
+  "RefundExecutionEximbayPreflightObservation.bindingId",
+  "RefundExecutionProviderEligibilityProof.id", "RefundExecutionProviderEligibilityProof.bindingId",
+  "RefundExecutionProviderContactEligibilityProof.id",
+  "RefundExecutionProviderContactEligibilityProof.dispatchAttemptId",
+  "RefundExecutionEvidence.id", "RefundExecutionEvidence.commandId",
+  "RefundExecutionEvidence.outcome",
+  "RefundAttemptTransition.id", "RefundAttemptTransition.refundAttemptId",
+  "RefundAttemptTransition.fromStatus", "RefundAttemptTransition.toStatus",
+  "RefundAttemptTransition.orderStatusBefore", "RefundAttemptTransition.orderStatusAfter",
+  "RefundAttemptTransition.actorType", "RefundAttemptTransition.actorUserId",
+  "RefundAttemptTransition.reason",
+  "RefundAttemptTransition.operationKey", "RefundAttemptTransition.createdAt",
+  "PaymentOutbox.id", "PaymentOutbox.dedupKey",
+]);
+
+export async function verifyExactRefundReadinessReadbackEffectivePrivileges(
+  database: Pick<Client, "query">,
+): Promise<void> {
+  const role = await readBusinessStateReadbackRoleSafety(database);
+  const tables = await readBusinessStateReadbackTablePrivileges(database);
+  const columns = await readBusinessStateReadbackColumnPrivileges(database);
+  const sequences = await readBusinessStateReadbackSequencePrivileges(database);
+  requireBusinessStateReadbackRoleSafety(role);
+  requireNoBusinessStateReadbackTablePrivileges(tables);
+  requireExactRefundReadinessReadbackColumnPrivileges(columns);
+  requireNoSequencePrivileges(sequences);
+}
 
 export async function verifyExactBusinessStateReadbackEffectivePrivileges(
   database: Pick<Client, "query">,
@@ -1033,6 +1198,18 @@ export function requireExactBusinessStateReadbackColumnPrivileges(
   }
   if (rows.filter((row) => row.select).length
     !== BUSINESS_STATE_READBACK_SELECT_COLUMNS.size) failPostcondition();
+}
+
+export function requireExactRefundReadinessReadbackColumnPrivileges(
+  rows: readonly BusinessStateReadbackColumnPrivilegeRow[],
+): void {
+  for (const row of rows) {
+    const exactColumn = `${row.tableName}.${row.columnName}`;
+    if (row.select !== REFUND_READINESS_READBACK_SELECT_COLUMNS.has(exactColumn)) failPostcondition();
+    if ([row.insert, row.update, row.references].some(Boolean)) failPostcondition();
+  }
+  if (rows.filter((row) => row.select).length
+    !== REFUND_READINESS_READBACK_SELECT_COLUMNS.size) failPostcondition();
 }
 
 export type BusinessStateReadbackRoleSafetyRow = Readonly<{

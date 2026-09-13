@@ -25,6 +25,7 @@ const exactAssets = Object.freeze([
   "containers/refund-db-bootstrap/README.md",
   "containers/refund-db-bootstrap/application-credentials.ts",
   "containers/refund-db-bootstrap/contacted-reconciliation-business-state-readback.ts",
+  "containers/refund-db-bootstrap/refund-readiness-business-state-readback.ts",
   "containers/refund-db-bootstrap/entrypoint.ts",
   "containers/refund-db-bootstrap/package-lock.json",
   "containers/refund-db-bootstrap/package.json",
@@ -32,6 +33,8 @@ const exactAssets = Object.freeze([
   "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/business-state-readback/database-role-revoke.sql",
+  "containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql",
+  "containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql",
   "infra/refund-sandbox/p3e-b2/synthetic-sale/database-role-grants.sql",
   "infra/refund-sandbox/p3e-b2/runtime-deferred/database_roles.sql",
   "infra/refund-sandbox/p3e-b2/contracts/eximbay-canary-runtime-v2.json",
@@ -48,7 +51,13 @@ const exactAssets = Object.freeze([
   "scripts/refund-authorization-cutover.ts",
   "src/lib/payment/eximbay/checkout-recovery-state.ts",
   "src/lib/payment/refund/eximbay-contacted-reconciliation-selection.ts",
+  "src/lib/payment/refund/eximbay-refund-canary-target-binding.ts",
+  "src/lib/payment/refund/invariants.ts",
+  "src/lib/payment/refund/providers/eximbay/preflight-contract.ts",
+  "src/lib/payment/refund/uncontacted-recovery-event-history.ts",
   "src/lib/payment/refund/worker-migration-inventory.ts",
+  "src/lib/payment/providers/eximbay/types.ts",
+  "src/lib/payment/providers/eximbay/validation.ts",
 ]);
 
 export type BootstrapContextManifestEntry = Readonly<{
