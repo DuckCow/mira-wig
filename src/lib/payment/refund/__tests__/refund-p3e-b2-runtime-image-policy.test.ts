@@ -149,6 +149,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(dockerfile).not.toMatch(/:(?:latest|22|bookworm-slim)(?:\s|$)/u);
   });
 
+  // Each context child has a 30s bound; allow 15s for surrounding work/cleanup.
   it("assembles the exact temporary context twice and rejects repository-root authority", () => {
     const ignore = readFileSync(join(ROOT, ".dockerignore"), "utf8");
     const contextBuilder = readFileSync(
@@ -206,7 +207,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).toContain("context.directory");
     expect(imageVerifier).not.toContain('"-f", DOCKERFILE,\n  "."');
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
-  });
+  }, 45_000);
 
   it("supplies the exact six bundle entrypoint sources to the Docker build stage", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
@@ -284,11 +285,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       "src/lib/market/locale.ts",
       "src/lib/market/types.ts",
     ]);
-  });
+  }, 45_000);
 
   // This is a deterministic subprocess/context proof, not an image performance SLO.
-  // Under the normal parallel suite it exceeded Vitest's 5s default (5.72s observed),
-  // so retain a finite case-local budget with headroom for concurrent test work.
+  // The 30s child bound needs an outer watchdog with cleanup headroom.
   it("rejects repository-context COPY operands outside canonical context", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const proof = spawnSync(
@@ -323,7 +323,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       withStaleAdmission,
       observed.paths,
     )).toEqual(["src/lib/stale-refund-input.ts"]);
-  }, 15_000);
+  }, 45_000);
 
   it("generates distinct valid collision-resistant proof-image tags", () => {
     const first = createProofImageTag();

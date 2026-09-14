@@ -60,7 +60,7 @@ describe("EX2B2-S1 source isolation", () => {
     expect(source).toContain('from "./ready"');
     expect(source).not.toContain("@/lib/db");
     expectExactImporterAllowlist(importers, S1_IMPORTERS);
-  });
+  }, 30_000);
 
   it.each([
     ["alias with single quotes", "import x from '@/lib/payment/eximbay/ready-kernel';"],
@@ -183,19 +183,31 @@ function inspectDurableWrite(node: ts.Node, violations: string[]): void {
   }
 }
 
+let productionGraph: readonly Readonly<{ importer: string; specifiers: readonly string[] }>[] | undefined;
+
 function productionImportersOf(targetRelativePath: string): string[] {
-  return ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined)
+  // Source is immutable during this file; retain every production input once.
+  productionGraph ??= Object.freeze(ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined)
     .flatMap((absolutePath) => {
       const importer = repositoryRelativePath(absolutePath);
       if (
         importer.includes("/__tests__/")
         || /\.test\.tsx?$/u.test(importer)
-        || importer === targetRelativePath
       ) return [];
       const source = readFileSync(absolutePath, "utf8");
-      return sourceImportsTarget(importer, source, targetRelativePath) ? [importer] : [];
-    })
-    .sort();
+      const parsed = ts.createSourceFile(importer, source, ts.ScriptTarget.ESNext, true);
+      const specifiers: string[] = [];
+      function visit(node: ts.Node): void {
+        const specifier = importedModuleSpecifier(node);
+        if (specifier) specifiers.push(specifier);
+        ts.forEachChild(node, visit);
+      }
+      visit(parsed);
+      return [Object.freeze({ importer, specifiers: Object.freeze(specifiers) })];
+    }));
+  return productionGraph.filter(({ importer, specifiers }) => importer !== targetRelativePath
+    && specifiers.some((specifier) => resolvesToTarget(importer, specifier, targetRelativePath)))
+    .map(({ importer }) => importer).sort();
 }
 
 function sourceImportsTarget(

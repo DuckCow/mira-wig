@@ -44,7 +44,7 @@ describe("refund worker migration inventory closure", () => {
     } finally {
       await context.cleanup();
     }
-  });
+  }, 45_000); // Real graph/copy/closure proof; no five-second performance invariant.
 
   it("fails closed for missing, unexpected, reordered, or changed packaged migrations", async () => {
     const inventory = await loadRefundWorkerMigrationInventory();
