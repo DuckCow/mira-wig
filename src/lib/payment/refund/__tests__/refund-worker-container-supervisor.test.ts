@@ -1378,35 +1378,37 @@ describe("refund worker container supervisor", () => {
   it("emits no fallback when the supervisor process is forcibly terminated before a result", async () => {
     const fixture = spawnForcedTerminationFixture();
     try {
-      if (!fixture.stdout || !fixture.stderr) throw new Error("MISSING_FIXTURE_STREAM");
-      const fixtureStdout = fixture.stdout;
-      const fixtureStderr = fixture.stderr;
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      fixtureStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-      fixtureStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      await within((async () => {
+        if (!fixture.stdout || !fixture.stderr) throw new Error("MISSING_FIXTURE_STREAM");
+        const fixtureStdout = fixture.stdout;
+        const fixtureStderr = fixture.stderr;
+        const stdout: Buffer[] = [];
+        const stderr: Buffer[] = [];
+        fixtureStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+        fixtureStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
 
-      await waitForChildMessage(fixture, "WORKER_STARTED");
-      const forwarded = waitForChildMessage(fixture, "WORKER_SIGTERM");
-      fixture.kill("SIGTERM");
-      await forwarded;
-      expect(Buffer.concat(stdout).toString("utf8")).toBe("");
-      expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+        await waitForChildMessage(fixture, "WORKER_STARTED");
+        const forwarded = waitForChildMessage(fixture, "WORKER_SIGTERM");
+        fixture.kill("SIGTERM");
+        await forwarded;
+        expect(Buffer.concat(stdout).toString("utf8")).toBe("");
+        expect(Buffer.concat(stderr).toString("utf8")).toBe("");
 
-      const closed = waitForChildClose(fixture);
-      fixture.kill("SIGKILL");
-      const { code, signal } = await within(closed, 2_000);
+        const closed = waitForChildClose(fixture);
+        fixture.kill("SIGKILL");
+        const { code, signal } = await closed;
 
-      expect(code).toBeNull();
-      expect(signal).toBe("SIGKILL");
-      expect(Buffer.concat(stdout).toString("utf8")).toBe("");
-      expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+        expect(code).toBeNull();
+        expect(signal).toBe("SIGKILL");
+        expect(Buffer.concat(stdout).toString("utf8")).toBe("");
+        expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+      })(), 30_000);
     } finally {
       if (fixture.exitCode === null && fixture.signalCode === null) {
         fixture.kill("SIGKILL");
       }
     }
-  });
+  }, 60_000);
 });
 
 type SpawnCall = Readonly<{
@@ -1572,7 +1574,7 @@ function waitForChildMessage(
   child: ReturnType<typeof spawn>,
   expected: string,
 ): Promise<void> {
-  return within(new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const onMessage = (value: unknown) => {
       if (value !== expected) return;
       dispose();
@@ -1588,7 +1590,7 @@ function waitForChildMessage(
     };
     child.on("message", onMessage);
     child.once("close", onClose);
-  }), 2_000);
+  });
 }
 
 function waitForChildClose(

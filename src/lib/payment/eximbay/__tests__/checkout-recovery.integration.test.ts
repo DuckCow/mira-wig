@@ -406,8 +406,8 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
     await admin.query("SELECT pg_advisory_lock(682326912)");
     try {
       const dependencies = contactedRoleDependencies();
-      await restoreCanaryRefundRoleGrants(admin, bootstrapInput, dependencies);
       await bootstrapEximbayP3eDatabaseRoles(admin, bootstrapInput);
+      await restoreCanaryRefundRoleGrants(admin, bootstrapInput, dependencies);
       await admin.query(`ALTER ROLE mira_refund_canary PASSWORD '${RESTRICTED_ROLE_PASSWORD}'`);
       await applyContactedReconciliationRoleGrants(admin, bootstrapInput, dependencies);
       restricted = restrictedRecoveryClient(databaseUrl);
