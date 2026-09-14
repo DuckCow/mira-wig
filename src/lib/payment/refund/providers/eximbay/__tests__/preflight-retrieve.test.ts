@@ -374,7 +374,16 @@ describe("value-free optional root subpredicates", () => {
   const cases = [
     [undefined, "ABSENT", null, true], [null, "NOT_STRING", null, false],
     [19, "NOT_STRING", null, false], [[], "NOT_STRING", null, false],
-    ["", "EMPTY_OR_WHITESPACE_ONLY", false, false], [" \t ", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["", "EMPTY_OR_WHITESPACE_ONLY", false, true], [" \t ", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    [" ", "EMPTY_OR_WHITESPACE_ONLY", false, true],
+    [" ".repeat(255), "EMPTY_OR_WHITESPACE_ONLY", false, true],
+    [" ".repeat(256), "EMPTY_OR_WHITESPACE_ONLY", true, false],
+    ["\u3000".repeat(85), "EMPTY_OR_WHITESPACE_ONLY", false, true],
+    ["\u3000".repeat(86), "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\n", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\r", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\v", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\f", "EMPTY_OR_WHITESPACE_ONLY", false, false],
     [" leading", "TRIM_MISMATCH", false, false], ["trailing ", "TRIM_MISMATCH", false, false],
     ["a\u0000b", "CONTROL_OR_SURROGATE", false, false], ["a\u0085b", "CONTROL_OR_SURROGATE", false, false],
     ["a\ud800b", "CONTROL_OR_SURROGATE", false, false], ["a\udc00b", "CONTROL_OR_SURROGATE", false, false],
@@ -399,6 +408,30 @@ describe("value-free optional root subpredicates", () => {
     const result = await observe({ other_param });
     expect(result.shape.optionalRootDetail?.otherParam.parserValid).toBe(false);
     expect(JSON.stringify(result)).not.toContain("private");
+  });
+  it.each([
+    ["absent envelope", undefined], ["both absent", {}],
+    ["param2 absent", { param1: "metadata" }], ["param1 absent", { param2: "metadata" }],
+    ["both empty", { param1: "", param2: "" }],
+    ["both safe whitespace", { param1: "   ", param2: "\u3000" }],
+  ])("admits synthetic formal-card envelope: %s", async (_label, other_param) => {
+    const result = await observe({
+      card_info: { card_number1: "5826", card_number4: "9371" }, other_param,
+      payment: { ...bodyObject().payment, auth_code: "synthetic-auth", payment_method: "P000" },
+    });
+    expect(result.parserResult).toBe("ADMITTED");
+    expect(result.shape.firstFailure).toBe("UNESTABLISHED");
+    expect(result.shape.optionalRootDetail).toMatchObject({
+      cardInfo: { pairKind: "FORMAL", firstFourAsciiDigits: true, lastFourAsciiDigits: true, parserValid: true },
+      otherParam: { parserValid: true },
+    });
+    if (other_param && Object.values(other_param).every((value) => value.trim() === "") && Object.keys(other_param).length === 2) {
+      expect(result.shape.optionalRootDetail?.otherParam).toMatchObject({
+        param1Class: "EMPTY_OR_WHITESPACE_ONLY", param2Class: "EMPTY_OR_WHITESPACE_ONLY",
+        param1TextLengthOver255: false, param2TextLengthOver255: false,
+      });
+    }
+    expect(JSON.stringify(result)).not.toMatch(/5826|9371|synthetic-auth|merchant-mid|order-1|transaction-1|param[12]Length/);
   });
   it("observes both invalid envelopes and preserves earlier first failures", async () => {
     const extra = { card_info: { cardno1: "oops", cardno4: "9371" }, other_param: { param1: " bad", param2: "" } };

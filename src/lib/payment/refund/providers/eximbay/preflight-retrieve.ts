@@ -325,8 +325,23 @@ function optionalOtherParamValid(root: Record<string, unknown>): boolean {
     return false;
   }
   return ["param1", "param2"].every((key) => (
-    !Object.hasOwn(otherParam, key) || Boolean(boundedText(otherParam[key], 255))
+    !Object.hasOwn(otherParam, key) || optionalParamTextValid(otherParam[key])
   ));
+}
+
+function optionalParamTextValid(value: unknown): boolean {
+  if (typeof value !== "string" || value.trim().length !== 0) {
+    return boundedText(value, 255) !== null;
+  }
+  if (UTF8_ENCODER.encode(value).byteLength > 255) return false;
+  // Sentinels bypass only the nonblank/edge-trim rules; the existing primitive
+  // still rejects preparation controls and unpaired surrogates in blank text.
+  try {
+    requireExactText(`x${value}x`, "INVALID_EXIMBAY_RETRIEVE_TEXT");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Observation uses the same parsed root and the installed admission helpers. The
