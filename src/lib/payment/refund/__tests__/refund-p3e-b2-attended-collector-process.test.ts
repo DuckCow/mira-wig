@@ -790,6 +790,7 @@ describe("P3E-B2 TB2A provider-free real process adapter", () => {
   it("keeps a valid fixture snapshot and its nested values after an attended mutation", async () => {
     await withAttendedProcessBoundary(async (boundary) => {
       const request = mutableFixtureRequest(boundary.directory);
+      request.timing = { ...ATTENDED_TIMING };
       const originalArgs = request.args;
       const originalEnvironment = request.env;
       const originalTiming = request.timing;
@@ -825,7 +826,7 @@ describe("P3E-B2 TB2A provider-free real process adapter", () => {
       expect(admittedRequests[0]).toMatchObject({
         executable: TEST_MODULE_NODE_EXECUTABLE_PATH,
         args: [FIXTURE, "normal"],
-        timing: QUICK_TIMING,
+        timing: ATTENDED_TIMING,
         options: {
           cwd: realpathSync(boundary.directory),
           env: { NODE_ENV: "production" },
