@@ -1,3 +1,4 @@
+import { isEximbayPreflightDiagnostic, type EximbayPreflightDiagnostic } from "../providers/eximbay/preflight-diagnostic";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
@@ -335,6 +336,147 @@ describe("refund worker container supervisor", () => {
       },
     });
     expect(harness.stderr).toEqual([]);
+  });
+
+  it.each([
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "TRANSPORT_FAILURE", responseReceived: false, httpStatus: null },
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "TRANSPORT_FAILURE", responseReceived: true, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "TRANSPORT_FAILURE", responseReceived: true, httpStatus: null },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "NON_2XX", responseReceived: true, httpStatus: 503 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "IDENTITY_MISMATCH", responseReceived: true, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: null, responseReceived: true, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "REJECTION", code: "LEASE_FENCE_MISMATCH", responseReceived: true, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "REJECTION", code: "PREFLIGHT_CONFLICT", responseReceived: true, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "EXCEPTION", code: null, responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "REJECTION", code: "REFUND_NOT_LAWFUL", responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "EXCEPTION", code: "PERSISTENCE_CONFLICT", responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "EXCEPTION", code: "PERSISTENCE_CONFLICT", responseReceived: null, httpStatus: null },
+    { stage: "LEASE_CONTINUATION", kind: "EXCEPTION", code: null, responseReceived: null, httpStatus: null },
+  ] satisfies EximbayPreflightDiagnostic[])("preserves producer diagnostic %j without changing failed-child effects or retry behavior", async (diagnostic) => {
+    expect(isEximbayPreflightDiagnostic(diagnostic)).toBe(true);
+    const operation: EximbayRefundReentryResult = {
+      ...reentryFailure(), code: "RETRIEVE_CONTACTED", cancellationCount: 0,
+      diagnostic,
+      ...(diagnostic.stage === "DISPATCH_AUTHORIZATION" && diagnostic.responseReceived === null
+        ? { code: "NO_PROVIDER_CONTACT", terminalClass: "SAFE_STOP", preflightRetrieveCount: 0 } as const : {}),
+    };
+    const harness = supervisorHarness([
+      runningChild({ closeOnTerm: 0 }), completedChild(1, reentryTerminal(operation), ""),
+    ], { readiness: true });
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"], REFUND_REENTRY_ENV, harness.output, harness.dependencies,
+    );
+    expect(exit).toBe(1);
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({ childOperationResult: {
+      evidence: "TRUSTWORTHY", result: operation,
+      providerEffects: { preflightRetrieveCount: operation.preflightRetrieveCount, cancellationCount: 0 },
+    } });
+  });
+
+  it.each([
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "TRANSPORT_FAILURE", responseReceived: false, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "EXCEPTION", code: null, responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "EXCEPTION", code: "PERSISTENCE_CONFLICT", responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "EXCEPTION", code: "PERSISTENCE_CONFLICT", responseReceived: null, httpStatus: null },
+    { stage: "LEASE_CONTINUATION", kind: "EXCEPTION", code: null, responseReceived: null, httpStatus: null },
+  ] satisfies EximbayPreflightDiagnostic[])("cross-validates producer effect tuples for %j", async (diagnostic) => {
+    for (const [retrieve, cancel] of [[0, 0], [1, 0], [1, 1]] as const) {
+      const operation: EximbayRefundReentryResult = {
+        ...reentryFailure(), diagnostic, preflightRetrieveCount: retrieve, cancellationCount: cancel,
+        code: cancel ? "CANCEL_CONTACT_MAY_HAVE_OCCURRED" : retrieve ? "RETRIEVE_CONTACTED" : "NO_PROVIDER_CONTACT",
+        terminalClass: retrieve ? "PROVIDER_EFFECT_POSSIBLE" : "SAFE_STOP",
+      };
+      const supported = diagnostic.stage === "LEASE_CONTINUATION"
+        || (cancel === 0 && retrieve === (diagnostic.responseReceived === null ? 0 : 1));
+      const harness = supervisorHarness([
+        runningChild({ closeOnTerm: 0 }), completedChild(1, reentryTerminal(operation), ""),
+      ], { readiness: true });
+      await runRefundWorkerContainerSupervisor(
+        ["eximbay-refund-reentry-once"], REFUND_REENTRY_ENV, harness.output, harness.dependencies,
+      );
+      expect(parseOnlyOutput(harness.stdout)).toMatchObject({ childOperationResult: supported
+        ? { evidence: "TRUSTWORTHY", result: operation }
+        : { evidence: "UNKNOWN", result: null, providerEffects: { preflightRetrieveCount: null, cancellationCount: null, reconciliationLookupCount: null } } });
+      expect(harness.spawnCalls).toHaveLength(2);
+    }
+  });
+
+  it("rejects success carrying a failure diagnostic", async () => {
+    const operation = { ...reentrySuccess(), diagnostic: {
+      stage: "LEASE_CONTINUATION", kind: "EXCEPTION", code: null, responseReceived: null, httpStatus: null,
+    } };
+    const harness = supervisorHarness([
+      runningChild({ closeOnTerm: 0 }), completedChild(0, `${JSON.stringify(operation)}\n`, ""),
+    ], { readiness: true });
+    await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"], REFUND_REENTRY_ENV, harness.output, harness.dependencies,
+    );
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({ childOperationResult: {
+      evidence: "UNKNOWN", result: null, providerEffects: { preflightRetrieveCount: null, cancellationCount: null, reconciliationLookupCount: null },
+    } });
+  });
+
+  it.each([true, false])("pins JSON.parse last-wins duplicate diagnostic members (valid last: %s)", async (validLast) => {
+    const valid = JSON.stringify({ stage: "RETRIEVE", kind: "REJECTION", code: "INVALID_JSON", responseReceived: true, httpStatus: 200 });
+    const invalid = '{"stage":"sensitive-duplicate-sentinel"}';
+    const operation = { ...reentryFailure(), code: "RETRIEVE_CONTACTED", cancellationCount: 0 };
+    const raw = JSON.stringify(operation).slice(0, -1)
+      + `,"diagnostic":${validLast ? invalid : valid},"diagnostic":${validLast ? valid : invalid}}\n`;
+    const harness = supervisorHarness([
+      runningChild({ closeOnTerm: 0 }), completedChild(1, raw, ""),
+    ], { readiness: true });
+    await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"], REFUND_REENTRY_ENV, harness.output, harness.dependencies,
+    );
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({ childOperationResult: {
+      evidence: validLast ? "TRUSTWORTHY" : "UNKNOWN",
+    } });
+    expect(harness.stdout.join("")).not.toContain("sensitive-duplicate-sentinel");
+  });
+
+  it.each([
+    { stage: "RETRIEVE", kind: "REJECTION", code: "NON_2XX", responseReceived: true, httpStatus: 200 },
+    { stage: "OBSERVATION_TRANSACTION", kind: "REJECTION", code: "NON_2XX", responseReceived: false, httpStatus: null },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "NON_2XX", responseReceived: true, httpStatus: null },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "TRANSPORT_FAILURE", responseReceived: true, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "INVALID_JSON", responseReceived: true, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "TRANSPORT_FAILURE", responseReceived: false, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "EXCEPTION", code: "TRANSPORT_FAILURE", responseReceived: null, httpStatus: null },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "INVALID_JSON", responseReceived: true, httpStatus: 503 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "IDENTITY_MISMATCH", responseReceived: false, httpStatus: null },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "LEASE_EXPIRED", responseReceived: true, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: null, responseReceived: true, httpStatus: 200 },
+    { stage: "OBSERVATION_TRANSACTION", kind: "EXCEPTION", code: null, responseReceived: false, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "REJECTION", code: "REFUND_NOT_LAWFUL", responseReceived: true, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "REJECTION", code: "PERSISTENCE_CONFLICT", responseReceived: true, httpStatus: null },
+    { stage: "OBSERVATION_TRANSACTION", kind: "EXCEPTION", code: "LEASE_EXPIRED", responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "REJECTION", code: "NON_2XX", responseReceived: true, httpStatus: 503 },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "REJECTION", code: "PREFLIGHT_CONFLICT", responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "REJECTION", code: "PERSISTENCE_CONFLICT", responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "REJECTION", code: "LEASE_EXPIRED", responseReceived: null, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "EXCEPTION", code: null, responseReceived: true, httpStatus: null },
+    { stage: "DISPATCH_AUTHORIZATION", kind: "EXCEPTION", code: "PERSISTENCE_CONFLICT", responseReceived: false, httpStatus: null },
+    { stage: "LEASE_CONTINUATION", kind: "REJECTION", code: "LEASE_EXPIRED", responseReceived: null, httpStatus: null },
+    { stage: "LEASE_CONTINUATION", kind: "EXCEPTION", code: null, responseReceived: true, httpStatus: 200 },
+    { stage: "UNKNOWN", kind: "EXCEPTION", code: null, responseReceived: null, httpStatus: null },
+    { stage: "RETRIEVE", kind: "UNKNOWN", code: "NON_2XX", responseReceived: true, httpStatus: 503 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "sensitive-raw-error", responseReceived: true, httpStatus: 200 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "NON_2XX", responseReceived: false, httpStatus: 503 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "NON_2XX", responseReceived: true, httpStatus: 999 },
+    { stage: "RETRIEVE", kind: "REJECTION", code: "NON_2XX", responseReceived: true, httpStatus: 503, body: "sensitive-payload" },
+  ])("rejects untrusted diagnostic shape or values without copying them", async (diagnostic) => {
+    expect(isEximbayPreflightDiagnostic(diagnostic)).toBe(false);
+    const operation = { ...reentryFailure(), diagnostic };
+    const harness = supervisorHarness([
+      runningChild({ closeOnTerm: 0 }), completedChild(1, `${JSON.stringify(operation)}\n`, ""),
+    ], { readiness: true });
+    await runRefundWorkerContainerSupervisor(
+      ["eximbay-refund-reentry-once"], REFUND_REENTRY_ENV, harness.output, harness.dependencies,
+    );
+    expect(parseOnlyOutput(harness.stdout)).toMatchObject({ childOperationResult: {
+      evidence: "UNKNOWN", result: null,
+    } });
+    expect(harness.stdout.join("")).not.toContain("sensitive-");
   });
 
   it("reports malformed re-entry child evidence with UNKNOWN provider effects", async () => {

@@ -1,3 +1,4 @@
+import { diagnosticFields, isEximbayPreflightDiagnostic } from "./providers/eximbay/preflight-diagnostic";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { access } from "node:fs/promises";
@@ -1009,6 +1010,7 @@ function validateEximbayRefundReentryTerminal(
       cancellationCount: value.cancellationCount,
       reentry: "FORBIDDEN",
       cleanupFailures,
+      ...diagnosticFields(value.diagnostic),
     }),
   });
 }
@@ -1016,7 +1018,10 @@ function validateEximbayRefundReentryTerminal(
 function reentryShapeFailure(
   value: Record<string, unknown>,
 ): ChildValidationFailureState | null {
-  if (!hasExactKeys(value, EXIMBAY_REFUND_REENTRY_KEYS)) {
+  const keys = Object.hasOwn(value, "diagnostic")
+    ? [...EXIMBAY_REFUND_REENTRY_KEYS, "diagnostic"].sort() : EXIMBAY_REFUND_REENTRY_KEYS;
+  if (Object.hasOwn(value, "diagnostic") && !isEximbayPreflightDiagnostic(value.diagnostic)) return "REENTRY_SEMANTICS_INVALID";
+  if (!hasExactKeys(value, keys)) {
     return "REENTRY_KEY_SET_MISMATCH";
   }
   if (value.schema !== "mira-refund-eximbay-reentry-result/v1") {
@@ -1066,6 +1071,7 @@ function validSuccessfulReentrySemantics(
   cancel: 0 | 1,
 ): boolean {
   return [
+    !Object.hasOwn(value, "diagnostic"),
     value.code === "KNOWN_SUCCESS",
     value.terminalClass === "REFUND_SUCCEEDED",
     retrieve === 1,
@@ -1079,6 +1085,7 @@ function validFailedReentrySemantics(
   cancel: 0 | 1,
 ): boolean {
   if (value.code === "KNOWN_SUCCESS") return false;
+  if (!consistentPreflightEffects(value.diagnostic, retrieve, cancel)) return false;
   const effectPossible = [retrieve, cancel].some((count) => count === 1);
   const expectedTerminal = effectPossible ? "PROVIDER_EFFECT_POSSIBLE" : "SAFE_STOP";
   if (value.terminalClass !== expectedTerminal) {
@@ -1089,6 +1096,25 @@ function validFailedReentrySemantics(
   return !["RETRIEVE_CONTACTED", "CANCEL_CONTACT_MAY_HAVE_OCCURRED"].includes(
     String(value.code),
   );
+}
+
+function consistentPreflightEffects(
+  diagnostic: unknown,
+  retrieve: 0 | 1,
+  cancel: 0 | 1,
+): boolean {
+  if (diagnostic === undefined) return true;
+  if (!isEximbayPreflightDiagnostic(diagnostic)) return false;
+  // The continuation catch can run before or after provider contact.
+  if (diagnostic.stage === "LEASE_CONTINUATION") return true;
+  if (cancel !== 0) return false;
+  // Only authorizeR1's reused-observation exception lacks a current response.
+  if (diagnostic.stage === "DISPATCH_AUTHORIZATION" && diagnostic.responseReceived === null) {
+    return retrieve === 0;
+  }
+  // Retrieve and observation failures follow exactly one retrieve invocation;
+  // fresh dispatch failures occur after that response was admitted.
+  return retrieve === 1;
 }
 
 const EXIMBAY_REFUND_REENTRY_CODES = new Set<string>([

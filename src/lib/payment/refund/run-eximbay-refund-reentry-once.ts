@@ -1,3 +1,4 @@
+import { EximbayPreflightException, type EximbayPreflightDiagnostic } from "./providers/eximbay/preflight-diagnostic";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hasEximbayRefundCanaryEffectConfiguration } from "./eximbay-refund-canary-environment";
@@ -46,6 +47,7 @@ export type EximbayRefundReentryResultCode =
   | "INTERNAL_FAILURE";
 
 export type EximbayRefundReentryResult = Readonly<{
+  diagnostic?: EximbayPreflightDiagnostic;
   schema: typeof RESULT_SCHEMA;
   ok: boolean;
   code: EximbayRefundReentryResultCode;
@@ -157,12 +159,22 @@ async function executeAdmittedLease(
     credentialGenerationBindingId: admitted.account.credentialGenerationBindingId,
   });
   const authorize = createEximbayFirstRefundDispatchAuthorizer({ config, retrieve: singleShot.retrieve });
+  let diagnostic: EximbayPreflightDiagnostic | undefined;
+  const observedAuthorize: typeof authorize = async (client, input) => {
+    const authorization = await authorize(client, input);
+    if (!authorization.ok) diagnostic = authorization.diagnostic;
+    return authorization;
+  };
   const contact = createEximbayRefundContactExecutor({ config, cancel: singleShot.cancellation });
   try {
-    const outcome = await continueLeasedEximbayRefundExecution(database, admitted.lease, authorize, contact);
-    return routeResult(outcome, singleShot.counts);
-  } catch {
-    return result(false, contactCode(singleShot.counts), singleShot.counts);
+    const outcome = await continueLeasedEximbayRefundExecution(database, admitted.lease, observedAuthorize, contact);
+    const output = routeResult(outcome, singleShot.counts);
+    return diagnostic ? Object.freeze({ ...output, diagnostic }) : output;
+  } catch (error) {
+    const diagnostic: EximbayPreflightDiagnostic = error instanceof EximbayPreflightException
+      ? error.diagnostic
+      : Object.freeze({ stage: "LEASE_CONTINUATION", kind: "EXCEPTION", code: null, responseReceived: null, httpStatus: null });
+    return Object.freeze({ ...result(false, contactCode(singleShot.counts), singleShot.counts), diagnostic });
   }
 }
 

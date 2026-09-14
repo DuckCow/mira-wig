@@ -65,7 +65,7 @@ export type EximbayRefundRetrieveFailureCode =
 
 export type EximbayRefundRetrieveResult =
   | Readonly<{ kind: "admitted"; facts: EximbayRefundPreflightFacts }>
-  | Readonly<{ kind: "notAdmitted"; code: EximbayRefundRetrieveFailureCode }>;
+  | Readonly<{ kind: "notAdmitted"; code: EximbayRefundRetrieveFailureCode; failureKind: "REJECTION" | "EXCEPTION"; responseReceived?: boolean; httpStatus?: number | null }>;
 
 export function createEximbayRefundRetrievePlan(
   config: EximbayRefundPreflightConfig,
@@ -112,6 +112,8 @@ export async function executeEximbayRefundRetrieve(
   executedPlans.add(plan);
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), EXIMBAY_REFUND_RETRIEVE_DEADLINE_MS);
+  let responseReceived = false;
+  let httpStatus: number | null = null;
   try {
     const response = await transport(plan.endpoint, {
       method: plan.method,
@@ -120,10 +122,13 @@ export async function executeEximbayRefundRetrieve(
       redirect: "error",
       signal: controller.signal,
     });
+    responseReceived = true;
+    httpStatus = safeHttpStatus(response.status);
     const boundary = await readResponseBoundary(response);
-    return boundary.ok ? admitResponse(boundary.body, authority) : notAdmitted(boundary.code);
+    const result = boundary.ok ? admitResponse(boundary.body, authority) : notAdmitted(boundary.code);
+    return result.kind === "admitted" ? result : Object.freeze({ ...result, responseReceived, httpStatus });
   } catch {
-    return notAdmitted("TRANSPORT_FAILURE");
+    return Object.freeze({ ...notAdmitted("TRANSPORT_FAILURE"), failureKind: "EXCEPTION", responseReceived, httpStatus });
   } finally {
     clearTimeout(deadline);
   }
@@ -402,7 +407,7 @@ function admittedJsonContentType(value: string | null): boolean {
 }
 
 function notAdmitted(code: EximbayRefundRetrieveFailureCode): EximbayRefundRetrieveResult {
-  return Object.freeze({ kind: "notAdmitted", code });
+  return Object.freeze({ kind: "notAdmitted", code, failureKind: "REJECTION" });
 }
 
 type ClosedJson =
@@ -574,4 +579,8 @@ class NoDuplicateJsonScanner {
 
   #invalid(): never { throw new ClosedJsonError("INVALID_JSON"); }
   #duplicate(): never { throw new ClosedJsonError("DUPLICATE_JSON_KEY"); }
+}
+
+function safeHttpStatus(status: number): number | null {
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
 }

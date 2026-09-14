@@ -92,7 +92,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     const result = await executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(response(override)),
     );
-    expect(result).toEqual({ kind: "notAdmitted", code });
+    expect(result).toMatchObject({ kind: "notAdmitted", code });
   });
 
   it.each([
@@ -103,7 +103,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     ["duplicate English-example card field", exactBody({ card_info: { cardno1: "4111", cardno4: "1111" } }).replace('"cardno1":"4111"', '"cardno1":"4111","cardno1":"4111"'), "DUPLICATE_JSON_KEY"],
   ])("rejects %s", async (_label, body, code) => {
     const result = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
-    expect(result).toEqual({ kind: "notAdmitted", code });
+    expect(result).toMatchObject({ kind: "notAdmitted", code });
   });
 
   it("admits exactly the raw-byte bound and rejects an oversized stream", async () => {
@@ -123,7 +123,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     });
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(streamResponse(oversized)),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "BODY_TOO_LARGE" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "BODY_TOO_LARGE" });
     expect(cancelled).toBe(true);
   });
 
@@ -133,7 +133,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     });
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(streamResponse(invalidUtf8)),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "INVALID_UTF8" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "INVALID_UTF8" });
 
     const fragmented = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -144,13 +144,24 @@ describe("provider-free Eximbay refund retrieve", () => {
     });
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(streamResponse(fragmented)),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "TOO_MANY_RESPONSE_CHUNKS" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "TOO_MANY_RESPONSE_CHUNKS" });
+  });
+
+  it("retains receipt of an HTTP response even when reading its body rejects", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(new Error("private-body-error")); },
+    });
+    const result = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(
+      new Response(body, { status: 200, headers: { "content-type": "application/json" } }),
+    ));
+    expect(result).toEqual({ kind: "notAdmitted", code: "TRANSPORT_FAILURE", failureKind: "EXCEPTION", responseReceived: true, httpStatus: 200 });
+    expect(JSON.stringify(result)).not.toContain("private-body-error");
   });
 
   it("maps transport failure and aborts the actual request signal at deadline", async () => {
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.reject(new Error("synthetic transport failure")),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "TRANSPORT_FAILURE" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "TRANSPORT_FAILURE", failureKind: "EXCEPTION", responseReceived: false, httpStatus: null });
 
     vi.useFakeTimers();
     let observedSignal: AbortSignal | undefined;
@@ -161,7 +172,7 @@ describe("provider-free Eximbay refund retrieve", () => {
       });
     });
     await vi.advanceTimersByTimeAsync(EXIMBAY_REFUND_RETRIEVE_DEADLINE_MS + 1);
-    await expect(pending).resolves.toEqual({ kind: "notAdmitted", code: "TRANSPORT_FAILURE" });
+    await expect(pending).resolves.toMatchObject({ kind: "notAdmitted", code: "TRANSPORT_FAILURE", failureKind: "EXCEPTION", responseReceived: false, httpStatus: null });
     expect(observedSignal?.aborted).toBe(true);
   });
 });
