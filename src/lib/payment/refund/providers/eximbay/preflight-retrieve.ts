@@ -1,4 +1,4 @@
-import { emptyRetrieveShapeDiagnostic, summarizeShape, ROOT_FIELDS, PAYMENT_FIELDS, CARD_FIELDS, OTHER_FIELDS, type RetrieveShapeDiagnostic, type RetrieveShapeFailure } from "./retrieve-shape-diagnostic";
+import { emptyRetrieveShapeDiagnostic, summarizeShape, ROOT_FIELDS, PAYMENT_FIELDS, CARD_FIELDS, OTHER_FIELDS, type OtherParamClass, type OptionalRootDetail, type RetrieveShapeDiagnostic, type RetrieveShapeFailure } from "./retrieve-shape-diagnostic";
 import { PaymentMode } from "@prisma/client";
 import { decodeEximbayAmount, encodeEximbayAmount } from "@/lib/payment/providers/eximbay/amount";
 import { isRecord, requireExactKeys, requireExactText } from "@/lib/payment/providers/eximbay/validation";
@@ -250,6 +250,7 @@ function admitRoot(
   }
   if (root.rescode !== "0000") return notAdmitted("PROVIDER_NON_SUCCESS");
   if (!isRecord(root.payment)) return shapeFailure(diagnostic, "PAYMENT_NOT_OBJECT");
+  observeOptionalRootDetail(root, diagnostic);
   if (!optionalRootEnvelopeValid(root)) return shapeFailure(diagnostic, "OPTIONAL_ROOT_ENVELOPE_INVALID");
   return admitPayment(root.mid, root.payment, authority, diagnostic);
 }
@@ -326,6 +327,48 @@ function optionalOtherParamValid(root: Record<string, unknown>): boolean {
   return ["param1", "param2"].every((key) => (
     !Object.hasOwn(otherParam, key) || Boolean(boundedText(otherParam[key], 255))
   ));
+}
+
+// Observation uses the same parsed root and the installed admission helpers. The
+// financial predicate and its short-circuit/failure ordering remain unchanged.
+function observeOptionalRootDetail(root: Record<string, unknown>, diagnostic?: RetrieveShapeDiagnostic): void {
+  if (!diagnostic) return;
+  const card = root.card_info;
+  const pair = isRecord(card) ? documentedCardFields(card) : null;
+  const other = isRecord(root.other_param) ? root.other_param : {};
+  diagnostic.optionalRootDetail = {
+    cardInfo: {
+      pairKind: cardPairKind(root, pair),
+      firstFourAsciiDigits: pair ? /^[0-9]{4}$/u.test(boundedText(pair[0], 4) ?? "") : null,
+      lastFourAsciiDigits: pair ? /^[0-9]{4}$/u.test(boundedText(pair[1], 4) ?? "") : null,
+      parserValid: optionalCardInfoValid(root),
+    },
+    otherParam: {
+      param1Class: otherParamClass(other, "param1"),
+      param2Class: otherParamClass(other, "param2"),
+      param1TextLengthOver255: textLengthOver255(other.param1),
+      param2TextLengthOver255: textLengthOver255(other.param2),
+      parserValid: optionalOtherParamValid(root),
+    },
+  };
+}
+function cardPairKind(root: Record<string, unknown>, pair: readonly [unknown, unknown] | null): OptionalRootDetail["cardInfo"]["pairKind"] {
+  if (!Object.hasOwn(root, "card_info")) return "ABSENT";
+  if (!pair || !isRecord(root.card_info)) return "INVALID";
+  return Object.hasOwn(root.card_info, "card_number1") ? "FORMAL" : "LEGACY";
+}
+function otherParamClass(other: Record<string, unknown>, key: string): OtherParamClass {
+  if (!Object.hasOwn(other, key)) return "ABSENT";
+  const value = other[key];
+  if (typeof value !== "string") return "NOT_STRING";
+  if (value.trim().length === 0) return "EMPTY_OR_WHITESPACE_ONLY";
+  if (value !== value.trim()) return "TRIM_MISMATCH";
+  try { requireExactText(value, "INVALID_EXIMBAY_RETRIEVE_TEXT"); }
+  catch { return "CONTROL_OR_SURROGATE"; }
+  return boundedText(value, 255) === null ? "OVER_255_UTF8_BYTES" : "VALID";
+}
+function textLengthOver255(value: unknown): boolean | null {
+  return typeof value === "string" ? Array.from(value).length > 255 : null;
 }
 
 function optionalPaymentEnvelopeValid(payment: Record<string, unknown>): boolean {

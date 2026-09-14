@@ -1922,6 +1922,35 @@ describe("read-only diagnostic supervisor", () => {
     expect(JSON.stringify(harness.stdout)).not.toMatch(/private|REFUND_SUCCEEDED/);
     expect(proxy.killCalls).toEqual(["SIGTERM"]);
   });
+  it.each(["valid", "extra", "card-private", "parameter-length", "inconsistent", "missing"])("validates refined diagnostic detail through supervisor: %s", async (fault) => {
+    const shape = { ...emptyRetrieveShapeDiagnostic(), jsonParseSuccess: true,
+      firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID",
+      optionalRootDetail: {
+        cardInfo: { pairKind: "FORMAL", firstFourAsciiDigits: true, lastFourAsciiDigits: true, parserValid: true },
+        otherParam: { param1Class: "OVER_255_UTF8_BYTES", param2Class: "ABSENT",
+          param1TextLengthOver255: false, param2TextLengthOver255: null, parserValid: false },
+      },
+    };
+    const detail = shape.optionalRootDetail;
+    const variants: Record<string, unknown> = {
+      valid: detail,
+      extra: { ...detail, raw: "private-value" },
+      "card-private": { ...detail, cardInfo: { ...detail.cardInfo, digits: "private-card" } },
+      "parameter-length": { ...detail, otherParam: { ...detail.otherParam, length: 258 } },
+      inconsistent: { ...detail, otherParam: { ...detail.otherParam, parserValid: true } },
+      missing: null,
+    };
+    const result = { ...diagnosticResult("DIAGNOSTIC_COMPLETE"), inquiryCount: 1,
+      parserResult: "UNKNOWN_SHAPE", shape: { ...shape, optionalRootDetail: variants[fault] } };
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness([proxy, completedChild(0, `${JSON.stringify(result)}\n`, "")], { readiness: true });
+    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(fault === "valid" ? 0 : 1);
+    expect(JSON.parse(harness.stdout[0])).toMatchObject({
+      childValidation: fault === "valid" ? "TRUSTED" : "INVALID_DIAGNOSTIC_OUTPUT",
+      childResult: fault === "valid" ? result : null,
+    });
+    expect(JSON.stringify(harness.stdout)).not.toMatch(/private-value|private-card|258/);
+  });
   it("rejects stderr alongside a valid diagnostic terminal", async () => {
     const proxy = runningChild({ closeOnTerm: 0 });
     const child = completedChild(1, `${JSON.stringify(diagnosticResult("PAYMENT_NOT_FOUND"))}\n`, "secret-private");

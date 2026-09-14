@@ -18,6 +18,27 @@ export type ShapeSummary = Readonly<{
   fields: readonly Readonly<{ name: string; type: JsonType }>[];
   extraKeyCount: number;
 }>;
+export const OTHER_PARAM_CLASSES = [
+  "ABSENT", "NOT_STRING", "EMPTY_OR_WHITESPACE_ONLY", "TRIM_MISMATCH",
+  "CONTROL_OR_SURROGATE", "OVER_255_UTF8_BYTES", "VALID",
+] as const;
+export type OtherParamClass = typeof OTHER_PARAM_CLASSES[number];
+export type OptionalRootDetail = Readonly<{
+  cardInfo: Readonly<{
+    pairKind: "FORMAL" | "LEGACY" | "INVALID" | "ABSENT";
+    firstFourAsciiDigits: boolean | null;
+    lastFourAsciiDigits: boolean | null;
+    parserValid: boolean;
+  }>;
+  otherParam: Readonly<{
+    param1Class: OtherParamClass;
+    param2Class: OtherParamClass;
+    // Unicode code points, not UTF-16 code units or a vendor length interpretation.
+    param1TextLengthOver255: boolean | null;
+    param2TextLengthOver255: boolean | null;
+    parserValid: boolean;
+  }>;
+}>;
 export interface RetrieveShapeDiagnostic {
   httpStatus: number | null;
   contentTypeClass: "UNOBSERVED" | "JSON" | "OTHER";
@@ -27,11 +48,12 @@ export interface RetrieveShapeDiagnostic {
   payment: ShapeSummary;
   cardInfo: ShapeSummary;
   otherParam: ShapeSummary;
+  optionalRootDetail: OptionalRootDetail | null;
   firstFailure: RetrieveShapeFailure;
 }
 export function emptyRetrieveShapeDiagnostic(): RetrieveShapeDiagnostic {
   return { httpStatus: null, contentTypeClass: "UNOBSERVED", bodyByteLength: null,
-    jsonParseSuccess: false, root: unobserved(), payment: unobserved(), cardInfo: unobserved(), otherParam: unobserved(), firstFailure: "UNESTABLISHED" };
+    optionalRootDetail: null, jsonParseSuccess: false, root: unobserved(), payment: unobserved(), cardInfo: unobserved(), otherParam: unobserved(), firstFailure: "UNESTABLISHED" };
 }
 function unobserved(): ShapeSummary { return { type: "unobserved", fields: [], extraKeyCount: 0 }; }
 function jsonType(value: unknown): JsonType {
@@ -72,16 +94,49 @@ function validSummary(value: unknown, allowed: readonly string[]): boolean {
 }
 export function isRetrieveShapeDiagnostic(value: unknown): value is RetrieveShapeDiagnostic {
   if (!record(value) || !exact(value, ["httpStatus", "contentTypeClass", "bodyByteLength",
-    "jsonParseSuccess", "root", "payment", "cardInfo", "otherParam", "firstFailure"])) return false;
+    "jsonParseSuccess", "root", "payment", "cardInfo", "otherParam", "optionalRootDetail", "firstFailure"])) return false;
   return [validHttpStatus(value.httpStatus),
     ["UNOBSERVED", "JSON", "OTHER"].some((kind) => kind === value.contentTypeClass),
     value.bodyByteLength === null || integer(value.bodyByteLength, 65_536),
     typeof value.jsonParseSuccess === "boolean", validSummary(value.root, ROOT_FIELDS),
     validSummary(value.payment, PAYMENT_FIELDS), validSummary(value.cardInfo, CARD_FIELDS),
     validSummary(value.otherParam, OTHER_FIELDS),
+    validOptionalRootDetail(value.optionalRootDetail),
+    optionalRootFailureConsistent(value),
     RETRIEVE_SHAPE_FAILURES.some((failure) => failure === value.firstFailure)].every(Boolean);
 }
 
 function validHttpStatus(value: unknown): boolean {
   return value === null || (typeof value === "number" && value >= 100 && integer(value, 599));
+}
+
+function nullableBoolean(value: unknown): boolean {
+  return value === null || typeof value === "boolean";
+}
+function validCardDetail(value: unknown): boolean {
+  if (!record(value) || !exact(value, ["pairKind", "firstFourAsciiDigits", "lastFourAsciiDigits", "parserValid"])) return false;
+  return [
+    ["FORMAL", "LEGACY", "INVALID", "ABSENT"].some((kind) => kind === value.pairKind),
+    nullableBoolean(value.firstFourAsciiDigits), nullableBoolean(value.lastFourAsciiDigits),
+    typeof value.parserValid === "boolean",
+  ].every(Boolean);
+}
+function validOtherDetail(value: unknown): boolean {
+  if (!record(value) || !exact(value, ["param1Class", "param2Class", "param1TextLengthOver255", "param2TextLengthOver255", "parserValid"])) return false;
+  return [
+    OTHER_PARAM_CLASSES.some((kind) => kind === value.param1Class),
+    OTHER_PARAM_CLASSES.some((kind) => kind === value.param2Class),
+    nullableBoolean(value.param1TextLengthOver255), nullableBoolean(value.param2TextLengthOver255),
+    typeof value.parserValid === "boolean",
+  ].every(Boolean);
+}
+function validOptionalRootDetail(value: unknown): boolean {
+  return value === null || (record(value) && exact(value, ["cardInfo", "otherParam"])
+    && validCardDetail(value.cardInfo) && validOtherDetail(value.otherParam));
+}
+function optionalRootFailureConsistent(value: Record<string, unknown>): boolean {
+  if (value.firstFailure !== "OPTIONAL_ROOT_ENVELOPE_INVALID") return true;
+  const detail = value.optionalRootDetail;
+  return record(detail) && record(detail.cardInfo) && record(detail.otherParam)
+    && (detail.cardInfo.parserValid === false || detail.otherParam.parserValid === false);
 }

@@ -1,3 +1,4 @@
+import { isRetrieveShapeDiagnostic } from "../retrieve-shape-diagnostic";
 import { PaymentMode, PaymentProvider } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -333,5 +334,96 @@ describe("observational retrieve diagnostic parity", () => {
   it.each(["{", '{"rescode":"0000","rescode":"0000"}'])("keeps invalid JSON failure before structural checks", async (body) => {
     const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
     expect(observation.shape).toMatchObject({ jsonParseSuccess: false, firstFailure: "UNESTABLISHED" });
+  });
+});
+
+
+describe("value-free optional root subpredicates", () => {
+  async function observe(extra: Record<string, unknown>) {
+    const body = JSON.stringify({ ...bodyObject(), ...extra });
+    const transport = vi.fn(() => Promise.resolve(rawResponse(body)));
+    const result = await diagnoseEximbayRefundRetrieve(plan(), transport);
+    const financial = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    expect(result.parserResult).toBe(financial.kind === "admitted" ? "ADMITTED" : financial.code);
+    expect(isRetrieveShapeDiagnostic(result.shape)).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(1);
+    return result;
+  }
+  it.each([
+    [{ card_number1: "5826", card_number4: "9371" }, "FORMAL", true, true, true],
+    [{ cardno1: "5826", cardno4: "9371" }, "LEGACY", true, true, true],
+    [{ card_number1: "123", card_number4: "9371" }, "FORMAL", false, true, false],
+    [{ cardno1: "5826", cardno4: "abcd" }, "LEGACY", true, false, false],
+    [{ cardno1: "１２３４", cardno4: "9371" }, "LEGACY", false, true, false],
+    [{ cardno1: "5826", cardno4: "9371\n" }, "LEGACY", true, false, false],
+    [{ cardno1: 5826, cardno4: "9371" }, "LEGACY", false, true, false],
+    [{ cardno1: "5826", card_number4: "9371" }, "INVALID", null, null, false],
+    [{ cardno1: "5826", cardno4: "9371", card_number1: "5826", card_number4: "9371" }, "INVALID", null, null, false],
+    [{ cardno1: "5826", cardno4: "9371", private: "value" }, "INVALID", null, null, false],
+    [null, "INVALID", null, null, false],
+    [[], "INVALID", null, null, false],
+    [undefined, "ABSENT", null, null, true],
+  ])("classifies card pair %j", async (card_info, pairKind, first, last, parserValid) => {
+    const result = await observe({ card_info });
+    expect(result.shape.optionalRootDetail?.cardInfo).toEqual({
+      pairKind, firstFourAsciiDigits: first, lastFourAsciiDigits: last, parserValid,
+    });
+    expect(result.parserResult).toBe(parserValid ? "ADMITTED" : "UNKNOWN_SHAPE");
+    expect(JSON.stringify(result)).not.toMatch(/5826|9371|private/);
+  });
+  const cases = [
+    [undefined, "ABSENT", null, true], [null, "NOT_STRING", null, false],
+    [19, "NOT_STRING", null, false], [[], "NOT_STRING", null, false],
+    ["", "EMPTY_OR_WHITESPACE_ONLY", false, false], [" \t ", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    [" leading", "TRIM_MISMATCH", false, false], ["trailing ", "TRIM_MISMATCH", false, false],
+    ["a\u0000b", "CONTROL_OR_SURROGATE", false, false], ["a\u0085b", "CONTROL_OR_SURROGATE", false, false],
+    ["a\ud800b", "CONTROL_OR_SURROGATE", false, false], ["a\udc00b", "CONTROL_OR_SURROGATE", false, false],
+    ["q", "VALID", false, true], ["q".repeat(255), "VALID", false, true],
+    ["한".repeat(85), "VALID", false, true], ["한".repeat(86), "OVER_255_UTF8_BYTES", false, false],
+    ["😀".repeat(128), "OVER_255_UTF8_BYTES", false, false],
+    ["q".repeat(256), "OVER_255_UTF8_BYTES", true, false],
+    ["😀".repeat(256), "OVER_255_UTF8_BYTES", true, false],
+  ] as const;
+  describe.each(["param1", "param2"] as const)("%s", (key) => {
+    it.each(cases)("classifies case %#", async (value, kind, over, parserValid) => {
+      const result = await observe({ other_param: { [key]: value } });
+      const detail = result.shape.optionalRootDetail?.otherParam;
+      expect(detail).toMatchObject({ [`${key}Class`]: kind, [`${key}TextLengthOver255`]: over, parserValid });
+      expect(result.parserResult).toBe(parserValid ? "ADMITTED" : "UNKNOWN_SHAPE");
+      // The detail contains only enum strings, booleans, and null; never lengths.
+      for (const field of Object.values(detail ?? {})) expect(typeof field).not.toBe("number");
+      if (typeof value === "string" && value.length > 1) expect(JSON.stringify(result)).not.toContain(JSON.stringify(value));
+    });
+  });
+  it.each([null, [], { unknownPrivateKey: "private" }])("rejects malformed other_param %j", async (other_param) => {
+    const result = await observe({ other_param });
+    expect(result.shape.optionalRootDetail?.otherParam.parserValid).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+  it("observes both invalid envelopes and preserves earlier first failures", async () => {
+    const extra = { card_info: { cardno1: "oops", cardno4: "9371" }, other_param: { param1: " bad", param2: "" } };
+    const result = await observe(extra);
+    expect(result.shape).toMatchObject({ firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID", optionalRootDetail: {
+      cardInfo: { parserValid: false }, otherParam: { parserValid: false, param1Class: "TRIM_MISMATCH", param2Class: "EMPTY_OR_WHITESPACE_ONLY" },
+    } });
+    for (const earlier of [{ resmsg: "" }, { payment: [] }, { unknown: true }]) {
+      const first = await observe({ ...extra, ...earlier });
+      expect(first.shape.firstFailure).not.toBe("OPTIONAL_ROOT_ENVELOPE_INVALID");
+      expect(first.shape.optionalRootDetail).toBeNull();
+    }
+  });
+  it("rejects private/extra detail at every level and inconsistent optional-root failure", async () => {
+    const { shape } = await observe({});
+    const detail = shape.optionalRootDetail;
+    expect(detail).not.toBeNull();
+    expect(isRetrieveShapeDiagnostic({ ...shape, firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID" })).toBe(false);
+    expect(isRetrieveShapeDiagnostic({ ...shape, optionalRootDetail: null, firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID" })).toBe(false);
+    for (const optionalRootDetail of [
+      { ...detail, raw: "private" },
+      { ...detail, cardInfo: { ...detail?.cardInfo, digits: "9371" } },
+      { ...detail, otherParam: { ...detail?.otherParam, param1Length: 86 } },
+      { ...detail, otherParam: { ...detail?.otherParam, param1Class: "private" } },
+      { ...detail, otherParam: { ...detail?.otherParam, param1TextLengthOver255: 86 } },
+    ]) expect(isRetrieveShapeDiagnostic({ ...shape, optionalRootDetail })).toBe(false);
   });
 });
