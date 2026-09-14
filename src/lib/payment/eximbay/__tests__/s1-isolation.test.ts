@@ -110,6 +110,7 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/providers/eximbay/trusted-facts.ts",
         "src/lib/payment/refund/providers/eximbay/cancel-contact.ts",
         "src/lib/payment/refund/providers/eximbay/cancel-wire.ts",
+        "src/lib/payment/refund/providers/eximbay/contacted-evidence-parser.ts",
         "src/lib/payment/refund/providers/eximbay/preflight-retrieve.ts",
         "src/lib/payment/refund/providers/eximbay/refund-lookup.ts",
       ],
