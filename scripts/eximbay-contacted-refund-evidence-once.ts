@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { runEximbayContactedRefundEvidenceOnce } from "../src/lib/payment/refund/run-eximbay-contacted-refund-evidence-once";
 
-// Existing specialized worker CLI convention. No container/job/image changes.
+// Existing specialized worker CLI convention; worker-image dispatch is explicit and one-shot.
 export async function main(): Promise<number> {
   if (process.argv.length !== 3) return 64;
   const result = await runEximbayContactedRefundEvidenceOnce(process.argv[2], process.env);

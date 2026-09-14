@@ -28,6 +28,8 @@ import {
 } from "../eximbay-contacted-reconciliation-environment";
 import { parseEximbayRefundCanaryEnvironment } from "../eximbay-refund-canary-environment";
 import type { EximbayRefundReentryResult } from "../run-eximbay-refund-reentry-once";
+import { CONTACTED_EVIDENCE_COMMAND_ID } from "../providers/eximbay/contacted-evidence-state";
+import type { ContactedEvidenceResult } from "../run-eximbay-contacted-refund-evidence-once";
 
 const INSTANCE = "sample-project:asia-northeast3:refund-db";
 const DATABASE_URL =
@@ -212,6 +214,207 @@ describe("refund worker container supervisor", () => {
       executable: process.execPath,
       args: ["/test/eximbay-contacted-reconciliation.mjs"],
     });
+    expect(harness.stdout).toEqual([terminal]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("runs only the contacted-refund evidence bundle with the fixed command identity", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const terminal = contactedEvidenceTerminal(contactedEvidenceResult());
+    const child = completedChild(0, terminal, "");
+    const harness = supervisorHarness([proxy, child], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      {
+        REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
+        DATABASE_URL,
+      },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.spawnCalls).toHaveLength(2);
+    expect(harness.spawnCalls[1]).toMatchObject({
+      executable: process.execPath,
+      args: ["/test/eximbay-contacted-refund-evidence.mjs", CONTACTED_EVIDENCE_COMMAND_ID],
+    });
+    expect(harness.stdout).toEqual([terminal]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it.each([
+    ["NO_MATCHING_REFUND_TRANSACTION", contactedEvidenceResult({
+      parserResult: "NO_MATCHING_REFUND_TRANSACTION",
+      providerStatusClass: "NONE",
+      refundIdMatch: false,
+      refundAmountMatch: false,
+      refundTransactionIdPresent: false,
+    })],
+    ["UNESTABLISHED", contactedEvidenceResult({
+      parserResult: "UNESTABLISHED",
+      firstFailure: "UNSUPPORTED_STATUS",
+      providerStatusClass: "OTHER",
+    })],
+    ["CONFIG_INVALID", contactedEvidenceResult({
+      databaseDisconnected: false,
+      inquiryCount: 0,
+      httpStatus: null,
+      jsonValid: null,
+      parserResult: "UNESTABLISHED",
+      firstFailure: "CONFIG_INVALID",
+      providerStatusClass: null,
+      providerResponseSuccess: null,
+      refundIdMatch: null,
+      originalTransactionBindingMatch: null,
+      currencyMatch: null,
+      refundAmountMatch: null,
+      refundTransactionIdPresent: null,
+      refundDatePresent: null,
+    })],
+    ["IDENTITY_MISMATCH", contactedEvidenceResult({
+      parserResult: "IDENTITY_MISMATCH",
+      firstFailure: "REFUND_ID",
+      refundIdMatch: false,
+    })],
+    ["MONEY_MISMATCH", contactedEvidenceResult({
+      parserResult: "MONEY_MISMATCH",
+      firstFailure: "ORIGINAL_MONEY",
+      currencyMatch: false,
+    })],
+    ["TRANSPORT_FAILURE", contactedEvidenceResult({
+      httpStatus: null,
+      jsonValid: null,
+      parserResult: "UNESTABLISHED",
+      firstFailure: "TRANSPORT_FAILURE",
+      providerStatusClass: null,
+      providerResponseSuccess: null,
+      refundIdMatch: null,
+      originalTransactionBindingMatch: null,
+      currencyMatch: null,
+      refundAmountMatch: null,
+      refundTransactionIdPresent: null,
+      refundDatePresent: null,
+    })],
+  ] as const)("preserves trusted exit-1 contacted evidence: %s", async (_name, result) => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const terminal = contactedEvidenceTerminal(result);
+    const harness = supervisorHarness([
+      proxy,
+      completedChild(1, terminal, "bounded child diagnostic\n"),
+    ], { readiness: true });
+
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output,
+      harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([terminal]);
+    expect(harness.stderr).toEqual([]);
+    expect(proxy.killCalls).toEqual(["SIGTERM"]);
+  });
+
+  it.each([
+    ["malformed", "not-json\n"],
+    ["empty", ""],
+    ["wrong schema", contactedEvidenceTerminal(contactedEvidenceResult({
+      schema: "wrong-contacted-evidence-schema",
+    }))],
+  ])("rejects exit-1 contacted evidence with %s stdout", async (_name, terminal) => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness([
+      proxy,
+      completedChild(1, terminal, ""),
+    ], { readiness: true });
+
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output,
+      harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+  });
+
+  it("rejects exit 2 even when stdout is superficially valid contacted evidence", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const terminal = contactedEvidenceTerminal(contactedEvidenceResult({
+      parserResult: "UNESTABLISHED",
+      firstFailure: "TRANSPORT_FAILURE",
+    }));
+    const harness = supervisorHarness([
+      proxy,
+      completedChild(2, terminal, ""),
+    ], { readiness: true });
+
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output,
+      harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+  });
+
+  it("preserves CONFIG_INVALID evidence from a real exit-1 child process", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const terminal = contactedEvidenceTerminal(contactedEvidenceResult({
+      databaseDisconnected: false,
+      inquiryCount: 0,
+      httpStatus: null,
+      jsonValid: null,
+      parserResult: "UNESTABLISHED",
+      firstFailure: "CONFIG_INVALID",
+      providerStatusClass: null,
+      providerResponseSuccess: null,
+      refundIdMatch: null,
+      originalTransactionBindingMatch: null,
+      currencyMatch: null,
+      refundAmountMatch: null,
+      refundTransactionIdPresent: null,
+      refundDatePresent: null,
+    }));
+    let spawnCount = 0;
+    const harness = supervisorHarness([], { readiness: true });
+    const dependencies: RefundWorkerContainerSupervisorDependencies = Object.freeze({
+      ...harness.dependencies,
+      spawn: () => {
+        spawnCount += 1;
+        if (spawnCount === 1) {
+          proxy.start();
+          return proxy;
+        }
+        const processChild = spawn(process.execPath, [
+          "--eval",
+          `process.stdout.write(${JSON.stringify(terminal)}); process.exitCode = 1;`,
+        ], { stdio: ["ignore", "pipe", "pipe"] });
+        if (!processChild.stdout || !processChild.stderr) throw new Error("MISSING_CHILD_STREAM");
+        const stdout = processChild.stdout;
+        const stderr = processChild.stderr;
+        return Object.freeze({
+          stdout,
+          stderr,
+          once: (event: "close", listener: (
+            code: number | null,
+            signal: NodeJS.Signals | null,
+          ) => void) => processChild.once(event, listener),
+          kill: (signal: NodeJS.Signals) => processChild.kill(signal),
+          get exitCode() { return processChild.exitCode; },
+          get signalCode() { return processChild.signalCode; },
+        });
+      },
+    });
+
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output,
+      dependencies,
+    )).toBe(1);
     expect(harness.stdout).toEqual([terminal]);
     expect(harness.stderr).toEqual([]);
   });
@@ -1441,6 +1644,7 @@ function supervisorHarness(
     workerBundle: "/test/refund-execution-worker.mjs",
     preflightBundle: "/test/refund-sandbox-provider-free-preflight.mjs",
     eximbayContactedReconciliationBundle: "/test/eximbay-contacted-reconciliation.mjs",
+    eximbayContactedRefundEvidenceBundle: "/test/eximbay-contacted-refund-evidence.mjs",
     eximbayRefundReentryBundle: "/test/eximbay-refund-reentry.mjs",
     spawn: (executable, args) => {
       spawnCalls.push(Object.freeze({
@@ -1707,6 +1911,35 @@ function reentryTerminal(result: EximbayRefundReentryResult): string {
 function parseOnlyOutput(output: readonly string[]): unknown {
   expect(output).toHaveLength(1);
   return JSON.parse(output[0] ?? "null");
+}
+
+function contactedEvidenceResult(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const result: ContactedEvidenceResult = Object.freeze({
+    schema: "mira-eximbay-contacted-refund-evidence/v1",
+    diagnosticCode: "CONTACTED_REFUND_EVIDENCE",
+    terminalClass: "READ_ONLY_CONTACTED_REFUND_EVIDENCE",
+    databaseDisconnected: true,
+    inquiryCount: 1,
+    httpStatus: 200,
+    jsonValid: true,
+    parserResult: "MATCHED_REFUND_TRANSACTION",
+    firstFailure: null,
+    providerStatusClass: "REFUND",
+    providerResponseSuccess: true,
+    refundIdMatch: true,
+    originalTransactionBindingMatch: true,
+    currencyMatch: true,
+    refundAmountMatch: true,
+    refundTransactionIdPresent: true,
+    refundDatePresent: false,
+  });
+  return Object.freeze({ ...result, ...overrides });
+}
+
+function contactedEvidenceTerminal(result: unknown): string {
+  return `${JSON.stringify(result)}\n`;
 }
 
 function contactedReconciliationTerminal(providerRetrieveCount: 0 | 1): string {

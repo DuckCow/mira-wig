@@ -36,6 +36,8 @@ const entryPoints = Object.freeze({
     "scripts/refund-sandbox-provider-free-preflight.ts",
   "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
   "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
+  "eximbay-contacted-refund-evidence":
+    "scripts/eximbay-contacted-refund-evidence-once.ts",
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
   "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
   "eximbay-retrieve-shape-diagnostic": "scripts/eximbay-retrieve-shape-diagnostic.ts",

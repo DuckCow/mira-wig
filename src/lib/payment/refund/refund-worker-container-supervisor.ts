@@ -1,6 +1,7 @@
 import { isRetrieveDiagnosticResult, type RetrieveDiagnosticResult } from "./retrieve-diagnostic-result";
 import { diagnosticPaymentId } from "./run-eximbay-retrieve-shape-diagnostic-once";
 import { diagnosticFields, isEximbayPreflightDiagnostic } from "./providers/eximbay/preflight-diagnostic";
+import { CONTACTED_EVIDENCE_COMMAND_ID } from "./providers/eximbay/contacted-evidence-state";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { access } from "node:fs/promises";
@@ -60,6 +61,9 @@ const PREFLIGHT_BUNDLE = fileURLToPath(
 const EXIMBAY_CANARY_BUNDLE = fileURLToPath(
   new URL("./eximbay-refund-canary.mjs", import.meta.url),
 );
+const EXIMBAY_CONTACTED_REFUND_EVIDENCE_BUNDLE = fileURLToPath(
+  new URL("./eximbay-contacted-refund-evidence.mjs", import.meta.url),
+);
 const EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE = fileURLToPath(
   new URL("./eximbay-contacted-reconciliation.mjs", import.meta.url),
 );
@@ -74,6 +78,7 @@ const INVALID_HOST_INPUT_LINE = '{"ok":false,"code":"INVALID_HOST_INPUT"}\n';
 const CONFIG_INVALID_LINE = '{"ok":false,"code":"CONFIG_INVALID"}\n';
 
 export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
+  "eximbay-contacted-refund-evidence-once",
   "eximbay-retrieve-shape-diagnostic-once",
   "worker-check",
   "worker-health",
@@ -124,6 +129,7 @@ export type RefundWorkerContainerSupervisorDependencies = Readonly<{
   workerBundle: string;
   preflightBundle: string;
   eximbayCanaryBundle: string;
+  eximbayContactedRefundEvidenceBundle: string;
   eximbayContactedReconciliationBundle: string;
   eximbayRefundReentryBundle: string;
   inspectSelf: () => Promise<RefundWorkerImageSelfCheck>;
@@ -163,6 +169,7 @@ RefundWorkerContainerSupervisorDependencies = Object.freeze({
   workerBundle: WORKER_BUNDLE,
   preflightBundle: PREFLIGHT_BUNDLE,
   eximbayCanaryBundle: EXIMBAY_CANARY_BUNDLE,
+  eximbayContactedRefundEvidenceBundle: EXIMBAY_CONTACTED_REFUND_EVIDENCE_BUNDLE,
   eximbayContactedReconciliationBundle: EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE,
   eximbayRefundReentryBundle: EXIMBAY_REFUND_REENTRY_BUNDLE,
   inspectSelf: inspectRefundWorkerImage,
@@ -202,6 +209,9 @@ function directCommand(
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
   dependencies: RefundWorkerContainerSupervisorDependencies,
 ): Promise<number> | null {
+  if (command === "eximbay-contacted-refund-evidence-once") {
+    return runEximbayContactedRefundEvidenceOnce(env, output, dependencies);
+  }
   if (command === "eximbay-retrieve-shape-diagnostic-once") {
     return runRetrieveDiagnostic(env, output, dependencies);
   }
@@ -214,6 +224,23 @@ function directCommand(
     return runEximbayRefundReentryOnce(env, output, dependencies);
   }
   return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+}
+
+async function runEximbayContactedRefundEvidenceOnce(
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> {
+  const binding = validateDatabaseBinding(env);
+  if (!binding) return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
+  return runWithProxy(binding, Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      dependencies.eximbayContactedRefundEvidenceBundle,
+      CONTACTED_EVIDENCE_COMMAND_ID,
+    ]),
+    resultSchema: "EXIMBAY_CONTACTED_REFUND_EVIDENCE",
+  }), env, output, dependencies);
 }
 
 async function runRetrieveDiagnostic(
@@ -355,7 +382,8 @@ function hasConnectionEnvironmentOverride(env: RuntimeEnvironment): boolean {
 type ChildSpecification = Readonly<{
   executable: string;
   args: readonly string[];
-  resultSchema?: "EXIMBAY_CONTACTED_RECONCILIATION" | "EXIMBAY_REFUND_REENTRY" | "EXIMBAY_RETRIEVE_DIAGNOSTIC";
+  resultSchema?: "EXIMBAY_CONTACTED_REFUND_EVIDENCE" | "EXIMBAY_CONTACTED_RECONCILIATION"
+    | "EXIMBAY_REFUND_REENTRY" | "EXIMBAY_RETRIEVE_DIAGNOSTIC";
 }>;
 
 async function runWithProxy(
@@ -551,6 +579,13 @@ async function finalizeLegacyProxiedChildResult(
         1,
       );
   }
+  if (childSpecification.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE") {
+    return writeStatic(
+      output.stdout,
+      assessment.evidence.result.line,
+      assessment.evidence.result.exitCode,
+    );
+  }
   return relayChildResult(assessment.evidence.result, output);
 }
 
@@ -570,6 +605,20 @@ function trustedChildEvidence(
 }> {
   const result = capture.result;
   if (!result) return Object.freeze({ evidence: null, validation: capture.validation });
+  if (specification.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE") {
+    const validation = validateContactedRefundEvidenceTerminal(result);
+    return validation === "TRUSTED"
+      ? Object.freeze({
+        evidence: Object.freeze({
+          result,
+          providerRetrieveCount: null,
+          providerObservation: null,
+          reentryResult: null,
+        }),
+        validation,
+      })
+      : Object.freeze({ evidence: null, validation });
+  }
   if (specification.resultSchema === "EXIMBAY_REFUND_REENTRY") {
     const validation = validateEximbayRefundReentryTerminal(result);
     return validation.state === "TRUSTED"
@@ -758,7 +807,11 @@ type ChildValidationState =
   | "REENTRY_COUNTER_INVALID"
   | "REENTRY_CLEANUP_INVALID"
   | "REENTRY_SEMANTICS_INVALID"
-  | "REENTRY_EXIT_CODE_MISMATCH";
+  | "REENTRY_EXIT_CODE_MISMATCH"
+  | "EVIDENCE_KEY_SET_MISMATCH"
+  | "EVIDENCE_SCHEMA_MISMATCH"
+  | "EVIDENCE_SEMANTICS_INVALID"
+  | "EVIDENCE_EXIT_CODE_MISMATCH";
 type ChildCapture = Readonly<{
   processState: ChildProcessState;
   exitCode: number | null;
@@ -865,10 +918,16 @@ function captureCompletedChildResult(input: Readonly<{
   const exit = Object.freeze({ code: input.exitCode, signal: null });
   const reentry = input.resultSchema === "EXIMBAY_REFUND_REENTRY";
   const diagnostic = input.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC";
-  const useStdout = [reentry, diagnostic, input.exitCode === 0].some(Boolean);
+  const contactedEvidence = input.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE";
+  const useStdout = [
+    reentry,
+    diagnostic,
+    contactedEvidence && (input.exitCode === 0 || input.exitCode === 1),
+    input.exitCode === 0,
+  ].some(Boolean);
   const selected = useStdout ? input.stdout : input.stderr;
-  const other = otherChildStream(input, reentry, useStdout);
-  const terminal = exactOneJsonLine(selected, other, reentry || diagnostic);
+  const other = otherChildStream(input, reentry || contactedEvidence, useStdout);
+  const terminal = exactOneJsonLine(selected, other, reentry || diagnostic || contactedEvidence);
   return terminal.terminal
     ? childCapture(
       input.processState,
@@ -1050,6 +1109,162 @@ const EXIMBAY_REFUND_REENTRY_KEYS = Object.freeze([
   "schema",
   "terminalClass",
 ]);
+
+const CONTACTED_REFUND_EVIDENCE_KEYS = Object.freeze([
+  "currencyMatch",
+  "databaseDisconnected",
+  "diagnosticCode",
+  "firstFailure",
+  "httpStatus",
+  "inquiryCount",
+  "jsonValid",
+  "originalTransactionBindingMatch",
+  "parserResult",
+  "providerResponseSuccess",
+  "providerStatusClass",
+  "refundAmountMatch",
+  "refundDatePresent",
+  "refundIdMatch",
+  "refundTransactionIdPresent",
+  "schema",
+  "terminalClass",
+]);
+const CONTACTED_REFUND_PARSER_RESULTS = new Set<string>([
+  "MATCHED_REFUND_TRANSACTION",
+  "NO_MATCHING_REFUND_TRANSACTION",
+  "PROVIDER_DEFINITIVE_ERROR",
+  "UNKNOWN_SHAPE",
+  "IDENTITY_MISMATCH",
+  "MONEY_MISMATCH",
+  "UNESTABLISHED",
+]);
+const CONTACTED_REFUND_FIRST_FAILURES = new Set<string>([
+  "TARGET_MISMATCH",
+  "CONFIG_INVALID",
+  "INTERNAL_FAILURE",
+  "DATABASE_DISCONNECT_FAILED",
+  "DATABASE_READ_FAILED",
+  "TARGET_UNAVAILABLE",
+  "CREDENTIAL_UNAVAILABLE",
+  "TRANSPORT_FAILURE",
+  "NON_2XX",
+  "INVALID_CONTENT_TYPE",
+  "BODY_TOO_LARGE",
+  "TOO_MANY_RESPONSE_CHUNKS",
+  "INVALID_RESPONSE_CHUNK",
+  "INVALID_UTF8",
+  "INVALID_JSON",
+  "DUPLICATE_JSON_KEY",
+  "UNKNOWN_SHAPE",
+  "PROVIDER_NON_SUCCESS",
+  "ORIGINAL_TRANSACTION_BINDING",
+  "ORIGINAL_MONEY",
+  "UNSUPPORTED_STATUS",
+  "REFUND_ID",
+  "REFUND_TRANSACTION_ID_MISSING",
+  "REFUND_AMOUNT",
+  "REFUND_TYPE_MISMATCH",
+  "BALANCE_MISMATCH",
+  "CONTRADICTORY_NONE",
+]);
+
+function validateContactedRefundEvidenceTerminal(
+  terminal: ChildResult,
+): ChildValidationState {
+  const value = terminal.value;
+  if (!isPlainRecord(value)) return "INVALID_RECORD";
+  if (!hasExactKeys(value, CONTACTED_REFUND_EVIDENCE_KEYS)) {
+    return "EVIDENCE_KEY_SET_MISMATCH";
+  }
+  if (!hasContactedRefundEvidenceEnvelope(value)) return "EVIDENCE_SCHEMA_MISMATCH";
+  if (!validContactedRefundEvidenceValues(value)) return "EVIDENCE_SEMANTICS_INVALID";
+  const expectedExitCode = contactedRefundEvidenceExitCode(value);
+  return terminal.exitCode === expectedExitCode ? "TRUSTED" : "EVIDENCE_EXIT_CODE_MISMATCH";
+}
+
+function hasContactedRefundEvidenceEnvelope(value: Record<string, unknown>): boolean {
+  return value.schema === "mira-eximbay-contacted-refund-evidence/v1"
+    && value.diagnosticCode === "CONTACTED_REFUND_EVIDENCE"
+    && value.terminalClass === "READ_ONLY_CONTACTED_REFUND_EVIDENCE";
+}
+
+function contactedRefundEvidenceExitCode(value: Record<string, unknown>): 0 | 1 {
+  return value.databaseDisconnected === true
+    && value.parserResult === "MATCHED_REFUND_TRANSACTION" ? 0 : 1;
+}
+
+function validContactedRefundEvidenceValues(value: Record<string, unknown>): boolean {
+  if (!validContactedRefundEvidenceScalars(value)) return false;
+  if (!validContactedRefundFirstFailure(value)) return false;
+  return validContactedRefundInquiryState(value);
+}
+
+function validContactedRefundFirstFailure(value: Record<string, unknown>): boolean {
+  const successfulMatch = value.parserResult === "MATCHED_REFUND_TRANSACTION"
+    || value.parserResult === "NO_MATCHING_REFUND_TRANSACTION";
+  if (successfulMatch) return value.firstFailure === null;
+  return typeof value.firstFailure === "string"
+    && CONTACTED_REFUND_FIRST_FAILURES.has(value.firstFailure);
+}
+
+function validContactedRefundInquiryState(value: Record<string, unknown>): boolean {
+  if (value.inquiryCount === 0) {
+    return value.httpStatus === null && value.jsonValid === null
+      && value.parserResult === "UNESTABLISHED"
+      && nullEvidenceFacts(value);
+  }
+  return value.databaseDisconnected === true;
+}
+
+function validContactedRefundEvidenceScalars(value: Record<string, unknown>): boolean {
+  return typeof value.databaseDisconnected === "boolean"
+    && isProviderRetrieveCount(value.inquiryCount)
+    && typeof value.parserResult === "string"
+    && CONTACTED_REFUND_PARSER_RESULTS.has(value.parserResult)
+    && validContactedRefundEvidenceNullableBooleans(value)
+    && validContactedRefundProviderStatusClass(value.providerStatusClass)
+    && validContactedRefundHttpStatus(value.httpStatus);
+}
+
+function validContactedRefundEvidenceNullableBooleans(value: Record<string, unknown>): boolean {
+  return [
+    value.jsonValid,
+    value.providerResponseSuccess,
+    value.refundIdMatch,
+    value.originalTransactionBindingMatch,
+    value.currencyMatch,
+    value.refundAmountMatch,
+    value.refundTransactionIdPresent,
+    value.refundDatePresent,
+  ].every(isNullableBoolean);
+}
+
+function validContactedRefundProviderStatusClass(value: unknown): boolean {
+  return value === null || value === "REFUND" || value === "PARTIAL_REFUND"
+    || value === "NONE" || value === "OTHER";
+}
+
+function validContactedRefundHttpStatus(value: unknown): boolean {
+  if (value === null) return true;
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+}
+
+function nullEvidenceFacts(value: Record<string, unknown>): boolean {
+  return [
+    value.providerStatusClass,
+    value.providerResponseSuccess,
+    value.refundIdMatch,
+    value.originalTransactionBindingMatch,
+    value.currencyMatch,
+    value.refundAmountMatch,
+    value.refundTransactionIdPresent,
+    value.refundDatePresent,
+  ].every((member) => member === null);
+}
+
+function isNullableBoolean(value: unknown): value is boolean | null {
+  return value === null || typeof value === "boolean";
+}
 
 type ReentryTerminalValidation =
   | Readonly<{ state: "TRUSTED"; result: EximbayRefundReentryResult }>
@@ -1991,6 +2206,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     access(WORKER_BUNDLE, fsConstants.R_OK),
     access(PREFLIGHT_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_CANARY_BUNDLE, fsConstants.R_OK),
+    access(EXIMBAY_CONTACTED_REFUND_EVIDENCE_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_REFUND_REENTRY_BUNDLE, fsConstants.R_OK),
     access(RETRIEVE_DIAGNOSTIC_BUNDLE, fsConstants.R_OK),
