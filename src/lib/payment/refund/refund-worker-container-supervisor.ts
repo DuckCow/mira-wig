@@ -1,3 +1,5 @@
+import { isRetrieveDiagnosticResult, type RetrieveDiagnosticResult } from "./retrieve-diagnostic-result";
+import { diagnosticPaymentId } from "./run-eximbay-retrieve-shape-diagnostic-once";
 import { diagnosticFields, isEximbayPreflightDiagnostic } from "./providers/eximbay/preflight-diagnostic";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
@@ -64,6 +66,7 @@ const EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE = fileURLToPath(
 const EXIMBAY_REFUND_REENTRY_BUNDLE = fileURLToPath(
   new URL("./eximbay-refund-reentry.mjs", import.meta.url),
 );
+const RETRIEVE_DIAGNOSTIC_BUNDLE = fileURLToPath(new URL("./eximbay-retrieve-shape-diagnostic.mjs", import.meta.url));
 const PROXY_EXECUTABLE = "/usr/local/bin/cloud-sql-proxy";
 const SYSTEMIC_FAILURE_LINE = '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n';
 const DATABASE_UNAVAILABLE_LINE = '{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n';
@@ -71,6 +74,7 @@ const INVALID_HOST_INPUT_LINE = '{"ok":false,"code":"INVALID_HOST_INPUT"}\n';
 const CONFIG_INVALID_LINE = '{"ok":false,"code":"CONFIG_INVALID"}\n';
 
 export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
+  "eximbay-retrieve-shape-diagnostic-once",
   "worker-check",
   "worker-health",
   "worker-once",
@@ -198,6 +202,9 @@ function directCommand(
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
   dependencies: RefundWorkerContainerSupervisorDependencies,
 ): Promise<number> | null {
+  if (command === "eximbay-retrieve-shape-diagnostic-once") {
+    return runRetrieveDiagnostic(env, output, dependencies);
+  }
   if (command === "image-self-check") return runImageSelfCheck(output, dependencies);
   if (command === "eximbay-canary-once") return runEximbayCanaryOnce(env, output, dependencies);
   if (command === "eximbay-contacted-reconciliation-once") {
@@ -207,6 +214,21 @@ function directCommand(
     return runEximbayRefundReentryOnce(env, output, dependencies);
   }
   return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+}
+
+async function runRetrieveDiagnostic(
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> {
+  const binding = validateDatabaseBinding(env);
+  if (!binding || !diagnosticPaymentId(env) || !parseEximbayRefundCanaryEnvironment(env)) {
+    return writeRetrieveDiagnosticSupervisor(output, null, "NOT_STARTED", "NOT_ATTEMPTED");
+  }
+  return runWithProxy(binding, {
+    executable: process.execPath, args: [RETRIEVE_DIAGNOSTIC_BUNDLE],
+    resultSchema: "EXIMBAY_RETRIEVE_DIAGNOSTIC",
+  }, env, output, dependencies);
 }
 
 async function runEximbayRefundReentryOnce(
@@ -333,7 +355,7 @@ function hasConnectionEnvironmentOverride(env: RuntimeEnvironment): boolean {
 type ChildSpecification = Readonly<{
   executable: string;
   args: readonly string[];
-  resultSchema?: "EXIMBAY_CONTACTED_RECONCILIATION" | "EXIMBAY_REFUND_REENTRY";
+  resultSchema?: "EXIMBAY_CONTACTED_RECONCILIATION" | "EXIMBAY_REFUND_REENTRY" | "EXIMBAY_RETRIEVE_DIAGNOSTIC";
 }>;
 
 async function runWithProxy(
@@ -387,6 +409,9 @@ function proxyStartFailure(
   specification: ChildSpecification,
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
 ): Promise<number> {
+  if (specification.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC") {
+    return writeRetrieveDiagnosticSupervisor(output, null, "PROXY_START_FAILED", "NOT_ATTEMPTED");
+  }
   return specification.resultSchema === "EXIMBAY_REFUND_REENTRY"
     ? writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "PROXY_START_FAILED")
     : writeStatic(output.stderr, DATABASE_UNAVAILABLE_LINE, 1);
@@ -396,6 +421,9 @@ function proxyReadinessFailure(
   specification: ChildSpecification,
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
 ): Promise<number> {
+  if (specification.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC") {
+    return writeRetrieveDiagnosticSupervisor(output, null, "PROXY_READINESS_FAILED", "NOT_ATTEMPTED");
+  }
   return specification.resultSchema === "EXIMBAY_REFUND_REENTRY"
     ? writeReentrySupervisorTerminal(output, null, "NOT_ATTEMPTED", "PROXY_READINESS_FAILED")
     : writeStatic(output.stderr, DATABASE_UNAVAILABLE_LINE, 1);
@@ -406,6 +434,9 @@ function failedChildSpawnResult(
   lifecycle: ProxyLifecycleState,
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
 ): Promise<number> {
+  if (specification.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC") {
+    return writeRetrieveDiagnosticSupervisor(output, null, lifecycle, "NOT_ATTEMPTED");
+  }
   if (specification.resultSchema === "EXIMBAY_CONTACTED_RECONCILIATION") {
     return writeContactedSystemicFailure(
       output.stderr,
@@ -428,6 +459,9 @@ async function finalizeProxiedChildResult(
   proxyStopped: boolean,
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
 ): Promise<number> {
+  if (childSpecification.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC") {
+    return finalizeRetrieveDiagnostic(workerCapture, proxyFailedWhileRunning, proxyStopped, output);
+  }
   const assessment = trustedChildEvidence(childSpecification, workerCapture);
   const lifecycle = proxyLifecycle(proxyFailedWhileRunning, proxyStopped);
   if (childSpecification.resultSchema === "EXIMBAY_REFUND_REENTRY") {
@@ -449,6 +483,36 @@ async function finalizeProxiedChildResult(
     proxyStopped,
     output,
   );
+}
+
+function finalizeRetrieveDiagnostic(
+  capture: ChildCapture,
+  proxyFailed: boolean,
+  proxyStopped: boolean,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+): Promise<number> {
+  const result = capture.result;
+  const value = validatedRetrieveDiagnostic(result);
+  return writeRetrieveDiagnosticSupervisor(output, value, proxyLifecycle(proxyFailed, proxyStopped),
+    value ? "TRUSTED" : "INVALID_DIAGNOSTIC_OUTPUT");
+}
+
+function writeRetrieveDiagnosticSupervisor(
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  childResult: RetrieveDiagnosticResult | null,
+  lifecycle: ProxyLifecycleState,
+  childValidation: "TRUSTED" | "INVALID_DIAGNOSTIC_OUTPUT" | "NOT_ATTEMPTED",
+): Promise<number> {
+  const ok = childResult?.ok === true && lifecycle === "READY_CLEANUP_CONFIRMED";
+  const terminal = { schema: "mira-eximbay-retrieve-shape-diagnostic-supervisor/v1", ok,
+    terminalClass: "READ_ONLY_DIAGNOSTIC", childResult, childValidation, proxyLifecycle: lifecycle };
+  return writeStatic(output.stdout, `${JSON.stringify(terminal)}\n`, ok ? 0 : 1);
+}
+
+function validatedRetrieveDiagnostic(result: ChildResult | null) {
+  if (!result || !isRetrieveDiagnosticResult(result.value)) return null;
+  if (result.line !== `${JSON.stringify(result.value)}\n`) return null;
+  return result.exitCode === (result.value.ok ? 0 : 1) ? result.value : null;
 }
 
 async function finalizeLegacyProxiedChildResult(
@@ -800,9 +864,11 @@ function captureCompletedChildResult(input: Readonly<{
 }>): ChildCapture {
   const exit = Object.freeze({ code: input.exitCode, signal: null });
   const reentry = input.resultSchema === "EXIMBAY_REFUND_REENTRY";
-  const selected = reentry ? input.stdout : input.exitCode === 0 ? input.stdout : input.stderr;
-  const other = reentry ? Buffer.alloc(0) : input.exitCode === 0 ? input.stderr : input.stdout;
-  const terminal = exactOneJsonLine(selected, other, reentry);
+  const diagnostic = input.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC";
+  const useStdout = [reentry, diagnostic, input.exitCode === 0].some(Boolean);
+  const selected = useStdout ? input.stdout : input.stderr;
+  const other = otherChildStream(input, reentry, useStdout);
+  const terminal = exactOneJsonLine(selected, other, reentry || diagnostic);
   return terminal.terminal
     ? childCapture(
       input.processState,
@@ -816,6 +882,11 @@ function captureCompletedChildResult(input: Readonly<{
     : childCapture(
       input.processState, exit, input.streams, false, input.framing, null, terminal.validation,
     );
+}
+
+function otherChildStream(input: Readonly<{ stdout: Buffer; stderr: Buffer }>, reentry: boolean, useStdout: boolean): Buffer {
+  if (reentry) return Buffer.alloc(0);
+  return useStdout ? input.stderr : input.stdout;
 }
 
 function childCapture(
@@ -1922,6 +1993,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     access(EXIMBAY_CANARY_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_REFUND_REENTRY_BUNDLE, fsConstants.R_OK),
+    access(RETRIEVE_DIAGNOSTIC_BUNDLE, fsConstants.R_OK),
   ]);
   const version = spawnSync(PROXY_EXECUTABLE, ["--version"], {
     encoding: "utf8",

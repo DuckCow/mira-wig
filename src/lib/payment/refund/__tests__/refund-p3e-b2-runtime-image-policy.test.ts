@@ -183,7 +183,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      entrypointCount: 6,
+      entrypointCount: 7,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -209,7 +209,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
   }, 45_000);
 
-  it("supplies the exact six bundle entrypoint sources to the Docker build stage", () => {
+  it("supplies the exact seven bundle entrypoint sources to the Docker build stage", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const contextBuilder = readFileSync(
       join(ROOT, "scripts/build-refund-worker-bundles.mts"),
@@ -223,13 +223,14 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
   "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
   "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
+  "eximbay-retrieve-shape-diagnostic": "scripts/eximbay-retrieve-shape-diagnostic.ts",
 });`);
     expect(dockerfile).toContain(
       "COPY --link scripts/refund-execution-worker.ts "
       + "scripts/refund-sandbox-provider-free-preflight.ts "
       + "scripts/eximbay-refund-canary.ts "
       + "scripts/eximbay-contacted-reconciliation.ts "
-      + "scripts/eximbay-refund-reentry.ts ./scripts/",
+      + "scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts ./scripts/",
     );
     expect(dockerfile).toContain(
       "COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/",
@@ -266,6 +267,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       || path === "scripts/refund-sandbox-provider-free-preflight.ts"
       || path === "scripts/eximbay-refund-canary.ts"
       || path === "scripts/eximbay-contacted-reconciliation.ts"
+      || path === "scripts/eximbay-refund-reentry.ts"
+      || path === "scripts/eximbay-retrieve-shape-diagnostic.ts"
     ));
     expect(requiredSources).toEqual(expect.arrayContaining([
       "src/lib/payment/refund/authorization/worker-client.ts",

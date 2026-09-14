@@ -12,6 +12,7 @@ import {
   type EximbayRefundPreflightFacts,
 } from "../preflight-contract";
 import {
+  diagnoseEximbayRefundRetrieve,
   createEximbayRefundRetrievePlan,
   executeEximbayRefundRetrieve,
   EXIMBAY_REFUND_RETRIEVE_DEADLINE_MS,
@@ -279,3 +280,58 @@ const REJECTION_CASES: ReadonlyArray<readonly [string, ResponseOverride, string]
   ["unknown root key", { unknown: "value" }, "UNKNOWN_SHAPE"],
   ["unknown payment key", { payment: { unknown: "value" } }, "UNKNOWN_SHAPE"],
 ];
+
+
+describe("observational retrieve diagnostic parity", () => {
+  it.each(REJECTION_CASES)("retains the established fixture result: %s", async (_label, override, code) => {
+    const diagnostic = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(response(override)));
+    const financial = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(response(override)));
+    expect(diagnostic.parserResult).toBe(code);
+    expect(financial).toMatchObject({ kind: "notAdmitted", code });
+  });
+  it.each([
+    [null, "ROOT_NOT_OBJECT"],
+    [{ ...bodyObject(), extra: "private" }, "ROOT_KEY_SET_MISMATCH"],
+    [{ ...bodyObject(), resmsg: "" }, "ROOT_REQUIRED_TEXT_INVALID"],
+    [{ ...bodyObject(), payment: [] }, "PAYMENT_NOT_OBJECT"],
+    [{ ...bodyObject(), card_info: [] }, "OPTIONAL_ROOT_ENVELOPE_INVALID"],
+    [{ ...bodyObject(), other_param: { param1: [] } }, "OPTIONAL_ROOT_ENVELOPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, extra: 1 } }, "PAYMENT_KEY_SET_MISMATCH"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, balance: undefined } }, "PAYMENT_KEY_SET_MISMATCH"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, auth_code: [] } }, "OPTIONAL_PAYMENT_ENVELOPE_INVALID"],
+    [{ ...bodyObject(), mid: "" }, "IDENTITY_SHAPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, transaction_date: "20260101" } }, "TRANSACTION_DATE_SHAPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, balance: "bad" } }, "BALANCE_SHAPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, amount: "bad" } }, "OTHER_EXACT_STRUCTURAL_FAILURE"],
+  ])("reports the actual first predicate %j -> %s", async (value, failure) => {
+    const body = JSON.stringify(value);
+    const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    const financial = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    expect(observation.shape.firstFailure).toBe(failure);
+    expect(financial.kind).toBe("notAdmitted");
+    if (financial.kind === "notAdmitted") expect(observation.parserResult).toBe(financial.code);
+  });
+  it("retains success, value privacy, and the shared plan one-shot ceiling", async () => {
+    const selected = plan();
+    const transport = vi.fn(() => Promise.resolve(response({ card_info: { cardno1: "4111", cardno4: "1111" } })));
+    const observation = await diagnoseEximbayRefundRetrieve(selected, transport);
+    expect(observation.parserResult).toBe("ADMITTED");
+    expect(observation.shape.firstFailure).toBe("UNESTABLISHED");
+    expect(await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(response()))).toEqual(admittedFacts());
+    expect(JSON.stringify(observation)).not.toMatch(/merchant-mid|order-1|transaction-1|4111|1111/);
+    await expect(diagnoseEximbayRefundRetrieve(selected, transport)).rejects.toThrow("EXIMBAY_REFUND_RETRIEVE_PLAN_REUSED");
+    await expect(executeEximbayRefundRetrieve(selected, transport)).rejects.toThrow("EXIMBAY_REFUND_RETRIEVE_PLAN_REUSED");
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it("never emits unknown key names, even when they contain identifiers", async () => {
+    const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(JSON.stringify({
+      ...bodyObject(), "private-customer-id": "private-value",
+    }))));
+    expect(observation.shape.root.extraKeyCount).toBe(1);
+    expect(JSON.stringify(observation)).not.toContain("private");
+  });
+  it.each(["{", '{"rescode":"0000","rescode":"0000"}'])("keeps invalid JSON failure before structural checks", async (body) => {
+    const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    expect(observation.shape).toMatchObject({ jsonParseSuccess: false, firstFailure: "UNESTABLISHED" });
+  });
+});
