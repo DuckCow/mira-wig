@@ -13,7 +13,9 @@ import { createEximbayRefundLookupPlan, type EximbayRefundLookupAuthority,
   type EximbayRefundLookupTransport } from "./providers/eximbay/refund-lookup";
 import { readEximbayRawJsonResponse } from "./providers/eximbay/raw-response";
 import { emptyContactedRefundEvidence, parseContactedRefundEvidence,
-  type ContactedRefundEvidence } from "./providers/eximbay/contacted-evidence-parser";
+  parseContactedRefundSuccessProof, type ContactedRefundSuccessProof, type ContactedRefundEvidence } from "./providers/eximbay/contacted-evidence-parser";
+
+export type ContactedProofConsumer = (proof: ContactedRefundSuccessProof) => Promise<void>;
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type ContactedEvidenceDatabaseRead = Readonly<{
@@ -60,6 +62,13 @@ export async function runEximbayContactedRefundEvidenceOnce(
   commandId: string, env: Env,
   dependencies: ContactedEvidenceDependencies = { readDatabase: readContactedEvidenceDatabase, fetch: globalThis.fetch, readSecret: readExactEximbayRefundCanarySecret },
 ): Promise<ContactedEvidenceResult> {
+  return collectEximbayContactedRefundProofOnce(commandId, env, dependencies);
+}
+
+export async function collectEximbayContactedRefundProofOnce(
+  commandId: string, env: Env, dependencies: ContactedEvidenceDependencies,
+  consumeProof?: ContactedProofConsumer,
+): Promise<ContactedEvidenceResult> {
   let disconnected = false;
   try {
     if (commandId !== CONTACTED_EVIDENCE_COMMAND_ID) return stopped("TARGET_MISMATCH", false);
@@ -67,11 +76,11 @@ export async function runEximbayContactedRefundEvidenceOnce(
     if (!config) return stopped("CONFIG_INVALID", false);
     const read = await dependencies.readDatabase(env);
     disconnected = read.databaseDisconnected;
-    return await inquireAfterRead(read, config, dependencies);
+    return await inquireAfterRead(read, config, dependencies, consumeProof);
   } catch { return stopped("INTERNAL_FAILURE", disconnected); }
 }
 
-function readEvidenceConfig(env: Env) {
+export function readEvidenceConfig(env: Env) {
   try {
     const config = createEximbayRefundPreflightConfig({ mode: "SANDBOX",
       mid: environmentText(env, "EXIMBAY_SANDBOX_MID"),
@@ -96,6 +105,7 @@ async function inquireAfterRead(
   read: ContactedEvidenceDatabaseRead,
   config: NonNullable<ReturnType<typeof readEvidenceConfig>>,
   dependencies: ContactedEvidenceDependencies,
+  consumeProof?: ContactedProofConsumer,
 ): Promise<ContactedEvidenceResult> {
   if (!read.databaseDisconnected) return stopped("DATABASE_DISCONNECT_FAILED", false);
   if (!read.databaseReadSucceeded) return stopped("DATABASE_READ_FAILED", true);
@@ -106,11 +116,12 @@ async function inquireAfterRead(
   try { secret = await dependencies.readSecret(config.secret); }
   catch { return stopped("CREDENTIAL_UNAVAILABLE", true); }
   const credentials = createEximbayRefundRestCredentials(secret);
-  return inquireOnce(authority, createAuthenticatedEximbayRefundRestFetch(credentials, dependencies.fetch));
+  return inquireOnce(authority, createAuthenticatedEximbayRefundRestFetch(credentials, dependencies.fetch), consumeProof);
 }
 
 async function inquireOnce(
   authority: EximbayRefundLookupAuthority, transport: EximbayRefundLookupTransport,
+  consumeProof?: ContactedProofConsumer,
 ): Promise<ContactedEvidenceResult> {
   const plan = createEximbayRefundLookupPlan(authority);
   const controller = new AbortController();
@@ -128,6 +139,8 @@ async function inquireOnce(
       databaseDisconnected: true, inquiryCount: 1, httpStatus,
       jsonValid: raw.code === "INVALID_JSON" ? false : null,
     });
+    const proof = parseContactedRefundSuccessProof(raw.value, authority);
+    if (proof && consumeProof) await consumeProof(proof);
     return result(parseContactedRefundEvidence(raw.value, authority), {
       databaseDisconnected: true, inquiryCount: 1, httpStatus, jsonValid: true,
     });

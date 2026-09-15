@@ -85,7 +85,8 @@ export async function persistResolution(
   provenance: RefundEvidencePersistenceProvenance = NO_EVIDENCE_PROVENANCE,
 ): Promise<RefundExecutionResult> {
   try {
-    return await persistResolutionWrites(tx, context, input, plan, capturedAt, provenance);
+    return await persistResolutionWrites(tx, context, input, plan, capturedAt, provenance,
+      () => finalizeCommand(tx, context, input, plan));
   } catch (error) {
     if (error instanceof ResolutionRollbackError) throw error;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw error;
@@ -99,13 +100,44 @@ function isDriverAdapterError(error: unknown): boolean {
   return error instanceof Error && error.name === "DriverAdapterError";
 }
 
+// This narrow persistence entry point is called only after the exact contacted-proof
+// owner has locked and revalidated its WAITING_EVIDENCE aggregate.
+export async function persistContactedSuccessResolution(
+  tx: ResolutionTx, context: PersistenceContext,
+  observation: NormalizedPersistFreshRefundExecutionObservationInput["observation"],
+  plan: ResolutionPlan, capturedAt: Date, dispatchId: string,
+): Promise<RefundExecutionResult> {
+  if (plan.attemptStatus !== RefundAttemptStatus.SUCCEEDED
+    || plan.commandStatus !== RefundExecutionCommandStatus.DONE) throw new ResolutionRollbackError();
+  return persistResolutionWrites(tx, context, {
+    commandId: context.command.id, dispatchAttempt: context.command.dispatchAttempt,
+    observation,
+  }, plan, capturedAt, {
+    source: RefundExecutionEvidenceSource.PROVIDER_LOOKUP,
+    sourceDedupKey: `eximbay-contacted-success:${context.command.id}:${dispatchId}`,
+    dispatchAttemptId: dispatchId, authorizingLeaseGeneration: null,
+  }, async () => {
+    const update = await tx.refundExecutionCommand.updateMany({
+      where: { id: context.command.id, refundAttemptId: context.target.id,
+        status: RefundExecutionCommandStatus.WAITING_EVIDENCE,
+        leaseGeneration: 6, dispatchAttempt: 1 },
+      data: commandData(plan),
+    });
+    if (update.count !== 1) throw new ResolutionRollbackError();
+  });
+}
+
+type EvidenceInput = Pick<NormalizedPersistFreshRefundExecutionObservationInput,
+  "commandId" | "dispatchAttempt" | "observation">;
+
 async function persistResolutionWrites(
   tx: ResolutionTx,
   context: PersistenceContext,
-  input: NormalizedPersistFreshRefundExecutionObservationInput,
+  input: EvidenceInput,
   plan: ResolutionPlan,
   capturedAt: Date,
   provenance: RefundEvidencePersistenceProvenance,
+  finalize: () => Promise<void>,
 ): Promise<RefundExecutionResult> {
   const evidence = await tx.refundExecutionEvidence.create({
     data: evidenceData(input, plan, provenance),
@@ -117,7 +149,7 @@ async function persistResolutionWrites(
       data: transitionData(context.target.id, evidence.id, plan, capturedAt),
     });
   }
-  await finalizeCommand(tx, context, input, plan);
+  await finalize();
   if (plan.attemptStatus === RefundAttemptStatus.SUCCEEDED) {
     await enqueueRefundSucceededEmailIntent(tx, {
       refundAttemptId: context.target.id,
@@ -128,7 +160,7 @@ async function persistResolutionWrites(
 }
 
 function evidenceData(
-  input: NormalizedPersistFreshRefundExecutionObservationInput,
+  input: EvidenceInput,
   plan: ResolutionPlan,
   provenance: RefundEvidencePersistenceProvenance,
 ) {

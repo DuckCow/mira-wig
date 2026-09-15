@@ -362,3 +362,35 @@ function unknownShape(
 ): ContactedRefundEvidence {
   return Object.freeze({ ...emptyContactedRefundEvidence("UNKNOWN_SHAPE", firstFailure), shapeDiagnostic });
 }
+
+// Opaque, non-serializable proof. Only the parser can mint it; raw provider facts
+// remain in this process and are never part of operator evidence/output.
+const proofFacts = new WeakMap<ContactedRefundSuccessProof, {
+  authority: EximbayRefundLookupAuthority; providerRefundTransactionId: string;
+}>();
+export type ContactedRefundSuccessProof = Readonly<{ kind: "CONTACTED_REFUND_SUCCESS_PROOF" }>;
+
+export function parseContactedRefundSuccessProof(
+  value: unknown, authority: EximbayRefundLookupAuthority,
+): ContactedRefundSuccessProof | null {
+  if (parseContactedRefundEvidence(value, authority).parserResult !== "MATCHED_REFUND_TRANSACTION") return null;
+  if (!isRecord(value) || !isRecord(value.payment)) return null;
+  const id = value.payment.refund_transaction_id;
+  if (!text(id, 512)) return null;
+  const proof: ContactedRefundSuccessProof = Object.freeze({ kind: "CONTACTED_REFUND_SUCCESS_PROOF" });
+  proofFacts.set(proof, { authority: Object.freeze({ ...authority }), providerRefundTransactionId: id });
+  return proof;
+}
+
+export function matchContactedRefundSuccessProof(
+  proof: ContactedRefundSuccessProof, authority: EximbayRefundLookupAuthority,
+): string | null {
+  const facts = proofFacts.get(proof);
+  if (!facts) return null;
+  const keys: (keyof EximbayRefundLookupAuthority)[] = ["targetDispatchAttemptId", "mid", "providerOrderId",
+    "originalTransactionId", "currency", "originalAmount", "preContactRefundableBalance",
+    "expectedRefundAmount", "expectedRefundType", "providerOperationKey", "language"];
+  const same = keys
+    .every(key => authority[key] === facts.authority[key]);
+  return same ? facts.providerRefundTransactionId : null;
+}
