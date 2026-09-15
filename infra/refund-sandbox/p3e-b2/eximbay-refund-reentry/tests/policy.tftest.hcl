@@ -66,7 +66,7 @@ run "admit_authorization_ready_worker_template" {
       google_cloud_run_v2_job.canary.template[0].parallelism == 1 &&
       google_cloud_run_v2_job.canary.template[0].template[0].max_retries == 0 &&
       google_cloud_run_v2_job.canary.template[0].template[0].timeout == "180s" &&
-      google_cloud_run_v2_job.canary.template[0].template[0].containers[0].image == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:1a680f7fa7417d999b477459ab64bb181270265acc411bd27554112960a15904" &&
+      google_cloud_run_v2_job.canary.template[0].template[0].containers[0].image == "asia-northeast3-docker.pkg.dev/mira-refund-sandbox-0001/mira-p3e-sbx-refund-images/refund-worker@sha256:d76ec8c160953005272b64ddc9e8860f11003ef1380e74c844ba7915f3616fa7" &&
       google_cloud_run_v2_job.canary.template[0].template[0].containers[0].args == tolist(["eximbay-refund-reentry-once"]) &&
       one([for env in google_cloud_run_v2_job.canary.template[0].template[0].containers[0].env : env.value if env.name == "MIRA_REFUND_AUTHORIZATION_ENABLED"]) == "ENABLED" &&
       length([for env in google_cloud_run_v2_job.canary.template[0].template[0].containers[0].env : env if env.name == "MIRA_REFUND_AUTHORIZATION_ID"]) == 0
