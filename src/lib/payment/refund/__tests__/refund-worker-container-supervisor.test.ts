@@ -29,6 +29,11 @@ import {
 import { parseEximbayRefundCanaryEnvironment } from "../eximbay-refund-canary-environment";
 import type { EximbayRefundReentryResult } from "../run-eximbay-refund-reentry-once";
 import { CONTACTED_EVIDENCE_COMMAND_ID } from "../providers/eximbay/contacted-evidence-state";
+import type {
+  ContactedRefundShapeDiagnostic,
+  ContactedRefundValueClass,
+} from "../providers/eximbay/contacted-evidence-parser";
+import { parseContactedRefundEvidence } from "../providers/eximbay/contacted-evidence-parser";
 import type { ContactedEvidenceResult } from "../run-eximbay-contacted-refund-evidence-once";
 
 const INSTANCE = "sample-project:asia-northeast3:refund-db";
@@ -262,6 +267,7 @@ describe("refund worker container supervisor", () => {
       inquiryCount: 0,
       httpStatus: null,
       jsonValid: null,
+      shapeDiagnostic: null,
       parserResult: "UNESTABLISHED",
       firstFailure: "CONFIG_INVALID",
       providerStatusClass: null,
@@ -286,6 +292,7 @@ describe("refund worker container supervisor", () => {
     ["TRANSPORT_FAILURE", contactedEvidenceResult({
       httpStatus: null,
       jsonValid: null,
+      shapeDiagnostic: null,
       parserResult: "UNESTABLISHED",
       firstFailure: "TRANSPORT_FAILURE",
       providerStatusClass: null,
@@ -314,6 +321,70 @@ describe("refund worker container supervisor", () => {
     expect(harness.stdout).toEqual([terminal]);
     expect(harness.stderr).toEqual([]);
     expect(proxy.killCalls).toEqual(["SIGTERM"]);
+  });
+
+  it("preserves exact sanitized shape diagnostics for trusted exit-1 evidence", async () => {
+    const shape = contactedShapeDiagnostic();
+    if (shape.payment.valueClass !== "VALID") throw new Error("expected payment diagnostic");
+    const diagnostic: ContactedRefundShapeDiagnostic = Object.freeze({ ...shape,
+      payment: Object.freeze({ ...shape.payment,
+        unknownKeyClass: "ONE", exactKeysValid: false }) });
+    const result = contactedEvidenceResult({ parserResult: "UNKNOWN_SHAPE",
+      firstFailure: "PAYMENT_UNKNOWN_KEY", shapeDiagnostic: diagnostic });
+    const terminal = contactedEvidenceTerminal(result);
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness([proxy, completedChild(1, terminal, "")], { readiness: true });
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output, harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([terminal]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("accepts parser diagnostics for ordering-sensitive provider keys without echoing them", async () => {
+    const providerKeys = ["a", "Z", "혼합-Unicode-秘密"];
+    const payment = { status: "REFUND", order_id: "order", currency: "USD", amount: "1.00",
+      transaction_id: "transaction", transaction_date: "20260916000000",
+      refund_id: "refund", refund_transaction_id: "provider-refund", refund_amount: "1.00" };
+    const input: Record<string, unknown> = { rescode: "0000", resmsg: "Success", mid: "mid", payment };
+    for (const key of providerKeys) input[key] = "ignored";
+    const evidence = parseContactedRefundEvidence(input, {
+      targetDispatchAttemptId: "dispatch", mid: "mid", providerOrderId: "order",
+      originalTransactionId: "transaction", currency: "USD", originalAmount: 100,
+      preContactRefundableBalance: 100, expectedRefundAmount: 100, expectedRefundType: "F",
+      providerOperationKey: "refund", language: "EN",
+    });
+    const result = contactedEvidenceResult(evidence);
+    const terminal = contactedEvidenceTerminal(result);
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness([proxy, completedChild(1, terminal, "")], { readiness: true });
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output, harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([terminal]);
+    for (const key of providerKeys) expect(terminal).not.toContain(JSON.stringify(key));
+  });
+
+  it("rejects value-bearing contacted shape diagnostics without echoing them", async () => {
+    const shape = contactedShapeDiagnostic();
+    const result = contactedEvidenceResult({ parserResult: "UNKNOWN_SHAPE",
+      firstFailure: "PAYMENT_FIELD_INVALID",
+      shapeDiagnostic: { ...shape, rawProviderValue: "secret-like-private-value" } });
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const harness = supervisorHarness([
+      proxy, completedChild(1, contactedEvidenceTerminal(result), ""),
+    ], { readiness: true });
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-evidence-once"],
+      { REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL },
+      harness.output, harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(JSON.stringify(harness.stderr)).not.toContain("secret-like-private-value");
   });
 
   it.each([
@@ -367,6 +438,7 @@ describe("refund worker container supervisor", () => {
       inquiryCount: 0,
       httpStatus: null,
       jsonValid: null,
+      shapeDiagnostic: null,
       parserResult: "UNESTABLISHED",
       firstFailure: "CONFIG_INVALID",
       providerStatusClass: null,
@@ -1934,8 +2006,48 @@ function contactedEvidenceResult(
     refundAmountMatch: true,
     refundTransactionIdPresent: true,
     refundDatePresent: false,
+    shapeDiagnostic: contactedShapeDiagnostic(),
   });
   return Object.freeze({ ...result, ...overrides });
+}
+
+function contactedShapeDiagnostic(): ContactedRefundShapeDiagnostic {
+  const rootFields: ContactedRefundShapeDiagnostic["root"] = {
+    valueClass: "VALID",
+    knownKeyPresence: { rescode: true, resmsg: true, mid: true, payment: true,
+      card_info: false, other_param: false },
+    missingRequiredKeys: [],
+    unknownKeyClass: "NONE",
+    exactKeysValid: true,
+    fields: { rescode: "VALID", resmsg: "VALID", mid: "VALID", payment: "VALID",
+      card_info: "ABSENT", other_param: "ABSENT" },
+  };
+  const paymentFields: Readonly<Record<string, ContactedRefundValueClass>> = {
+    status: "VALID", order_id: "VALID", currency: "VALID", amount: "VALID",
+    transaction_id: "VALID", transaction_date: "VALID", auth_code: "ABSENT",
+    balance: "ABSENT", payment_method: "ABSENT", paypal_payer_id: "ABSENT",
+    refund_id: "VALID", refund_transaction_id: "VALID", refund_amount: "VALID",
+  };
+  const absentObject = (fieldNames: readonly string[]): ContactedRefundShapeDiagnostic["cardInfo"] => {
+    const fields: Record<string, ContactedRefundValueClass> = {};
+    for (const key of fieldNames) fields[key] = "ABSENT";
+    const knownKeyPresence: Record<string, boolean> = {};
+    for (const key of fieldNames) knownKeyPresence[key] = false;
+    return Object.freeze({ present: false, objectValid: false,
+      knownKeyPresence: Object.freeze(knownKeyPresence), unknownKeyClass: "NONE",
+      fields: Object.freeze(fields) });
+  };
+  return Object.freeze({
+    root: Object.freeze(rootFields),
+    payment: Object.freeze({ valueClass: "VALID", knownKeyPresence: Object.freeze({
+      status: true, order_id: true, currency: true, amount: true, transaction_id: true,
+      transaction_date: true, auth_code: false, balance: false, payment_method: false,
+      paypal_payer_id: false, refund_id: true, refund_transaction_id: true, refund_amount: true,
+    }), missingRequiredKeys: Object.freeze([]), unknownKeyClass: "NONE",
+      exactKeysValid: true, fields: Object.freeze(paymentFields) }),
+    cardInfo: absentObject(["card_number1", "card_number4", "cardno1", "cardno4"]),
+    otherParam: absentObject(["param1", "param2"]),
+  });
 }
 
 function contactedEvidenceTerminal(result: unknown): string {

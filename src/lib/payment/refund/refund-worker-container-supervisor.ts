@@ -1127,6 +1127,7 @@ const CONTACTED_REFUND_EVIDENCE_KEYS = Object.freeze([
   "refundIdMatch",
   "refundTransactionIdPresent",
   "schema",
+  "shapeDiagnostic",
   "terminalClass",
 ]);
 const CONTACTED_REFUND_PARSER_RESULTS = new Set<string>([
@@ -1155,7 +1156,18 @@ const CONTACTED_REFUND_FIRST_FAILURES = new Set<string>([
   "INVALID_UTF8",
   "INVALID_JSON",
   "DUPLICATE_JSON_KEY",
-  "UNKNOWN_SHAPE",
+  "ROOT_NOT_OBJECT",
+  "ROOT_UNKNOWN_KEY",
+  "RESCODE_INVALID",
+  "RESMSG_INVALID",
+  "CARD_INFO_INVALID",
+  "OTHER_PARAM_INVALID",
+  "MID_MISSING_OR_INVALID",
+  "PAYMENT_NOT_OBJECT",
+  "PAYMENT_UNKNOWN_KEY",
+  "PAYMENT_REQUIRED_FIELD_MISSING",
+  "PAYMENT_FIELD_INVALID",
+  "TRANSACTION_DATE_INVALID",
   "PROVIDER_NON_SUCCESS",
   "ORIGINAL_TRANSACTION_BINDING",
   "ORIGINAL_MONEY",
@@ -1196,7 +1208,148 @@ function contactedRefundEvidenceExitCode(value: Record<string, unknown>): 0 | 1 
 function validContactedRefundEvidenceValues(value: Record<string, unknown>): boolean {
   if (!validContactedRefundEvidenceScalars(value)) return false;
   if (!validContactedRefundFirstFailure(value)) return false;
+  if (!validContactedRefundShapeDiagnostic(value)) return false;
   return validContactedRefundInquiryState(value);
+}
+
+const CONTACTED_VALUE_CLASSES = new Set<string>([
+  "ABSENT", "NOT_STRING", "EMPTY_OR_WHITESPACE_ONLY", "TRIM_MISMATCH",
+  "CONTROL_OR_SURROGATE", "OVER_MAX_TEXT_UNITS", "OVER_MAX_UTF8_BYTES",
+  "FORMAT_INVALID", "VALID", "NOT_OBJECT",
+]);
+const CONTACTED_ROOT_FIELDS = Object.freeze([
+  "rescode", "resmsg", "mid", "payment", "card_info", "other_param",
+]);
+const CONTACTED_ROOT_REQUIRED_FIELDS = Object.freeze(["rescode", "resmsg", "mid", "payment"]);
+const CONTACTED_PAYMENT_FIELDS = Object.freeze([
+  "status", "order_id", "currency", "amount", "transaction_id", "transaction_date",
+  "auth_code", "balance", "payment_method", "paypal_payer_id", "refund_id",
+  "refund_transaction_id", "refund_amount",
+]);
+const CONTACTED_PAYMENT_REQUIRED_FIELDS = Object.freeze([
+  "status", "order_id", "currency", "amount", "transaction_id", "transaction_date",
+]);
+const CONTACTED_CARD_FIELDS = Object.freeze(["card_number1", "card_number4", "cardno1", "cardno4"]);
+const CONTACTED_OTHER_PARAM_FIELDS = Object.freeze(["param1", "param2"]);
+
+function validContactedRefundShapeDiagnostic(value: Record<string, unknown>): boolean {
+  if (value.shapeDiagnostic === null) return value.jsonValid !== true;
+  if (value.jsonValid !== true || !isPlainRecord(value.shapeDiagnostic)) return false;
+  const shape = value.shapeDiagnostic;
+  if (!hasExactKeys(shape, ["cardInfo", "otherParam", "payment", "root"])) return false;
+  if (!validContactedRootDiagnostic(shape.root)) return false;
+  if (!validContactedPaymentDiagnostic(shape.payment)) return false;
+  if (!validContactedOptionalDiagnostic(shape.cardInfo, CONTACTED_CARD_FIELDS)) return false;
+  return validContactedOptionalDiagnostic(shape.otherParam, CONTACTED_OTHER_PARAM_FIELDS);
+}
+
+function validContactedRootDiagnostic(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  if (value.valueClass === "NOT_OBJECT") return hasExactKeys(value, ["valueClass"]);
+  return validContactedRecordDiagnostic(
+    value, CONTACTED_ROOT_FIELDS, CONTACTED_ROOT_REQUIRED_FIELDS,
+  );
+}
+
+function validContactedPaymentDiagnostic(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  if (value.valueClass === "ABSENT" || value.valueClass === "NOT_OBJECT") {
+    return hasExactKeys(value, ["valueClass"]);
+  }
+  return validContactedRecordDiagnostic(
+    value, CONTACTED_PAYMENT_FIELDS, CONTACTED_PAYMENT_REQUIRED_FIELDS,
+  );
+}
+
+function validContactedRecordDiagnostic(
+  value: Record<string, unknown>, fieldNames: readonly string[], requiredNames: readonly string[],
+): boolean {
+  if (!hasExactKeys(value, [
+    "exactKeysValid", "fields", "knownKeyPresence", "missingRequiredKeys",
+    "unknownKeyClass", "valueClass",
+  ])) return false;
+  if (value.valueClass !== "VALID" || typeof value.exactKeysValid !== "boolean") return false;
+  if (!validContactedUnknownKeyClass(value.unknownKeyClass)) return false;
+  if (value.exactKeysValid !== (value.unknownKeyClass === "NONE")) return false;
+  if (!validContactedKnownKeyPresence(value.knownKeyPresence, fieldNames)) return false;
+  if (!validContactedMissingRequiredKeys(
+    value.missingRequiredKeys, requiredNames, value.knownKeyPresence,
+  )) return false;
+  return validContactedFieldClasses(value.fields, fieldNames, value.knownKeyPresence);
+}
+
+function validContactedOptionalDiagnostic(value: unknown, fieldNames: readonly string[]): boolean {
+  if (!isPlainRecord(value)) return false;
+  if (!validContactedOptionalEnvelope(value)) return false;
+  if (!validContactedUnknownKeyClass(value.unknownKeyClass)) return false;
+  if (!validContactedKnownKeyPresence(value.knownKeyPresence, fieldNames)) return false;
+  if (!validContactedFieldClasses(value.fields, fieldNames, value.knownKeyPresence)) return false;
+  return validContactedOptionalSemantics(value, fieldNames);
+}
+
+function validContactedOptionalEnvelope(value: Record<string, unknown>): value is Record<string, unknown> & {
+  present: boolean; objectValid: boolean;
+} {
+  if (!hasExactKeys(value, [
+    "fields", "knownKeyPresence", "objectValid", "present", "unknownKeyClass",
+  ])) return false;
+  return typeof value.present === "boolean" && typeof value.objectValid === "boolean";
+}
+
+function validContactedOptionalSemantics(
+  value: Record<string, unknown> & { present: boolean; objectValid: boolean },
+  fieldNames: readonly string[],
+): boolean {
+  if (!value.present) return value.objectValid === false && emptyDiagnosticObject(value, fieldNames);
+  if (!value.objectValid) return true;
+  const fields = value.fields;
+  if (!isPlainRecord(fields)) return false;
+  return value.unknownKeyClass === "NONE"
+    && fieldNames.every((key) => fields[key] === "ABSENT" || fields[key] === "VALID");
+}
+
+function validContactedKnownKeyPresence(
+  value: unknown, knownKeys: readonly string[],
+): boolean {
+  return isPlainRecord(value)
+    && hasExactKeys(value, [...knownKeys].sort())
+    && knownKeys.every((key) => typeof value[key] === "boolean");
+}
+
+function validContactedMissingRequiredKeys(
+  value: unknown, requiredNames: readonly string[], presence: unknown,
+): boolean {
+  if (!Array.isArray(value) || !isPlainRecord(presence)) return false;
+  const expected = requiredNames.filter((key) => presence[key] === false);
+  return value.length === expected.length
+    && value.every((key, index) => key === expected[index]);
+}
+
+function validContactedFieldClasses(
+  value: unknown, fieldNames: readonly string[], presence: unknown,
+): boolean {
+  if (!isPlainRecord(value) || !isPlainRecord(presence)) return false;
+  if (!hasExactKeys(value, [...fieldNames].sort())) return false;
+  return fieldNames.every((key) => validContactedFieldClass(value[key], presence[key] === true));
+}
+
+function validContactedFieldClass(value: unknown, present: boolean): boolean {
+  if (typeof value !== "string" || !CONTACTED_VALUE_CLASSES.has(value)) return false;
+  return present ? value !== "ABSENT" : value === "ABSENT";
+}
+
+function validContactedUnknownKeyClass(value: unknown): boolean {
+  return value === "NONE" || value === "ONE" || value === "MULTIPLE";
+}
+
+function emptyDiagnosticObject(value: Record<string, unknown>, fieldNames: readonly string[]): boolean {
+  if (value.unknownKeyClass !== "NONE") return false;
+  const presence = value.knownKeyPresence;
+  if (!isPlainRecord(presence)) return false;
+  const fields = value.fields;
+  if (!isPlainRecord(fields)) return false;
+  return fieldNames.every((key) => presence[key] === false
+    && fields[key] === "ABSENT");
 }
 
 function validContactedRefundFirstFailure(value: Record<string, unknown>): boolean {

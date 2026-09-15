@@ -214,7 +214,14 @@ describe("exact contacted dispatch read-only evidence", () => {
 });
 
 describe("separate refund inquiry evidence parser", () => {
-  it("matches REFUND", () => { expect(parseContactedRefundEvidence(response(), authority).parserResult).toBe("MATCHED_REFUND_TRANSACTION"); });
+  it("matches REFUND", () => {
+    const result = parseContactedRefundEvidence(response(), authority);
+    expect(result.parserResult).toBe("MATCHED_REFUND_TRANSACTION");
+    expect(result.shapeDiagnostic).toMatchObject({
+      root: { valueClass: "VALID", exactKeysValid: true },
+      payment: { valueClass: "VALID", exactKeysValid: true },
+    });
+  });
   it("matches PARTIAL_REFUND only for a partial operation", () => {
     const partial = { ...authority, originalAmount: 200, preContactRefundableBalance: 200, expectedRefundType: "P" as const };
     expect(parseContactedRefundEvidence(response({ status: "PARTIAL_REFUND", amount: "2.00" }), partial).parserResult).toBe("MATCHED_REFUND_TRANSACTION");
@@ -242,18 +249,158 @@ describe("separate refund inquiry evidence parser", () => {
     const out = parseContactedRefundEvidence({ rescode: "9999", resmsg: "private-message" }, authority);
     expect(out.parserResult).toBe("PROVIDER_DEFINITIVE_ERROR"); expect(JSON.stringify(out)).not.toMatch(/9999|private-message/u);
   });
-  it.each([null, [], {}, { ...response(), payment: [] }, { ...response(), extra: "value" }])("rejects unknown shape %#", value => {
-    expect(parseContactedRefundEvidence(value, authority).parserResult).toBe("UNKNOWN_SHAPE");
+  it.each([
+    [null, "ROOT_NOT_OBJECT"],
+    [[], "ROOT_NOT_OBJECT"],
+    [{}, "RESCODE_INVALID"],
+    [{ ...response(), payment: [] }, "PAYMENT_NOT_OBJECT"],
+    [{ ...response(), extra: "value" }, "ROOT_UNKNOWN_KEY"],
+  ])("rejects unknown shape %# with an exact diagnostic", (value, firstFailure) => {
+    const result = parseContactedRefundEvidence(value, authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure });
+    expect(result.shapeDiagnostic).not.toBeNull();
+  });
+  it.each([
+    ["root not object", null, "ROOT_NOT_OBJECT"],
+    ["unknown root key", { ...response(), private_root_value: "do-not-emit" }, "ROOT_UNKNOWN_KEY"],
+    ["payment not object", { ...response(), payment: "do-not-emit" }, "PAYMENT_NOT_OBJECT"],
+    ["unknown payment key", response({ private_payment_value: "do-not-emit" }), "PAYMENT_UNKNOWN_KEY"],
+    ["missing required payment field", (() => {
+      const payment: Record<string, unknown> = response().payment; delete payment.order_id;
+      return { ...response(), payment };
+    })(), "PAYMENT_REQUIRED_FIELD_MISSING"],
+    ["blank optional payment value", response({ balance: "" }), "PAYMENT_FIELD_INVALID"],
+    ["untrimmed optional payment value", response({ auth_code: " padded-private " }), "PAYMENT_FIELD_INVALID"],
+    ["invalid transaction date", response({ transaction_date: "invalid-private-date" }), "TRANSACTION_DATE_INVALID"],
+    ["invalid card info", { ...response(), card_info: "private-card" }, "CARD_INFO_INVALID"],
+    ["invalid other param", { ...response(), other_param: "private-param" }, "OTHER_PARAM_INVALID"],
+    ["mid invalid", { ...response(), mid: "" }, "MID_MISSING_OR_INVALID"],
+  ])("keeps admission rejected and identifies %s", (_name, value, firstFailure) => {
+    const result = parseContactedRefundEvidence(value, authority);
+    expect(result.parserResult).toBe("UNKNOWN_SHAPE");
+    expect(result.firstFailure).toBe(firstFailure);
+  });
+  it("reports only bounded unknown-key classes and canonical known-key presence", () => {
+    const result = parseContactedRefundEvidence({ ...response({ z_unknown: "private" }),
+      z_root_unknown: "private", card_info: { card_number4: "private", z_card_unknown: "private" },
+      other_param: { param2: "", z_param_unknown: "private" } }, authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "ROOT_UNKNOWN_KEY",
+      shapeDiagnostic: {
+        root: { exactKeysValid: false, unknownKeyClass: "ONE",
+          knownKeyPresence: { rescode: true, resmsg: true, mid: true, payment: true,
+            card_info: true, other_param: true }, missingRequiredKeys: [] },
+        payment: { exactKeysValid: false, unknownKeyClass: "ONE",
+          knownKeyPresence: { status: true, balance: false } },
+        cardInfo: { present: true, objectValid: false, unknownKeyClass: "ONE",
+          knownKeyPresence: { card_number4: true } },
+        otherParam: { present: true, objectValid: false, unknownKeyClass: "ONE",
+          knownKeyPresence: { param1: false, param2: true } },
+      } });
+  });
+  it("reports closed value classes without exact lengths or raw values", () => {
+    const untrimmed = parseContactedRefundEvidence(response({ balance: " private-balance " }), authority);
+    expect(untrimmed.shapeDiagnostic).toMatchObject({
+      payment: { fields: { balance: "TRIM_MISMATCH" } },
+    });
+    const blank = parseContactedRefundEvidence(response({ balance: "" }), authority);
+    expect(blank.shapeDiagnostic).toMatchObject({
+      payment: { fields: { balance: "EMPTY_OR_WHITESPACE_ONLY" } },
+    });
+    const invalidDate = parseContactedRefundEvidence(response({ transaction_date: "private-date" }), authority);
+    expect(invalidDate.shapeDiagnostic).toMatchObject({
+      payment: { fields: { transaction_date: "FORMAT_INVALID" } },
+    });
+    const malformedObjects = parseContactedRefundEvidence({ ...response(),
+      card_info: "private-card", other_param: "private-param" }, authority);
+    expect(malformedObjects.shapeDiagnostic).toMatchObject({
+      cardInfo: { present: true, objectValid: false, unknownKeyClass: "NONE",
+        knownKeyPresence: { card_number1: false, card_number4: false, cardno1: false, cardno4: false } },
+      otherParam: { present: true, objectValid: false, unknownKeyClass: "NONE",
+        knownKeyPresence: { param1: false, param2: false } },
+    });
+    expect(JSON.stringify([untrimmed, blank, invalidDate, malformedObjects]))
+      .not.toMatch(/private-balance|private-date|private-card|private-param|length|bytes/iu);
   });
   it("admits blank optional metadata without changing identity requirements", () => {
     expect(parseContactedRefundEvidence({ ...response(), other_param: { param1: "", param2: "" } }, authority).parserResult).toBe("MATCHED_REFUND_TRANSACTION");
     expect(parseContactedRefundEvidence({ ...response({ refund_id: "wrong" }), other_param: { param1: "" } }, authority).parserResult).toBe("IDENTITY_MISMATCH");
   });
   it.each(["\u0000", "\ud800", "x".repeat(256)])("rejects unsafe/oversize optional metadata %#", value => {
-    expect(parseContactedRefundEvidence({ ...response(), other_param: { param1: value } }, authority).parserResult).toBe("UNKNOWN_SHAPE");
+    const result = parseContactedRefundEvidence({ ...response(), other_param: { param1: value } }, authority);
+    expect(result.parserResult).toBe("UNKNOWN_SHAPE");
+    expect(result.firstFailure).toBe("OTHER_PARAM_INVALID");
   });
   it("does not reject valid paired Unicode", () => {
     expect(parseContactedRefundEvidence({ ...response(), other_param: { param2: "😀" } }, authority).parserResult).toBe("MATCHED_REFUND_TRANSACTION");
+  });
+  it("keeps blank other_param metadata valid and classifies it without values", () => {
+    const result = parseContactedRefundEvidence({ ...response(), other_param: { param1: "", param2: "" } }, authority);
+    expect(result.parserResult).toBe("MATCHED_REFUND_TRANSACTION");
+    expect(result.shapeDiagnostic?.otherParam).toMatchObject({ present: true, objectValid: true,
+      fields: { param1: "VALID", param2: "VALID" } });
+  });
+  it("keeps the baseline admission, identity, and money result matrix unchanged", () => {
+    const missingRefundTransaction: Record<string, unknown> = response().payment;
+    delete missingRefundTransaction.refund_transaction_id;
+    const cases: readonly [unknown, string][] = [
+      [response(), "MATCHED_REFUND_TRANSACTION"],
+      [response({ refund_id: "wrong-private" }), "IDENTITY_MISMATCH"],
+      [response({ transaction_id: "wrong-private" }), "IDENTITY_MISMATCH"],
+      [response({ currency: "JPY" }), "MONEY_MISMATCH"],
+      [response({ refund_amount: "1.01" }), "MONEY_MISMATCH"],
+      [response({ status: "SALE" }), "UNESTABLISHED"],
+      [{ ...response(), payment: missingRefundTransaction }, "UNKNOWN_SHAPE"],
+      [{ ...response(), extra: "private" }, "UNKNOWN_SHAPE"],
+    ];
+    expect(cases.map(([value]) => parseContactedRefundEvidence(value, authority).parserResult))
+      .toEqual(cases.map(([, expected]) => expected));
+  });
+  it("never serializes rejected provider values or identifier-like values", () => {
+    const rawValues = ["raw-refund-id", "raw-transaction-id", "raw-refund-transaction-id",
+      "raw-order-id", "raw-mid", "raw-card-value", "secret-like-private-value"];
+    const value = { rescode: "0000", resmsg: rawValues[6], mid: rawValues[4], payment: {
+      status: "REFUND", order_id: rawValues[3], currency: "USD", amount: "1.00",
+      transaction_id: rawValues[1], transaction_date: "20260914000000", refund_id: rawValues[0],
+      refund_transaction_id: rawValues[2], refund_amount: "1.00", unknown_payment_key: rawValues[6],
+    }, card_info: { card_number1: rawValues[5] } };
+    const serialized = JSON.stringify(parseContactedRefundEvidence(value, authority));
+    for (const raw of rawValues) expect(serialized).not.toContain(raw);
+    expect(serialized).not.toContain(JSON.stringify(value));
+  });
+  it("never serializes provider-controlled property names", () => {
+    const unknownNames = [
+      "4111111111111111",
+      "secret-like-token-abc123",
+      "transaction-id-like-20260916",
+      "혼합-Unicode-秘密",
+      "a",
+      "Z",
+    ];
+    const value: Record<string, unknown> = { ...response() };
+    for (const key of unknownNames) value[key] = "ignored";
+    const result = parseContactedRefundEvidence(value, authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "ROOT_UNKNOWN_KEY",
+      shapeDiagnostic: { root: { unknownKeyClass: "MULTIPLE" } } });
+    const serialized = JSON.stringify(result);
+    for (const name of unknownNames) expect(serialized).not.toContain(JSON.stringify(name));
+  });
+  it("distinguishes one and multiple unknown keys without emitting their names", () => {
+    const one = parseContactedRefundEvidence({ ...response(), arbitrary_one: "ignored" }, authority);
+    const multiple = parseContactedRefundEvidence({ ...response(), arbitrary_one: "ignored",
+      arbitrary_two: "ignored" }, authority);
+    expect(one.shapeDiagnostic).toMatchObject({ root: { unknownKeyClass: "ONE" } });
+    expect(multiple.shapeDiagnostic).toMatchObject({ root: { unknownKeyClass: "MULTIPLE" } });
+    expect(JSON.stringify([one, multiple])).not.toMatch(/arbitrary_(?:one|two)/u);
+  });
+  it("reports canonical missing required keys and absent known optional keys", () => {
+    const payment: Record<string, unknown> = response().payment;
+    delete payment.order_id;
+    const result = parseContactedRefundEvidence({ ...response(), payment }, authority);
+    expect(result.shapeDiagnostic).toMatchObject({ payment: {
+      missingRequiredKeys: ["order_id"],
+      knownKeyPresence: { order_id: false, auth_code: false },
+      fields: { order_id: "ABSENT", auth_code: "ABSENT" },
+    } });
   });
 });
 
@@ -322,6 +469,18 @@ describe("command integration and mutation reachability", () => {
       expect(await commandMain()).toBe(64);
       expect(databaseBoundary.transaction).not.toHaveBeenCalled();
     } finally { process.argv = previous; }
+  });
+  it("emits only sanitized shape diagnostics for a rejected provider response", async () => {
+    const rawValues = [refundId, facts.providerOrderId, facts.providerTransactionId,
+      "rejected-refund-transaction", "private-card-value", "secret-like-private-value", config.mid];
+    const rejected = { ...response({ unknown_payment_key: rawValues[5] }),
+      card_info: { card_number1: rawValues[4] } };
+    const { result } = await run(fixture(), fakeFetch(rejected));
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "PAYMENT_UNKNOWN_KEY",
+      shapeDiagnostic: { payment: { unknownKeyClass: "ONE" } } });
+    const serialized = JSON.stringify(result);
+    for (const raw of rawValues) expect(serialized).not.toContain(raw);
+    expect(serialized).not.toContain(JSON.stringify(rejected));
   });
   it("has no financial mutation, authorization, lease, cancel, reconciliation, or email path in compiled command", async () => {
     const compiled = await build({ entryPoints: ["scripts/eximbay-contacted-refund-evidence-once.ts"],
