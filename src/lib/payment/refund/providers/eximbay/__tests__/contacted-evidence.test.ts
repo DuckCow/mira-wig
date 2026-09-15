@@ -214,13 +214,86 @@ describe("exact contacted dispatch read-only evidence", () => {
 });
 
 describe("separate refund inquiry evidence parser", () => {
-  it("matches REFUND", () => {
+  it("accepts absent auth_code and matches REFUND", () => {
     const result = parseContactedRefundEvidence(response(), authority);
     expect(result.parserResult).toBe("MATCHED_REFUND_TRANSACTION");
     expect(result.shapeDiagnostic).toMatchObject({
       root: { valueClass: "VALID", exactKeysValid: true },
-      payment: { valueClass: "VALID", exactKeysValid: true },
+      payment: { valueClass: "VALID", exactKeysValid: true, fields: { auth_code: "ABSENT" } },
     });
+  });
+  it("accepts an exact empty auth_code as semantic absence", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: "" }), authority);
+    expect(result).toMatchObject({ parserResult: "MATCHED_REFUND_TRANSACTION", firstFailure: null,
+      shapeDiagnostic: { payment: { fields: { auth_code: "EMPTY_OR_WHITESPACE_ONLY" } } } });
+  });
+  it("accepts a safe blank auth_code without rewriting its diagnostic class", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: " \u00a0" }), authority);
+    expect(result).toMatchObject({ parserResult: "MATCHED_REFUND_TRANSACTION", firstFailure: null,
+      shapeDiagnostic: { payment: { fields: { auth_code: "EMPTY_OR_WHITESPACE_ONLY" } } } });
+  });
+  it("preserves valid nonblank auth_code behavior", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: "A12345" }), authority);
+    expect(result).toMatchObject({ parserResult: "MATCHED_REFUND_TRANSACTION", firstFailure: null,
+      shapeDiagnostic: { payment: { fields: { auth_code: "VALID" } } } });
+  });
+  it("rejects a non-string auth_code", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: 12345 }), authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "PAYMENT_FIELD_INVALID",
+      shapeDiagnostic: { payment: { fields: { auth_code: "NOT_STRING" } } } });
+  });
+  it.each([
+    ["leading", " A12345"],
+    ["trailing", "A12345 "],
+  ])("preserves rejection of %s whitespace on nonblank auth_code", (_position, authCode) => {
+    const result = parseContactedRefundEvidence(response({ auth_code: authCode }), authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "PAYMENT_FIELD_INVALID",
+      shapeDiagnostic: { payment: { fields: { auth_code: "TRIM_MISMATCH" } } } });
+  });
+  it("rejects a control character in blank auth_code", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: "\t" }), authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "PAYMENT_FIELD_INVALID",
+      shapeDiagnostic: { payment: { fields: { auth_code: "EMPTY_OR_WHITESPACE_ONLY" } } } });
+  });
+  it("rejects an unpaired surrogate in auth_code", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: "\ud800" }), authority);
+    expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "PAYMENT_FIELD_INVALID",
+      shapeDiagnostic: { payment: { fields: { auth_code: "CONTROL_OR_SURROGATE" } } } });
+  });
+  it("preserves the 512-byte auth_code boundary", () => {
+    expect(parseContactedRefundEvidence(response({ auth_code: "x".repeat(512) }), authority).parserResult)
+      .toBe("MATCHED_REFUND_TRANSACTION");
+    expect(parseContactedRefundEvidence(response({ auth_code: " ".repeat(512) }), authority).parserResult)
+      .toBe("MATCHED_REFUND_TRANSACTION");
+  });
+  it("rejects oversized nonblank and blank auth_code values", () => {
+    for (const authCode of ["x".repeat(513), " ".repeat(513)]) {
+      const result = parseContactedRefundEvidence(response({ auth_code: authCode }), authority);
+      expect(result).toMatchObject({ parserResult: "UNKNOWN_SHAPE", firstFailure: "PAYMENT_FIELD_INVALID" });
+    }
+  });
+  it("lets REFUND with blank auth_code proceed past payment shape validation", () => {
+    const result = parseContactedRefundEvidence(response({ auth_code: "" }), authority);
+    expect(result).toMatchObject({ parserResult: "MATCHED_REFUND_TRANSACTION", firstFailure: null,
+      providerStatusClass: "REFUND", providerResponseSuccess: true });
+  });
+  it("lets PARTIAL_REFUND with blank auth_code proceed past payment shape validation", () => {
+    const partial = { ...authority, originalAmount: 200, preContactRefundableBalance: 200, expectedRefundType: "P" as const };
+    const result = parseContactedRefundEvidence(response({
+      status: "PARTIAL_REFUND", amount: "2.00", auth_code: "",
+    }), partial);
+    expect(result).toMatchObject({ parserResult: "MATCHED_REFUND_TRANSACTION", firstFailure: null,
+      providerStatusClass: "PARTIAL_REFUND", providerResponseSuccess: true });
+  });
+  it.each([
+    ["refund ID", { refund_id: "wrong" }, "IDENTITY_MISMATCH"],
+    ["original transaction", { transaction_id: "wrong" }, "IDENTITY_MISMATCH"],
+    ["currency", { currency: "JPY" }, "MONEY_MISMATCH"],
+    ["amount", { refund_amount: "1.01" }, "MONEY_MISMATCH"],
+    ["provider status", { status: "SALE" }, "UNESTABLISHED"],
+  ])("preserves %s mismatch after admitting blank auth_code", (_name, patch, expected) => {
+    expect(parseContactedRefundEvidence(response({ ...patch, auth_code: "" }), authority).parserResult)
+      .toBe(expected);
   });
   it("matches PARTIAL_REFUND only for a partial operation", () => {
     const partial = { ...authority, originalAmount: 200, preContactRefundableBalance: 200, expectedRefundType: "P" as const };

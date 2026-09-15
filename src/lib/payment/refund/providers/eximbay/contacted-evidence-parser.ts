@@ -91,7 +91,7 @@ function paymentShape(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value) || !keysWithin(value, PAYMENT)) return false;
   return ["status", "order_id", "currency", "amount", "transaction_id", "transaction_date"]
     .every((key) => text(value[key], 512))
-    && Object.values(value).every((member) => text(member, 512))
+    && Object.entries(value).every(([key, member]) => paymentText(key, member))
     && /^[0-9]{14}$/u.test(String(value.transaction_date));
 }
 
@@ -323,10 +323,19 @@ function paymentFailure(value: unknown): string {
   const required = ["status", "order_id", "currency", "amount", "transaction_id", "transaction_date"];
   if (required.some((key) => !Object.hasOwn(value, key))) return "PAYMENT_REQUIRED_FIELD_MISSING";
   if (required.some((key) => !text(value[key], 512))) return "PAYMENT_FIELD_INVALID";
-  if (PAYMENT.some((key) => Object.hasOwn(value, key) && !text(value[key], 512))) {
+  if (PAYMENT.some((key) => Object.hasOwn(value, key) && !paymentText(key, value[key]))) {
     return "PAYMENT_FIELD_INVALID";
   }
   return "TRANSACTION_DATE_INVALID";
+}
+
+function paymentText(key: string, value: unknown): value is string {
+  if (key !== "auth_code") return text(value, 512);
+  return text(value, 512) || safeBlankText(value, 512);
+}
+
+function safeBlankText(value: unknown, maxBytes: number): value is string {
+  return typeof value === "string" && value.trim().length === 0 && safeText(value, maxBytes);
 }
 
 function optionalMetadata(value: unknown): boolean {
