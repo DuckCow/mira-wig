@@ -7,7 +7,7 @@ COPY --link package.json package-lock.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY --link tsconfig.json prisma.config.ts ./
 COPY --link prisma ./prisma
-COPY --link scripts/refund-execution-worker.ts scripts/refund-sandbox-provider-free-preflight.ts scripts/eximbay-refund-canary.ts scripts/eximbay-contacted-refund-evidence-once.ts scripts/eximbay-contacted-reconciliation.ts scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts ./scripts/
+COPY --link scripts/refund-execution-worker.ts scripts/refund-sandbox-provider-free-preflight.ts scripts/eximbay-refund-canary.ts scripts/eximbay-contacted-refund-evidence-once.ts scripts/eximbay-contacted-refund-success-close-once.ts scripts/eximbay-contacted-reconciliation.ts scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts ./scripts/
 COPY --link scripts/build-refund-worker-bundles.mts ./scripts/
 COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/
 COPY --link src/lib/payment ./src/lib/payment

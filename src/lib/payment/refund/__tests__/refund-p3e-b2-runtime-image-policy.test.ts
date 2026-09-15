@@ -183,7 +183,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      entrypointCount: 8,
+      entrypointCount: 9,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -209,7 +209,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
   }, 45_000);
 
-  it("supplies the exact eight bundle entrypoint sources to the Docker build stage", () => {
+  it("supplies the exact nine bundle entrypoint sources to the Docker build stage", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const contextBuilder = readFileSync(
       join(ROOT, "scripts/build-refund-worker-bundles.mts"),
@@ -221,6 +221,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     "scripts/refund-sandbox-provider-free-preflight.ts",
   "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
   "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
+  "eximbay-contacted-refund-success-close":
+    "scripts/eximbay-contacted-refund-success-close-once.ts",
   "eximbay-contacted-refund-evidence":
     "scripts/eximbay-contacted-refund-evidence-once.ts",
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
@@ -232,6 +234,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       + "scripts/refund-sandbox-provider-free-preflight.ts "
       + "scripts/eximbay-refund-canary.ts "
       + "scripts/eximbay-contacted-refund-evidence-once.ts "
+      + "scripts/eximbay-contacted-refund-success-close-once.ts "
       + "scripts/eximbay-contacted-reconciliation.ts "
       + "scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts ./scripts/",
     );
@@ -269,12 +272,15 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       || path === "scripts/refund-execution-worker.ts"
       || path === "scripts/refund-sandbox-provider-free-preflight.ts"
       || path === "scripts/eximbay-refund-canary.ts"
-      || path === "scripts/eximbay-contacted-refund-evidence-once.ts"
+      || ["scripts/eximbay-contacted-refund-evidence-once.ts",
+        "scripts/eximbay-contacted-refund-success-close-once.ts"].includes(path)
       || path === "scripts/eximbay-contacted-reconciliation.ts"
       || path === "scripts/eximbay-refund-reentry.ts"
       || path === "scripts/eximbay-retrieve-shape-diagnostic.ts"
     ));
     expect(requiredSources).toEqual(expect.arrayContaining([
+      "scripts/eximbay-contacted-refund-success-close-once.ts",
+      "src/lib/payment/refund/providers/eximbay/apply-contacted-success.ts",
       "src/lib/payment/refund/authorization/worker-client.ts",
       "src/lib/payment/refund/authorization/contract.ts",
       "src/lib/payment/refund/authorization/json-body.ts",

@@ -127,6 +127,59 @@ describe("refund worker container supervisor", () => {
     expect(harness.stderr).toEqual(['{"ok":false,"code":"INVALID_HOST_INPUT"}\n']);
   });
 
+  it.each(["CLOSED", "REJECTED", "PERSISTENCE_FAILED"])(
+    "dispatches only the explicit closure override and relays %s once", async (outcome) => {
+      const code = outcome === "CLOSED" ? 0 : 1;
+      const line = `${JSON.stringify({ schema: "mira-eximbay-contacted-refund-success-close/v1",
+        outcome, parserResult: "MATCHED_REFUND_TRANSACTION", inquiryCount: 1,
+        diagnosticCode: "CONTACTED_REFUND_EVIDENCE" })}\n`;
+      const harness = supervisorHarness([
+        runningChild({ closeOnTerm: 0 }), completedChild(code, line, ""),
+      ], { readiness: true });
+      const exit = await runRefundWorkerContainerSupervisor(
+        ["eximbay-contacted-refund-success-close-once"], ENABLED_ENV,
+        harness.output, harness.dependencies,
+      );
+      expect(exit).toBe(code);
+      expect(harness.spawnCalls).toHaveLength(2);
+      expect(harness.spawnCalls[1]?.args).toEqual([
+        expect.stringMatching(/\/eximbay-contacted-refund-success-close\.mjs$/),
+        CONTACTED_EVIDENCE_COMMAND_ID,
+      ]);
+      expect(harness.stdout).toEqual([line]);
+      expect(harness.stderr).toEqual([]);
+    },
+  );
+
+  it.each([
+    { inquiryCount: 0 }, { outcome: "UNKNOWN" }, { parserResult: "UNKNOWN_SHAPE" },
+    { providerRefundId: "must-not-escape" }, { schema: "wrong" },
+  ])("rejects malformed closure terminal without relaying it", async (patch) => {
+    const line = `${JSON.stringify({ schema: "mira-eximbay-contacted-refund-success-close/v1",
+      outcome: "CLOSED", parserResult: "MATCHED_REFUND_TRANSACTION", inquiryCount: 1,
+      diagnosticCode: "CONTACTED_REFUND_EVIDENCE", ...patch })}\n`;
+    const harness = supervisorHarness([
+      runningChild({ closeOnTerm: 0 }), completedChild(0, line, ""),
+    ], { readiness: true });
+    expect(await runRefundWorkerContainerSupervisor(
+      ["eximbay-contacted-refund-success-close-once"], ENABLED_ENV,
+      harness.output, harness.dependencies,
+    )).toBe(1);
+    expect(harness.stdout).toEqual([]);
+    expect(harness.stderr).toEqual(['{"ok":false,"code":"SYSTEMIC_FAILURE"}\n']);
+    expect(harness.spawnCalls).toHaveLength(2);
+  });
+
+  it("rejects closure override extra arguments and missing database binding before spawn", async () => {
+    for (const args of [["eximbay-contacted-refund-success-close-once", "extra"],
+      ["eximbay-contacted-refund-success-close-once"]]) {
+      const harness = supervisorHarness();
+      expect(await runRefundWorkerContainerSupervisor(args, {}, harness.output,
+        harness.dependencies)).toBe(args.length === 1 ? 78 : 64);
+      expect(harness.spawnCalls).toEqual([]);
+    }
+  });
+
   it("preserves the existing disabled worker result and never starts the proxy", async () => {
     const worker = completedChild(0, '{"ok":true,"code":"FEATURE_DISABLED"}\n', "");
     const harness = supervisorHarness([worker]);

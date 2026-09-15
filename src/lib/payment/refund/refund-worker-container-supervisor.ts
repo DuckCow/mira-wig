@@ -78,6 +78,7 @@ const INVALID_HOST_INPUT_LINE = '{"ok":false,"code":"INVALID_HOST_INPUT"}\n';
 const CONFIG_INVALID_LINE = '{"ok":false,"code":"CONFIG_INVALID"}\n';
 
 export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
+  "eximbay-contacted-refund-success-close-once",
   "eximbay-contacted-refund-evidence-once",
   "eximbay-retrieve-shape-diagnostic-once",
   "worker-check",
@@ -209,8 +210,9 @@ function directCommand(
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
   dependencies: RefundWorkerContainerSupervisorDependencies,
 ): Promise<number> | null {
-  if (command === "eximbay-contacted-refund-evidence-once") {
-    return runEximbayContactedRefundEvidenceOnce(env, output, dependencies);
+  if (["eximbay-contacted-refund-evidence-once", "eximbay-contacted-refund-success-close-once"].includes(command)) {
+    return runEximbayContactedRefundEvidenceOnce(env, output, dependencies,
+      command === "eximbay-contacted-refund-success-close-once");
   }
   if (command === "eximbay-retrieve-shape-diagnostic-once") {
     return runRetrieveDiagnostic(env, output, dependencies);
@@ -230,16 +232,19 @@ async function runEximbayContactedRefundEvidenceOnce(
   env: RuntimeEnvironment,
   output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
   dependencies: RefundWorkerContainerSupervisorDependencies,
+  closeSuccess: boolean,
 ): Promise<number> {
   const binding = validateDatabaseBinding(env);
   if (!binding) return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
   return runWithProxy(binding, Object.freeze({
     executable: process.execPath,
     args: Object.freeze([
-      dependencies.eximbayContactedRefundEvidenceBundle,
+      closeSuccess
+        ? fileURLToPath(new URL("./eximbay-contacted-refund-success-close.mjs", import.meta.url))
+        : dependencies.eximbayContactedRefundEvidenceBundle,
       CONTACTED_EVIDENCE_COMMAND_ID,
     ]),
-    resultSchema: "EXIMBAY_CONTACTED_REFUND_EVIDENCE",
+    resultSchema: closeSuccess ? "EXIMBAY_CONTACTED_REFUND_SUCCESS_CLOSE" : "EXIMBAY_CONTACTED_REFUND_EVIDENCE",
   }), env, output, dependencies);
 }
 
@@ -382,7 +387,7 @@ function hasConnectionEnvironmentOverride(env: RuntimeEnvironment): boolean {
 type ChildSpecification = Readonly<{
   executable: string;
   args: readonly string[];
-  resultSchema?: "EXIMBAY_CONTACTED_REFUND_EVIDENCE" | "EXIMBAY_CONTACTED_RECONCILIATION"
+  resultSchema?: "EXIMBAY_CONTACTED_REFUND_SUCCESS_CLOSE" | "EXIMBAY_CONTACTED_REFUND_EVIDENCE" | "EXIMBAY_CONTACTED_RECONCILIATION"
     | "EXIMBAY_REFUND_REENTRY" | "EXIMBAY_RETRIEVE_DIAGNOSTIC";
 }>;
 
@@ -579,7 +584,8 @@ async function finalizeLegacyProxiedChildResult(
         1,
       );
   }
-  if (childSpecification.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE") {
+  if (childSpecification.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE"
+    || childSpecification.resultSchema === "EXIMBAY_CONTACTED_REFUND_SUCCESS_CLOSE") {
     return writeStatic(
       output.stdout,
       assessment.evidence.result.line,
@@ -605,8 +611,8 @@ function trustedChildEvidence(
 }> {
   const result = capture.result;
   if (!result) return Object.freeze({ evidence: null, validation: capture.validation });
-  if (specification.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE") {
-    const validation = validateContactedRefundEvidenceTerminal(result);
+  if (isContactedRefundSchema(specification.resultSchema)) {
+    const validation = validateContactedRefundTerminal(specification.resultSchema, result);
     return validation === "TRUSTED"
       ? Object.freeze({
         evidence: Object.freeze({
@@ -918,7 +924,7 @@ function captureCompletedChildResult(input: Readonly<{
   const exit = Object.freeze({ code: input.exitCode, signal: null });
   const reentry = input.resultSchema === "EXIMBAY_REFUND_REENTRY";
   const diagnostic = input.resultSchema === "EXIMBAY_RETRIEVE_DIAGNOSTIC";
-  const contactedEvidence = input.resultSchema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE";
+  const contactedEvidence = isContactedRefundSchema(input.resultSchema);
   const useStdout = [
     reentry,
     diagnostic,
@@ -1179,6 +1185,36 @@ const CONTACTED_REFUND_FIRST_FAILURES = new Set<string>([
   "BALANCE_MISMATCH",
   "CONTRADICTORY_NONE",
 ]);
+
+function isContactedRefundSchema(schema: ChildSpecification["resultSchema"]): boolean {
+  return schema === "EXIMBAY_CONTACTED_REFUND_EVIDENCE" || schema === "EXIMBAY_CONTACTED_REFUND_SUCCESS_CLOSE";
+}
+
+function validateContactedRefundTerminal(
+  schema: ChildSpecification["resultSchema"], terminal: ChildResult,
+): ChildValidationState {
+  return schema === "EXIMBAY_CONTACTED_REFUND_SUCCESS_CLOSE"
+    ? validateContactedClosureTerminal(terminal) : validateContactedRefundEvidenceTerminal(terminal);
+}
+
+function validateContactedClosureTerminal(terminal: ChildResult): ChildValidationState {
+  const value = terminal.value;
+  if (!isPlainRecord(value) || !hasExactKeys(value,
+    ["diagnosticCode", "inquiryCount", "outcome", "parserResult", "schema"])) return "EVIDENCE_KEY_SET_MISMATCH";
+  if (value.schema !== "mira-eximbay-contacted-refund-success-close/v1"
+    || value.diagnosticCode !== "CONTACTED_REFUND_EVIDENCE") return "EVIDENCE_SCHEMA_MISMATCH";
+  if (!validContactedClosureValues(value)) return "EVIDENCE_SEMANTICS_INVALID";
+  return terminal.exitCode === (value.outcome === "CLOSED" ? 0 : 1)
+    ? "TRUSTED" : "EVIDENCE_EXIT_CODE_MISMATCH";
+}
+
+function validContactedClosureValues(value: Record<string, unknown>): boolean {
+  if (!["CLOSED", "REJECTED", "PERSISTENCE_FAILED"].includes(String(value.outcome))
+    || !CONTACTED_REFUND_PARSER_RESULTS.has(String(value.parserResult))) return false;
+  if (value.inquiryCount !== 0 && value.inquiryCount !== 1) return false;
+  return value.outcome === "REJECTED" || (value.inquiryCount === 1
+    && value.parserResult === "MATCHED_REFUND_TRANSACTION");
+}
 
 function validateContactedRefundEvidenceTerminal(
   terminal: ChildResult,
