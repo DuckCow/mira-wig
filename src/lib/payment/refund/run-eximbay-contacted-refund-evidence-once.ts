@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import { createEximbayRefundPreflightConfig } from "./providers/eximbay/preflight-contract";
 import { createHash } from "node:crypto";
 import { readExactEximbayRefundCanarySecret } from "./eximbay-refund-canary-secret-reader";
@@ -39,7 +39,7 @@ export type ContactedEvidenceResult = ContactedRefundEvidence & Readonly<{
 // One consistent snapshot, SELECT only. Disconnect before any provider request.
 export async function readContactedEvidenceDatabase(env: Env): Promise<ContactedEvidenceDatabaseRead> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_UNAVAILABLE");
-  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
+  const db = new PrismaClient({ adapter: createPrismaPg({ connectionString: env.DATABASE_URL }) });
   let row: ContactedEvidenceRow | null;
   let databaseReadSucceeded: boolean;
   let databaseDisconnected: boolean;

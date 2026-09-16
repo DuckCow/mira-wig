@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import {
   CheckoutSessionStatus,
   CustomerRefundIntakeReasonCode,
@@ -1719,7 +1719,7 @@ async function applyRepositoryMigrations(client: Client): Promise<void> {
 
 function isolatedPrismaClient(connectionString: string, schema: string): PrismaClient {
   return new PrismaClient({
-    adapter: new PrismaPg(
+    adapter: createPrismaPg(
       { connectionString, options: `-c timezone=UTC -c search_path=${schema}` },
       { schema },
     ),

@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import { inspectRefundExecutionActivationInventory } from "./execution-activation";
 import { inspectRefundCredentialLifecycle } from "./refund-operations-credential";
 import {
@@ -63,7 +63,7 @@ export const defaultRefundSandboxProviderFreePreflightDependencies:
 RefundSandboxProviderFreePreflightDependencies<PrismaClient> = Object.freeze({
   inspectEnvironment: safeRefundSandboxProviderFreePreflightEnvironment,
   createDatabase: (connectionString) => new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: createPrismaPg({ connectionString }),
   }),
   disconnectDatabase: (database) => database.$disconnect(),
   checkDatabaseConnectivity,

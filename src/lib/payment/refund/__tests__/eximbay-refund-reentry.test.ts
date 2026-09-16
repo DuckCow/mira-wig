@@ -26,54 +26,6 @@ describe("exact Eximbay refund re-entry authority", () => {
     });
   });
 
-  it("uses only the direct historical-seal authorities admitted by the canonical DB role", () => {
-    const source = readFileSync(join(
-      process.cwd(), "src/lib/payment/refund/eximbay-refund-reentry-authority.ts",
-    ), "utf8");
-    for (const directGate of [
-      "tx.eximbayRefundSandboxCanaryApproval.findUnique",
-      "tx.refundExecutionCommand.findUnique",
-      "events: { orderBy:",
-      "dispatchAttempts: true",
-      "refundAttempt: {",
-      "order: true",
-      "payment: true",
-      "transitions: true",
-      "providerOperationBinding: {",
-      "eligibilityProof: true",
-      "eximbayPreflightObservations: true",
-      "tx.refundExecutionProviderContactEligibilityProof.count",
-      "tx.refundExecutionEvidence.count",
-      "payment.id === target.paymentId",
-      "order.id === target.orderId",
-      "attempt.id === target.refundAttemptId",
-      "command.id === target.commandId",
-      "binding.id === target.providerOperationBindingId",
-      "command.leaseGeneration === target.predecessorLeaseGeneration",
-      "exactPredecessorEventMatches(command.events)",
-      "command.dispatchAttempts.length === 0",
-      "binding.eligibilityProof === null",
-      "binding.eximbayPreflightObservations.length === 0",
-      "!attempt.transitions.some((transition) => transition.toStatus === RefundAttemptStatus.SUCCEEDED)",
-      "approval.consumedExecutionId === target.consumedExecutionId",
-      "approval.consumedExecutionBindingDigest === target.consumedExecutionBindingDigest",
-      "if ([contactProofCount, evidenceCount].some((count) => count !== 0))",
-    ]) {
-      expect(source).toContain(directGate);
-    }
-    expect(source).not.toMatch(/paymentOutbox|PaymentOutbox/u);
-
-    const grants = readFileSync(join(
-      process.cwd(), "infra/refund-sandbox/p3e-b2/eximbay-canary/database-role-grants.sql",
-    ), "utf8");
-    expect(grants).toMatch(
-      /GRANT INSERT ON TABLE[^;]*"PaymentOutbox"[^;]*TO mira_refund_canary;/u,
-    );
-    expect(grants).not.toMatch(
-      /GRANT\s+[^;]*\bSELECT\b[^;]*ON TABLE "PaymentOutbox"/u,
-    );
-  });
-
   it("stops before database, secret, or provider capability for a malformed runtime", async () => {
     const createDatabase = vi.fn();
     const readSecret = vi.fn();

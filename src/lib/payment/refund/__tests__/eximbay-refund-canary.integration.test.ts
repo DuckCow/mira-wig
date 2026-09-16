@@ -9,7 +9,7 @@ import {
   RefundExecutionCommandStatus,
   OrderStatus,
 } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../../database/prisma-pg";
 import { Client } from "pg";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -754,7 +754,7 @@ async function installRestrictedRoleAuthority(): Promise<void> {
 }
 
 function restrictedPrisma(role: "mira_refund_preflight" | "mira_refund_canary"): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: restrictedDatabaseUrl(role) }) });
+  return new PrismaClient({ adapter: createPrismaPg({ connectionString: restrictedDatabaseUrl(role) }) });
 }
 
 async function restrictedPg(

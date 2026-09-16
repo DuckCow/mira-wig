@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient, RefundAttemptActorType } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../../../database/prisma-pg";
 import { Client } from "pg";
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
@@ -60,7 +60,7 @@ export function roleUrl(role?: string): string {
   return url.toString();
 }
 export function prismaFor(role: string) {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: roleUrl(role) }) });
+  return new PrismaClient({ adapter: createPrismaPg({ connectionString: roleUrl(role) }) });
 }
 export async function pgFor(role?: string) {
   const client = new Client({ connectionString: roleUrl(role) });

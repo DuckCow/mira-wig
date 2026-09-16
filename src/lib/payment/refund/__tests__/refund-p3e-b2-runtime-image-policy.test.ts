@@ -184,7 +184,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      entrypointCount: 11,
+      entrypointCount: 10,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -213,7 +213,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
   }, 45_000);
 
-  it("supplies the exact eleven bundle entrypoint sources to the Docker build stage", () => {
+  it("supplies the exact ten bundle entrypoint sources to the Docker build stage", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const contextBuilder = readFileSync(
       join(ROOT, "scripts/build-refund-worker-bundles.mts"),
@@ -233,7 +233,6 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     "scripts/eximbay-contacted-refund-evidence-once.ts",
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
   "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
-  "eximbay-retrieve-shape-diagnostic": "scripts/eximbay-retrieve-shape-diagnostic.ts",
   "pl09-targeted-refund-email-dispatch":
     "scripts/pl09-targeted-refund-email-dispatch.ts",
 });`);
@@ -244,7 +243,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       + "scripts/eximbay-contacted-refund-evidence-once.ts "
       + "scripts/eximbay-contacted-refund-success-close-once.ts "
       + "scripts/eximbay-contacted-reconciliation.ts "
-      + "scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts "
+      + "scripts/eximbay-refund-reentry.ts "
       + "scripts/pl09-targeted-refund-email-dispatch.ts ./scripts/",
     );
     expect(dockerfile).toContain(
@@ -1701,7 +1700,6 @@ const REQUIRED_BUILD_ENTRYPOINTS = new Set([
   "scripts/eximbay-contacted-refund-success-close-once.ts",
   "scripts/eximbay-contacted-reconciliation.ts",
   "scripts/eximbay-refund-reentry.ts",
-  "scripts/eximbay-retrieve-shape-diagnostic.ts",
   "scripts/pl09-targeted-refund-email-dispatch.ts",
 ]);
 

@@ -13,7 +13,7 @@ import {
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../../database/prisma-pg";
 import { Client } from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
@@ -924,7 +924,7 @@ function restrictedRecoveryClient(adminUrl: string): PrismaClient {
   const url = new URL(adminUrl);
   url.username = "mira_refund_canary";
   url.password = RESTRICTED_ROLE_PASSWORD;
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url.toString() }) });
+  return new PrismaClient({ adapter: createPrismaPg({ connectionString: url.toString() }) });
 }
 
 async function reconciliationPrivilegeResidue(admin: Client) {

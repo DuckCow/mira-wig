@@ -1,6 +1,6 @@
 import { EximbayPreflightException, type EximbayPreflightDiagnostic } from "./providers/eximbay/preflight-diagnostic";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import { hasEximbayRefundCanaryEffectConfiguration } from "./eximbay-refund-canary-environment";
 import { REFUND_AUTHORIZATION_GATE } from "./authorization/contract";
 import { requestRefundAuthorizationAdmission, type AdmittedRefundReentry } from "./authorization/worker-client";
@@ -75,7 +75,7 @@ export const defaultEximbayRefundReentryDependencies: EximbayRefundReentryDepend
   Object.freeze({
     createDatabase: (env) => {
       if (!env.DATABASE_URL) throw new Error("DATABASE_URL_REQUIRED");
-      return new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
+      return new PrismaClient({ adapter: createPrismaPg({ connectionString: env.DATABASE_URL }) });
     },
     disconnectDatabase: (database) => database.$disconnect(),
     admit: requestRefundAuthorizationAdmission,

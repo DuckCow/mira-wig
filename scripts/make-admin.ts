@@ -10,7 +10,7 @@
 // ============================================================
 
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../src/lib/database/prisma-pg";
 
 const email = process.argv[2];
 
@@ -26,7 +26,7 @@ async function main() {
     process.exit(1);
   }
 
-  const adapter = new PrismaPg({ connectionString });
+  const adapter = createPrismaPg({ connectionString });
   const db = new PrismaClient({ adapter });
 
   try {

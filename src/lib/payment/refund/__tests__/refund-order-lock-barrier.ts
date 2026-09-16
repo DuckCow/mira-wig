@@ -1,4 +1,4 @@
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../../database/prisma-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
 
@@ -26,7 +26,7 @@ export function createNamedDbSession(label: string): NamedDbSession {
   url.searchParams.set("application_name", applicationName);
   return {
     applicationName,
-    client: new PrismaClient({ adapter: new PrismaPg({ connectionString: url.toString() }) }),
+    client: new PrismaClient({ adapter: createPrismaPg({ connectionString: url.toString() }) }),
   };
 }
 

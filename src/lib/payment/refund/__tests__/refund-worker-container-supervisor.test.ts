@@ -1,6 +1,3 @@
-import { emptyRetrieveShapeDiagnostic } from "../providers/eximbay/retrieve-shape-diagnostic";
-import { diagnosticEnvironment } from "./retrieve-diagnostic-fixture";
-import { diagnosticResult } from "../retrieve-diagnostic-result";
 import { isEximbayPreflightDiagnostic, type EximbayPreflightDiagnostic } from "../providers/eximbay/preflight-diagnostic";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -105,11 +102,10 @@ describe("refund worker container supervisor", () => {
     });
   });
 
-  it("adds only the exact PL-09 command to the existing command mappings", () => {
+  it("keeps current command mappings after retiring the retrieve diagnostic", () => {
     expect(REFUND_WORKER_CONTAINER_COMMANDS).toEqual([
       "eximbay-contacted-refund-success-close-once",
       "eximbay-contacted-refund-evidence-once",
-      "eximbay-retrieve-shape-diagnostic-once",
       "worker-check",
       "worker-health",
       "worker-once",
@@ -126,6 +122,7 @@ describe("refund worker container supervisor", () => {
     [],
     ["worker-once", "extra"],
     ["unknown"],
+    ["eximbay-retrieve-shape-diagnostic-once"],
     ["worker-once", "worker-once"],
   ])("rejects a non-exact command vector %j without spawning", async (args) => {
     const harness = supervisorHarness();
@@ -2332,106 +2329,3 @@ function expectContactedSupervisorFailure(
     ? '{"ok":false,"code":"SYSTEMIC_FAILURE"}'
     : `{"ok":false,"code":"SYSTEMIC_FAILURE","providerRetrieveCount":${providerRetrieveCount}}`);
 }
-
-
-describe("read-only diagnostic supervisor", () => {
-  const env = { ...diagnosticEnvironment(), REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE, DATABASE_URL };
-  const command = ["eximbay-retrieve-shape-diagnostic-once"];
-  it("fails closed before proxy startup for a missing selector", async () => {
-    const harness = supervisorHarness();
-    await runRefundWorkerContainerSupervisor(command,
-      { ...env, MIRA_EXIMBAY_RETRIEVE_DIAGNOSTIC_PAYMENT_ID: undefined }, harness.output, harness.dependencies);
-    expect(harness.spawnCalls).toHaveLength(0);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({ terminalClass: "READ_ONLY_DIAGNOSTIC", proxyLifecycle: "NOT_STARTED" });
-  });
-  it("reports diagnostic success only after a valid child terminal and proxy cleanup", async () => {
-    const shape = emptyRetrieveShapeDiagnostic();
-    shape.jsonParseSuccess = true;
-    shape.root = { type: "object", fields: [], extraKeyCount: 0 };
-    shape.payment = { type: "object", fields: [], extraKeyCount: 0 };
-    const result = { ...diagnosticResult("DIAGNOSTIC_COMPLETE"), inquiryCount: 1, parserResult: "ADMITTED", shape };
-    const proxy = runningChild({ closeOnTerm: 0 });
-    const child = completedChild(0, `${JSON.stringify(result)}\n`, "");
-    const harness = supervisorHarness([proxy, child], { readiness: true });
-    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(0);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({ ok: true, terminalClass: "READ_ONLY_DIAGNOSTIC", childResult: result });
-    expect(proxy.killCalls).toEqual(["SIGTERM"]);
-  });
-  it("preserves the dedicated child failure after proxy cleanup", async () => {
-    const proxy = runningChild({ closeOnTerm: 0 });
-    const result = diagnosticResult("PAYMENT_NOT_FOUND");
-    const child = completedChild(1, `${JSON.stringify(result)}\n`, "");
-    const harness = supervisorHarness([proxy, child], { readiness: true });
-    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(1);
-    expect(proxy.killCalls).toEqual(["SIGTERM"]);
-    expect(harness.spawnCalls).toHaveLength(2);
-    expect(harness.spawnCalls[1].args[0]).toContain("eximbay-retrieve-shape-diagnostic.mjs");
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({ terminalClass: "READ_ONLY_DIAGNOSTIC",
-      childResult: result, childValidation: "TRUSTED", proxyLifecycle: "READY_CLEANUP_CONFIRMED" });
-  });
-  it.each([
-    "{}\n", "not-json\n", `${JSON.stringify({ ...diagnosticResult("PAYMENT_NOT_FOUND"), raw: "private" })}\n`,
-    `${JSON.stringify({ ...diagnosticResult("PAYMENT_NOT_FOUND"), cancellationCount: 1 })}\n`,
-    `${JSON.stringify({ ...diagnosticResult("PAYMENT_NOT_FOUND"), terminalClass: "REFUND_SUCCEEDED" })}\n`,
-    `${"x".repeat(65_537)}\n`,
-  ])("rejects malformed child output without echoing it", async (line) => {
-    const proxy = runningChild({ closeOnTerm: 0 });
-    const harness = supervisorHarness([proxy, completedChild(1, line, "")], { readiness: true });
-    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(1);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({ childResult: null, childValidation: "INVALID_DIAGNOSTIC_OUTPUT" });
-    expect(JSON.stringify(harness.stdout)).not.toMatch(/private|REFUND_SUCCEEDED/);
-    expect(proxy.killCalls).toEqual(["SIGTERM"]);
-  });
-  it.each(["valid", "extra", "card-private", "parameter-length", "inconsistent", "missing"])("validates refined diagnostic detail through supervisor: %s", async (fault) => {
-    const shape = { ...emptyRetrieveShapeDiagnostic(), jsonParseSuccess: true,
-      firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID",
-      optionalRootDetail: {
-        cardInfo: { pairKind: "FORMAL", firstFourAsciiDigits: true, lastFourAsciiDigits: true, parserValid: true },
-        otherParam: { param1Class: "OVER_255_UTF8_BYTES", param2Class: "ABSENT",
-          param1TextLengthOver255: false, param2TextLengthOver255: null, parserValid: false },
-      },
-    };
-    const detail = shape.optionalRootDetail;
-    const variants: Record<string, unknown> = {
-      valid: detail,
-      extra: { ...detail, raw: "private-value" },
-      "card-private": { ...detail, cardInfo: { ...detail.cardInfo, digits: "private-card" } },
-      "parameter-length": { ...detail, otherParam: { ...detail.otherParam, length: 258 } },
-      inconsistent: { ...detail, otherParam: { ...detail.otherParam, parserValid: true } },
-      missing: null,
-    };
-    const result = { ...diagnosticResult("DIAGNOSTIC_COMPLETE"), inquiryCount: 1,
-      parserResult: "UNKNOWN_SHAPE", shape: { ...shape, optionalRootDetail: variants[fault] } };
-    const proxy = runningChild({ closeOnTerm: 0 });
-    const harness = supervisorHarness([proxy, completedChild(0, `${JSON.stringify(result)}\n`, "")], { readiness: true });
-    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(fault === "valid" ? 0 : 1);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({
-      childValidation: fault === "valid" ? "TRUSTED" : "INVALID_DIAGNOSTIC_OUTPUT",
-      childResult: fault === "valid" ? result : null,
-    });
-    expect(JSON.stringify(harness.stdout)).not.toMatch(/private-value|private-card|258/);
-  });
-  it("rejects stderr alongside a valid diagnostic terminal", async () => {
-    const proxy = runningChild({ closeOnTerm: 0 });
-    const child = completedChild(1, `${JSON.stringify(diagnosticResult("PAYMENT_NOT_FOUND"))}\n`, "secret-private");
-    const harness = supervisorHarness([proxy, child], { readiness: true });
-    await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({ childResult: null });
-    expect(JSON.stringify(harness.stdout)).not.toContain("secret-private");
-  });
-  it("cleans up on readiness failure and does not spawn a diagnostic", async () => {
-    const proxy = runningChild({ closeOnTerm: 0 });
-    const harness = supervisorHarness([proxy]);
-    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(1);
-    expect(proxy.killCalls).toEqual(["SIGTERM"]);
-    expect(harness.spawnCalls).toHaveLength(1);
-  });
-  it("reports unconfirmed proxy cleanup without losing the child observation", async () => {
-    const proxy = runningChild({ closeOnTerm: null });
-    const child = completedChild(1, `${JSON.stringify(diagnosticResult("PAYMENT_NOT_FOUND"))}\n`, "");
-    const harness = supervisorHarness([proxy, child], { readiness: true });
-    expect(await runRefundWorkerContainerSupervisor(command, env, harness.output, harness.dependencies)).toBe(1);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({ proxyLifecycle: "READY_CLEANUP_UNCONFIRMED", childValidation: "TRUSTED" });
-    expect(proxy.killCalls).toEqual(["SIGTERM", "SIGKILL"]);
-  });
-});

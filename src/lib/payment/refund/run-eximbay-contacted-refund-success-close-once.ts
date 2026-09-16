@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import { collectEximbayContactedRefundProofOnce, readContactedEvidenceDatabase, readEvidenceConfig,
   type ContactedEvidenceDependencies } from "./run-eximbay-contacted-refund-evidence-once";
 import { readExactEximbayRefundCanarySecret } from "./eximbay-refund-canary-secret-reader";
@@ -14,7 +14,7 @@ export type ContactedClosureDependencies = ContactedEvidenceDependencies & Reado
 async function apply(proof: ContactedRefundSuccessProof, env: Env): Promise<ContactedSuccessApplication> {
   const config = readEvidenceConfig(env);
   if (!config || !env.DATABASE_URL) return { outcome: "REJECTED" };
-  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
+  const db = new PrismaClient({ adapter: createPrismaPg({ connectionString: env.DATABASE_URL }) });
   try { return await applyEximbayContactedRefundSuccess(db, proof, config.config); }
   finally { await db.$disconnect(); }
 }

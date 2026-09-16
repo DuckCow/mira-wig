@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../src/lib/database/prisma-pg";
 import { PrismaClient } from "@prisma/client";
 import {
   EximbayCanaryProducerError,
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   if (!connectionString) throw new EximbayCanaryProducerError("DATABASE_URL_REQUIRED");
   const attestation = parseEximbayCanaryAttestation(await readBoundedJson(command.attestationPath));
   if (!attestation) throw new EximbayCanaryProducerError("ATTESTATION_INVALID");
-  const client = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  const client = new PrismaClient({ adapter: createPrismaPg({ connectionString }) });
   try {
     const result = await materializeProspectiveEximbayCanaryRequest(client, {
       paymentId: command.paymentId, attestation,

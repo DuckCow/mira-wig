@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../src/lib/database/prisma-pg";
 import {
   createPrismaPl09OutboxStore,
   createPrismaTransactionalEmailProjectionSource,
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const sandboxRecipient = requirePl09SandboxRecipient(environment);
   const connectionString = required("DATABASE_URL");
   const publicOrigin = required("PUBLIC_MIRA_ORIGIN");
-  const adapter = new PrismaPg({ connectionString });
+  const adapter = createPrismaPg({ connectionString });
   const db = new PrismaClient({ adapter });
 
   try {

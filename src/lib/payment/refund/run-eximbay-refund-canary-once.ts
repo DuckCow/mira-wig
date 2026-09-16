@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import { consumeEximbayRefundCanaryApproval } from "./consume-eximbay-refund-canary-approval-v2";
 import {
   parseEximbayRefundCanaryEnvironment,
@@ -56,7 +56,7 @@ export const defaultEximbayRefundCanaryDependencies: EximbayRefundCanaryDependen
   Object.freeze({
     createDatabase: (env) => {
       if (!env.DATABASE_URL) throw new Error("DATABASE_URL_REQUIRED");
-      return new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
+      return new PrismaClient({ adapter: createPrismaPg({ connectionString: env.DATABASE_URL }) });
     },
     disconnectDatabase: (database) => database.$disconnect(),
     readSecret: readExactEximbayRefundCanarySecret,

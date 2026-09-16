@@ -26,7 +26,7 @@ import {
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../../database/prisma-pg";
 import { Client } from "pg";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -1745,7 +1745,7 @@ async function installRestrictedRoleAuthority(): Promise<void> {
 
 function restrictedPrisma(): PrismaClient {
   return new PrismaClient({
-    adapter: new PrismaPg({ connectionString: restrictedDatabaseUrl() }),
+    adapter: createPrismaPg({ connectionString: restrictedDatabaseUrl() }),
   });
 }
 

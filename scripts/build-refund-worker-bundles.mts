@@ -44,7 +44,6 @@ const entryPoints = Object.freeze({
     "scripts/eximbay-contacted-refund-evidence-once.ts",
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
   "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
-  "eximbay-retrieve-shape-diagnostic": "scripts/eximbay-retrieve-shape-diagnostic.ts",
   "pl09-targeted-refund-email-dispatch":
     "scripts/pl09-targeted-refund-email-dispatch.ts",
 });

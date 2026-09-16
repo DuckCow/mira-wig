@@ -10,7 +10,7 @@ import {
   PaymentRemediationStatus,
   PrismaClient,
 } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../../database/prisma-pg";
 import { describe, expect, it, vi } from "vitest";
 import { recoverEximbayCheckout } from "@/lib/payment/eximbay/checkout-recovery";
 import { buildRefundWorkerBundles } from
@@ -51,7 +51,7 @@ import {
 } from "../run-eximbay-contacted-reconciliation-once";
 
 const DATABASE = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: "postgresql://fixture:fixture@localhost:5432/fixture" }),
+  adapter: createPrismaPg({ connectionString: "postgresql://fixture:fixture@localhost:5432/fixture" }),
 });
 const PROHIBITED = Object.freeze([
   "ready",
