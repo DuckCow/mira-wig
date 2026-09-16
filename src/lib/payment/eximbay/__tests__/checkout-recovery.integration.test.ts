@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  CheckoutSessionStatus,
   FulfillmentType,
   PaymentAdapterExecutionKind,
   PaymentAttemptLifecycle,
@@ -8,9 +9,12 @@ import {
   PaymentMode,
   PaymentProvider,
   PaymentRemediationStatus,
+  PrismaClient,
   ShippingCountry,
   WigCategory,
 } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Client } from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
@@ -19,10 +23,18 @@ import type { ProviderFactoryContext } from "@/lib/payment/providers/contract";
 import { PaymentMethod } from "@/lib/payment/providers/routing";
 import type { PaymentInitiationProvider } from "@/lib/payment/providers/types";
 import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
-import { createCheckoutSession, readCheckoutSessionResume } from "@/lib/payment/session";
+import { createCheckoutSession, isUsable, readCheckoutSessionResume } from "@/lib/payment/session";
 import type { EximbayBf4Fetch } from "../bf4-contact";
 import { processEximbayBf4Status } from "../bf4-engine";
 import type { EximbayReadyFetch } from "../ready-http";
+import {
+  applyContactedReconciliationRoleGrants,
+  bootstrapEximbayP3eDatabaseRoles,
+  defaultEximbayP3eDatabaseBootstrapDependencies,
+  EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
+  EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+  restoreCanaryRefundRoleGrants,
+} from "../../../../../scripts/eximbay-p3e-database-bootstrap";
 import {
   checkoutRecoveryTransmissionId,
   EXIMBAY_CHECKOUT_RECOVERY_EVENT_TYPE,
@@ -47,6 +59,7 @@ const RECOVERY_AT = new Date("2026-08-25T01:05:00.000Z");
 const CALLBACK_AT = new Date("2026-08-25T01:06:00.000Z");
 const MID = "R11A_SYNTHETIC_MID";
 const API_KEY = "R11A_SYNTHETIC_KEY_DO_NOT_LOG";
+const RESTRICTED_ROLE_PASSWORD = "contacted_reconciliation_restricted_test_only";
 const RECOVERY_ENV = Object.freeze({
   [EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED]: "ENABLED",
   EXIMBAY_SANDBOX_MID: MID,
@@ -62,6 +75,12 @@ interface Fixture {
   providerOrderId: string;
   amount: number;
 }
+
+const bootstrapInput = Object.freeze({
+  admission: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ADMISSION,
+  environment: EXIMBAY_P3E_DATABASE_BOOTSTRAP_ENVIRONMENT,
+  targetDatabaseName: "wig_platform_test" as const,
+});
 
 describe.sequential("Eximbay R11A checkout recovery", () => {
   let fixture: Fixture;
@@ -141,11 +160,128 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
   });
 
   it("does not release an observed transaction", async () => {
-    const result = await recoverEximbayCheckout(db, recoveryInput(fixture, transactionObservedTransport()));
-    expect(result).toEqual({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
+    const result = await recoverEximbayCheckout(
+      db,
+      recoveryInput(fixture, transactionObservedTransport(fixture)),
+    );
+    expect(result).toEqual({
+      kind: "notReleased",
+      reason: "TRANSACTION_OBSERVED",
+      providerObservation: {
+        schema: "eximbay.checkout-recovery.provider-observation",
+        version: 1,
+        application: {
+          checkoutSessionId: fixture.sessionId,
+          paymentId: fixture.paymentId,
+          providerOrderId: fixture.providerOrderId,
+          expectedAmountMinor: fixture.amount,
+          expectedCurrency: "USD",
+        },
+        providerResult: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          resultCode: "0000",
+          mode: "SANDBOX",
+          binding: {
+            merchant: "MATCH",
+            providerOrder: "MATCH",
+            money: "MATCH",
+          },
+          provider: {
+            transactionId: "observed-transaction",
+            orderId: fixture.providerOrderId,
+            status: "SALE",
+            amount: amountWire(fixture.amount),
+            currency: "USD",
+            transactionDate: "20260825010400",
+          },
+        },
+      },
+    });
+    await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+    await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+      .resolves.toMatchObject({
+        status: PaymentAttemptStatus.INITIATED,
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        remediationStatus: PaymentRemediationStatus.NONE,
+        providerPaymentKey: null,
+        financialSucceededAt: null,
+        blockingEndedAt: null,
+        errorCode: null,
+      });
+    await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+  });
+
+  it("keeps mismatched provider identity and money distinct from the application target", async () => {
+    const result = await recoverEximbayCheckout(db, recoveryInput(
+      fixture,
+      () => Promise.resolve(jsonResponse({
+        rescode: "0000",
+        resmsg: "observed",
+        mid: "OTHER_MERCHANT",
+        payment: {
+          order_id: "other-provider-order",
+          currency: "JPY",
+          amount: "777",
+          transaction_id: "other-transaction",
+          status: "AUTH",
+          transaction_date: "20260825010401",
+        },
+      })),
+    ));
+
+    expect(result).toMatchObject({
+      kind: "notReleased",
+      reason: "TRANSACTION_OBSERVED",
+      providerObservation: {
+        application: {
+          checkoutSessionId: fixture.sessionId,
+          paymentId: fixture.paymentId,
+          providerOrderId: fixture.providerOrderId,
+          expectedAmountMinor: fixture.amount,
+          expectedCurrency: "USD",
+        },
+        providerResult: {
+          admission: "TRANSACTION_DETAIL_ADMITTED",
+          binding: {
+            merchant: "MISMATCH",
+            providerOrder: "MISMATCH",
+            money: "MISMATCH",
+          },
+          provider: {
+            orderId: "other-provider-order",
+            currency: "JPY",
+            amount: "777",
+            transactionId: "other-transaction",
+            status: "AUTH",
+          },
+        },
+      },
+    });
     await expect(db.paymentEvent.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
     await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
       .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });
+    await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
+  });
+
+  it("recovers an expired SUBMITTED session only through its exact contacted blocker", async () => {
+    const expiresAt = new Date(RECOVERY_AT.getTime() - 1);
+    const session = await db.checkoutSession.update({
+      where: { id: fixture.sessionId },
+      data: { expiresAt },
+      select: { status: true, expiresAt: true },
+    });
+    expect(isUsable(session, RECOVERY_AT)).toBe(false);
+
+    const transport = q004Transport();
+    await expect(recoverEximbayCheckout(db, recoveryInput(fixture, transport)))
+      .resolves.toMatchObject({ kind: "released", paymentId: fixture.paymentId });
+    expect(transport).toHaveBeenCalledTimes(1);
+    await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+      .resolves.toMatchObject({
+        attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+        blockingEndedAt: RECOVERY_AT,
+        errorCode: "EXIMBAY_NO_TRANSACTION_OBSERVED",
+      });
   });
 
   it("logs one bounded redacted diagnostic while keeping provider outcome unknown fail closed", async () => {
@@ -258,6 +394,135 @@ describe.sequential("Eximbay R11A checkout recovery", () => {
       await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } })).resolves.toBe(0);
     } finally {
       warning.mockRestore();
+    }
+  });
+
+  it("runs every contacted-recovery disposition under the exact temporary restricted role", async () => {
+    const databaseUrl = requireDisposableDatabaseUrl(process.env.DATABASE_URL);
+    const admin = new Client({ connectionString: databaseUrl });
+    const additionalFixtures: Fixture[] = [];
+    let restricted: PrismaClient | null = null;
+    await admin.connect();
+    await admin.query("SELECT pg_advisory_lock(682326912)");
+    try {
+      const dependencies = contactedRoleDependencies();
+      await bootstrapEximbayP3eDatabaseRoles(admin, bootstrapInput);
+      await restoreCanaryRefundRoleGrants(admin, bootstrapInput, dependencies);
+      await admin.query(`ALTER ROLE mira_refund_canary PASSWORD '${RESTRICTED_ROLE_PASSWORD}'`);
+      await applyContactedReconciliationRoleGrants(admin, bootstrapInput, dependencies);
+      restricted = restrictedRecoveryClient(databaseUrl);
+
+      const q004 = q004Transport();
+      await expect(recoverEximbayCheckout(restricted, recoveryInput(fixture, q004)))
+        .resolves.toMatchObject({ kind: "released", paymentId: fixture.paymentId });
+      expect(q004).toHaveBeenCalledTimes(1);
+      const replayTransport = vi.fn<EximbayBf4Fetch>();
+      await expect(recoverEximbayCheckout(restricted, recoveryInput(fixture, replayTransport)))
+        .resolves.toMatchObject({ kind: "replayed", paymentId: fixture.paymentId });
+      expect(replayTransport).not.toHaveBeenCalled();
+      await expect(db.payment.findUniqueOrThrow({ where: { id: fixture.paymentId } }))
+        .resolves.toMatchObject({
+          status: PaymentAttemptStatus.INITIATED,
+          attemptLifecycle: PaymentAttemptLifecycle.CONTACTED,
+          remediationStatus: PaymentRemediationStatus.NONE,
+          providerPaymentKey: null,
+          financialSucceededAt: null,
+          blockingEndedAt: RECOVERY_AT,
+          errorCode: "EXIMBAY_NO_TRANSACTION_OBSERVED",
+        });
+      await expect(db.paymentEvent.count({
+        where: {
+          provider: PaymentProvider.EXIMBAY,
+          transmissionId: checkoutRecoveryTransmissionId(fixture.paymentId),
+        },
+      })).resolves.toBe(1);
+      await expect(db.order.count({ where: { checkoutSessionId: fixture.sessionId } }))
+        .resolves.toBe(0);
+      await expect(readCheckoutSessionResume(db, {
+        checkoutSessionId: fixture.sessionId,
+        authenticatedUserId: fixture.userId,
+        now: RECOVERY_AT,
+      })).resolves.toMatchObject({ disposition: "PAYMENT_ELIGIBLE", recoveryPaymentId: null });
+
+      const observedFixture = await createFixture();
+      additionalFixtures.push(observedFixture);
+      const observedTransport = transactionObservedTransport(observedFixture);
+      await expect(recoverEximbayCheckout(
+        restricted,
+        recoveryInput(observedFixture, observedTransport),
+      )).resolves.toMatchObject({
+        kind: "notReleased",
+        reason: "TRANSACTION_OBSERVED",
+        providerObservation: {
+          application: { paymentId: observedFixture.paymentId },
+          providerResult: { admission: "TRANSACTION_DETAIL_ADMITTED" },
+        },
+      });
+      expect(observedTransport).toHaveBeenCalledTimes(1);
+
+      const ambiguousFixture = await createFixture();
+      additionalFixtures.push(ambiguousFixture);
+      const ambiguousTransport = vi.fn<EximbayBf4Fetch>(() => Promise.resolve(jsonResponse({
+        ...realCanaryObservedQ004Envelope("shape remains intentionally ambiguous"),
+        extra_root_member: true,
+      })));
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        await expect(recoverEximbayCheckout(
+          restricted,
+          recoveryInput(ambiguousFixture, ambiguousTransport),
+        )).resolves.toEqual({ kind: "notReleased", reason: "OUTCOME_UNKNOWN" });
+      } finally {
+        warning.mockRestore();
+      }
+      expect(ambiguousTransport).toHaveBeenCalledTimes(1);
+
+      const ineligibleFixture = await createFixture();
+      additionalFixtures.push(ineligibleFixture);
+      await db.checkoutSession.update({
+        where: { id: ineligibleFixture.sessionId },
+        data: {
+          status: CheckoutSessionStatus.EXPIRED,
+          expiresAt: new Date(RECOVERY_AT.getTime() - 1),
+        },
+      });
+      const ineligibleTransport = vi.fn<EximbayBf4Fetch>();
+      await expect(recoverEximbayCheckout(
+        restricted,
+        recoveryInput(ineligibleFixture, ineligibleTransport),
+      )).resolves.toEqual({ kind: "notReleased", reason: "NOT_ELIGIBLE" });
+      expect(ineligibleTransport).not.toHaveBeenCalled();
+
+      await expect(db.payment.findUniqueOrThrow({ where: { id: observedFixture.paymentId } }))
+        .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });
+      await expect(db.payment.findUniqueOrThrow({ where: { id: ambiguousFixture.paymentId } }))
+        .resolves.toMatchObject({ blockingEndedAt: null, errorCode: null });
+      await expect(db.paymentEvent.count({
+        where: { checkoutSessionId: { in: [observedFixture.sessionId, ambiguousFixture.sessionId] } },
+      })).resolves.toBe(0);
+
+      await restricted.$disconnect();
+      restricted = null;
+      await restoreCanaryRefundRoleGrants(admin, bootstrapInput, dependencies);
+      await expect(reconciliationPrivilegeResidue(admin)).resolves.toEqual({
+        checkoutSessionIdUpdate: false,
+        paymentEventSelect: false,
+        paymentEventInsert: false,
+        paymentBlockingEndedAtUpdate: false,
+      });
+    } finally {
+      if (restricted) await restricted.$disconnect().catch(() => undefined);
+      for (const extra of additionalFixtures.reverse()) {
+        await cleanupFixture(extra).catch(() => undefined);
+      }
+      await restoreCanaryRefundRoleGrants(
+        admin,
+        bootstrapInput,
+        contactedRoleDependencies(),
+      ).catch(() => undefined);
+      await admin.query("ALTER ROLE mira_refund_canary PASSWORD NULL").catch(() => undefined);
+      await admin.query("SELECT pg_advisory_unlock(682326912)").catch(() => undefined);
+      await admin.end();
     }
   });
 
@@ -648,6 +913,56 @@ function recoveryInput(
   } as const;
 }
 
+function contactedRoleDependencies() {
+  return {
+    ...defaultEximbayP3eDatabaseBootstrapDependencies,
+    verifyExactLedger: () => Promise.resolve(),
+  };
+}
+
+function restrictedRecoveryClient(adminUrl: string): PrismaClient {
+  const url = new URL(adminUrl);
+  url.username = "mira_refund_canary";
+  url.password = RESTRICTED_ROLE_PASSWORD;
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url.toString() }) });
+}
+
+async function reconciliationPrivilegeResidue(admin: Client) {
+  const result = await admin.query<{
+    checkoutSessionIdUpdate: boolean;
+    paymentEventSelect: boolean;
+    paymentEventInsert: boolean;
+    paymentBlockingEndedAtUpdate: boolean;
+  }>(`
+    SELECT
+      has_column_privilege(
+        'mira_refund_canary', 'public."CheckoutSession"', 'id', 'UPDATE'
+      ) AS "checkoutSessionIdUpdate",
+      has_table_privilege(
+        'mira_refund_canary', 'public."PaymentEvent"', 'SELECT'
+      ) AS "paymentEventSelect",
+      has_table_privilege(
+        'mira_refund_canary', 'public."PaymentEvent"', 'INSERT'
+      ) AS "paymentEventInsert",
+      has_column_privilege(
+        'mira_refund_canary', 'public."Payment"', 'blockingEndedAt', 'UPDATE'
+      ) AS "paymentBlockingEndedAtUpdate"
+  `);
+  const row = result.rows[0];
+  if (!row) throw new Error("CONTACTED_RECONCILIATION_PRIVILEGE_READ_FAILED");
+  return row;
+}
+
+function requireDisposableDatabaseUrl(value: string | undefined): string {
+  if (!value) throw new Error("DISPOSABLE_DATABASE_REQUIRED");
+  const url = new URL(value);
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+    throw new Error("LOCAL_DATABASE_REQUIRED");
+  }
+  if (url.pathname !== "/wig_platform_test") throw new Error("WIG_PLATFORM_TEST_REQUIRED");
+  return value;
+}
+
 function q004Transport() {
   return vi.fn<EximbayBf4Fetch>(() => Promise.resolve(
     jsonResponse(realCanaryObservedQ004Envelope("not observed")),
@@ -666,9 +981,21 @@ function realCanaryObservedQ004Envelope(resmsg: string): Record<string, unknown>
   };
 }
 
-function transactionObservedTransport() {
+function transactionObservedTransport(fixture: Fixture) {
   return vi.fn<EximbayBf4Fetch>(() => Promise.resolve(
-    jsonResponse({ rescode: "0000", resmsg: "observed", mid: MID, payment: {} }),
+    jsonResponse({
+      rescode: "0000",
+      resmsg: "observed",
+      mid: MID,
+      payment: {
+        order_id: fixture.providerOrderId,
+        currency: "USD",
+        amount: amountWire(fixture.amount),
+        transaction_id: "observed-transaction",
+        status: "SALE",
+        transaction_date: "20260825010400",
+      },
+    }),
   ));
 }
 

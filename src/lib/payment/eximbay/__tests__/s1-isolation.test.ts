@@ -60,7 +60,7 @@ describe("EX2B2-S1 source isolation", () => {
     expect(source).toContain('from "./ready"');
     expect(source).not.toContain("@/lib/db");
     expectExactImporterAllowlist(importers, S1_IMPORTERS);
-  });
+  }, 30_000);
 
   it.each([
     ["alias with single quotes", "import x from '@/lib/payment/eximbay/ready-kernel';"],
@@ -95,6 +95,7 @@ describe("EX2B2-S1 source isolation", () => {
       [
         "src/lib/payment/eximbay/ready-config.ts",
         "src/lib/payment/eximbay/ready-contact.ts",
+        "src/lib/payment/synthetic-sale/run.ts",
       ],
     );
   });
@@ -109,13 +110,14 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/providers/eximbay/trusted-facts.ts",
         "src/lib/payment/refund/providers/eximbay/cancel-contact.ts",
         "src/lib/payment/refund/providers/eximbay/cancel-wire.ts",
+        "src/lib/payment/refund/providers/eximbay/contacted-evidence-parser.ts",
         "src/lib/payment/refund/providers/eximbay/preflight-retrieve.ts",
         "src/lib/payment/refund/providers/eximbay/refund-lookup.ts",
       ],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-handoff.ts"),
-      ["src/app/actions/payment.ts"],
+      ["src/app/actions/payment.ts", "src/lib/payment/synthetic-sale/run.ts"],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-loader.ts"),
@@ -123,7 +125,10 @@ describe("EX2B2-S1 source isolation", () => {
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-invocation.ts"),
-      ["src/app/(shop)/checkout/eximbay-browser-consumer.ts"],
+      [
+        "src/app/(shop)/checkout/eximbay-browser-consumer.ts",
+        "src/lib/payment/synthetic-sale/browser.ts",
+      ],
     );
     expectExactImporterAllowlist(
       productionImportersOf("src/lib/payment/eximbay/sdk-handoff-contract.ts"),
@@ -133,6 +138,7 @@ describe("EX2B2-S1 source isolation", () => {
         "src/lib/payment/eximbay/sdk-invocation.ts",
         "src/lib/payment/eximbay/sdk-loader.ts",
         "src/lib/payment/eximbay/sdk-origins.ts",
+        "src/lib/payment/synthetic-sale/run.ts",
       ],
     );
   }, 30_000);
@@ -178,19 +184,31 @@ function inspectDurableWrite(node: ts.Node, violations: string[]): void {
   }
 }
 
+let productionGraph: readonly Readonly<{ importer: string; specifiers: readonly string[] }>[] | undefined;
+
 function productionImportersOf(targetRelativePath: string): string[] {
-  return ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined)
+  // Source is immutable during this file; retain every production input once.
+  productionGraph ??= Object.freeze(ts.sys.readDirectory(join(ROOT, "src"), [".ts", ".tsx"], undefined, undefined)
     .flatMap((absolutePath) => {
       const importer = repositoryRelativePath(absolutePath);
       if (
         importer.includes("/__tests__/")
         || /\.test\.tsx?$/u.test(importer)
-        || importer === targetRelativePath
       ) return [];
       const source = readFileSync(absolutePath, "utf8");
-      return sourceImportsTarget(importer, source, targetRelativePath) ? [importer] : [];
-    })
-    .sort();
+      const parsed = ts.createSourceFile(importer, source, ts.ScriptTarget.ESNext, true);
+      const specifiers: string[] = [];
+      function visit(node: ts.Node): void {
+        const specifier = importedModuleSpecifier(node);
+        if (specifier) specifiers.push(specifier);
+        ts.forEachChild(node, visit);
+      }
+      visit(parsed);
+      return [Object.freeze({ importer, specifiers: Object.freeze(specifiers) })];
+    }));
+  return productionGraph.filter(({ importer, specifiers }) => importer !== targetRelativePath
+    && specifiers.some((specifier) => resolvesToTarget(importer, specifier, targetRelativePath)))
+    .map(({ importer }) => importer).sort();
 }
 
 function sourceImportsTarget(

@@ -4,16 +4,19 @@ ARG PROXY_EXECUTABLE_SHA256=12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad8
 FROM node:22.23.1-bookworm-slim@sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27 AS build
 WORKDIR /build
 COPY --link package.json package-lock.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY --link tsconfig.json prisma.config.ts ./
 COPY --link prisma ./prisma
-COPY --link scripts/refund-execution-worker.ts scripts/refund-sandbox-provider-free-preflight.ts scripts/eximbay-refund-canary.ts scripts/prepare-eximbay-refund-canary-admission.ts ./scripts/
+COPY --link infra ./infra
+COPY --link scripts/refund-execution-worker.ts scripts/refund-sandbox-provider-free-preflight.ts scripts/eximbay-refund-canary.ts scripts/prepare-eximbay-refund-canary-admission.ts scripts/eximbay-contacted-refund-evidence-once.ts scripts/eximbay-contacted-refund-success-close-once.ts scripts/eximbay-contacted-reconciliation.ts scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts scripts/pl09-targeted-refund-email-dispatch.ts ./scripts/
 COPY --link scripts/build-refund-worker-bundles.mts ./scripts/
 COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/
 COPY --link src/lib/payment ./src/lib/payment
 COPY --link src/lib/promotion ./src/lib/promotion
-COPY --link src/lib/market/locale.ts src/lib/market/types.ts ./src/lib/market/
-RUN ./node_modules/.bin/prisma generate
+COPY --link src/lib/market/catalog-presentation.ts src/lib/market/locale.ts src/lib/market/persisted-money.ts src/lib/market/types.ts ./src/lib/market/
+COPY --link src/lib/order/snapshot.ts ./src/lib/order/
+COPY --link src/lib/order-cancellation/provenance.ts ./src/lib/order-cancellation/
+RUN CHECKPOINT_DISABLE=1 ./node_modules/.bin/prisma generate
 RUN node --import tsx scripts/build-refund-worker-bundles.mts
 
 FROM gcr.io/cloud-sql-connectors/cloud-sql-proxy@sha256:b239a84edd20cfcf1fef20a8d297ac578a73e5cb0ba0eaaf5498782de4f9f861 AS proxy
@@ -33,8 +36,10 @@ LABEL org.opencontainers.image.created="${SOURCE_DATE_EPOCH}" \
       mira.refund.release-authority="absent"
 WORKDIR /app
 COPY --link --from=proxy-verified /verified/cloud-sql-proxy /usr/local/bin/cloud-sql-proxy
+COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --link --from=build /build/.refund-worker-build/src ./src
 COPY --link --from=build /build/prisma/migrations ./prisma/migrations
+COPY --link --from=build /build/infra ./infra
 COPY --link --from=build /build/node_modules/@prisma/client ./node_modules/@prisma/client
 COPY --link --from=build /build/node_modules/@prisma/client-runtime-utils ./node_modules/@prisma/client-runtime-utils
 COPY --link --from=build /build/node_modules/.prisma ./node_modules/.prisma

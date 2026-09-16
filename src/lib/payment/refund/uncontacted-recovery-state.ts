@@ -23,9 +23,14 @@ import {
 import type { LockedTossAuthorizationState } from "./providers/toss/refund-authorization-state";
 import { isEximbayRefundContext } from "./providers/eximbay/preflight-state";
 import { deriveEximbayDispatchAuthority } from "./providers/eximbay/lifecycle-authority";
-import { createEximbayRefundPreflightConfig } from "./providers/eximbay/preflight-contract";
+import {
+  createEximbayRefundPreflightConfig,
+  EXIMBAY_REFUND_CANCEL_WIRE_VERSION,
+  EXIMBAY_REFUND_OPERATION_FAMILY_VERSION,
+} from "./providers/eximbay/preflight-contract";
 import { validateInitialRefundExecutionSuitability } from "./execution-suitability";
 import { hasCoherentUncontactedLeaseEventHistory } from "./uncontacted-recovery-event-history";
+import { EXIMBAY_REFUND_REENTRY_TARGET } from "./eximbay-refund-reentry-authority";
 
 const POSTGRES_INT_MAX = 2_147_483_647;
 
@@ -69,6 +74,8 @@ export type LockedUncontactedRecoveryState = Readonly<{
 export type UncontactedRecoveryClassification =
   | Readonly<{ kind: "EXPIRED_U1" }>
   | Readonly<{ kind: "ACTIVE_U1" }>
+  | Readonly<{ kind: "EXPIRED_SEALED_EXIMBAY_REENTRY" }>
+  | Readonly<{ kind: "ACTIVE_SEALED_EXIMBAY_REENTRY" }>
   | Readonly<{ kind: "AUTHORIZED_U2" }>
   | Readonly<{ kind: "EXPIRED_AUTHORIZED_EXIMBAY_R1" }>
   | Readonly<{ kind: "CONTACTED" }>
@@ -133,6 +140,12 @@ function classifyReady(
 function classifyOrdinalZeroLease(
   locked: LockedUncontactedRecoveryState,
 ): UncontactedRecoveryClassification {
+  const sealedEximbay = hasExactSealedEximbayReentryState(locked);
+  if (sealedEximbay) {
+    return isExpired(locked)
+      ? classification("EXPIRED_SEALED_EXIMBAY_REENTRY")
+      : classification("ACTIVE_SEALED_EXIMBAY_REENTRY");
+  }
   const exactUncontactedShape = [
     locked.dispatches.length === 0,
     locked.binding === null,
@@ -147,6 +160,41 @@ function classifyOrdinalZeroLease(
   return isExpired(locked)
     ? classification("EXPIRED_U1")
     : classification("ACTIVE_U1");
+}
+
+function hasExactSealedEximbayReentryState(
+  locked: LockedUncontactedRecoveryState,
+): boolean {
+  const target = EXIMBAY_REFUND_REENTRY_TARGET;
+  const binding = locked.binding;
+  if (!binding) return false;
+  return [
+    locked.aggregate.payment.id === target.paymentId,
+    locked.aggregate.id === target.orderId,
+    locked.target.id === target.refundAttemptId,
+    locked.command.id === target.commandId,
+    locked.command.leaseGeneration === target.predecessorLeaseGeneration,
+    locked.command.dispatchAttempt === 0,
+    locked.dispatches.length === 0,
+    locked.contactProofCount === 0,
+    locked.evidenceCount === 0,
+    locked.target.providerRefundId === null,
+    locked.command.lastSafeErrorCode === null,
+    locked.command.lastSafeErrorMessage === null,
+    isEximbayRefundContext(authorizationContext(locked)),
+    binding.id === target.providerOperationBindingId,
+    binding.refundAttemptId === target.refundAttemptId,
+    binding.provider === PaymentProvider.EXIMBAY,
+    binding.mode === PaymentMode.SANDBOX,
+    binding.providerOperationFamilyKey === target.providerOperationFamilyKey,
+    binding.operationFamilyKeyAlgorithmVersion === EXIMBAY_REFUND_OPERATION_FAMILY_VERSION,
+    binding.wireContractVersion === EXIMBAY_REFUND_CANCEL_WIRE_VERSION,
+    binding.operationFamilyFingerprint === target.operationFamilyFingerprint,
+    binding.merchantAccountBindingId === target.merchantAccountBindingId,
+    binding.credentialGenerationBindingId === target.credentialGenerationBindingId,
+    binding.eligibilityProof === null,
+    binding.eximbayPreflightObservations.length === 0,
+  ].every(Boolean);
 }
 
 function classifyAuthorizedLease(

@@ -10,6 +10,8 @@ import { normalizeRefundRequestFingerprintInput } from "../../refund/refund-requ
 import { EXIMBAY_SDK_ORIGINS, EXIMBAY_SDK_SOURCES } from "../../eximbay/sdk-origins";
 import nextConfig, { EXIMBAY_SDK_CSP_BOUNDARY } from "../../../../../next.config";
 import { EXIMBAY_CHECKOUT_SANDBOX_ENABLED } from "../../eximbay/checkout-activation";
+import packageJson from "../../../../../package.json";
+import runtimeAuthority from "../../refund/__tests__/fixtures/historical-pl-contracts/contracts/runtime-authority-v1.json";
 
 const ROOT = process.cwd();
 const MIGRATION = "prisma/migrations/20260803100000_eximbay_ex1_provider_identity/migration.sql";
@@ -49,13 +51,13 @@ describe("Eximbay customer SANDBOX source capability with default-off activation
     }
   });
 
-  it("keeps reviewed S3 SDK authority path-exact with only the separately gated status route", () => {
+  it("keeps reviewed S3 SDK authority path-exact alongside the separately gated payment routes", () => {
     const routes = repositoryFiles(join(ROOT, "src/app/api/payments"));
-    const packageJson = source("package.json");
 
     expect(routes).toEqual([
       "src/app/api/payments/eximbay/status/route.ts",
       "src/app/api/payments/paypal/webhook/route.ts",
+      "src/app/api/payments/refunds/reentry/admission/route.ts",
       "src/app/api/payments/status/[checkoutSessionId]/__tests__/route.integration.test.ts",
       "src/app/api/payments/status/[checkoutSessionId]/route.ts",
       "src/app/api/payments/toss/success/__tests__/route.test.ts",
@@ -63,10 +65,16 @@ describe("Eximbay customer SANDBOX source capability with default-off activation
       "src/app/api/payments/toss/webhook/route.ts",
     ]);
     expect(existsSync(join(ROOT, "src/lib/payment/providers/eximbay"))).toBe(true);
-    expect(packageJson.toLowerCase()).not.toContain("eximbay");
+    // Script names describe local worker entrypoints; SDK dependencies are the
+    // relevant surface for the browser's reviewed script-loading authority.
+    expect(JSON.stringify({
+      dependencies: packageJson.dependencies,
+      devDependencies: packageJson.devDependencies,
+    }).toLowerCase()).not.toContain("eximbay");
     expect(productionPathsContaining(EXIMBAY_CHECKOUT_SANDBOX_ENABLED)).toEqual([
       "src/lib/payment/eximbay/checkout-activation.ts",
       "src/lib/payment/providers/factory.ts",
+      "src/lib/payment/synthetic-sale/contract.ts",
     ]);
     expect(EXIMBAY_SDK_ORIGINS).toEqual({
       SANDBOX: "https://api-test.eximbay.com",
@@ -151,12 +159,16 @@ describe("Eximbay customer SANDBOX source capability with default-off activation
     })).toThrowError(expect.objectContaining({ code: "SANDBOX_EXTERNAL_MISCONFIGURED" }));
   });
 
-  it("preserves Toss-only runtime activation while the Eximbay worker route remains separately gated", () => {
-    const authority = source("infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json");
+  it("preserves provider-free preflight and Toss-only default selection with separately gated Eximbay routing", () => {
     const eligibility = source("src/lib/payment/refund/worker-eligibility.ts");
     const activation = source("src/lib/payment/refund/execution-activation.ts");
 
-    expect(authority).toContain('"classification": "TOSS_ONLY_EXPLICIT"');
+    expect(runtimeAuthority.providerScope.classification).toBe("PREFLIGHT_ONLY_NO_PROVIDER_ROUTE");
+    expect(runtimeAuthority.providerScope.runtimeProviderCredentialBindings).toBe(0);
+    expect(runtimeAuthority.jobs.preflight.providerContact).toBe("FORBIDDEN");
+    expect(runtimeAuthority.jobs.canary).toEqual({
+      materialized: false, providerCredential: "ABSENT", target: "ABSENT", approval: "ABSENT", executable: false,
+    });
     expect(eligibility).toContain("const TOSS_ONLY");
     expect(eligibility).toContain("PaymentProvider.EXIMBAY");
     expect(eligibility).toContain("provider: PaymentProvider.TOSS");

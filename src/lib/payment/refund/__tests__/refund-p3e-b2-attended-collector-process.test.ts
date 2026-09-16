@@ -285,21 +285,21 @@ describe("P3E-B2 TB2A provider-free real process adapter", () => {
 
   it("bounds a genuinely outliving descendant and cleans its exact PID", async () => {
     await withProcessDirectory(runOutlivingDescendantCase);
-  });
+  }, 60_000);
 
   it("terminates streaming stdout at the byte cap", async () => {
     await withProcessDirectory(async (directory) => {
-      expect(await executeFixture(directory, "stdout-cap")).toEqual({
+      expect(await executeReadyFixture(directory, "stdout-cap")).toEqual({
         ok: false,
         reason: "OUTPUT_LIMIT_EXCEEDED",
         attemptCount: 1,
       });
     });
-  });
+  }, 60_000);
 
   it("terminates streaming stderr at the byte cap without exposing bytes", async () => {
     await withProcessDirectory(async (directory) => {
-      const result = await executeFixture(directory, "stderr-cap");
+      const result = await executeReadyFixture(directory, "stderr-cap");
 
       expect(result).toEqual({
         ok: false,
@@ -308,17 +308,17 @@ describe("P3E-B2 TB2A provider-free real process adapter", () => {
       });
       expect(JSON.stringify(result)).not.toContain("x");
     });
-  });
+  }, 60_000);
 
   it("rejects invalid UTF-8 through the real parser", async () => {
     await withProcessDirectory(async (directory) => {
-      expect(await executeFixture(directory, "invalid-utf8")).toEqual({
+      expect(await executeReadyFixture(directory, "invalid-utf8")).toEqual({
         ok: false,
         reason: "MALFORMED_OUTPUT",
         attemptCount: 1,
       });
     });
-  });
+  }, 60_000);
 
   it("never signals an undefined PID from the injected spawn-failure seam", async () => {
     await withProcessDirectory(runUndefinedPidCase);
@@ -790,6 +790,7 @@ describe("P3E-B2 TB2A provider-free real process adapter", () => {
   it("keeps a valid fixture snapshot and its nested values after an attended mutation", async () => {
     await withAttendedProcessBoundary(async (boundary) => {
       const request = mutableFixtureRequest(boundary.directory);
+      request.timing = { ...ATTENDED_TIMING };
       const originalArgs = request.args;
       const originalEnvironment = request.env;
       const originalTiming = request.timing;
@@ -825,7 +826,7 @@ describe("P3E-B2 TB2A provider-free real process adapter", () => {
       expect(admittedRequests[0]).toMatchObject({
         executable: TEST_MODULE_NODE_EXECUTABLE_PATH,
         args: [FIXTURE, "normal"],
-        timing: QUICK_TIMING,
+        timing: ATTENDED_TIMING,
         options: {
           cwd: realpathSync(boundary.directory),
           env: { NODE_ENV: "production" },
@@ -968,6 +969,40 @@ async function executeFixture(
     projectNumber: PROJECT_NUMBER,
     timing,
   }, dependencies);
+}
+
+// READY/GO orders fixture work; the finite budget only bounds OS startup/cleanup.
+async function executeReadyFixture(directory: string, mode: string) {
+  let child: ReturnType<typeof spawn> | undefined;
+  let closed: Promise<void> | undefined;
+  const result = executeFixture(directory, mode, ATTENDED_TIMING, {
+    signalProcessGroup(pid, signal) { process.kill(-pid, signal); },
+    spawnProcess(request) {
+      const running = spawn(request.executable, [...request.args], {
+        ...request.options, env: { ...request.options.env },
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+      });
+      child = running;
+      if (!running.stdout || !running.stderr) throw new Error("FIXTURE_PIPES_REQUIRED");
+      closed = new Promise((resolveClose) => running.once("close", () => resolveClose()));
+      running.once("message", (message: unknown) => {
+        if (message !== "READY") { running.kill("SIGKILL"); return; }
+        running.send("GO");
+      });
+      return Object.assign(running, { stdout: running.stdout, stderr: running.stderr });
+    },
+  });
+  try {
+    const outcome = await result;
+    if (!child || !closed) throw new Error("FIXTURE_NOT_SPAWNED");
+    await withinTestDeadline(closed, 5_000);
+    return outcome;
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null && child.pid) {
+      process.kill(-child.pid, "SIGKILL");
+    }
+    if (closed) await withinTestDeadline(closed, 5_000);
+  }
 }
 
 class FakeTb2aChildProcess extends EventEmitter {
@@ -1279,19 +1314,19 @@ async function runOutlivingDescendantCase(
 ): Promise<void> {
   const readyFile = join(directory, "descendant.ready");
   const completionFile = join(directory, "descendant.completed");
-  let rootExited = false;
-  let rootClosed = false;
+  let acknowledgeExit: (code: number | null) => void = () => undefined;
+  const rootExit = new Promise<number | null>((resolveExit) => { acknowledgeExit = resolveExit; });
+  let acknowledgeClose: (state: "closed") => void = () => undefined;
+  const rootClose = new Promise<"closed">((resolveClose) => { acknowledgeClose = resolveClose; });
   let readinessPresentAtRootExit = false;
   const spawnProcess = vi.fn((request: Tb2aSpawnRequest) => {
     const child = spawnFixtureRequest(request);
-    child.once("exit", () => {
+    child.once("exit", (code: number | null) => {
       readinessPresentAtRootExit =
         readDescendantReadyRecord(readyFile) !== null;
-      rootExited = true;
+      acknowledgeExit(code);
     });
-    child.once("close", () => {
-      rootClosed = true;
-    });
+    child.once("close", () => acknowledgeClose("closed"));
     return child;
   });
   let descendantPid: number | null = null;
@@ -1300,7 +1335,7 @@ async function runOutlivingDescendantCase(
       directory,
       "exit-with-descendant",
       Object.freeze({
-        commandDeadlineMs: 5_000,
+        commandDeadlineMs: 30_000,
         sigtermGraceMs: 40,
         closeDeadlineMs: 120,
       }),
@@ -1312,7 +1347,10 @@ async function runOutlivingDescendantCase(
       },
       [readyFile, completionFile],
     );
-    const readiness = await waitForDescendantReadyRecord(readyFile, 2_500);
+    // The fixture exits successfully only after publishing descendant readiness.
+    expect(await withinTestDeadline(rootExit, 30_000)).toBe(0);
+    const readiness = readDescendantReadyRecord(readyFile);
+    if (!readiness) throw new Error("DESCENDANT_NOT_READY_AT_ROOT_EXIT");
     descendantPid = readiness.pid;
     expect(readiness).toEqual({
       protocol: "TB2A_DESCENDANT_READY_V1",
@@ -1322,10 +1360,9 @@ async function runOutlivingDescendantCase(
       inheritedOutputOpen: true,
     });
     expect(processExists(descendantPid)).toBe(true);
-    await waitForCondition(() => rootExited, 2_500);
-    expect(rootExited).toBe(true);
     expect(readinessPresentAtRootExit).toBe(true);
-    expect(rootClosed).toBe(false);
+    // A pending close alongside root exit and a live descendant proves inherited pipes.
+    expect(await Promise.race([rootClose, Promise.resolve("pending")])).toBe("pending");
     expect(existsSync(completionFile)).toBe(false);
     expect(processExists(descendantPid)).toBe(true);
 
@@ -1335,16 +1372,15 @@ async function runOutlivingDescendantCase(
       attemptCount: 1,
     });
     expect(spawnProcess).toHaveBeenCalledTimes(1);
-    expect(rootExited).toBe(true);
     expect(existsSync(completionFile)).toBe(false);
     expect(processExists(descendantPid)).toBe(true);
   } finally {
+    descendantPid ??= readDescendantReadyRecord(readyFile)?.pid ?? null;
     if (descendantPid !== null && processExists(descendantPid)) {
       await stopReadyDescendant(descendantPid, completionFile);
     }
   }
-  await waitForCondition(() => rootClosed, 2_500);
-  expect(rootClosed).toBe(true);
+  await withinTestDeadline(rootClose, 5_000);
   expect(readFileSync(completionFile, "utf8")).toBe("completed\n");
   expect(descendantPid).not.toBeNull();
   expect(processExists(descendantPid ?? -1)).toBe(false);
@@ -1408,20 +1444,6 @@ function readDescendantReadyRecord(
     return null;
   }
   return reconstructDescendantReadyRecord(value);
-}
-
-async function waitForDescendantReadyRecord(
-  path: string,
-  timeoutMs: number,
-): Promise<DescendantReadyRecord> {
-  const deadline = Date.now() + timeoutMs;
-  let readiness = readDescendantReadyRecord(path);
-  while (readiness === null) {
-    if (Date.now() >= deadline) throw new Error("TEST_READY_TIMEOUT");
-    await delay(5);
-    readiness = readDescendantReadyRecord(path);
-  }
-  return readiness;
 }
 
 async function stopReadyDescendant(

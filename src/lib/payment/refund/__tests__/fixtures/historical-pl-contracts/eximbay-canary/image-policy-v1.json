@@ -1,0 +1,111 @@
+{
+  "contractVersion": "mira-refund-eximbay-canary-image-policy/v1",
+  "parentAuthoritySha256": "4ec6d62d3e205452cd154a6f2ed7229f39357d8f4364f26eec78405fd1c43473",
+  "baselineCommit": "518513e0990b6f3e2f0958125cbfa1118d423988",
+  "buildContext": {
+    "manifestSha256": "d24f98c7fd30f79842c860e5ac70baf3ed7dbc7f7f4beed4dfd8ee516d530a07",
+    "fileCount": 198,
+    "repositoryGraphInputCount": 149,
+    "packagedGraphInputCount": 373
+  },
+  "entrypoints": [
+    {
+      "source": "containers/refund-worker/entrypoint.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs"
+    },
+    {
+      "source": "scripts/eximbay-refund-canary.ts",
+      "runtimePath": "/app/src/lib/payment/refund/eximbay-refund-canary.mjs"
+    },
+    {
+      "source": "scripts/refund-execution-worker.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-execution-worker.mjs"
+    },
+    {
+      "source": "scripts/refund-sandbox-provider-free-preflight.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs"
+    }
+  ],
+  "systemCaTrust": {
+    "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
+    "sourcePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimeUser": "65532:65532",
+    "requiredType": "REGULAR_FILE",
+    "requiredNonempty": true,
+    "requiredReadable": true,
+    "requiredOwner": "0:0",
+    "sslCertFileOverride": "NONE",
+    "sslCertDirOverride": "NONE"
+  },
+  "applicationClosure": {
+    "entryCount": 181,
+    "metadataManifestSha256": "4bec8a7d93a9babab226860eef9495e9a2a56d0a8fb612d1dadf40e895b58e03",
+    "contentManifestSha256": "5405d0d162f6cc39d0551e577f54d6bd7e24050348e5d4e142d96721a7df7008"
+  },
+  "systemClosure": {
+    "removedEntryCount": 2620,
+    "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
+    "changedEntryCount": 3,
+    "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
+    "addedEntryCount": 187,
+    "addedMetadataContentManifestSha256": "07b114e373a53925531a0f67ad76207335ed97cff6d3c66634fdd0530c70df35"
+  },
+  "nonApplicationAdditionCount": 6,
+  "nonApplicationAdditions": [
+    {
+      "path": "/cloudsql",
+      "type": "DIRECTORY",
+      "mode": 448,
+      "uid": 65532,
+      "gid": 65532,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs/ca-certificates.crt",
+      "type": "REGULAR_FILE",
+      "mode": 365,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+      "symlinkTarget": null
+    },
+    {
+      "path": "/tmp/refund-worker",
+      "type": "DIRECTORY",
+      "mode": 448,
+      "uid": 65532,
+      "gid": 65532,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/usr/local/bin/cloud-sql-proxy",
+      "type": "REGULAR_FILE",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb",
+      "symlinkTarget": null
+    }
+  ]
+}

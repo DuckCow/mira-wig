@@ -1,0 +1,54 @@
+{
+  "contractVersion": "mira-refund-eximbay-canonical-deployment/v1",
+  "executionAuthority": false,
+  "jobContractVersion": "mira-refund-eximbay-canary-job/v2",
+  "custodyContractVersion": "mira-refund-eximbay-canary-fresh-sale-custody/v3",
+  "targetContractVersion": "mira-refund-eximbay-sandbox-canary-target/v2",
+  "approvalContractVersion": "mira-refund-eximbay-sandbox-canary-approval/v2",
+  "historicalReleaseAuthority": "VERIFICATION_ONLY",
+  "activation": "SEPARATE_AUTHORITY_REQUIRED",
+  "environment": {
+    "lane": "EXIMBAY_SANDBOX_V2",
+    "custodyArtifactSha256": "MIRA_REFUND_EXIMBAY_CANARY_CUSTODY_ARTIFACT_SHA256",
+    "syntheticProvenanceDigest": "MIRA_REFUND_EXIMBAY_CANARY_SYNTHETIC_PROVENANCE_DIGEST",
+    "noCustomerPiiAttested": "MIRA_REFUND_EXIMBAY_CANARY_NO_CUSTOMER_PII_ATTESTED"
+  },
+  "inputs": [
+    {
+      "path": "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
+      "sha256": "9d5a8c87a4a1fa3dea6b3a653fda0d2d5ab26fc2b3c44711db2dc286fe2cad2a"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json",
+      "sha256": "b0b498ff2ed9c35669522f2e1e059d200404b9796b28969206576ea1708c18c6"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+      "sha256": "f5009dfe2328803e2ef2613a7f33435c21b8ab4531a83614ea6d614540b962c0"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/checks.tf",
+      "sha256": "1f306025fa6bdf808062a007f1671c05a318db7975c5396a17384863ff922aa4"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/locals.tf",
+      "sha256": "2bd3803b090b112c32a57766ba48dff774efeb367a9a4346788f76abcbc3fbdd"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/main.tf",
+      "sha256": "6b4865199543b45a996aefbfe0b5c896bbda45542c0941080f67c1d8a82ca3f7"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/providers.tf",
+      "sha256": "2584f699ea63aa02718f4a3fc878f65dc3506158afe4e2fb3270c3d80e868170"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/variables.tf",
+      "sha256": "e1e1e10810306e1bd45e49dc5077b753303e880cd6eee2ecdcceb3a1c09b5036"
+    },
+    {
+      "path": "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/versions.tf",
+      "sha256": "0a2e2bdc0fd3d90359e13e198236031460abb239a691696e58cb518c0467acf0"
+    }
+  ]
+}

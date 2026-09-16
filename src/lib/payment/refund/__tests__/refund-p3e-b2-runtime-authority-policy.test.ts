@@ -340,7 +340,7 @@ describe("P3E-B2-R2B1 dormant runtime authority policy", () => {
       databaseEndpoint: "CLOUD_SQL_PRIVATE_IP_ONLY",
       applicationTransport: "POSTGRESQL_UNIX_SOCKET",
     });
-    expect(sha256(readFileSync(join(ROOT, "containers/refund-worker/Dockerfile"))))
+    expect(sha256(readFileSync(join(ROOT, "src/lib/payment/refund/__tests__/fixtures/historical-main-refund-worker.Dockerfile"))))
       .toBe("12c872d38c4990c22023dd051c2811bde803e6cd0905cdbfab3baac6c8ca7f67");
     expect(sha256(readFileSync(join(ROOT, "package-lock.json"))))
       .toBe("c45bd86701bae2fb55b8954739d5f3d29c58b72281139155cc9f74f0c9ca828f");

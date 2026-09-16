@@ -1,3 +1,4 @@
+import { setPl09DispatcherRoleGrants, pl09DispatcherPrivilegeSql } from "../../../../../scripts/eximbay-p3e-database-bootstrap";
 import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -37,6 +38,50 @@ beforeAll(() => {
 });
 
 describe("convergent exact Eximbay P3E database-role authority", () => {
+  it("grants only the PL09 delta, executes worker SQL, and revokes to the exact ACL baseline", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      const dependencies = { ...defaultEximbayP3eDatabaseBootstrapDependencies,
+        verifyExactLedger: () => Promise.resolve() };
+      const baseline = await aclSnapshot(admin);
+      const grantSql = pl09DispatcherPrivilegeSql(true);
+      expect(pl09DispatcherPrivilegeSql(false)).toBe(grantSql.replaceAll("GRANT ", "REVOKE ").replaceAll(" TO ", " FROM "));
+      expect(grantSql).not.toMatch(/INSERT|DELETE|TRUNCATE|CREATE|SEQUENCE/u);
+      const granted = await setPl09DispatcherRoleGrants(admin, input, dependencies, true);
+      expect(granted.code).toBe("PL09_DISPATCHER_ROLE_GRANTS_COMPLETE");
+      try {
+        await admin.query("SET ROLE mira_refund_canary");
+        await admin.query('SELECT * FROM "PaymentOutbox" WHERE false');
+        await admin.query('UPDATE "PaymentOutbox" SET "status" = \'DONE\', "processedAt" = now(), "nextAttemptAt" = null, "lastError" = null, "updatedAt" = now() WHERE false RETURNING *');
+        await admin.query('SELECT "id", "email" FROM "User" WHERE false');
+        await expect(admin.query('SELECT "name" FROM "User" WHERE false')).rejects.toMatchObject({ code: "42501" });
+        await expect(admin.query('DELETE FROM "PaymentOutbox" WHERE false')).rejects.toMatchObject({ code: "42501" });
+        await expect(admin.query('UPDATE "PaymentOutbox" SET "payload" = \'{}\' WHERE false')).rejects.toMatchObject({ code: "42501" });
+        await expect(admin.query('UPDATE "Payment" SET "amount" = 1 WHERE false')).rejects.toMatchObject({ code: "42501" });
+      } finally {
+        await admin.query("RESET ROLE");
+        await setPl09DispatcherRoleGrants(admin, input, dependencies, false);
+      }
+      expect(await aclSnapshot(admin)).toEqual(baseline);
+      await setPl09DispatcherRoleGrants(admin, input, dependencies, false);
+      expect(await aclSnapshot(admin)).toEqual(baseline);
+    });
+  });
+
+  it("rolls back PL09 grants on a failed postcondition without financial ACL changes", async () => {
+    await withAdmin(async (admin) => {
+      await bootstrapEximbayP3eDatabaseRoles(admin, input);
+      const baseline = await aclSnapshot(admin);
+      await expect(setPl09DispatcherRoleGrants(admin, input, {
+        ...defaultEximbayP3eDatabaseBootstrapDependencies,
+        verifyExactLedger: () => Promise.resolve(),
+        beforePostcondition: async (database) => { await database.query('GRANT DELETE ON "PaymentOutbox" TO mira_refund_canary'); },
+      }, true)).rejects.toMatchObject({ code: "ROLE_AUTHORITY_POSTCONDITION_FAILED" });
+      expect(await aclSnapshot(admin)).toEqual(baseline);
+    });
+  });
+
+
   it("keeps the operator surface argument-free and explicitly admitted", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -655,4 +700,16 @@ function requireDisposableDatabaseUrl(value: string | undefined): string {
     throw new Error("DISPOSABLE_DATABASE_REQUIRED");
   }
   return value;
+}
+
+async function aclSnapshot(admin: Client) {
+  const result = await admin.query<{ relname: string; attname: string; attacl: string | null }>(`
+    SELECT c.relname, a.attname, a.attacl::text
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_attribute a ON a.attrelid = c.oid
+    WHERE n.nspname = 'public' AND a.attnum > 0 AND NOT a.attisdropped
+    ORDER BY c.relname, a.attnum
+  `);
+  // PostgreSQL retains an empty ACL array after the exact inverse REVOKE.
+  return result.rows.map((row) => ({ ...row, attacl: row.attacl === "{}" ? null : row.attacl }));
 }

@@ -11,7 +11,7 @@ import {
   defaultEximbayRefundCanaryDependencies,
   runEximbayRefundCanaryOnce,
   type EximbayRefundCanaryResult,
-} from "../run-eximbay-refund-canary-once";
+} from "../run-eximbay-refund-canary-once-main-v1";
 
 describe("Eximbay refund sandbox canary authority boundaries", () => {
   it("purely admits only the separate exact Eximbay evidence format", () => {
@@ -76,9 +76,6 @@ describe("Eximbay refund sandbox canary authority boundaries", () => {
       disconnectDatabase: vi.fn(),
       readSecret,
       fetch,
-      sleep: vi.fn(),
-      now: vi.fn(() => 0),
-      timeoutMs: 1,
       runAdmission: defaultEximbayRefundCanaryDependencies.runAdmission,
     })).resolves.toMatchObject({ code: "CONFIG_MISMATCH" });
     expect(createDatabase).not.toHaveBeenCalled();

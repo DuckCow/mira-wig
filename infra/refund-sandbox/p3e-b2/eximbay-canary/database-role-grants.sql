@@ -277,6 +277,7 @@ GRANT SELECT ON TABLE
   "RefundExecutionDispatchAttempt",
   "RefundExecutionProviderOperationBinding",
   "RefundExecutionProviderEligibilityProof",
+  "RefundExecutionProviderContactEligibilityProof",
   "RefundExecutionEximbayPreflightObservation",
   "RefundExecutionEvidence",
   "EximbayRefundSandboxCanaryApproval"

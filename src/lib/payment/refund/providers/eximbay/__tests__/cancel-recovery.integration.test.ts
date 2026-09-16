@@ -33,6 +33,7 @@ import {
   createDispatchFixture,
   type DispatchFixture,
 } from "../../../__tests__/refund-dispatch-fixture";
+import { runEximbayRefundReentryOnce } from "../../../run-eximbay-refund-reentry-once";
 import { createEximbayFirstRefundDispatchAuthorizer } from "../authorize-first-dispatch";
 import { createEximbayRefundContactExecutor } from "../execute-contact";
 import { createEximbayRefundReconciler } from "../reconcile-refund";
@@ -455,6 +456,127 @@ describe("dormant Eximbay cancel and refund-id recovery", () => {
     expect(replay).toEqual({ ok: true, state: "SUCCEEDED", replayed: true });
     expect(calls).toBe(1);
   });
+
+  it("returns parked for a committed direct cancel identity conflict without success effects", async () => {
+    const owner = await readyR1(fixtures, 1_234, 1_234);
+    await createEximbayRefundContactExecutor({
+      config: CONFIG,
+      cancel: () => Promise.resolve(cancelSuccess(owner, owner.r1RefundId, "shared-provider-refund", 0)),
+    })(db, contactInput(owner.lease, 1));
+    const leased = await readyR1(fixtures, 1_234, 1_234);
+    let calls = 0;
+    const execute = createEximbayRefundContactExecutor({
+      config: CONFIG,
+      cancel: () => {
+        calls += 1;
+        return Promise.resolve(cancelSuccess(leased, leased.r1RefundId, "shared-provider-refund", 0));
+      },
+    });
+    const result = await execute(db, contactInput(leased.lease, 1));
+    expect(result).toEqual({ ok: true, state: "PARKED", replayed: false });
+    expect(await db.refundAttempt.findUniqueOrThrow({ where: { id: leased.fixture.refundAttemptId } }))
+      .toMatchObject({ status: "MANUAL_REVIEW", providerRefundId: null });
+    expect(await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: leased.fixture.commandId } }))
+      .toMatchObject({ status: "PARKED", leaseOwner: null, leaseUntil: null, leaseTokenHash: null });
+    expect(await db.order.findUniqueOrThrow({ where: { id: leased.fixture.orderId } }))
+      .toMatchObject({ status: "REFUND_PENDING" });
+    expect(await db.refundExecutionEvidence.findMany({ where: { commandId: leased.fixture.commandId } }))
+      .toMatchObject([{ outcome: "SUCCEEDED", application: "CONFLICT" }]);
+    expect(await db.refundAttemptTransition.findMany({ where: {
+      refundAttemptId: leased.fixture.refundAttemptId, fromStatus: "PROCESSING",
+    } })).toMatchObject([{ toStatus: "MANUAL_REVIEW" }]);
+    expect(await db.paymentOutbox.count({ where: { dedupKey: { contains: leased.fixture.refundAttemptId } } })).toBe(0);
+    await execute(db, contactInput(leased.lease, 1));
+    expect(calls).toBe(1);
+  });
+
+  it.each(["success", "conflict", "unknown", "persistence-failure"] as const)(
+    "preserves %s disposition through the actual one-shot runner without retry", async (scenario) => {
+      if (scenario === "conflict") {
+        const owner = await readyR1(fixtures, 1_234, 1_234);
+        await createEximbayRefundContactExecutor({
+          config: CONFIG,
+          cancel: () => Promise.resolve(cancelSuccess(owner, owner.r1RefundId, "runner-refund", 0)),
+        })(db, contactInput(owner.lease, 1));
+      }
+      const candidate = await readyEximbayCandidate(fixtures, 1_234, 1_234);
+      await db.checkoutSession.update({ where: { id: candidate.fixture.sessionId }, data: { communicationLocale: "en" } });
+      const acquired = await acquireRefundExecutionLease(db, {
+        commandId: candidate.fixture.commandId, leaseOwner: "runner-test",
+      }, LEASE_ENV);
+      if (!acquired.ok) throw new Error(acquired.code);
+      const leased = { ...candidate, lease: acquired.lease, r1RefundId: "", initialRetrieveCount: 0 };
+      if (scenario === "persistence-failure") {
+        await db.$executeRawUnsafe(`CREATE FUNCTION disposition_test_fail() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic deferred result failure'; END $$`);
+        await db.$executeRawUnsafe(`CREATE CONSTRAINT TRIGGER disposition_test_fail
+          AFTER INSERT ON "RefundAttemptTransition" DEFERRABLE INITIALLY DEFERRED
+          FOR EACH ROW WHEN (NEW."toStatus" = 'SUCCEEDED') EXECUTE FUNCTION disposition_test_fail()`);
+      }
+      let calls = 0;
+      try {
+        const result = await runEximbayRefundReentryOnce({
+          REFUND_EXECUTION_WORKER_ENABLED: "ENABLED",
+          REFUND_EXECUTION_EXIMBAY_ROUTING_ENABLED: "ENABLED",
+          REFUND_EXECUTION_LEASE_ENABLED: "ENABLED",
+          REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED: "ENABLED",
+          REFUND_EXECUTION_DISPATCH_AUTHORIZATION_ENABLED: "ENABLED",
+          REFUND_EXECUTION_OBSERVATION_APPLICATION_ENABLED: "ENABLED",
+          MIRA_REFUND_AUTHORIZATION_ENABLED: "ENABLED",
+          CLOUD_RUN_TASK_COUNT: "1", CLOUD_RUN_TASK_INDEX: "0", CLOUD_RUN_TASK_ATTEMPT: "0",
+        }, {
+          createDatabase: () => db,
+          disconnectDatabase: () => Promise.resolve(),
+          admit: () => Promise.resolve({
+            grantId: "synthetic-grant", releasePolicyDigest: "a".repeat(64), lease: leased.lease,
+            account: { ...CONFIG, secretResource: "synthetic-secret", secretVersion: "1" },
+          }),
+          readSecret: () => Promise.resolve("synthetic-secret"),
+          fetch: async () => {
+            calls += 1;
+            if (calls === 1) return preflightResponse(leased.fixture, leased.providerOrderId, 1_234);
+            const dispatch = await db.refundExecutionDispatchAttempt.findFirstOrThrow({
+              where: { commandId: leased.fixture.commandId },
+            });
+            leased.r1RefundId = dispatch.providerOperationKey;
+            return scenario === "unknown" ? Promise.reject(new Error("synthetic timeout"))
+              : Promise.resolve(cancelSuccess(leased, leased.r1RefundId, "runner-refund", 0));
+          },
+          runAdmission: async (_env, operation) => ({ outcome: "ACQUIRED", result: await operation() }),
+        });
+        expect(calls, JSON.stringify(result)).toBe(2);
+        expect(result).toMatchObject({
+          ok: scenario === "success",
+          code: scenario === "success" ? "KNOWN_SUCCESS" : "CANCEL_CONTACT_MAY_HAVE_OCCURRED",
+          terminalClass: scenario === "success" ? "REFUND_SUCCEEDED" : "PROVIDER_EFFECT_POSSIBLE",
+          preflightRetrieveCount: 1, cancellationCount: 1, reconciliationLookupCount: 0,
+          reentry: "FORBIDDEN",
+        });
+        const command = await db.refundExecutionCommand.findUniqueOrThrow({ where: { id: leased.fixture.commandId } });
+        const statuses = { success: "DONE", conflict: "PARKED", unknown: "WAITING_EVIDENCE", "persistence-failure": "LEASED" };
+        expect(command.status).toBe(statuses[scenario]);
+        const dispatch = await db.refundExecutionDispatchAttempt.findFirstOrThrow({ where: { commandId: command.id } });
+        expect(dispatch.state).toBe("CONTACT_MAY_HAVE_OCCURRED");
+        expect(dispatch.contactMarkedAt).toBeInstanceOf(Date);
+        expect(await db.paymentOutbox.count({ where: { dedupKey: { contains: leased.fixture.refundAttemptId } } }))
+          .toBe(Number(scenario === "success"));
+        if (scenario === "persistence-failure") {
+          expect(await db.refundExecutionEvidence.count({ where: { commandId: command.id } })).toBe(0);
+          expect(await db.refundAttempt.findUniqueOrThrow({ where: { id: leased.fixture.refundAttemptId } }))
+            .toMatchObject({ status: "PROCESSING", providerRefundId: null });
+          expect(await db.order.findUniqueOrThrow({ where: { id: leased.fixture.orderId } }))
+            .toMatchObject({ status: "REFUND_PENDING" });
+          expect(await db.refundAttemptTransition.count({ where: { refundAttemptId: leased.fixture.refundAttemptId, fromStatus: "PROCESSING" } })).toBe(0);
+          expect(await db.paymentOutbox.count({ where: { dedupKey: { contains: leased.fixture.refundAttemptId } } })).toBe(0);
+        }
+      } finally {
+        if (scenario === "persistence-failure") {
+          await db.$executeRawUnsafe('DROP TRIGGER disposition_test_fail ON "RefundAttemptTransition"');
+          await db.$executeRawUnsafe('DROP FUNCTION disposition_test_fail()');
+        }
+      }
+    },
+  );
 
   it("rejects a persisted refund_id outside its exact allocator before cancel transport", async () => {
     const leased = await readyR1(fixtures, 1_234, 1_234);

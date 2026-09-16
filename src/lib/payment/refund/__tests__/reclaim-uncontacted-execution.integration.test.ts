@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
+  PaymentAdapterExecutionKind,
   PaymentMode,
   PaymentProvider,
   Prisma,
@@ -14,6 +15,7 @@ import {
 } from "@prisma/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
+import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import {
   acquireRefundExecutionLease,
   REFUND_EXECUTION_LEASE_DURATION_MS,
@@ -48,6 +50,7 @@ import { createTossRefundExecutionAuthorizer } from "../providers/toss/refund-au
 import { createTossRefundContactExecutor } from "../providers/toss/refund-contact-orchestrator";
 import type { TossRefundCancellationPort } from "../providers/toss/refund-cancellation-http";
 import type { TossRefundLookupPort } from "../providers/toss/refund-lookup-http";
+import { EXIMBAY_REFUND_REENTRY_TARGET } from "../eximbay-refund-reentry-authority";
 
 const LEASE_ENV = { [REFUND_EXECUTION_LEASE_ENABLED]: "ENABLED" };
 const RELEASE_ENV = { [REFUND_EXECUTION_LEASE_RELEASE_ENABLED]: "ENABLED" };
@@ -189,6 +192,35 @@ describe("reclaimUncontactedRefundExecution integration", () => {
         && event.eventType === RefundExecutionCommandEventType.PRE_CONTACT_RELEASED
     )).length).toBe(0);
     expect(state.evidence.length).toBe(0);
+  });
+
+  it("takes over only the exact sealed Eximbay predecessor generation once from 2 to 3", async () => {
+    const leased = await trackedExactSealedEximbayReentryFixture(fixtures);
+
+    const first = await reclaimUncontactedRefundExecution(
+      db,
+      reclaimInput(leased.fixture),
+      RECLAIM_ENV,
+    );
+
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error(`Expected exact sealed reclaim success: ${first.code}`);
+    expect(first.lease.commandId).toBe(EXIMBAY_REFUND_REENTRY_TARGET.commandId);
+    expect(first.lease.leaseGeneration).toBe(3);
+    expect(first.recoveredState).toBe("ORDINAL_ZERO");
+    expect(await db.refundExecutionProviderOperationBinding.count({
+      where: { refundAttemptId: EXIMBAY_REFUND_REENTRY_TARGET.refundAttemptId },
+    })).toBe(1);
+
+    await expire(leased.fixture);
+    const before = await redactedState(leased.fixture);
+    const second = await reclaimUncontactedRefundExecution(
+      db,
+      reclaimInput(leased.fixture),
+      RECLAIM_ENV,
+    );
+    expect(failureCode(second)).toBe("LEDGER_INCONSISTENT");
+    expect(isDeepStrictEqual(await redactedState(leased.fixture), before)).toBe(true);
   });
 
   it("treats expiry equality as expired", async () => {
@@ -694,6 +726,108 @@ async function trackedLeasedTossFixture(
   await makeToss(fixture);
   if (expired) await expire(fixture);
   return { fixture, lease: acquired.lease };
+}
+
+async function trackedExactSealedEximbayReentryFixture(
+  fixtures: DispatchFixture[],
+): Promise<LeasedFixture> {
+  const target = EXIMBAY_REFUND_REENTRY_TARGET;
+  const fixture = await createDispatchFixture({
+    totalAmount: target.amount,
+    targetAmount: target.amount,
+    paymentId: target.paymentId,
+    orderId: target.orderId,
+    refundAttemptId: target.refundAttemptId,
+    commandId: target.commandId,
+    refundActorType: "SYSTEM",
+    refundActorUserId: null,
+  });
+  fixtures.push(fixture);
+  await db.$executeRawUnsafe(
+    'ALTER TABLE "Payment" DISABLE TRIGGER "Payment_provider_order_id_immutable"',
+  );
+  try {
+    await db.payment.update({
+      where: { id: fixture.paymentId },
+      data: {
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+        providerOrderId: syntheticEximbayProviderOrderId(),
+      },
+    });
+  } finally {
+    await db.$executeRawUnsafe(
+      'ALTER TABLE "Payment" ENABLE TRIGGER "Payment_provider_order_id_immutable"',
+    );
+  }
+  await Promise.all([
+    db.payment.update({
+      where: { id: fixture.paymentId },
+      data: { currency: target.currency, adapterExecutionKind: PaymentAdapterExecutionKind.EXTERNAL },
+    }),
+    db.order.update({ where: { id: fixture.orderId }, data: { currency: target.currency } }),
+    db.refundAttempt.update({
+      where: { id: fixture.refundAttemptId },
+      data: {
+        currency: target.currency,
+        provider: PaymentProvider.EXIMBAY,
+        mode: PaymentMode.SANDBOX,
+      },
+    }),
+  ]);
+  const acquired = await acquireRefundExecutionLease(db, {
+    commandId: fixture.commandId,
+    leaseOwner: "exact-sealed-eximbay-predecessor",
+  }, LEASE_ENV);
+  if (!acquired.ok) throw new Error(`Expected exact predecessor lease: ${acquired.code}`);
+  const generationOneOccurredAt = new Date("1999-12-31T23:50:00.000Z");
+  const generationTwoOccurredAt = new Date("2000-01-01T00:00:00.000Z");
+  await db.$transaction([
+    db.refundExecutionCommandEvent.updateMany({
+      where: {
+        commandId: fixture.commandId,
+        eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+        leaseGeneration: acquired.lease.leaseGeneration,
+      },
+      data: { occurredAt: generationOneOccurredAt },
+    }),
+    db.refundExecutionCommand.update({
+      where: { id: fixture.commandId },
+      data: {
+        leaseGeneration: target.predecessorLeaseGeneration,
+        leaseOwner: "exact-sealed-eximbay-generation-two-predecessor",
+        leaseUntil: new Date(
+          generationTwoOccurredAt.getTime() + target.predecessorLeaseDurationMs,
+        ),
+        leaseTokenHash: createHash("sha256").update("generation-two-token").digest("hex"),
+      },
+    }),
+    db.refundExecutionCommandEvent.create({
+      data: {
+        commandId: fixture.commandId,
+        eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
+        leaseGeneration: target.predecessorLeaseGeneration,
+        dispatchAttempt: 0,
+        occurredAt: generationTwoOccurredAt,
+      },
+    }),
+  ]);
+  await db.refundExecutionProviderOperationBinding.create({
+    data: {
+      id: target.providerOperationBindingId,
+      refundAttemptId: target.refundAttemptId,
+      provider: PaymentProvider.EXIMBAY,
+      mode: PaymentMode.SANDBOX,
+      providerOperationFamilyKey: target.providerOperationFamilyKey,
+      operationFamilyKeyAlgorithmVersion: "eximbay-refund-family-v1",
+      wireContractVersion: "refund-provider-eximbay-cancel-wire/v1",
+      operationFamilyFingerprint: target.operationFamilyFingerprint,
+      merchantAccountBindingId: target.merchantAccountBindingId,
+      credentialGenerationBindingId: target.credentialGenerationBindingId,
+    },
+  });
+  await expire(fixture);
+  return Object.freeze({ fixture, lease: acquired.lease });
 }
 
 function reclaimInput(fixture: DispatchFixture) {

@@ -10,10 +10,8 @@ import {
   PaymentProvider,
   PaymentRemediationStatus,
   Prisma,
-  type Payment,
   type PrismaClient,
 } from "@prisma/client";
-import { isUsable } from "@/lib/payment/session";
 import { hasUnresolvedSessionExposure } from "@/lib/payment/remediation";
 import type { ProviderEnv } from "@/lib/payment/providers/credentials";
 import {
@@ -22,45 +20,62 @@ import {
   retrieveEximbayCheckoutRecoveryStatus,
   type EximbayBf4Fetch,
   type EximbayBf4OutcomeUnknownDiagnostic,
+  type EximbayCheckoutRecoveryProviderObservation,
   type EximbayCheckoutRecoveryRetrieveResult,
 } from "./bf4-contact";
 import { EXIMBAY_BF4_EVENT_TYPE } from "./bf4-envelope";
+import {
+  checkoutRecoveryTransmissionId,
+  EXIMBAY_CHECKOUT_RECOVERY_EVENT_TYPE,
+  EXIMBAY_NO_TRANSACTION_OBSERVED,
+  isExactQ004RecoveryEvent,
+  isExactQ004ReleasedPayment,
+  isExactRecoverableBlocker,
+  type EximbayCheckoutRecoveryPayment,
+} from "./checkout-recovery-state";
+
+export {
+  checkoutRecoveryTransmissionId,
+  EXIMBAY_CHECKOUT_RECOVERY_EVENT_TYPE,
+  EXIMBAY_NO_TRANSACTION_OBSERVED,
+  isExactQ004RecoveryEvent,
+  isExactQ004ReleasedPayment,
+  isExactRecoverableBlocker,
+} from "./checkout-recovery-state";
 
 export const EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED =
   "EXIMBAY_CHECKOUT_RECOVERY_SANDBOX_ENABLED";
-export const EXIMBAY_CHECKOUT_RECOVERY_EVENT_TYPE = "EXIMBAY_NO_TRANSACTION_OBSERVED";
-export const EXIMBAY_NO_TRANSACTION_OBSERVED = "EXIMBAY_NO_TRANSACTION_OBSERVED";
 export const EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN =
   "EXIMBAY_RELEASED_ATTEMPT_OUTCOME_UNKNOWN";
 export const EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_LOG_EVENT =
   "EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_V1";
 
-type RecoveryPayment = Pick<
-  Payment,
-  | "id"
-  | "checkoutSessionId"
-  | "provider"
-  | "mode"
-  | "status"
-  | "attemptLifecycle"
-  | "remediationStatus"
-  | "amount"
-  | "currency"
-  | "providerOrderId"
-  | "providerPaymentKey"
-  | "contactStartedAt"
-  | "financialSucceededAt"
-  | "blockingEndedAt"
-  | "suspendedByPaymentId"
-  | "errorCode"
->;
+type RecoveryPayment = EximbayCheckoutRecoveryPayment;
+
+export type EximbayCheckoutRecoveryObservation = Readonly<{
+  schema: "eximbay.checkout-recovery.provider-observation";
+  version: 1;
+  application: Readonly<{
+    checkoutSessionId: string;
+    paymentId: string;
+    providerOrderId: string;
+    expectedAmountMinor: number;
+    expectedCurrency: string;
+  }>;
+  providerResult: EximbayCheckoutRecoveryProviderObservation;
+}>;
 
 export type EximbayCheckoutRecoveryResult =
   | Readonly<{ kind: "released"; paymentId: string; eventId: string; releasedAt: Date }>
   | Readonly<{ kind: "replayed"; paymentId: string; eventId: string; releasedAt: Date }>
   | Readonly<{
       kind: "notReleased";
-      reason: "DISABLED" | "NOT_ELIGIBLE" | "TRANSACTION_OBSERVED" | "OUTCOME_UNKNOWN" | "STATE_CHANGED";
+      reason: "TRANSACTION_OBSERVED";
+      providerObservation: EximbayCheckoutRecoveryObservation;
+    }>
+  | Readonly<{
+      kind: "notReleased";
+      reason: "DISABLED" | "NOT_ELIGIBLE" | "OUTCOME_UNKNOWN" | "STATE_CHANGED";
     }>;
 
 export interface RecoverEximbayCheckoutInput {
@@ -70,6 +85,7 @@ export interface RecoverEximbayCheckoutInput {
   readonly env?: ProviderEnv;
   readonly transport: EximbayBf4Fetch;
   readonly now?: () => Date;
+  readonly emitDiagnostic?: (line: string) => void;
 }
 
 export class EximbayCheckoutRecoveryConfigError extends Error {
@@ -77,10 +93,6 @@ export class EximbayCheckoutRecoveryConfigError extends Error {
     super("EXIMBAY_CHECKOUT_RECOVERY_INVALID_ACTIVATION");
     this.name = "EximbayCheckoutRecoveryConfigError";
   }
-}
-
-export function checkoutRecoveryTransmissionId(paymentId: string): string {
-  return `eximbay:checkout-recovery:q004:${paymentId}`;
 }
 
 export async function recoverEximbayCheckout(
@@ -101,7 +113,11 @@ export async function recoverEximbayCheckout(
     amountWire: encodeAmountWire(initial.payment),
     language: "EN",
   }, input.transport);
-  const providerDisposition = recoveryProviderDisposition(retrieved, initial.payment);
+  const providerDisposition = recoveryProviderDisposition(
+    retrieved,
+    initial.payment,
+    input.emitDiagnostic,
+  );
   if (providerDisposition !== null) return providerDisposition;
 
   const observedAt = input.now?.() ?? new Date();
@@ -126,14 +142,17 @@ async function checkoutRecoveryPreflight(
   const replay = await loadExactReplay(client, owned.payment);
   if (replay.kind === "replayed") return Object.freeze({ kind: "result", result: replay });
   if (replay.kind === "split") throw new Error("EXIMBAY_CHECKOUT_RECOVERY_SPLIT_EVIDENCE");
-  const eligible = await isEligibleBeforeContact(client, owned, input.now?.() ?? new Date());
+  const eligible = await isEligibleBeforeContact(client, owned);
   return eligible
     ? Object.freeze({ kind: "eligible", owned })
     : recoveryPreflightResult("NOT_ELIGIBLE");
 }
 
 function recoveryPreflightResult(
-  reason: Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>["reason"],
+  reason: Exclude<
+    Extract<EximbayCheckoutRecoveryResult, { kind: "notReleased" }>["reason"],
+    "TRANSACTION_OBSERVED"
+  >,
 ): RecoveryPreflight {
   return Object.freeze({ kind: "result", result: Object.freeze({ kind: "notReleased", reason }) });
 }
@@ -141,28 +160,51 @@ function recoveryPreflightResult(
 function recoveryProviderDisposition(
   retrieved: EximbayCheckoutRecoveryRetrieveResult,
   payment: RecoveryPayment,
+  emitDiagnostic: ((line: string) => void) | undefined,
 ): EximbayCheckoutRecoveryResult | null {
   if (retrieved.kind === "transactionObserved") {
-    return Object.freeze({ kind: "notReleased", reason: "TRANSACTION_OBSERVED" });
+    return Object.freeze({
+      kind: "notReleased",
+      reason: "TRANSACTION_OBSERVED",
+      providerObservation: checkoutRecoveryObservation(payment, retrieved.observation),
+    });
   }
   if (retrieved.kind === "outcomeUnknown") {
     emitOutcomeUnknownDiagnostic({
       checkoutSessionId: payment.checkoutSessionId,
       paymentId: payment.id,
       diagnostic: retrieved.diagnostic,
-    });
+    }, emitDiagnostic);
     return Object.freeze({ kind: "notReleased", reason: "OUTCOME_UNKNOWN" });
   }
   return null;
+}
+
+function checkoutRecoveryObservation(
+  payment: RecoveryPayment,
+  providerResult: EximbayCheckoutRecoveryProviderObservation,
+): EximbayCheckoutRecoveryObservation {
+  return Object.freeze({
+    schema: "eximbay.checkout-recovery.provider-observation",
+    version: 1,
+    application: Object.freeze({
+      checkoutSessionId: payment.checkoutSessionId,
+      paymentId: payment.id,
+      providerOrderId: requireProviderOrderId(payment),
+      expectedAmountMinor: payment.amount,
+      expectedCurrency: payment.currency,
+    }),
+    providerResult,
+  });
 }
 
 function emitOutcomeUnknownDiagnostic(input: Readonly<{
   checkoutSessionId: string;
   paymentId: string;
   diagnostic: EximbayBf4OutcomeUnknownDiagnostic;
-}>): void {
+}>, emit: (line: string) => void = console.warn): void {
   try {
-    console.warn(JSON.stringify(Object.freeze({
+    emit(JSON.stringify(Object.freeze({
       event: EXIMBAY_CHECKOUT_RECOVERY_OUTCOME_UNKNOWN_LOG_EVENT,
       checkoutSessionId: input.checkoutSessionId,
       paymentId: input.paymentId,
@@ -189,7 +231,7 @@ async function releaseAfterQ004(
   const replay = await loadExactReplay(tx, current.payment);
   if (replay.kind === "replayed") return replay;
   if (replay.kind === "split") throw new Error("EXIMBAY_CHECKOUT_RECOVERY_SPLIT_EVIDENCE");
-  if (!await isEligibleBeforeContact(tx, current, input.observedAt)) {
+  if (!await isEligibleBeforeContact(tx, current)) {
     return Object.freeze({ kind: "notReleased", reason: "STATE_CHANGED" });
   }
   if (await hasClaimedCallback(tx, current.payment)) {
@@ -236,7 +278,6 @@ type OwnedPayment = Readonly<{
     id: string;
     userId: string;
     status: CheckoutSessionStatus;
-    expiresAt: Date;
     order: { id: string } | null;
   }>;
 }>;
@@ -247,7 +288,7 @@ async function loadOwnedPayment(
 ): Promise<OwnedPayment | null> {
   const session = await client.checkoutSession.findFirst({
     where: { id: input.checkoutSessionId, userId: input.authenticatedUserId },
-    select: { id: true, userId: true, status: true, expiresAt: true, order: { select: { id: true } } },
+    select: { id: true, userId: true, status: true, order: { select: { id: true } } },
   });
   if (!session) return null;
   const payment = await client.payment.findFirst({
@@ -260,9 +301,8 @@ async function loadOwnedPayment(
 async function isEligibleBeforeContact(
   client: Pick<PrismaClient, "payment"> | Prisma.TransactionClient,
   owned: OwnedPayment,
-  now: Date,
 ): Promise<boolean> {
-  if (owned.session.order !== null || !isUsable(owned.session, now)) return false;
+  if (!isEligibleContactedRecoverySession(owned.session)) return false;
   if (!isExactRecoverableBlocker(owned.payment)) return false;
   if (await hasUnresolvedSessionExposure(client, owned.payment.checkoutSessionId)) return false;
   const blockers = await client.payment.count({
@@ -271,37 +311,8 @@ async function isEligibleBeforeContact(
   return blockers === 1;
 }
 
-export function isExactRecoverableBlocker(payment: RecoveryPayment): boolean {
-  return ![
-    payment.provider !== PaymentProvider.EXIMBAY,
-    payment.mode !== PaymentMode.SANDBOX,
-    payment.status !== PaymentAttemptStatus.INITIATED && payment.status !== PaymentAttemptStatus.AWAITING,
-    payment.attemptLifecycle !== PaymentAttemptLifecycle.CONTACTED,
-    payment.remediationStatus !== PaymentRemediationStatus.NONE,
-    payment.contactStartedAt === null,
-    payment.providerOrderId === null,
-    payment.providerPaymentKey !== null,
-    payment.financialSucceededAt !== null,
-    payment.blockingEndedAt !== null,
-    payment.suspendedByPaymentId !== null,
-  ].some(Boolean);
-}
-
-export function isExactQ004ReleasedPayment(payment: RecoveryPayment): boolean {
-  return ![
-    payment.provider !== PaymentProvider.EXIMBAY,
-    payment.mode !== PaymentMode.SANDBOX,
-    payment.status !== PaymentAttemptStatus.INITIATED && payment.status !== PaymentAttemptStatus.AWAITING,
-    payment.attemptLifecycle !== PaymentAttemptLifecycle.CONTACTED,
-    payment.remediationStatus !== PaymentRemediationStatus.NONE,
-    payment.contactStartedAt === null,
-    payment.providerOrderId === null,
-    payment.providerPaymentKey !== null,
-    payment.financialSucceededAt !== null,
-    payment.blockingEndedAt === null,
-    payment.suspendedByPaymentId !== null,
-    payment.errorCode !== EXIMBAY_NO_TRANSACTION_OBSERVED,
-  ].some(Boolean);
+function isEligibleContactedRecoverySession(session: OwnedPayment["session"]): boolean {
+  return session.status === CheckoutSessionStatus.SUBMITTED && session.order === null;
 }
 
 type ReplayRead =
@@ -402,52 +413,6 @@ function recoveryEvidence(
   };
 }
 
-export function isExactQ004RecoveryEvent(
-  event: {
-    source: PaymentEventSource;
-    eventType: string;
-    verifiedMode: PaymentMode | null;
-    verifiedCredentialBinding: string | null;
-    checkoutSessionId: string | null;
-    raw: Prisma.JsonValue;
-    status: PaymentEventStatus;
-    receivedAt: Date;
-    processedAt: Date | null;
-  },
-  payment: Pick<RecoveryPayment, "id" | "checkoutSessionId" | "providerOrderId" | "blockingEndedAt">,
-): boolean {
-  const metadataMismatch = [
-    event.source !== PaymentEventSource.API,
-    event.eventType !== EXIMBAY_CHECKOUT_RECOVERY_EVENT_TYPE,
-    event.verifiedMode !== PaymentMode.SANDBOX,
-    event.verifiedCredentialBinding === null,
-    event.checkoutSessionId !== payment.checkoutSessionId,
-    event.status !== PaymentEventStatus.PROCESSED,
-    event.processedAt === null,
-    payment.blockingEndedAt === null,
-    !isRecord(event.raw),
-  ].some(Boolean);
-  if (metadataMismatch || event.processedAt === null || payment.blockingEndedAt === null || !isRecord(event.raw)) {
-    return false;
-  }
-  if (event.receivedAt.getTime() !== payment.blockingEndedAt.getTime()
-    || event.processedAt.getTime() !== payment.blockingEndedAt.getTime()) return false;
-  const providerResult = event.raw.providerResult;
-  return ![
-    event.raw.schema !== "eximbay.checkout-recovery.q004",
-    event.raw.version !== 1,
-    event.raw.paymentId !== payment.id,
-    event.raw.checkoutSessionId !== payment.checkoutSessionId,
-    event.raw.providerOrderId !== payment.providerOrderId,
-    event.raw.mode !== PaymentMode.SANDBOX,
-    event.raw.credentialBinding !== event.verifiedCredentialBinding,
-    event.raw.providerCode !== "Q004",
-    event.raw.observedAt !== payment.blockingEndedAt.toISOString(),
-    !isRecord(providerResult),
-    isRecord(providerResult) && providerResult.rescode !== "Q004",
-  ].some(Boolean);
-}
-
 function recoveryPaymentSelect(): Prisma.PaymentSelect {
   return {
     id: true,
@@ -485,8 +450,4 @@ function encodeAmountWire(payment: Pick<RecoveryPayment, "currency" | "amount">)
   if (payment.currency !== "USD") throw new Error("EXIMBAY_CHECKOUT_RECOVERY_UNSUPPORTED_CURRENCY");
   const digits = String(payment.amount).padStart(3, "0");
   return `${digits.slice(0, -2)}.${digits.slice(-2)}`;
-}
-
-function isRecord(value: unknown): value is Prisma.JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

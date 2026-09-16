@@ -1,0 +1,19 @@
+{
+  "schema": "mira-refund-p3e-b2-synthetic-sale-service/v1",
+  "environment": "SANDBOX",
+  "provider": "EXIMBAY",
+  "mid": "1849705C64",
+  "market": "US",
+  "currency": "USD",
+  "temporary": true,
+  "mustRetireBeforePhaseB": [
+    "public invocation binding",
+    "Cloud Run Service",
+    "sale service account Cloud SQL Client binding",
+    "database-secret Accessor binding",
+    "Eximbay-secret Accessor binding",
+    "temporary synthetic-SALE database ACL"
+  ],
+  "automaticCleanup": false,
+  "sourcePhaseEffects": 0
+}

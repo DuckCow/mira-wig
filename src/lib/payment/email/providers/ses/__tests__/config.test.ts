@@ -15,7 +15,30 @@ describe("SES transactional email configuration", () => {
       configurationSetName: "mira-transactional-v1",
       requestTimeoutMs: 10_000,
       fromEmailAddress: "Mira <orders@example.test>",
+      recipientRouting: { mode: "PRODUCTION" },
     });
+  });
+
+  it("requires one exact safe recipient in sandbox/prelaunch mode", () => {
+    expect(validateSesTransactionalEmailConfig({
+      ...validConfig(),
+      recipientRouting: {
+        mode: "SANDBOX_PRELAUNCH",
+        safeRecipient: "authorized@example.test",
+      },
+    }).recipientRouting).toEqual({
+      mode: "SANDBOX_PRELAUNCH",
+      safeRecipient: "authorized@example.test",
+    });
+
+    expect(() => validateSesTransactionalEmailConfig({
+      ...validConfig(),
+      recipientRouting: { mode: "SANDBOX_PRELAUNCH" },
+    })).toThrow("SES_CONFIGURATION_INVALID");
+    expect(() => validateSesTransactionalEmailConfig({
+      ...validConfig(),
+      recipientRouting: { mode: "SANDBOX_PRELAUNCH", safeRecipient: " invalid" },
+    })).toThrow("SES_CONFIGURATION_INVALID");
   });
 
   it.each([

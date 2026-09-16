@@ -31,6 +31,8 @@ describe("provider-free sandbox preflight runner", () => {
       cloudProvisioningVerifiedByRuntime: false,
       checks: {
         database: "READY",
+        databaseUser: "mira_refund_preflight",
+        databaseName: "refund_sandbox",
         postgresqlMajor: 18,
         migrations: "READY",
         worker: "DISABLED_READY",
@@ -42,7 +44,7 @@ describe("provider-free sandbox preflight runner", () => {
       },
     });
     expect(fixture.order).toEqual([
-      "environment", "createDatabase", "connectivity", "postgresqlMajor",
+      "environment", "createDatabase", "connectivity", "databaseIdentity", "postgresqlMajor",
       "repositoryMigrations", "migrationLedger", "compareMigrations", "health",
       "manual", "reconciliation", "credential", "approvalCount", "admission", "disconnect",
     ]);
@@ -61,7 +63,7 @@ describe("provider-free sandbox preflight runner", () => {
 
     expect(result.ok).toBe(true);
     expect(fixture.order).toEqual([
-      "createDatabase", "connectivity", "postgresqlMajor", "repositoryMigrations",
+      "createDatabase", "connectivity", "databaseIdentity", "postgresqlMajor", "repositoryMigrations",
       "migrationLedger", "compareMigrations", "health", "manual", "reconciliation",
       "credential", "approvalCount", "admission", "disconnect",
     ]);
@@ -71,6 +73,9 @@ describe("provider-free sandbox preflight runner", () => {
     ["environment", "CONFIG_INVALID"],
     ["createDatabase", "DATABASE_UNAVAILABLE"],
     ["connectivity", "DATABASE_UNAVAILABLE"],
+    ["databaseIdentity", "DATABASE_UNAVAILABLE"],
+    ["wrongUser", "PREFLIGHT_NOT_READY"],
+    ["wrongDatabase", "PREFLIGHT_NOT_READY"],
     ["postgresqlMajor", "DATABASE_UNAVAILABLE"],
     ["wrongMajor", "PREFLIGHT_NOT_READY"],
     ["repositoryMigrations", "SYSTEMIC_FAILURE"],
@@ -173,6 +178,13 @@ function preflightFixture(failure?: string) {
     checkDatabaseConnectivity: () => {
       rejectAt("connectivity");
       return Promise.resolve();
+    },
+    readDatabaseIdentity: () => {
+      rejectAt("databaseIdentity");
+      return Promise.resolve(Object.freeze({
+        currentUser: failure === "wrongUser" ? "mira_refund_canary" : "mira_refund_preflight",
+        currentDatabase: failure === "wrongDatabase" ? "postgres" : "refund_sandbox",
+      }));
     },
     readPostgresqlMajor: () => {
       rejectAt("postgresqlMajor");

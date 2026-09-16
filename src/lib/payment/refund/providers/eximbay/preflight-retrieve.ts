@@ -1,3 +1,4 @@
+import { emptyRetrieveShapeDiagnostic, summarizeShape, ROOT_FIELDS, PAYMENT_FIELDS, CARD_FIELDS, OTHER_FIELDS, type OtherParamClass, type OptionalRootDetail, type RetrieveShapeDiagnostic, type RetrieveShapeFailure } from "./retrieve-shape-diagnostic";
 import { PaymentMode } from "@prisma/client";
 import { decodeEximbayAmount, encodeEximbayAmount } from "@/lib/payment/providers/eximbay/amount";
 import { isRecord, requireExactKeys, requireExactText } from "@/lib/payment/providers/eximbay/validation";
@@ -65,7 +66,7 @@ export type EximbayRefundRetrieveFailureCode =
 
 export type EximbayRefundRetrieveResult =
   | Readonly<{ kind: "admitted"; facts: EximbayRefundPreflightFacts }>
-  | Readonly<{ kind: "notAdmitted"; code: EximbayRefundRetrieveFailureCode }>;
+  | Readonly<{ kind: "notAdmitted"; code: EximbayRefundRetrieveFailureCode; failureKind: "REJECTION" | "EXCEPTION"; responseReceived?: boolean; httpStatus?: number | null }>;
 
 export function createEximbayRefundRetrievePlan(
   config: EximbayRefundPreflightConfig,
@@ -106,12 +107,31 @@ export async function executeEximbayRefundRetrieve(
   plan: EximbayRefundRetrievePlan,
   transport: EximbayRefundRetrieveTransport,
 ): Promise<EximbayRefundRetrieveResult> {
+  return executeRetrieve(plan, transport);
+}
+
+export async function diagnoseEximbayRefundRetrieve(
+  plan: EximbayRefundRetrievePlan,
+  transport: EximbayRefundRetrieveTransport,
+): Promise<Readonly<{ parserResult: "ADMITTED" | EximbayRefundRetrieveFailureCode; shape: RetrieveShapeDiagnostic }>> {
+  const shape = emptyRetrieveShapeDiagnostic();
+  const result = await executeRetrieve(plan, transport, shape);
+  return Object.freeze({ parserResult: result.kind === "admitted" ? "ADMITTED" : result.code, shape });
+}
+
+async function executeRetrieve(
+  plan: EximbayRefundRetrievePlan,
+  transport: EximbayRefundRetrieveTransport,
+  diagnostic?: RetrieveShapeDiagnostic,
+): Promise<EximbayRefundRetrieveResult> {
   const authority = planAuthorities.get(plan);
   if (!authority) throw new Error("UNTRUSTED_EXIMBAY_REFUND_RETRIEVE_PLAN");
   if (executedPlans.has(plan)) throw new Error("EXIMBAY_REFUND_RETRIEVE_PLAN_REUSED");
   executedPlans.add(plan);
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), EXIMBAY_REFUND_RETRIEVE_DEADLINE_MS);
+  let responseReceived = false;
+  let httpStatus: number | null = null;
   try {
     const response = await transport(plan.endpoint, {
       method: plan.method,
@@ -120,10 +140,17 @@ export async function executeEximbayRefundRetrieve(
       redirect: "error",
       signal: controller.signal,
     });
-    const boundary = await readResponseBoundary(response);
-    return boundary.ok ? admitResponse(boundary.body, authority) : notAdmitted(boundary.code);
+    responseReceived = true;
+    httpStatus = safeHttpStatus(response.status);
+    if (diagnostic) {
+      diagnostic.httpStatus = httpStatus;
+      diagnostic.contentTypeClass = admittedJsonContentType(response.headers.get("content-type")) ? "JSON" : "OTHER";
+    }
+    const boundary = await readResponseBoundary(response, diagnostic);
+    const result = boundary.ok ? admitResponse(boundary.body, authority, diagnostic) : notAdmitted(boundary.code);
+    return result.kind === "admitted" ? result : Object.freeze({ ...result, responseReceived, httpStatus });
   } catch {
-    return notAdmitted("TRANSPORT_FAILURE");
+    return Object.freeze({ ...notAdmitted("TRANSPORT_FAILURE"), failureKind: "EXCEPTION", responseReceived, httpStatus });
   } finally {
     clearTimeout(deadline);
   }
@@ -132,11 +159,13 @@ export async function executeEximbayRefundRetrieve(
 function admitResponse(
   body: string,
   authority: RetrieveAuthority,
+  diagnostic?: RetrieveShapeDiagnostic,
 ): EximbayRefundRetrieveResult {
   const parsed = parseClosedJson(body);
   if (!parsed.ok) return notAdmitted(parsed.code);
-  if (!isRecord(parsed.value)) return notAdmitted("UNKNOWN_SHAPE");
-  return admitRoot(parsed.value, authority);
+  observeParsedShape(parsed.value, diagnostic);
+  if (!isRecord(parsed.value)) return shapeFailure(diagnostic, "ROOT_NOT_OBJECT");
+  return admitRoot(parsed.value, authority, diagnostic);
 }
 
 type BoundaryFailure = Readonly<{
@@ -149,7 +178,7 @@ type ResponseBoundary =
   | BoundaryFailure;
 type ByteBoundary = Readonly<{ ok: true; body: Uint8Array }> | BoundaryFailure;
 
-async function readResponseBoundary(response: Response): Promise<ResponseBoundary> {
+async function readResponseBoundary(response: Response, diagnostic?: RetrieveShapeDiagnostic): Promise<ResponseBoundary> {
   if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
     return boundaryFailure("NON_2XX");
   }
@@ -158,6 +187,7 @@ async function readResponseBoundary(response: Response): Promise<ResponseBoundar
   }
   const bytes = await readBoundedBody(response.body);
   if (!bytes.ok) return bytes;
+  if (diagnostic) diagnostic.bodyByteLength = bytes.body.byteLength;
   try {
     return Object.freeze({ ok: true, body: new TextDecoder("utf-8", { fatal: true }).decode(bytes.body) });
   } catch {
@@ -204,6 +234,7 @@ function boundaryFailure(code: BoundaryFailure["code"]): BoundaryFailure {
 function admitRoot(
   root: Record<string, unknown>,
   authority: RetrieveAuthority,
+  diagnostic?: RetrieveShapeDiagnostic,
 ): EximbayRefundRetrieveResult {
   try {
     if (root.rescode === "0000") {
@@ -212,38 +243,41 @@ function admitRoot(
       requireExactKeys(root, ["rescode", "resmsg"]);
     }
   } catch {
-    return notAdmitted("UNKNOWN_SHAPE");
+    return shapeFailure(diagnostic, "ROOT_KEY_SET_MISMATCH");
   }
   if (!boundedText(root.rescode, 32) || !boundedText(root.resmsg, 4_096)) {
-    return notAdmitted("UNKNOWN_SHAPE");
+    return shapeFailure(diagnostic, "ROOT_REQUIRED_TEXT_INVALID");
   }
   if (root.rescode !== "0000") return notAdmitted("PROVIDER_NON_SUCCESS");
-  if (!isRecord(root.payment) || !optionalRootEnvelopeValid(root)) {
-    return notAdmitted("UNKNOWN_SHAPE");
-  }
-  return admitPayment(root.mid, root.payment, authority);
+  if (!isRecord(root.payment)) return shapeFailure(diagnostic, "PAYMENT_NOT_OBJECT");
+  observeOptionalRootDetail(root, diagnostic);
+  if (!optionalRootEnvelopeValid(root)) return shapeFailure(diagnostic, "OPTIONAL_ROOT_ENVELOPE_INVALID");
+  return admitPayment(root.mid, root.payment, authority, diagnostic);
 }
 
 function admitPayment(
   rootMid: unknown,
   payment: Record<string, unknown>,
   authority: RetrieveAuthority,
+  diagnostic?: RetrieveShapeDiagnostic,
 ): EximbayRefundRetrieveResult {
   try {
     requireExactKeys(payment, [
       "order_id", "currency", "amount", "transaction_id", "status", "transaction_date", "balance",
     ], ["auth_code", "payment_method"]);
   } catch {
-    return notAdmitted("UNKNOWN_SHAPE");
+    return shapeFailure(diagnostic, "PAYMENT_KEY_SET_MISMATCH");
   }
-  if (!optionalPaymentEnvelopeValid(payment)) return notAdmitted("UNKNOWN_SHAPE");
+  if (!optionalPaymentEnvelopeValid(payment)) return shapeFailure(diagnostic, "OPTIONAL_PAYMENT_ENVELOPE_INVALID");
   const identity = retrieveIdentity(rootMid, payment);
-  if (!identity) return notAdmitted("UNKNOWN_SHAPE");
+  if (!identity) return shapeFailure(diagnostic, "IDENTITY_SHAPE_INVALID");
   if (!identityMatches(identity, authority)) return notAdmitted("IDENTITY_MISMATCH");
-  const semanticFailure = paymentSemanticFailure(payment);
-  if (semanticFailure) return notAdmitted(semanticFailure);
-  const money = admittedMoney(payment, authority.expectation);
-  if (!money.ok) return notAdmitted(money.code);
+  const semanticFailure = observePaymentSemanticFailure(payment, diagnostic);
+  if (semanticFailure) return semanticFailure;
+  const money = admittedMoney(payment, authority.expectation, diagnostic);
+  if (!money.ok) {
+    return notAdmitted(money.code);
+  }
   const amounts = money.amounts;
   const facts = normalizeEximbayRefundPreflightFacts({
     ...identity,
@@ -291,8 +325,65 @@ function optionalOtherParamValid(root: Record<string, unknown>): boolean {
     return false;
   }
   return ["param1", "param2"].every((key) => (
-    !Object.hasOwn(otherParam, key) || Boolean(boundedText(otherParam[key], 255))
+    !Object.hasOwn(otherParam, key) || optionalParamTextValid(otherParam[key])
   ));
+}
+
+function optionalParamTextValid(value: unknown): boolean {
+  if (typeof value !== "string" || value.trim().length !== 0) {
+    return boundedText(value, 255) !== null;
+  }
+  if (UTF8_ENCODER.encode(value).byteLength > 255) return false;
+  // Sentinels bypass only the nonblank/edge-trim rules; the existing primitive
+  // still rejects preparation controls and unpaired surrogates in blank text.
+  try {
+    requireExactText(`x${value}x`, "INVALID_EXIMBAY_RETRIEVE_TEXT");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Observation uses the same parsed root and the installed admission helpers. The
+// financial predicate and its short-circuit/failure ordering remain unchanged.
+function observeOptionalRootDetail(root: Record<string, unknown>, diagnostic?: RetrieveShapeDiagnostic): void {
+  if (!diagnostic) return;
+  const card = root.card_info;
+  const pair = isRecord(card) ? documentedCardFields(card) : null;
+  const other = isRecord(root.other_param) ? root.other_param : {};
+  diagnostic.optionalRootDetail = {
+    cardInfo: {
+      pairKind: cardPairKind(root, pair),
+      firstFourAsciiDigits: pair ? /^[0-9]{4}$/u.test(boundedText(pair[0], 4) ?? "") : null,
+      lastFourAsciiDigits: pair ? /^[0-9]{4}$/u.test(boundedText(pair[1], 4) ?? "") : null,
+      parserValid: optionalCardInfoValid(root),
+    },
+    otherParam: {
+      param1Class: otherParamClass(other, "param1"),
+      param2Class: otherParamClass(other, "param2"),
+      param1TextLengthOver255: textLengthOver255(other.param1),
+      param2TextLengthOver255: textLengthOver255(other.param2),
+      parserValid: optionalOtherParamValid(root),
+    },
+  };
+}
+function cardPairKind(root: Record<string, unknown>, pair: readonly [unknown, unknown] | null): OptionalRootDetail["cardInfo"]["pairKind"] {
+  if (!Object.hasOwn(root, "card_info")) return "ABSENT";
+  if (!pair || !isRecord(root.card_info)) return "INVALID";
+  return Object.hasOwn(root.card_info, "card_number1") ? "FORMAL" : "LEGACY";
+}
+function otherParamClass(other: Record<string, unknown>, key: string): OtherParamClass {
+  if (!Object.hasOwn(other, key)) return "ABSENT";
+  const value = other[key];
+  if (typeof value !== "string") return "NOT_STRING";
+  if (value.trim().length === 0) return "EMPTY_OR_WHITESPACE_ONLY";
+  if (value !== value.trim()) return "TRIM_MISMATCH";
+  try { requireExactText(value, "INVALID_EXIMBAY_RETRIEVE_TEXT"); }
+  catch { return "CONTROL_OR_SURROGATE"; }
+  return boundedText(value, 255) === null ? "OVER_255_UTF8_BYTES" : "VALID";
+}
+function textLengthOver255(value: unknown): boolean | null {
+  return typeof value === "string" ? Array.from(value).length > 255 : null;
 }
 
 function optionalPaymentEnvelopeValid(payment: Record<string, unknown>): boolean {
@@ -307,11 +398,12 @@ type AdmittedMoney =
 function admittedMoney(
   payment: Record<string, unknown>,
   expectation: EximbayRefundRetrieveExpectation,
+  diagnostic?: RetrieveShapeDiagnostic,
 ): AdmittedMoney {
   if (payment.currency !== expectation.currency) {
     return Object.freeze({ ok: false, code: "MONEY_MISMATCH" });
   }
-  const amounts = retrieveAmounts(payment, expectation.currency);
+  const amounts = retrieveAmounts(payment, expectation.currency, diagnostic);
   if (!amounts) return Object.freeze({ ok: false, code: "INVALID_BALANCE" });
   return amounts.originalAmount === expectation.originalAmount
     ? Object.freeze({ ok: true, amounts })
@@ -353,13 +445,17 @@ function identityMatches(
 function retrieveAmounts(
   payment: Record<string, unknown>,
   currency: EximbayCurrency,
+  diagnostic?: RetrieveShapeDiagnostic,
 ): Readonly<{ originalAmount: number; refundableBalance: number }> | null {
+  let stage: RetrieveShapeFailure = "OTHER_EXACT_STRUCTURAL_FAILURE";
   try {
     const originalAmount = decodeEximbayAmount(currency, payment.amount);
+    stage = "BALANCE_SHAPE_INVALID";
     const refundableBalance = decodeNonnegativeAmount(currency, payment.balance);
     if (refundableBalance > originalAmount) return null;
     return Object.freeze({ originalAmount, refundableBalance });
   } catch {
+    if (diagnostic) diagnostic.firstFailure = stage;
     return null;
   }
 }
@@ -402,7 +498,7 @@ function admittedJsonContentType(value: string | null): boolean {
 }
 
 function notAdmitted(code: EximbayRefundRetrieveFailureCode): EximbayRefundRetrieveResult {
-  return Object.freeze({ kind: "notAdmitted", code });
+  return Object.freeze({ kind: "notAdmitted", code, failureKind: "REJECTION" });
 }
 
 type ClosedJson =
@@ -574,4 +670,29 @@ class NoDuplicateJsonScanner {
 
   #invalid(): never { throw new ClosedJsonError("INVALID_JSON"); }
   #duplicate(): never { throw new ClosedJsonError("DUPLICATE_JSON_KEY"); }
+}
+
+function safeHttpStatus(status: number): number | null {
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+}
+
+function shapeFailure(diagnostic: RetrieveShapeDiagnostic | undefined, failure: RetrieveShapeFailure): EximbayRefundRetrieveResult {
+  if (diagnostic) diagnostic.firstFailure = failure;
+  return notAdmitted("UNKNOWN_SHAPE");
+}
+
+function observePaymentSemanticFailure(payment: Record<string, unknown>, diagnostic?: RetrieveShapeDiagnostic): EximbayRefundRetrieveResult | null {
+  const failure = paymentSemanticFailure(payment);
+  if (failure === "UNKNOWN_SHAPE") return shapeFailure(diagnostic, "TRANSACTION_DATE_SHAPE_INVALID");
+  return failure ? notAdmitted(failure) : null;
+}
+
+function observeParsedShape(value: unknown, diagnostic?: RetrieveShapeDiagnostic): void {
+  if (!diagnostic) return;
+  diagnostic.jsonParseSuccess = true;
+  diagnostic.root = summarizeShape(value, ROOT_FIELDS);
+  if (!isRecord(value)) return;
+  if (Object.hasOwn(value, "payment")) diagnostic.payment = summarizeShape(value.payment, PAYMENT_FIELDS);
+  if (Object.hasOwn(value, "card_info")) diagnostic.cardInfo = summarizeShape(value.card_info, CARD_FIELDS);
+  if (Object.hasOwn(value, "other_param")) diagnostic.otherParam = summarizeShape(value.other_param, OTHER_FIELDS);
 }

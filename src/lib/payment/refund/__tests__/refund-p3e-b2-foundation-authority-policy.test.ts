@@ -818,6 +818,9 @@ describe("P3E-B2-R1B foundation authority policy", () => {
 
 function isR1BPath(path: string): boolean {
   if ([
+    "contracts/eximbay-canonical-deployment-v1.json",
+    "contracts/canonical-migration-inventory-v1.json",
+    "contracts/synthetic-sale-service-v1.json",
     "contracts/attended-collector-core-v1.json",
     "contracts/trusted-project-bootstrap-readiness-v1.json",
     "contracts/trusted-project-bootstrap-readiness-v2.json",

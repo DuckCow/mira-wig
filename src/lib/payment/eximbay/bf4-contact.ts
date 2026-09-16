@@ -132,9 +132,45 @@ export interface EximbayCheckoutRecoveryRetrieveRequest {
   readonly language: "EN" | "JP";
 }
 
+export type EximbayCheckoutRecoveryBinding = "MATCH" | "MISMATCH" | "NOT_ESTABLISHED";
+
+export type EximbayCheckoutRecoveryProviderObservation =
+  | Readonly<{
+      admission: "TRANSACTION_DETAIL_ADMITTED";
+      resultCode: "0000";
+      mode: EximbayPaymentMode;
+      binding: Readonly<{
+        merchant: Exclude<EximbayCheckoutRecoveryBinding, "NOT_ESTABLISHED">;
+        providerOrder: Exclude<EximbayCheckoutRecoveryBinding, "NOT_ESTABLISHED">;
+        money: Exclude<EximbayCheckoutRecoveryBinding, "NOT_ESTABLISHED">;
+      }>;
+      provider: Readonly<{
+        transactionId: string;
+        orderId: string;
+        status: EximbayInquiryStatus;
+        amount: string;
+        currency: string;
+        transactionDate: string;
+      }>;
+    }>
+  | Readonly<{
+      admission: "INCOMPLETE_TRANSACTION_DETAIL" | "PROVIDER_NON_SUCCESS";
+      resultCode: string;
+      mode: EximbayPaymentMode;
+      binding: Readonly<{
+        merchant: "NOT_ESTABLISHED";
+        providerOrder: "NOT_ESTABLISHED";
+        money: "NOT_ESTABLISHED";
+      }>;
+      provider: null;
+    }>;
+
 export type EximbayCheckoutRecoveryRetrieveResult =
   | Readonly<{ kind: "q004"; rescode: "Q004"; resmsg: string }>
-  | Readonly<{ kind: "transactionObserved"; rescode: string }>
+  | Readonly<{
+      kind: "transactionObserved";
+      observation: EximbayCheckoutRecoveryProviderObservation;
+    }>
   | Readonly<{
       kind: "outcomeUnknown";
       code: EximbayBf4ContactFailureCode;
@@ -239,7 +275,12 @@ export async function retrieveEximbayCheckoutRecoveryStatus(
   }));
   const response = await executePreparedContact(prepared, transport);
   if (!response.ok) return recoveryOutcomeUnknown(response.diagnostic);
-  return admitCheckoutRecoveryRetrieve(response.text, response.observation);
+  return admitCheckoutRecoveryRetrieve(
+    response.text,
+    response.observation,
+    authority,
+    request,
+  );
 }
 
 function prepareContact(
@@ -429,6 +470,8 @@ function admitRetrieve(text: string): EximbayBf4RetrieveResult {
 function admitCheckoutRecoveryRetrieve(
   text: string,
   observation: ContactObservation,
+  authority: EximbayBf4ConfigAuthority,
+  request: EximbayCheckoutRecoveryRetrieveRequest,
 ): EximbayCheckoutRecoveryRetrieveResult {
   const parsed = parseClosedJson(text);
   if (!parsed.ok) return recoveryOutcomeUnknown(diagnostic(parsed.code, observation));
@@ -440,7 +483,66 @@ function admitCheckoutRecoveryRetrieve(
   if (header.rescode === "Q004") {
     return Object.freeze({ kind: "q004", rescode: "Q004", resmsg: boundedResponseText(header.resmsg, 512) });
   }
-  return Object.freeze({ kind: "transactionObserved", rescode: boundedResponseText(header.rescode, 64) });
+  const resultCode = boundedResponseText(header.rescode, 64);
+  const payment = resultCode === "0000" ? retrievePayment(parsed.value) : null;
+  return Object.freeze({
+    kind: "transactionObserved",
+    observation: payment
+      ? checkoutRecoveryTransactionObservation(authority, request, payment)
+      : checkoutRecoveryHeaderObservation(authority.mode, resultCode),
+  });
+}
+
+function checkoutRecoveryTransactionObservation(
+  authority: EximbayBf4ConfigAuthority,
+  request: EximbayCheckoutRecoveryRetrieveRequest,
+  payment: EximbayBf4RetrievedPayment,
+): Extract<EximbayCheckoutRecoveryProviderObservation, {
+  admission: "TRANSACTION_DETAIL_ADMITTED";
+}> {
+  return Object.freeze({
+    admission: "TRANSACTION_DETAIL_ADMITTED",
+    resultCode: "0000",
+    mode: authority.mode,
+    binding: Object.freeze({
+      merchant: binding(payment.mid === authority.mid),
+      providerOrder: binding(payment.orderId === request.providerOrderId),
+      money: binding(payment.currency === request.currency && payment.amount === request.amountWire),
+    }),
+    provider: Object.freeze({
+      transactionId: payment.transactionId,
+      orderId: payment.orderId,
+      status: payment.status,
+      amount: payment.amount,
+      currency: payment.currency,
+      transactionDate: payment.transactionDate,
+    }),
+  });
+}
+
+function checkoutRecoveryHeaderObservation(
+  mode: EximbayPaymentMode,
+  resultCode: string,
+): Extract<EximbayCheckoutRecoveryProviderObservation, {
+  admission: "INCOMPLETE_TRANSACTION_DETAIL" | "PROVIDER_NON_SUCCESS";
+}> {
+  return Object.freeze({
+    admission: resultCode === "0000"
+      ? "INCOMPLETE_TRANSACTION_DETAIL"
+      : "PROVIDER_NON_SUCCESS",
+    resultCode,
+    mode,
+    binding: Object.freeze({
+      merchant: "NOT_ESTABLISHED",
+      providerOrder: "NOT_ESTABLISHED",
+      money: "NOT_ESTABLISHED",
+    }),
+    provider: null,
+  });
+}
+
+function binding(matches: boolean): "MATCH" | "MISMATCH" {
+  return matches ? "MATCH" : "MISMATCH";
 }
 
 type RetrieveHeader =
@@ -479,6 +581,8 @@ function retrieveHeader(value: Record<string, unknown>): RetrieveHeader {
 function retrievePayment(root: Record<string, unknown>): EximbayBf4RetrievedPayment | null {
   if (typeof root.mid !== "string" || !isRecord(root.payment)) return null;
   try {
+    requireOptionalRecord(root, "card_info");
+    requireOptionalRecord(root, "other_param");
     requireExactKeys(root.payment, [
       "order_id",
       "currency",

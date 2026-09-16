@@ -1,3 +1,4 @@
+import { deleteRetainedRefundTestHistory } from "./retained-refund-test-history";
 import { randomUUID } from "crypto";
 import {
   CheckoutSessionStatus,
@@ -16,6 +17,7 @@ import {
 import { db } from "@/lib/db";
 import { syntheticEximbayProviderOrderId } from "@/lib/payment/__tests__/eximbay-fixture";
 import { claimRefundAttemptForExecution } from "../claim";
+import { buildRefundExecutionClaimOperationKey } from "../claim-contract";
 import { requestRefundAttempt } from "../request";
 
 export const DISPATCH_NOW = new Date("2026-07-11T07:00:00.000Z");
@@ -62,6 +64,9 @@ interface DispatchFixtureOptions {
   requestThroughProduction?: boolean;
   useSchemaGeneratedRefundAttemptId?: boolean;
   refundAttemptId?: string;
+  paymentId?: string;
+  orderId?: string;
+  commandId?: string;
   fixtureIdentity?: string;
   refundActorType?: RefundAttemptActorType;
   refundActorUserId?: string | null;
@@ -143,6 +148,7 @@ async function constructDispatchFixture(
   const providerPaymentKey = `provider_payment_final_${identity}`;
   const payment = await db.payment.create({
     data: {
+      id: options.paymentId,
       checkoutSessionId: session.id,
       provider,
       mode,
@@ -164,6 +170,7 @@ async function constructDispatchFixture(
   observeConstructionStep(options, DispatchFixtureConstructionStep.PAYMENT_CREATED);
   const order = await db.order.create({
     data: {
+      id: options.orderId,
       checkoutSessionId: session.id,
       paymentId: payment.id,
       userId,
@@ -238,6 +245,8 @@ async function constructDispatchFixture(
   });
   if (!claim.ok) throw new Error(`Dispatch fixture claim failed: ${claim.code}`);
   journal.commandId = claim.commandId;
+  const commandId = await fixtureCommandIdentity(claim.commandId, options.commandId);
+  journal.commandId = commandId;
   observeConstructionStep(options, DispatchFixtureConstructionStep.CLAIM_CREATED);
   return {
     userId,
@@ -245,13 +254,34 @@ async function constructDispatchFixture(
     paymentId: payment.id,
     orderId: order.id,
     refundAttemptId: requestedAttempt.id,
-    commandId: claim.commandId,
+    commandId,
     totalAmount,
     targetAmount,
     providerRef,
     providerPaymentKey,
     operationKey: requestedAttempt.operationKey,
   };
+}
+
+async function replaceFixtureCommandIdentity(currentId: string, replacementId: string): Promise<string> {
+  const command = await db.refundExecutionCommand.update({
+    where: { id: currentId },
+    data: { id: replacementId },
+  });
+  await db.refundAttemptTransition.updateMany({
+    where: { operationKey: buildRefundExecutionClaimOperationKey(currentId) },
+    data: { operationKey: buildRefundExecutionClaimOperationKey(replacementId) },
+  });
+  return command.id;
+}
+
+function fixtureCommandIdentity(
+  currentId: string,
+  replacementId: string | undefined,
+): Promise<string> {
+  return replacementId
+    ? replaceFixtureCommandIdentity(currentId, replacementId)
+    : Promise.resolve(currentId);
 }
 
 function fixtureCommunicationLocale(
@@ -588,6 +618,7 @@ async function cleanupDispatchAuthorities(
       select: { id: true, variantId: true, wigStyleId: true },
     }),
   );
+  await collectCleanupMutation(cleanupErrors, () => deleteRetainedRefundTestHistory(commandIds));
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionEvidence.deleteMany({ where: { commandId: { in: commandIds } } })
   ));
@@ -605,6 +636,9 @@ async function cleanupDispatchAuthorities(
     db.refundExecutionProviderEligibilityProof.deleteMany({
       where: { bindingId: { in: bindings.map((binding) => binding.id) } },
     })
+  ));
+  await collectCleanupMutation(cleanupErrors, () => (
+    deleteEximbayPreflightObservations(bindings.map((binding) => binding.id))
   ));
   await collectCleanupMutation(cleanupErrors, () => (
     db.refundExecutionProviderOperationBinding.deleteMany({
@@ -656,6 +690,22 @@ async function cleanupDispatchAuthorities(
     db.user.deleteMany({ where: { id: { in: authority.userIds } } })
   ));
   return cleanupErrors;
+}
+
+async function deleteEximbayPreflightObservations(bindingIds: readonly string[]): Promise<void> {
+  if (bindingIds.length === 0) return;
+  await db.$executeRawUnsafe(
+    'ALTER TABLE "RefundExecutionEximbayPreflightObservation" DISABLE TRIGGER "EximbayPreflight_immutable"',
+  );
+  try {
+    await db.refundExecutionEximbayPreflightObservation.deleteMany({
+      where: { bindingId: { in: [...bindingIds] } },
+    });
+  } finally {
+    await db.$executeRawUnsafe(
+      'ALTER TABLE "RefundExecutionEximbayPreflightObservation" ENABLE TRIGGER "EximbayPreflight_immutable"',
+    );
+  }
 }
 
 async function collectCleanupQuery<T>(

@@ -40,6 +40,10 @@ export type RefundSandboxProviderFreePreflightDependencies<Database> = Readonly<
   createDatabase: (connectionString: string) => Database | Promise<Database>;
   disconnectDatabase: (database: Database) => Promise<void>;
   checkDatabaseConnectivity: (database: Database) => Promise<void>;
+  readDatabaseIdentity: (database: Database) => Promise<Readonly<{
+    currentUser: string;
+    currentDatabase: string;
+  }>>;
   readPostgresqlMajor: (database: Database) => Promise<number>;
   loadRepositoryMigrations: () => Promise<readonly RefundWorkerRepositoryMigration[]>;
   readMigrationLedger: (database: Database) => Promise<RefundWorkerMigrationLedger>;
@@ -63,6 +67,7 @@ RefundSandboxProviderFreePreflightDependencies<PrismaClient> = Object.freeze({
   }),
   disconnectDatabase: (database) => database.$disconnect(),
   checkDatabaseConnectivity,
+  readDatabaseIdentity,
   readPostgresqlMajor,
   loadRepositoryMigrations: loadRefundWorkerRepositoryMigrations,
   readMigrationLedger: readRefundWorkerMigrationLedger,
@@ -131,6 +136,10 @@ async function databaseFoundationReadiness<Database>(
   } catch {
     return "DATABASE_UNAVAILABLE";
   }
+  const identity = await safeDatabaseRead(() => dependencies.readDatabaseIdentity(database));
+  if (identity === null) return "DATABASE_UNAVAILABLE";
+  if (identity.currentUser !== "mira_refund_preflight"
+    || identity.currentDatabase !== "refund_sandbox") return "PREFLIGHT_NOT_READY";
   const major = await safeDatabaseRead(() => dependencies.readPostgresqlMajor(database));
   if (major === null) return "DATABASE_UNAVAILABLE";
   if (major !== 18) return "PREFLIGHT_NOT_READY";
@@ -259,4 +268,22 @@ async function readPostgresqlMajor(database: PrismaClient): Promise<number> {
   const major = Number(version.slice(0, 2));
   if (!Number.isSafeInteger(major)) throw new Error("INVALID_POSTGRESQL_VERSION");
   return major;
+}
+
+async function readDatabaseIdentity(database: PrismaClient): Promise<Readonly<{
+  currentUser: string;
+  currentDatabase: string;
+}>> {
+  const rows = await database.$queryRaw<{
+    currentUser: string;
+    currentDatabase: string;
+  }[]>(Prisma.sql`
+    SELECT current_user AS "currentUser", current_database() AS "currentDatabase"
+  `);
+  const identity = rows.length === 1 ? rows[0] : undefined;
+  if (typeof identity?.currentUser !== "string"
+    || typeof identity.currentDatabase !== "string") {
+    throw new Error("INVALID_DATABASE_IDENTITY");
+  }
+  return Object.freeze({ ...identity });
 }

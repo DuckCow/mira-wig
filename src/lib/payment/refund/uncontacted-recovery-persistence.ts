@@ -34,6 +34,7 @@ type AggregateContext = Readonly<{
   target: UncontactedRecoveryTarget;
   command: UncontactedRecoveryCommand;
 }>;
+type TakeoverState = AggregateContext & Readonly<{ capturedAt: Date }>;
 type TakeoverCandidate = Readonly<{
   generation: number;
   rawToken: string;
@@ -73,12 +74,13 @@ async function reclaimInTransaction(
   if (!locked) return reclaimFailure("COMMAND_NOT_FOUND_OR_INELIGIBLE");
   const classification = classifyUncontactedRefundExecutionState(locked);
   if (classification.kind !== "EXPIRED_U1"
+    && classification.kind !== "EXPIRED_SEALED_EXIMBAY_REENTRY"
     && classification.kind !== "EXPIRED_AUTHORIZED_EXIMBAY_R1") {
     return resultForClassification(classification, "LEASE_CONFLICT");
   }
   const gateFailure = validateRecoveryGate(env);
   if (gateFailure) return gateFailure;
-  return persistTakeover(tx, locked, input);
+  return persistRefundExecutionTakeover(tx, locked, input);
 }
 
 async function lockAndLoad(
@@ -194,15 +196,18 @@ async function captureDatabaseTime(tx: RecoveryTx): Promise<Date> {
   return rows[0].capturedAt;
 }
 
-async function persistTakeover(
+// Shared persistence boundary. Migration M requires application-owned grant consumption
+// for the historical canary ordinal-zero lane; generic callers cannot bypass it.
+export async function persistRefundExecutionTakeover(
   tx: RecoveryTx,
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
   input: NormalizedReclaimUncontactedRefundExecutionInput,
+  eventId?: string,
 ): Promise<ReclaimUncontactedRefundExecutionResult> {
   const candidate = buildTakeoverCandidate(locked);
   const updated = await updateCommandByFullCas(tx, locked, input, candidate);
   if (updated !== 1) throw new UncontactedRecoveryCasConflictError();
-  await appendTakeoverEvent(tx, locked, candidate.generation);
+  await appendTakeoverEvent(tx, locked, candidate.generation, eventId);
   const leased = leaseSuccess(
     locked.command.id,
     locked.target.id,
@@ -220,7 +225,7 @@ async function persistTakeover(
 }
 
 function buildTakeoverCandidate(
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
 ): TakeoverCandidate {
   const rawToken = randomBytes(32).toString("hex");
   return Object.freeze({
@@ -233,7 +238,7 @@ function buildTakeoverCandidate(
 
 async function updateCommandByFullCas(
   tx: RecoveryTx,
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
   input: NormalizedReclaimUncontactedRefundExecutionInput,
   candidate: TakeoverCandidate,
 ): Promise<number> {
@@ -263,11 +268,13 @@ async function updateCommandByFullCas(
 
 async function appendTakeoverEvent(
   tx: RecoveryTx,
-  locked: LockedUncontactedRecoveryState,
+  locked: TakeoverState,
   generation: number,
+  eventId?: string,
 ): Promise<void> {
   await tx.refundExecutionCommandEvent.create({
     data: {
+      id: eventId,
       commandId: locked.command.id,
       eventType: RefundExecutionCommandEventType.LEASE_ACQUIRED,
       leaseGeneration: generation,
@@ -296,11 +303,16 @@ function resultForClassification(
   classification: UncontactedRecoveryClassification,
   expiredFallback: "LEASE_CONFLICT" | "PERSISTENCE_CONFLICT",
 ): ReclaimUncontactedRefundExecutionResult {
-  if (classification.kind === "EXPIRED_U1") return reclaimFailure(expiredFallback);
-  if (classification.kind === "EXPIRED_AUTHORIZED_EXIMBAY_R1") {
+  if ([
+    "EXPIRED_U1",
+    "EXPIRED_SEALED_EXIMBAY_REENTRY",
+    "EXPIRED_AUTHORIZED_EXIMBAY_R1",
+  ].includes(classification.kind)) {
     return reclaimFailure(expiredFallback);
   }
-  if (classification.kind === "ACTIVE_U1") return reclaimFailure("LEASE_NOT_EXPIRED");
+  if (["ACTIVE_U1", "ACTIVE_SEALED_EXIMBAY_REENTRY"].includes(classification.kind)) {
+    return reclaimFailure("LEASE_NOT_EXPIRED");
+  }
   if (classification.kind === "AUTHORIZED_U2") {
     return reclaimFailure("AUTHORIZED_RECOVERY_UNSUPPORTED");
   }

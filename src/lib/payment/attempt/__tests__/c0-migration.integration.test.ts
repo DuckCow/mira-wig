@@ -1,10 +1,11 @@
 import { randomUUID } from "crypto";
 import { execFile } from "child_process";
-import { readFile } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import { join } from "path";
 import { promisify } from "util";
 import { Client } from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requireOwnedRefundTestCluster } from "../../refund/__tests__/retained-refund-test-history";
 
 const MIGRATION_PATH = join(
   process.cwd(),
@@ -155,11 +156,18 @@ describe("C0 commerce-integrity migration", () => {
   });
 
   it("applies the repository migration history through Prisma's migration runner", async () => {
+    await requireOwnedRefundTestCluster();
     const baseUrl = requireSafeTestDatabaseUrl();
-    const runnerSchema = `c0_prisma_runner_${randomUUID().replaceAll("-", "")}`;
+    const runnerDatabase = `c0_prisma_runner_${randomUUID().replaceAll("-", "")}`;
     const runnerUrl = new URL(baseUrl);
-    runnerUrl.searchParams.set("schema", runnerSchema);
+    runnerUrl.pathname = `/${runnerDatabase}`;
+    runnerUrl.searchParams.set("schema", "public");
+    // Current SECURITY DEFINER migrations deliberately bind canonical public
+    // objects. Isolate the whole database instead of relocating those objects.
+    await client.query(`CREATE DATABASE ${quoteIdentifier(runnerDatabase)}`);
+    const runner = new Client({ connectionString: runnerUrl.toString() });
     try {
+      await runner.connect();
       await execFileAsync(process.execPath, [
         join(process.cwd(), "node_modules/prisma/build/index.js"),
         "migrate",
@@ -168,16 +176,20 @@ describe("C0 commerce-integrity migration", () => {
         cwd: process.cwd(),
         env: { ...process.env, DATABASE_URL: runnerUrl.toString() },
       });
-      const result = await client.query<{ count: number }>(`
-        SELECT COUNT(*)::integer AS "count"
-        FROM ${quoteIdentifier(runnerSchema)}."_prisma_migrations"
+      const result = await runner.query<{ migration_name: string }>(`
+        SELECT "migration_name"
+        FROM public."_prisma_migrations"
         WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL
+        ORDER BY "migration_name"
       `);
-      expect(result.rows[0]?.count).toBeGreaterThan(0);
-      await expect(columnExistsInSchema(client, runnerSchema, "Payment", "suspendedByPaymentId"))
+      const expected = (await readdir(join(process.cwd(), "prisma/migrations")))
+        .filter((name) => /^\d{14}_/u.test(name)).sort();
+      expect(result.rows.map((row) => row.migration_name)).toEqual(expected);
+      await expect(columnExistsInSchema(runner, "public", "Payment", "suspendedByPaymentId"))
         .resolves.toBe(true);
     } finally {
-      await client.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(runnerSchema)} CASCADE`);
+      await runner.end();
+      await client.query(`DROP DATABASE ${quoteIdentifier(runnerDatabase)}`);
     }
   });
 

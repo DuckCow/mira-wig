@@ -1,0 +1,396 @@
+{
+  "contractVersion": "mira-refund-eximbay-canary-image-policy/v15",
+  "parentAuthoritySha256": "7c2561ec1c53b1cd1f69ba7ffec271e1a5b16ce4427abd45ea5c4055a4d653a8",
+  "baselineCommit": "6167e56b6a4ba61fa65ec727e7c987f7481173f9",
+  "sourceTree": "7fe0b4d66d856a0f5ee32881623312ee1a7b2760",
+  "supervisorSource": {
+    "path": "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+    "sha256": "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15"
+  },
+  "buildContext": {
+    "manifestSha256": "f8d899b7cb3bd44c86b0b2d2b59bb3e5eba8fceb7a709706f8feac894b87c38b",
+    "fileCount": 209,
+    "repositoryGraphInputCount": 160,
+    "packagedGraphInputCount": 374,
+    "entrypointCount": 5,
+    "migrationCount": 41,
+    "migrationDigest": "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c"
+  },
+  "artifact": {
+    "manifestDigest": "sha256:a086e094e8d161118625c040f0540a26528c700fc78edeab7474751099c4bf4e",
+    "manifestSize": 3066,
+    "configDigest": "sha256:10656349ca549bf1bfaa1d4feba32ca33f3269c977272fa93cca407517772857",
+    "platform": "linux/amd64",
+    "imageSize": 145706175,
+    "layerCount": 14,
+    "diffIds": [
+      "sha256:81f823b9617547261c907396f63f770deaa554748ff739bedfa650e3bb74595a",
+      "sha256:aa7bf5b94b92bc0951fa6a85f909392c3e1ed27b4c2fa82bc77fa84122a08416",
+      "sha256:96a9284da7b47faab75998a33dc2e56874756555b92480d023585ff8a6d153fd",
+      "sha256:a4bc3d2a20bafc5e6c89c5e2285579f620f118f81b5413c62edee3d2380bdaa2",
+      "sha256:f7d704e9049824a8bb8860609b030e2cfd2c380484325cda609bb4d578d0db3a",
+      "sha256:d67b6c10286ad1b8feb203890fe95767c6f6c84b0cf2bc75efe8edb04e87255e",
+      "sha256:37dcf33819d40bf4a17d85c43fb64a7c2b662ddb2d8a32706039d8fe580af869",
+      "sha256:d26753910b7ffdf28d76b61c8de0bbb2584fa07a1f6a427abfff8f65431abf7d",
+      "sha256:7dc9f2fc7ff33edeaab002fbb5ca1efb06c8ffc7747e0867ef8da8755aa3c98a",
+      "sha256:6bae8ccb56c0ddd8a58662666d80b5a962facc9a18b3f86834481079e081346b",
+      "sha256:7202a91105c7076829a71e785bf78bd6a6374580f38e00887838cc320b3e302c",
+      "sha256:244b64db5724fa2c290946b49d7732b61763920961654ea732d08f738d942efe",
+      "sha256:0344f83247ad7f60dc652c40c8f54d40c7d3a1b7f76ea3954a9b1570156be935",
+      "sha256:1a9aa4e287d3efd2708b0609e099e869609f4f5d58275ba93b13af72323c8ce4"
+    ],
+    "orderedLayers": [
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:597c6c618d36213af657a6a8444a5d87801f9a219682b206ad21ccb8f3e57bbd",
+        "size": 28232643,
+        "diffId": "sha256:81f823b9617547261c907396f63f770deaa554748ff739bedfa650e3bb74595a"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:e33bee2ce77b0c3748e6a8f2b808a5ab1d2ed466d5ee5a9b991cba597bd028e2",
+        "size": 3311,
+        "diffId": "sha256:aa7bf5b94b92bc0951fa6a85f909392c3e1ed27b4c2fa82bc77fa84122a08416"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:bb65bd65926c2b38f8a7d518cefa8524e1484182dd6ffba7883654d886b4cfb3",
+        "size": 49937657,
+        "diffId": "sha256:96a9284da7b47faab75998a33dc2e56874756555b92480d023585ff8a6d153fd"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:392df1351ac2d7628088ee58b248e62a2c1b749e4beb94b7640994df1857c8ca",
+        "size": 1712633,
+        "diffId": "sha256:a4bc3d2a20bafc5e6c89c5e2285579f620f118f81b5413c62edee3d2380bdaa2"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:437216719022b2853003498de36b055604c6ff1bcee290b912ed44226f2d3d46",
+        "size": 446,
+        "diffId": "sha256:f7d704e9049824a8bb8860609b030e2cfd2c380484325cda609bb4d578d0db3a"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:7a0f3103071d6d07d6d8f98138cf6871c08222838c43e602f35c77c225f4b43e",
+        "size": 91,
+        "diffId": "sha256:d67b6c10286ad1b8feb203890fe95767c6f6c84b0cf2bc75efe8edb04e87255e"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:2e43f2dffb5a7edd99fa6547e84f4c04ad3d6053ffe6aba881797f6b7e87fac5",
+        "size": 16264811,
+        "diffId": "sha256:37dcf33819d40bf4a17d85c43fb64a7c2b662ddb2d8a32706039d8fe580af869"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:65628a507c24f283c1c60b153ebd73ce3218318de6ba2835307be7fafb60b530",
+        "size": 129490,
+        "diffId": "sha256:d26753910b7ffdf28d76b61c8de0bbb2584fa07a1f6a427abfff8f65431abf7d"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:cabd7c48003acde9c5fd3e6b18e1c51096a08639bd779a6f3d8c551b6adf0369",
+        "size": 1523806,
+        "diffId": "sha256:7dc9f2fc7ff33edeaab002fbb5ca1efb06c8ffc7747e0867ef8da8755aa3c98a"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:6e3f750e604191ab2ed671c6b1e5f2820580f47d45e9c6584854e1b8f06b047c",
+        "size": 17068,
+        "diffId": "sha256:6bae8ccb56c0ddd8a58662666d80b5a962facc9a18b3f86834481079e081346b"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:3a7c54557f664e801cb96c048607dec2d177606c200aed5ee584ad807b3902e5",
+        "size": 28125150,
+        "diffId": "sha256:7202a91105c7076829a71e785bf78bd6a6374580f38e00887838cc320b3e302c"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:9bbc6220fc3a0514cd277c9bd4c89a3980b98a4236fd98e4dcd794a27ad2cdca",
+        "size": 47268,
+        "diffId": "sha256:244b64db5724fa2c290946b49d7732b61763920961654ea732d08f738d942efe"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:d34b543cee387ce72aceb70a17b41f5b211f197f75477e8552e49fb568ea370a",
+        "size": 3429615,
+        "diffId": "sha256:0344f83247ad7f60dc652c40c8f54d40c7d3a1b7f76ea3954a9b1570156be935"
+      },
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:9f3b81c87b8a6756f687f0b53d76a5a4f4a89da9b137c21894ee826a8a652e16",
+        "size": 16266900,
+        "diffId": "sha256:1a9aa4e287d3efd2708b0609e099e869609f4f5d58275ba93b13af72323c8ce4"
+      }
+    ]
+  },
+  "imageConfiguration": {
+    "user": "65532:65532",
+    "workdir": "/app",
+    "entrypoint": [
+      "/usr/local/bin/node",
+      "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs"
+    ],
+    "command": [],
+    "exposedPorts": [],
+    "environmentNames": [
+      "PATH",
+      "NODE_VERSION",
+      "YARN_VERSION",
+      "NODE_ENV"
+    ],
+    "labels": {
+      "mira.refund.contract": "mira-refund-worker-runtime-image-connection/v1",
+      "mira.refund.release-authority": "absent",
+      "org.opencontainers.image.created": "1784764800",
+      "org.opencontainers.image.title": "mira-refund-worker",
+      "org.opencontainers.image.version": "local-reproducibility-proof"
+    }
+  },
+  "commandAllowlist": [
+    "worker-check",
+    "worker-health",
+    "worker-once",
+    "sandbox-preflight",
+    "image-self-check",
+    "eximbay-canary-once",
+    "eximbay-contacted-reconciliation-once"
+  ],
+  "entrypoints": [
+    {
+      "source": "containers/refund-worker/entrypoint.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-worker-container-entrypoint.mjs"
+    },
+    {
+      "source": "scripts/eximbay-refund-canary.ts",
+      "runtimePath": "/app/src/lib/payment/refund/eximbay-refund-canary.mjs"
+    },
+    {
+      "source": "scripts/refund-execution-worker.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-execution-worker.mjs"
+    },
+    {
+      "source": "scripts/refund-sandbox-provider-free-preflight.ts",
+      "runtimePath": "/app/src/lib/payment/refund/refund-sandbox-provider-free-preflight.mjs"
+    },
+    {
+      "source": "scripts/eximbay-contacted-reconciliation.ts",
+      "runtimePath": "/app/src/lib/payment/refund/eximbay-contacted-reconciliation.mjs"
+    }
+  ],
+  "systemCaTrust": {
+    "sourceStage": "PINNED_CLOUD_SQL_PROXY_IMAGE",
+    "sourcePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimePath": "/etc/ssl/certs/ca-certificates.crt",
+    "runtimeUser": "65532:65532",
+    "requiredType": "REGULAR_FILE",
+    "requiredNonempty": true,
+    "requiredReadable": true,
+    "requiredOwner": "0:0",
+    "sslCertFileOverride": "NONE",
+    "sslCertDirOverride": "NONE"
+  },
+  "applicationClosure": {
+    "entryCount": 182,
+    "metadataManifestSha256": "7c4f5e79693a89fc25232e1ed13cb7b499e5265064be01c8317b7e00f362fbf3",
+    "contentManifestSha256": "721c37fa4e4b05a13dd9eb90f637dcfacf2439299c66317634f41dce56a70aa6"
+  },
+  "systemClosure": {
+    "removedEntryCount": 2620,
+    "removedPathManifestSha256": "fcbac8b41543fafd754b035b3c8a3dc93e605f3f7cd1d050b31640b6d87a7bab",
+    "changedEntryCount": 3,
+    "changedMetadataContentManifestSha256": "d9ea3c2e8982ba4189f03173dfeb4f914d1350d4715e77daede4f96d639f33da",
+    "addedEntryCount": 188,
+    "addedMetadataContentManifestSha256": "f56771afc6bfac06c02388ba5ed83562224703b453c6d81ecd6aba742069280e"
+  },
+  "nonApplicationAdditionCount": 6,
+  "nonApplicationAdditions": [
+    {
+      "path": "/cloudsql",
+      "type": "DIRECTORY",
+      "mode": 448,
+      "uid": 65532,
+      "gid": 65532,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs",
+      "type": "DIRECTORY",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/etc/ssl/certs/ca-certificates.crt",
+      "type": "REGULAR_FILE",
+      "mode": 365,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+      "symlinkTarget": null
+    },
+    {
+      "path": "/tmp/refund-worker",
+      "type": "DIRECTORY",
+      "mode": 448,
+      "uid": 65532,
+      "gid": 65532,
+      "sha256": null,
+      "symlinkTarget": null
+    },
+    {
+      "path": "/usr/local/bin/cloud-sql-proxy",
+      "type": "REGULAR_FILE",
+      "mode": 493,
+      "uid": 0,
+      "gid": 0,
+      "sha256": "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb",
+      "symlinkTarget": null
+    }
+  ],
+  "filesystemAuthority": "OFFLINE_DOCKER_IMAGE_SAVE_VERIFIED_LAYERS",
+  "canaryExecution": {
+    "command": "eximbay-canary-once",
+    "predecessorCanaryPolicySha256": "5ffc8c8af5ba5892296e15d78932dc61ce883aeaac6861bb9bb006a4b790e876",
+    "mode": "SANDBOX",
+    "targetFreshnessMaxAgeMs": 1800000,
+    "preRefundRetrieve": 1,
+    "refundRequest": 1,
+    "postRefundRetrieve": 0,
+    "recoveryRetrieve": 0,
+    "secondRefundRequest": 0,
+    "automaticRetry": 0,
+    "uncertainOutcome": "STOP_SEPARATE_RECONCILIATION_AUTHORITY_REQUIRED",
+    "sourceFiles": [
+      {
+        "path": "src/lib/payment/refund/run-eximbay-refund-canary-once.ts",
+        "sha256": "c87641bafb132d25046328e5d0c4d3e04c8f5316fbad99c09d3e034156a7dc35"
+      },
+      {
+        "path": "src/lib/payment/refund/eximbay-refund-canary-exact-selector.ts",
+        "sha256": "c49a4ff6c91fb10b3783990a188ef0fb9fcf96d3db82283945b4bdbacc6587a1"
+      },
+      {
+        "path": "src/lib/payment/refund/eximbay-refund-canary-target-producer.ts",
+        "sha256": "74e05407fe1c6aefaf002b979e62772ae1df1a8d96bedfc3d917f2ad2615873c"
+      },
+      {
+        "path": "src/lib/payment/refund/worker-router.ts",
+        "sha256": "42299c5defa9966e75dfd9f229596ae28b071ec3d220750b0f4a6ae07dc660cc"
+      }
+    ],
+    "packagedCanarySha256": "8cf939c77d2f866ea774acc3b1b4c36c360cea921886ec14389b5046cdadb778",
+    "packagedSupervisorSha256": "7ef7dbbe3333bec89a4f971442a49983a55a8168b92f85e5a814e729309f7ae2"
+  },
+  "contactedReconciliation": {
+    "command": "eximbay-contacted-reconciliation-once",
+    "mode": "SANDBOX",
+    "target": {
+      "runId": "9945726fe48b738bf30011af707b5b5f",
+      "checkoutSessionId": "cmtroa82m000001s6zh79k5jw",
+      "paymentId": "DERIVED_BY_APPLICATION",
+      "providerOrderId": "DERIVED_BY_APPLICATION",
+      "authenticatedUserId": "DERIVED_BY_APPLICATION",
+      "operatorTargetInputs": 0,
+      "predecessor": {
+        "runId": "248a30b8004082b8fca92f2c1a1fb066",
+        "checkoutSessionId": "cmtr2fobw000001s6ovszlemp",
+        "status": "SUPERSEDED_HISTORICAL_ONLY",
+        "predecessor": {
+          "runId": "1f93662ed1b45856aceac782029111fd",
+          "checkoutSessionId": "cmtqwntmf000001s6ol01azw8",
+          "status": "SUPERSEDED_HISTORICAL_ONLY",
+          "predecessor": {
+            "runId": "e03b436e666b4b188ec65c0ee4139790",
+            "checkoutSessionId": "cmtktx8rx000001s6lfbjivo1",
+            "status": "SUPERSEDED_HISTORICAL_ONLY",
+            "predecessor": {
+              "runId": "4c5c9b039f18037c6f3356c903df1372",
+              "checkoutSessionId": "cmtk62h80000001s626b90f9y",
+              "status": "SUPERSEDED_HISTORICAL_ONLY",
+              "predecessor": {
+                "runId": "89682c544f42d4debb260f5e3186087a",
+                "checkoutSessionId": "cmtjsiiqw000001s6uimkjhj5",
+                "status": "SUPERSEDED_HISTORICAL_ONLY",
+                "predecessor": {
+                  "runId": "da7783b013d20713d6db207c7657b559",
+                  "checkoutSessionId": "cmtjnvso1000001s60xfg0tyu",
+                  "status": "SUPERSEDED_HISTORICAL_ONLY",
+                  "predecessor": {
+                    "runId": "a764f61f4e4ba799ab16b318a676db65",
+                    "checkoutSessionId": "cmthg2mzu000001s6iuvx7u5x",
+                    "status": "SUPERSEDED_HISTORICAL_ONLY"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "paymentBinding": "APPLICATION_DERIVED",
+    "providerOrderIdBinding": "APPLICATION_DERIVED",
+    "arbitraryTargetAuthority": "ABSENT",
+    "previousTargetCurrent": "NO",
+    "eligiblePaymentCardinality": "EXACTLY_ONE",
+    "providerEffectCaps": {
+      "maxProviderRetrieveAttemptsPerExecution": 1,
+      "automaticProviderRetry": 0,
+      "cloudRunTaskRetry": 0
+    },
+    "recoverySemantics": {
+      "attemptLifecycle": "CONTACTED",
+      "remediationStatus": "NONE",
+      "providerOrderId": "REQUIRED",
+      "providerPaymentKey": "ABSENT",
+      "financialSucceededAt": "NULL",
+      "blockingEndedAt": "NULL",
+      "order": "ABSENT",
+      "q004ReplayProtection": "REQUIRED",
+      "singleActiveBlocker": "REQUIRED",
+      "expiredAlreadyContacted": "RECOVERABLE",
+      "expiredBeforeFreshContact": "NOT_USABLE"
+    },
+    "runtime": {
+      "default": "OFF",
+      "taskCount": 1,
+      "parallelism": 1,
+      "maxRetries": 0,
+      "timeoutSeconds": 180,
+      "automaticExecution": "NONE"
+    },
+    "sourceFiles": [
+      {
+        "path": "src/lib/payment/refund/eximbay-contacted-reconciliation-environment.ts",
+        "sha256": "0114255f03f92d89393c27812d983f0ea7f8179b36da6e815b7394dd5229e24e"
+      },
+      {
+        "path": "src/lib/payment/refund/run-eximbay-contacted-reconciliation-once.ts",
+        "sha256": "212ed5768f5b661f8df106000b39257411d73aaac4ced12429c584f5b1485a6f"
+      },
+      {
+        "path": "scripts/eximbay-contacted-reconciliation.ts",
+        "sha256": "3fc861fe0abe7597a95ccc5b6c3142eda7edd7ac99f782c152d0821b917ecbfa"
+      },
+      {
+        "path": "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+        "sha256": "f31ad5019ce4823e40a2d2589599e20d9fe5b9a2e6b126f6d56975064efaba15"
+      }
+    ],
+    "packagedContactedSha256": "f47031558defee3a55c15d06db15e6abad3e8d098914e11f980abd2eb76b5d7f"
+  }
+}

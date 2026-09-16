@@ -1096,7 +1096,9 @@ describe("payment initiate providerRef persistence", () => {
     const end = source.indexOf("\nfunction contactClaimWhere(", start);
     const claimSource = source.slice(start, end);
 
-    expect(claimSource.indexOf("await validateCommerceAtContactBoundary(tx, session)")).toBeLessThan(
+    expect(claimSource.indexOf(
+      "await validateCommerceAtContactBoundary(tx, session, input.marketConsistencyPolicy)",
+    )).toBeLessThan(
       claimSource.indexOf("const contactBoundaryNow = await captureContactBoundaryTime"),
     );
     expect(claimSource.indexOf("await assertEximbayPreparedFactsStillCurrent")).toBeLessThan(
@@ -1108,6 +1110,25 @@ describe("payment initiate providerRef persistence", () => {
     expect(claimSource.indexOf("if (!isUsable(session, contactBoundaryNow))")).toBeLessThan(
       claimSource.indexOf("attemptLifecycle: PaymentAttemptLifecycle.CONTACTED"),
     );
+  });
+
+  it("keeps the shared Market lock as the default and isolates the prematerialized plain read", () => {
+    const source = readFileSync(new URL("../initiate.ts", import.meta.url), "utf8");
+    const executeStart = source.indexOf("async function executePaymentAttempt(");
+    const executeEnd = source.indexOf("\nasync function contactProviderForAttempt(", executeStart);
+    const executionSource = source.slice(executeStart, executeEnd);
+    const lockStart = source.indexOf("async function lockCommerceRows(");
+    const lockEnd = source.indexOf("\nasync function lockIds(", lockStart);
+    const lockSource = source.slice(lockStart, lockEnd);
+
+    expect(executionSource).toContain(
+      "marketConsistencyPolicy: MarketConsistencyPolicy = DEFAULT_MARKET_CONSISTENCY_POLICY",
+    );
+    expect(lockSource).toContain('marketConsistencyPolicy === "PREMATERIALIZED_READ_ONLY"');
+    expect(lockSource).toContain(
+      "? await tx.$queryRaw<{ code: string; currency: string; isActive: boolean }[]>(marketQuery)",
+    );
+    expect(lockSource).toContain("FOR UPDATE");
   });
 
   it("C2I exact expiresAt boundary rejects with the late freshly captured contact time", async () => {

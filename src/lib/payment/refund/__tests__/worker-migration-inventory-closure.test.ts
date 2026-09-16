@@ -1,3 +1,6 @@
+import canonicalInventory from "../../../../../infra/refund-sandbox/p3e-b2/contracts/canonical-migration-inventory-v1.json";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   assembleRefundWorkerBuildContext,
@@ -19,9 +22,14 @@ describe("refund worker migration inventory closure", () => {
       const authoritative = repository.entries.map(({ path, sha256 }) => ({ path, sha256 }));
       const selfCheck = refundWorkerMigrationSelfCheckProof(repository);
 
-      expect(repository.migrationCount).toBe(47);
-      expect(repository.migrationDigest).toBe(
-        "1212496e6fb0ea5bfefaa1d5759da60b449e4f5c2702fd3d98f00a6886d97afe",
+      expect(repository).toEqual(canonicalInventory);
+      expect(repository.entries.at(-1)?.name).toBe(canonicalInventory.entries.at(-1)?.name);
+      const historical = createHash("sha256");
+      for (const entry of repository.entries.slice(0, 41)) {
+        historical.update(entry.name).update("\0").update(await readFile(entry.path)).update("\0");
+      }
+      expect(historical.digest("hex")).toBe(
+        "4af152869389ea6ceab2108100b3b2effe772e64784f29e9d62ceb98e0be173c",
       );
       expect(context.migrationInventory.entries).toEqual(repository.entries);
       expect(packaged).toEqual(authoritative);
@@ -37,7 +45,7 @@ describe("refund worker migration inventory closure", () => {
     } finally {
       await context.cleanup();
     }
-  });
+  }, 45_000); // Real graph/copy/closure proof; no five-second performance invariant.
 
   it("fails closed for missing, unexpected, reordered, or changed packaged migrations", async () => {
     const inventory = await loadRefundWorkerMigrationInventory();

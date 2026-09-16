@@ -1,3 +1,14 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { verifyEximbayRefundCanaryTargetV2 } from "../eximbay-refund-canary-target-binding-v2";
+import { prospectiveAttestation } from "./prospective-canary-attestation";
+import { deriveEximbayCanaryJobV2, EXIMBAY_CANARY_JOB_V2 } from "../eximbay-refund-canary-job-v2";
+import { EXIMBAY_CANARY_CUSTODY_V3, approvalAuthorityDigestV2, verifiedApprovalAuthorityV2 } from "../eximbay-refund-canary-approval-v2";
+import { inspectEximbayCanarySyntheticProvenance } from "../eximbay-refund-canary-target-producer";
+import { parseEximbayRefundCanaryFreshSaleCustodyV3Bytes } from "../eximbay-refund-canary-fresh-sale-custody-v3";
+import { prepareEximbayRefundCanaryAdmission as prepareV2 } from "../prepare-eximbay-refund-canary-admission-v2";
+import { consumeEximbayRefundCanaryApproval as consumeV2 } from "../consume-eximbay-refund-canary-approval-v2";
+import { parseEximbayRefundCanaryEnvironment as environmentV2 } from "../eximbay-refund-canary-environment-v2";
+import { requireOwnedRefundTestCluster } from "./retained-refund-test-history";
 import { createHash, randomUUID } from "node:crypto";
 import {
   FulfillmentType,
@@ -927,7 +938,7 @@ function failMissingLockRow(): never {
 }
 
 async function trackedAdmissionFixture(
-  options: Readonly<{ variantAmounts?: readonly number[] }> = {},
+  options: Readonly<{ variantAmounts?: readonly number[]; prospective?: boolean }> = {},
 ): Promise<AdmissionFixture> {
   const prepared = await buildAdmissionFixture(options);
   fixtures.push(prepared);
@@ -935,17 +946,18 @@ async function trackedAdmissionFixture(
 }
 
 async function buildAdmissionFixture(
-  options: Readonly<{ variantAmounts?: readonly number[] }> = {},
+  options: Readonly<{ variantAmounts?: readonly number[]; prospective?: boolean }> = {},
 ): Promise<AdmissionFixture> {
   const variantAmounts = requireVariantAmounts(options.variantAmounts);
+  const saleTime = options.prospective ? new Date(Date.now() - 60_000) : DISPATCH_NOW;
   await ensureCanonicalCanaryMarkets();
   const identity = randomUUID();
   const userId = `canary_sale_user_${identity}`;
   await db.user.create({
     data: {
       id: userId,
-      email: `${userId}@example.test`,
-      name: "Synthetic Canary Buyer",
+      email: options.prospective ? `mira-eximbay-canary+${identity}@example.test` : `${userId}@example.test`,
+      name: options.prospective ? "Mira Eximbay Canary" : "Synthetic Canary Buyer",
     },
   });
   await createRealSaleCatalog(userId, identity, variantAmounts);
@@ -953,17 +965,17 @@ async function buildAdmissionFixture(
     userId,
     marketCode: "US",
     communicationLocale: "en",
-    shipping: shippingData(),
-    now: DISPATCH_NOW,
+    shipping: options.prospective ? prospectiveShipping() : shippingData(),
+    now: saleTime,
   });
-  const { initiated, readyContactCalls } = await initiateRealEximbaySale(session.sessionId, userId);
+  const { initiated, readyContactCalls } = await initiateRealEximbaySale(session.sessionId, userId, saleTime);
   const providerTransactionId = `synthetic_sale_transaction_${identity}`;
   const normalizedSaleReceiptId = `synthetic_sale_receipt_${identity}`;
   await db.payment.update({
     where: { id: initiated.paymentId },
     data: { providerRef: normalizedSaleReceiptId },
   });
-  const capturedAt = new Date(DISPATCH_NOW.getTime() + 2_000);
+  const capturedAt = new Date(saleTime.getTime() + 2_000);
   const capture: CaptureFacts = {
     paymentId: initiated.paymentId,
     checkoutSessionId: session.sessionId,
@@ -1296,14 +1308,14 @@ async function createRealSaleCatalog(
   }
 }
 
-async function initiateRealEximbaySale(sessionId: string, userId: string) {
+async function initiateRealEximbaySale(sessionId: string, userId: string, saleTime: Date) {
   let readyContactCalls = 0;
   const initiated = await withEximbayCheckoutActivation(() => initiatePaymentAttempt(db, {
     sessionId,
     userId,
     adapterContext: eximbaySaleAdapterContext(),
-    now: new Date(DISPATCH_NOW.getTime() + 1_000),
-    contactBoundaryClock: () => new Date(DISPATCH_NOW.getTime() + 1_000),
+    now: new Date(saleTime.getTime() + 1_000),
+    contactBoundaryClock: () => new Date(saleTime.getTime() + 1_000),
     eximbayReady: {
       env: syntheticEximbayReadyEnvironment(),
       fetchImpl: () => {
@@ -1804,9 +1816,12 @@ async function requireEmptyContainmentDatabase(): Promise<void> {
 }
 
 async function resetDisposableContainmentDatabase(): Promise<void> {
+  await requireOwnedRefundTestCluster();
   const admin = new Client({ connectionString: databaseUrl });
   await admin.connect();
   try {
+    await admin.query("BEGIN");
+    await admin.query("SET LOCAL session_replication_role = replica");
     await admin.query(`
       DO $reset$
       DECLARE
@@ -1825,7 +1840,9 @@ async function resetDisposableContainmentDatabase(): Promise<void> {
       END
       $reset$;
     `);
+    await admin.query("COMMIT");
   } finally {
+    await admin.query("ROLLBACK").catch(() => undefined);
     await admin.end();
   }
 }
@@ -1847,3 +1864,137 @@ function sha256Bytes(value: Uint8Array): string {
 function sha256Text(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
+
+function prospectiveShipping() {
+  return { recipientName: "Mira Eximbay Canary", phone: "+1-202-555-0100",
+    country: ShippingCountry.US, postalCode: "10001", administrativeArea: "NY",
+    city: "Synthetic City", addressLine1: "1 Synthetic Avenue" };
+}
+
+async function prospectiveFixture() {
+  const prepared = await trackedAdmissionFixture({ prospective: true });
+  const syntheticProvenanceDigest = await db.$transaction((tx) =>
+    inspectEximbayCanarySyntheticProvenance(tx, prepared.fixture.paymentId, prospectiveAttestation));
+  const raw = { ...prepared.artifact, ...deriveEximbayCanaryJobV2(),
+    contractVersion: EXIMBAY_CANARY_CUSTODY_V3, jobContractVersion: EXIMBAY_CANARY_JOB_V2,
+    syntheticProvenanceDigest, noCustomerPiiAttested: true, attendedAttestation: prospectiveAttestation };
+  const bytes = Buffer.from(`${JSON.stringify(raw)}\n`);
+  const custodyHash = sha256Bytes(bytes);
+  const artifact = parseEximbayRefundCanaryFreshSaleCustodyV3Bytes(bytes, custodyHash);
+  if (!artifact) throw new Error("PROSPECTIVE_FIXTURE_INVALID");
+  return { prepared, artifact, custodyHash };
+}
+
+function prospectiveEnvironment(artifact: Awaited<ReturnType<typeof prospectiveFixture>>["artifact"],
+  custodyHash: string, targetBindingDigest: string) {
+  const result = environmentV2({ ...WORKER_ENV,
+    REFUND_EXECUTION_UNCONTACTED_RECOVERY_ENABLED: "ENABLED",
+    MIRA_REFUND_EXIMBAY_CANARY_LANE: "EXIMBAY_SANDBOX_V2",
+    MIRA_REFUND_EXIMBAY_CANARY_RELEASE_BINDING_DIGEST: artifact.releaseBindingDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_JOB_BINDING_DIGEST: artifact.canaryJobBindingDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_PREFLIGHT_JOB_BINDING_DIGEST: artifact.preflightJobBindingDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_IMAGE_BINDING_DIGEST: artifact.imageBindingDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_SECRET_GENERATION_BINDING_DIGEST: artifact.secretGenerationBindingDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_TARGET_BINDING_DIGEST: targetBindingDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_CUSTODY_ARTIFACT_SHA256: custodyHash,
+    MIRA_REFUND_EXIMBAY_CANARY_SYNTHETIC_PROVENANCE_DIGEST: artifact.syntheticProvenanceDigest,
+    MIRA_REFUND_EXIMBAY_CANARY_NO_CUSTOMER_PII_ATTESTED: "true",
+    MIRA_REFUND_EXIMBAY_CANARY_SECRET_RESOURCE: prospectiveAttestation.secretResource,
+    MIRA_REFUND_EXIMBAY_CANARY_SECRET_VERSION: prospectiveAttestation.secretVersion,
+    EXIMBAY_SANDBOX_MID: prospectiveAttestation.mid,
+    EXIMBAY_REFUND_SANDBOX_MERCHANT_ACCOUNT_BINDING: artifact.merchantAccountBindingId,
+    EXIMBAY_REFUND_SANDBOX_CREDENTIAL_GENERATION_BINDING: artifact.credentialGenerationBindingId,
+    CLOUD_RUN_JOB: "mira-eximbay-refund-canary", CLOUD_RUN_EXECUTION: "prospective-test",
+    CLOUD_RUN_TASK_COUNT: "1", CLOUD_RUN_TASK_INDEX: "0", CLOUD_RUN_TASK_ATTEMPT: "0" });
+  if (!result) throw new Error("PROSPECTIVE_ENVIRONMENT_INVALID");
+  return result;
+}
+
+describe("prospective job/v2 → custody/v3 → target/v2 → approval/v2 PostgreSQL authority", () => {
+  it("issues with an authenticated DB issuer and consumes exactly once under concurrent restricted callers", async () => {
+    const { artifact, custodyHash } = await prospectiveFixture();
+    const issued = await prepareV2(db, artifact, custodyHash, await loadRefundWorkerMigrationInventory());
+    expect(issued).toMatchObject({ ok: true, issuerAuthority: "AUTHENTICATED_POSTGRES_SESSION" });
+    if (!issued.ok) throw new Error(issued.code);
+    const persisted = await db.eximbayRefundSandboxCanaryApproval.findUniqueOrThrow({ where: { id: issued.approvalId } });
+    expect(verifiedApprovalAuthorityV2(persisted)).not.toBeNull();
+    expect(persisted.approvalEvidenceDigest).toBe(custodyHash);
+    expect(persisted.approvalAuthorityDigestV2).not.toBe(custodyHash);
+    await expect(db.eximbayRefundSandboxCanaryApproval.update({ where: { id: persisted.id },
+      data: { syntheticProvenanceDigest: "f".repeat(64) } })).rejects.toThrow();
+    const authority = prospectiveEnvironment(artifact, custodyHash, issued.targetBindingDigest);
+    await db.$transaction(async (tx) => {
+      const targetInput = { commandId: artifact.commandId, ...deriveEximbayCanaryJobV2(),
+        custodyArtifactSha256: custodyHash, syntheticProvenanceDigest: artifact.syntheticProvenanceDigest,
+        noCustomerPiiAttested: true as const, expectedTargetBindingDigest: issued.targetBindingDigest };
+      expect(await verifyEximbayRefundCanaryTargetV2(tx, targetInput)).not.toBeNull();
+      expect(await verifyEximbayRefundCanaryTargetV2(tx, { ...targetInput,
+        syntheticProvenanceDigest: "f".repeat(64) })).toBeNull();
+      expect(await verifyEximbayRefundCanaryTargetV2(tx, { ...targetInput,
+        custodyArtifactSha256: "f".repeat(64) })).toBeNull();
+    });
+    const runtime = restrictedPrisma();
+    try {
+      expect(await consumeV2(runtime, { ...authority, custodyArtifactSha256: "f".repeat(64) })).toEqual({ outcome: "CONFIG_MISMATCH" });
+      expect(await consumeV2(runtime, { ...authority, syntheticProvenanceDigest: "f".repeat(64) })).toEqual({ outcome: "CONFIG_MISMATCH" });
+      const results = await Promise.all([consumeV2(runtime, authority), consumeV2(runtime, authority)]);
+      expect(results.map((result) => result.outcome).sort()).toEqual(["ADMITTED", "APPROVAL_ALREADY_CONSUMED"]);
+    } finally { await runtime.$disconnect(); }
+  });
+
+  it("rejects a forged issuer at PostgreSQL insertion and refuses v1 consumption for a v2 row", async () => {
+    const { artifact, custodyHash } = await prospectiveFixture();
+    const issued = await prepareV2(db, artifact, custodyHash, await loadRefundWorkerMigrationInventory());
+    if (!issued.ok) throw new Error(issued.code);
+    const row = await db.eximbayRefundSandboxCanaryApproval.findUniqueOrThrow({ where: { id: issued.approvalId } });
+    await db.eximbayRefundSandboxCanaryApproval.delete({ where: { id: row.id } });
+    await expect(db.eximbayRefundSandboxCanaryApproval.create({ data: { ...row,
+      issuedByPrincipalId: "postgres-session/v1:forged" } })).rejects.toThrow();
+    await db.eximbayRefundSandboxCanaryApproval.create({ data: row });
+    const authority = prospectiveEnvironment(artifact, custodyHash, issued.targetBindingDigest);
+    // Legacy consumer filters approval/v1 explicitly, even when digests otherwise match.
+    const legacy = { ...authority, lane: "EXIMBAY_SANDBOX_V1" as const };
+    expect(await consumeEximbayRefundCanaryApproval(db, legacy)).toEqual({ outcome: "CONFIG_MISMATCH" });
+  });
+  it("uses final database time after a real target lock wait and never consumes expired v2 authority", async () => {
+    const { artifact, custodyHash } = await prospectiveFixture();
+    const issued = await prepareV2(db, artifact, custodyHash, await loadRefundWorkerMigrationInventory());
+    if (!issued.ok) throw new Error(issued.code);
+    const row = await db.eximbayRefundSandboxCanaryApproval.findUniqueOrThrow({ where: { id: issued.approvalId } });
+    const facts = verifiedApprovalAuthorityV2(row);
+    if (!facts) throw new Error("INVALID_ISSUED_V2_AUTHORITY");
+    const expiresAt = new Date(row.approvedAt.getTime() + 1500);
+    await db.eximbayRefundSandboxCanaryApproval.delete({ where: { id: row.id } });
+    await db.eximbayRefundSandboxCanaryApproval.create({ data: { ...row, expiresAt,
+      approvalAuthorityDigestV2: approvalAuthorityDigestV2({ ...facts, expiresAt }) } });
+    const locker = new Client({ connectionString: databaseUrl });
+    const runtime = restrictedPrisma();
+    await locker.connect();
+    let pending: ReturnType<typeof consumeV2> | undefined;
+    try {
+      await locker.query("BEGIN");
+      await locker.query('SELECT id FROM "Order" WHERE id=$1 FOR UPDATE', [artifact.orderId]);
+      const pid = (await locker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid;
+      pending = consumeV2(runtime, prospectiveEnvironment(artifact, custodyHash, issued.targetBindingDigest));
+      let blocked = false;
+      for (let index = 0; index < 100; index++) {
+        await locker.query("SELECT pg_stat_clear_snapshot()");
+        const waiters = await locker.query<{ blocked: boolean }>(
+          "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE usename='mira_refund_canary' AND $1 = ANY(pg_blocking_pids(pid))) AS blocked", [pid]);
+        if (waiters.rows[0]?.blocked) { blocked = true; break; }
+        await delay(10);
+      }
+      expect(blocked).toBe(true);
+      await delay(Math.max(0, expiresAt.getTime() - Date.now()) + 50);
+      await locker.query("COMMIT");
+      expect(await pending).toEqual({ outcome: "CONFIG_MISMATCH" });
+      expect((await db.eximbayRefundSandboxCanaryApproval.findUniqueOrThrow({ where: { id: row.id } })).consumedAt).toBeNull();
+    } finally {
+      await locker.query("ROLLBACK").catch(() => undefined);
+      await pending;
+      await runtime.$disconnect();
+      await locker.end();
+    }
+  });
+
+});

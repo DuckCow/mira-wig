@@ -1,3 +1,4 @@
+import canonicalInventory from "../../../../../infra/refund-sandbox/p3e-b2/contracts/canonical-migration-inventory-v1.json";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -29,8 +30,8 @@ describe("refund worker migration readiness integration", () => {
 
     expect(compareRefundWorkerMigrations(repository, ledger))
       .toEqual({ ok: true, status: "READY" });
-    expect(repository).toHaveLength(47);
-    expect(before).toHaveLength(47);
+    expect(repository).toHaveLength(canonicalInventory.entries.length);
+    expect(before).toHaveLength(canonicalInventory.entries.length);
     expect(after).toEqual(before);
   });
 });

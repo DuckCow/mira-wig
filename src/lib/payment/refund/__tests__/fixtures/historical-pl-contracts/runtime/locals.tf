@@ -1,0 +1,163 @@
+locals {
+  authority_contract = jsondecode(file("${path.module}/../contracts/runtime-authority-v1.json"))
+  project_id         = var.project_id
+  region             = "asia-northeast3"
+
+  runtime_apply_authorized   = true
+  runtime_root_apply_policy  = "EXPLICIT_PREFLIGHT_RELEASE_AUTHORIZED"
+  network_tags               = ["refund-provider-free"]
+  trusted_operator_model     = "PROJECT_OWNER_OR_EXPLICITLY_AUTHORIZED_HUMAN"
+  malicious_owner_resistance = "NOT_REQUIRED"
+
+  preflight_service_account_id = "${var.resource_prefix}-preflight"
+  preflight_job_name           = "${var.resource_prefix}-refund-preflight"
+
+  foundation_cloud_sql_instance_connection_name = try(
+    var.foundation_handoff.cloud_sql_instance_connection_name,
+    "",
+  )
+  foundation_cloud_sql_instance_resource_name = try(
+    var.foundation_handoff.cloud_sql_instance_resource_name,
+    "",
+  )
+  foundation_network_resource_name = try(
+    var.foundation_handoff.network_resource_name,
+    "",
+  )
+  foundation_subnetwork_resource_name = try(
+    var.foundation_handoff.subnetwork_resource_name,
+    "",
+  )
+  foundation_preflight_database_secret_resource_name = try(
+    var.foundation_handoff.preflight_database_secret_resource_name,
+    "",
+  )
+  foundation_canary_database_secret_resource_name = try(
+    var.foundation_handoff.canary_database_secret_resource_name,
+    "",
+  )
+  release_image_digest_uri = try(
+    var.release_image_handoff.image_digest_uri,
+    "",
+  )
+  preflight_database_secret_version_resource_name = try(
+    var.preflight_database_secret_version_reference.secret_resource_name,
+    "",
+  )
+  preflight_database_secret_version = try(
+    var.preflight_database_secret_version_reference.version,
+    "",
+  )
+  cloud_sql_condition_expression = "resource.name == '${local.foundation_cloud_sql_instance_resource_name}' && resource.service == 'sqladmin.googleapis.com'"
+
+  runtime_identities = {
+    preflight = google_service_account.preflight.email
+  }
+
+  task_timeout_seconds = 300
+  task_timeout         = "${local.task_timeout_seconds}s"
+  task_count           = 1
+  parallelism          = 1
+  max_retries          = 0
+  cpu                  = "1"
+  memory               = "512Mi"
+
+  foundation_handoff_valid = try(
+    toset(keys(var.foundation_handoff)) == toset([
+      "activation_apply_status",
+      "activation_operator_review_status",
+      "artifact_repository_resource_name",
+      "canary_database_secret_resource_name",
+      "cloud_sql_instance_connection_name",
+      "cloud_sql_instance_resource_name",
+      "contract_version",
+      "evidence_type",
+      "foundation_apply_status",
+      "foundation_operator_review_status",
+      "foundation_resource_graph_sha256",
+      "googleapis_private_zone_name",
+      "network_resource_name",
+      "preflight_database_secret_resource_name",
+      "project_id",
+      "project_number",
+      "provider_source",
+      "provider_version",
+      "region",
+      "restricted_googleapis_ipv4_range",
+      "source_state_prefix",
+      "subnetwork_resource_name",
+    ]) &&
+    var.foundation_handoff.contract_version == "mira-refund-p3e-b2-foundation-authority/v1" &&
+    var.foundation_handoff.project_id == var.project_id &&
+    var.foundation_handoff.project_number == "925882331349" &&
+    var.foundation_handoff.region == "asia-northeast3" &&
+    var.foundation_handoff.network_resource_name ==
+    "projects/${var.project_id}/global/networks/${var.resource_prefix}-refund-vpc" &&
+    var.foundation_handoff.subnetwork_resource_name ==
+    "projects/${var.project_id}/regions/asia-northeast3/subnetworks/${var.resource_prefix}-refund-ane3" &&
+    var.foundation_handoff.cloud_sql_instance_connection_name ==
+    "${var.project_id}:asia-northeast3:${var.resource_prefix}-refund-pg18" &&
+    var.foundation_handoff.cloud_sql_instance_resource_name ==
+    "projects/${var.project_id}/instances/${var.resource_prefix}-refund-pg18" &&
+    var.foundation_handoff.preflight_database_secret_resource_name ==
+    "projects/${var.project_id}/secrets/${var.resource_prefix}-preflight-database-url" &&
+    var.foundation_handoff.canary_database_secret_resource_name ==
+    "projects/${var.project_id}/secrets/${var.resource_prefix}-canary-database-url" &&
+    var.foundation_handoff.artifact_repository_resource_name ==
+    "projects/${var.project_id}/locations/asia-northeast3/repositories/${var.resource_prefix}-refund-images" &&
+    var.foundation_handoff.googleapis_private_zone_name ==
+    "${var.resource_prefix}-googleapis" &&
+    var.foundation_handoff.restricted_googleapis_ipv4_range == "199.36.153.4/30" &&
+    var.foundation_handoff.foundation_resource_graph_sha256 ==
+    "7a36736f234056929bf747f3c9c0174569545c83506db8fcbe04ff55a015296f" &&
+    var.foundation_handoff.source_state_prefix == "p3e-b2/foundation" &&
+    var.foundation_handoff.activation_apply_status == "APPLIED" &&
+    var.foundation_handoff.activation_operator_review_status == "OPERATOR_REVIEWED" &&
+    var.foundation_handoff.foundation_apply_status == "APPLIED" &&
+    var.foundation_handoff.foundation_operator_review_status == "OPERATOR_REVIEWED" &&
+    var.foundation_handoff.evidence_type == "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED" &&
+    var.foundation_handoff.provider_source == "hashicorp/google" &&
+    var.foundation_handoff.provider_version == "7.40.0",
+    false,
+  )
+
+  release_image_handoff_valid = try(
+    toset(keys(var.release_image_handoff)) == toset([
+      "contract_version",
+      "evidence_type",
+      "image_contract_version",
+      "image_digest_uri",
+      "local_reproducibility_digest_used",
+      "operator_review_status",
+      "platform",
+      "release_authority_status",
+    ]) &&
+    var.release_image_handoff.contract_version ==
+    "mira-refund-worker-release-image-handoff/v1" &&
+    var.release_image_handoff.image_contract_version ==
+    "mira-refund-worker-runtime-image-connection/v1" &&
+    var.release_image_handoff.platform == "linux/amd64" &&
+    can(regex(
+      "^asia-northeast3-docker\\.pkg\\.dev/${var.project_id}/${var.resource_prefix}-refund-images/refund-worker@sha256:[0-9a-f]{64}$",
+      var.release_image_handoff.image_digest_uri,
+    )) &&
+    var.release_image_handoff.release_authority_status ==
+    "SEPARATELY_REVIEWED_RELEASE_DIGEST" &&
+    var.release_image_handoff.operator_review_status == "OPERATOR_REVIEWED" &&
+    var.release_image_handoff.evidence_type ==
+    "OPERATOR_ATTESTED_NOT_CLOUD_AUTHENTICATED" &&
+    var.release_image_handoff.local_reproducibility_digest_used == false,
+    false,
+  )
+
+  preflight_database_secret_version_reference_valid = try(
+    toset(keys(var.preflight_database_secret_version_reference)) == toset([
+      "secret_resource_name",
+      "version",
+    ]) &&
+    var.preflight_database_secret_version_reference.secret_resource_name ==
+    var.foundation_handoff.preflight_database_secret_resource_name &&
+    var.preflight_database_secret_version_reference.version == "1",
+    false,
+  )
+}

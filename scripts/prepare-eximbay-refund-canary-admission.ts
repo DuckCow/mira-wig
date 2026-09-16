@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { runEximbayRefundCanaryPreparationProcess } from
-  "../src/lib/payment/refund/prepare-eximbay-refund-canary-admission";
+  "../src/lib/payment/refund/prepare-eximbay-refund-canary-admission-v2";
 
 export function main(): Promise<number> {
   return runEximbayRefundCanaryPreparationProcess(

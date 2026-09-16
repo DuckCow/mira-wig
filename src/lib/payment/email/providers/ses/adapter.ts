@@ -81,9 +81,12 @@ function sendEmailRequest(
   config: ValidatedSesTransactionalEmailConfig,
   input: TransactionalEmailSendInput,
 ) {
+  const recipient = config.recipientRouting.mode === "SANDBOX_PRELAUNCH"
+    ? config.recipientRouting.safeRecipient
+    : input.to;
   return {
     FromEmailAddress: config.fromEmailAddress,
-    Destination: { ToAddresses: [input.to] },
+    Destination: { ToAddresses: [recipient] },
     ...(config.replyToAddress ? { ReplyToAddresses: [config.replyToAddress] } : {}),
     Content: {
       Simple: {

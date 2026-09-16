@@ -1,3 +1,4 @@
+import canonicalInventory from "../../../../../infra/refund-sandbox/p3e-b2/contracts/canonical-migration-inventory-v1.json";
 import { createHash } from "node:crypto";
 import {
   chmod,
@@ -136,11 +137,12 @@ describe("refund worker fixed migration filesystem authority", () => {
     process.chdir(alternateCwd);
     try {
       const migrations = await loadRefundWorkerRepositoryMigrations();
-      expect(migrations).toHaveLength(47);
+      expect(migrations).toHaveLength(canonicalInventory.entries.length);
       expect(migrations[0]?.name).toBe("20260609111830_init");
-      expect(migrations.at(-1)).toEqual({
-        name: "20260829140000_promo_c5_recovery_checkpoint",
-        checksum: "152840be2fda354ac75c0c4432461a5196d0a110fd44a6715d47895fc5b9bc71",
+      expect(migrations.at(-1)?.name).toBe("20260909090000_refund_execution_authorization");
+      expect(migrations.at(40)).toEqual({
+        name: "20260827090000_add_checkout_communication_locale",
+        checksum: "e95285c27440152611e654852a204ed6e126a0cb6a223774432098db0a8e60bb",
       });
     } finally {
       process.chdir(originalCwd);

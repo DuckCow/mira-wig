@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("provider-free sandbox preflight against disposable PostgreSQL", () => {
-  it("uses real readers and the production two-session admission probe without mutation or network", async () => {
+  it("uses real state readers and the production two-session probe without mutation or network", async () => {
     const before = await businessSnapshot();
     const fetchPoison = vi.fn(() => { throw new Error("NETWORK_MUST_NOT_RUN"); });
     vi.stubGlobal("fetch", fetchPoison);
@@ -32,6 +32,15 @@ describe("provider-free sandbox preflight against disposable PostgreSQL", () => 
         DATABASE_URL: databaseUrl,
         activationEnvironment: Object.freeze({}),
       }),
+      readDatabaseIdentity: async (database: PrismaClient) => {
+        const observed = await defaultRefundSandboxProviderFreePreflightDependencies
+          .readDatabaseIdentity(database);
+        expect(observed.currentDatabase).toBe("wig_platform_test");
+        return Object.freeze({
+          currentUser: "mira_refund_preflight",
+          currentDatabase: "refund_sandbox",
+        });
+      },
       disconnectDatabase: async (database: PrismaClient) => {
         disconnects += 1;
         await defaultRefundSandboxProviderFreePreflightDependencies.disconnectDatabase(database);
@@ -49,6 +58,8 @@ describe("provider-free sandbox preflight against disposable PostgreSQL", () => 
       cloudProvisioningVerifiedByRuntime: false,
       checks: {
         database: "READY",
+        databaseUser: "mira_refund_preflight",
+        databaseName: "refund_sandbox",
         postgresqlMajor: 18,
         migrations: "READY",
         worker: "DISABLED_READY",

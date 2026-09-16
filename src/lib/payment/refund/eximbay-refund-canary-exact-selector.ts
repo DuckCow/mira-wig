@@ -1,9 +1,7 @@
 import { PaymentProvider, Prisma, type PrismaClient } from "@prisma/client";
 import type { RefundExecutionWorkerCandidate } from "./worker-allocation";
 import {
-  contactedRefundExecutionWorkerWhere,
   readyRefundExecutionWorkerWhere,
-  uncontactedRefundExecutionWorkerWhere,
 } from "./worker-eligibility";
 
 export async function selectExactEximbayRefundCanaryCandidate(
@@ -18,16 +16,12 @@ export async function selectExactEximbayRefundCanaryCandidate(
     const capturedAt = rows[0]?.capturedAt;
     if (!(capturedAt instanceof Date) || rows.length !== 1) return null;
     const providers = [PaymentProvider.EXIMBAY] as const;
-    for (const [candidateClass, where] of [
-      ["CONTACTED", contactedRefundExecutionWorkerWhere(capturedAt, providers)],
-      ["UNCONTACTED", uncontactedRefundExecutionWorkerWhere(capturedAt, providers)],
-      ["READY", readyRefundExecutionWorkerWhere(capturedAt, providers)],
-    ] as const) {
-      const found = await tx.refundExecutionCommand.findFirst({
-        where: { AND: [{ id: commandId }, where] }, select: { id: true },
-      });
-      if (found) return Object.freeze({ commandId: found.id, candidateClass, provider: "EXIMBAY" });
-    }
-    return null;
+    const found = await tx.refundExecutionCommand.findFirst({
+      where: { AND: [{ id: commandId }, readyRefundExecutionWorkerWhere(capturedAt, providers)] },
+      select: { id: true },
+    });
+    return found
+      ? Object.freeze({ commandId: found.id, candidateClass: "READY", provider: "EXIMBAY" })
+      : null;
   });
 }
