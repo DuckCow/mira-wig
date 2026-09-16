@@ -55,7 +55,7 @@ export const CONTACTED_RECONCILIATION_ROLE_GRANT_ARTIFACT = Object.freeze({
     repositoryRoot,
     "infra/refund-sandbox/p3e-b2/contacted-reconciliation/database-role-grants.sql",
   ),
-  sha256: "fc90079bd22e6e44c7ed5a56891911aa789af6d582c73c330b143927be79834a",
+  sha256: "3a895e270909c589a30ae5168ba4240013c476ed38084a47a2834b562c67dfc3",
 } satisfies EximbayP3eBootstrapArtifact);
 
 export const BUSINESS_STATE_READBACK_ROLE_GRANT_ARTIFACT = Object.freeze({
@@ -246,12 +246,11 @@ const PRE_FLIGHT_SELECT = new Set([
   "RefundExecutionProviderOperationBinding",
   "RefundExecutionProviderEligibilityProof",
   "RefundExecutionProviderContactEligibilityProof",
+  "RefundExecutionEximbayPreflightObservation",
   "EximbayRefundSandboxCanaryApproval",
 ]);
 
 const CANARY_SELECT = new Set([
-  "_prisma_migrations",
-  "CheckoutSession",
   "Payment",
   "Order",
   "RefundAttempt",
@@ -327,6 +326,7 @@ const SYNTHETIC_SALE_UPDATE_COLUMNS = new Set([
 
 const CONTACTED_RECONCILIATION_SELECT = new Set([
   ...CANARY_SELECT,
+  "CheckoutSession",
   "PaymentEvent",
 ]);
 

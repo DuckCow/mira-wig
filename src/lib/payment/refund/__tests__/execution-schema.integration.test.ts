@@ -530,6 +530,7 @@ describe("refund execution schema", () => {
       FROM pg_enum
       JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
       WHERE pg_type.typname = 'RefundExecutionDispatchAttemptState'
+        AND pg_type.typnamespace = 'public'::regnamespace
       ORDER BY enumsortorder
     `);
     const columns = await db.$queryRaw<{ columnName: string }[]>(Prisma.sql`

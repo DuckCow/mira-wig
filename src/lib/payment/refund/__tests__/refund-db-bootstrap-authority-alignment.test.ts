@@ -1,3 +1,5 @@
+import { verifyPackagedRefundAuthority as verifyCanonicalPackagedAuthority } from "../../../../../scripts/verify-refund-db-bootstrap-image.mjs";
+import { verifyEximbayCanonicalDeployment } from "../eximbay-refund-canonical-deployment";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
@@ -33,6 +35,16 @@ describe("refund database-bootstrap authority alignment", () => {
         external: ["pg", "@prisma/client", "@prisma/adapter-pg"],
       });
       expect(result.outputFiles).toHaveLength(1);
+      await expect(verifyEximbayCanonicalDeployment(context.directory)).resolves.toBeUndefined();
+      const currentRuntime = readFileSync(join(context.directory,
+        "infra/refund-sandbox/p3e-b2/contracts/eximbay-canonical-deployment-v1.json"));
+      const currentPolicy = readFileSync(join(context.directory,
+        "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json"));
+      const producer = readFileSync(join(context.directory, "dist/eximbay-refund-canary-target-producer.mjs"));
+      expect(verifyCanonicalPackagedAuthority(currentRuntime, currentPolicy, producer))
+        .toMatchObject({ executionAuthority: false,
+          runtimeContractVersion: "mira-refund-eximbay-canonical-deployment/v1" });
+      expect(() => verifyCanonicalPackagedAuthority(RUNTIME_V2, POLICY_V9, producer)).toThrow();
     } finally {
       await context.cleanup();
     }

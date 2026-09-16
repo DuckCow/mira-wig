@@ -26,6 +26,10 @@ BEGIN
 END
 $authority$;
 
+-- Canonical baseline has only refund-email columns; recovery temporarily reads
+-- the checkout aggregate, matching its historical effective read authority.
+GRANT SELECT ON TABLE "CheckoutSession" TO mira_refund_canary;
+
 GRANT UPDATE ("id") ON TABLE "CheckoutSession"
   TO mira_refund_canary;
 

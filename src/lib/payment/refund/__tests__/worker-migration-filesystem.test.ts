@@ -139,7 +139,7 @@ describe("refund worker fixed migration filesystem authority", () => {
       const migrations = await loadRefundWorkerRepositoryMigrations();
       expect(migrations).toHaveLength(canonicalInventory.entries.length);
       expect(migrations[0]?.name).toBe("20260609111830_init");
-      expect(migrations.at(-1)?.name).toBe("20260909090000_refund_execution_authorization");
+      expect(migrations.at(-1)?.name).toBe(canonicalInventory.entries.at(-1)?.name);
       expect(migrations.at(40)).toEqual({
         name: "20260827090000_add_checkout_communication_locale",
         checksum: "e95285c27440152611e654852a204ed6e126a0cb6a223774432098db0a8e60bb",

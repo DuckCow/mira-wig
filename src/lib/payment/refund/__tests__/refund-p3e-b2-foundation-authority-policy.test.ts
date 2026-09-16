@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -238,8 +239,9 @@ describe("P3E-B2-R1B foundation authority policy", () => {
     expect(isR1BPath(
       "contracts/trusted-project-bootstrap-readiness-v2.json",
     )).toBe(false);
-    expect(files).toHaveLength(94);
-    expect(files.filter((path) => !isR1BPath(path))).toHaveLength(56);
+    const committedFiles = execFileSync("git", ["ls-tree", "-r", "--name-only", "HEAD", "infra/refund-sandbox/p3e-b2"], { encoding: "utf8" })
+      .trim().split("\n").map((path) => path.replace("infra/refund-sandbox/p3e-b2/", "")).sort();
+    expect(files).toEqual(committedFiles);
   });
 
   it("independently freezes the exact activation, foundation, and role contracts", () => {

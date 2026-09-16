@@ -62,7 +62,11 @@ describe("Eximbay canary producer canonical authority", () => {
     ].map((path) => readFileSync(join(process.cwd(), path), "utf8")).join("\n");
     expect(sources).not.toMatch(/SecretManagerServiceClient|accessSecretVersion|\bfetch\s*\(/u);
     expect(sources).not.toMatch(/providers\/eximbay\/(?:adapter|client)|run-eximbay-refund-canary-once/u);
-    expect(sources.match(/issueEximbayRefundCanaryApproval\(/gu)).toHaveLength(2);
+    expect(sources.match(/issueEximbayRefundCanaryApproval\(/gu)).toHaveLength(1);
+    const cli = readFileSync(join(process.cwd(), "scripts/eximbay-refund-canary-target-producer.ts"), "utf8");
+    expect(cli).not.toContain("issueEximbayRefundCanaryApproval");
+    expect(cli).toContain("prepare-eximbay-refund-canary-admission-v2");
+    expect(cli).toContain('operation === "issue-approval-v2"');
     expect(readFileSync(join(process.cwd(), "src/lib/payment/refund/claim.ts"), "utf8"))
       .not.toMatch(/issueEximbayRefundCanaryApproval|materializeEximbayRefundCanaryTarget/u);
   });
