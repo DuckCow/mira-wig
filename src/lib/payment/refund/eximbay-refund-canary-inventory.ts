@@ -24,12 +24,14 @@ import {
   deriveEximbayRefundCanaryMarketProjectionDigest,
   deriveEximbayRefundCanaryVariantMarketPriceProjectionDigest,
   deriveEximbayRefundCanaryWigStyleMarketProjectionDigest,
-  type EximbayRefundCanaryFreshSaleCustody,
+  type EximbayRefundCanaryFreshSaleCustody as HistoricalCustody,
   type EximbayRefundCanaryInventoryCounts,
   type EximbayRefundCanaryMarketProjection,
   type EximbayRefundCanaryVariantMarketPriceProjection,
   type EximbayRefundCanaryWigStyleMarketProjection,
 } from "./eximbay-refund-canary-fresh-sale-custody";
+
+type EximbayRefundCanaryFreshSaleCustody = Omit<HistoricalCustody, "contractVersion">;
 
 type InventoryTx = Prisma.TransactionClient;
 

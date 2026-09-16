@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import {
   inspectRefundExecutionActivationInventory,
   isRefundExecutionEximbayRoutingEnabled,
@@ -538,7 +538,7 @@ function createDefaultWorkerDependencies(env: HostEnv): RefundExecutionWorkerDep
 function createOwnedDatabase(env: HostEnv): PrismaClient {
   const connectionString = env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL_REQUIRED");
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  return new PrismaClient({ adapter: createPrismaPg({ connectionString }) });
 }
 
 async function checkDatabaseConnectivity(database: PrismaClient): Promise<void> {

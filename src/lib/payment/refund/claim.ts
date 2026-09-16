@@ -33,6 +33,10 @@ import {
   type RefundExecutionClaimAggregate,
   type RefundExecutionClaimTarget,
 } from "./claim-evaluation";
+import { hasExactEximbayCanaryClaimAuthority } from
+  "./eximbay-refund-canary-claim-authority";
+import type { EximbayCanaryAttendedAttestation } from
+  "./eximbay-refund-canary-producer-contract";
 import {
   isRefundExecutionClaimEnabled,
   isRefundExecutionEximbayClaimEnabled,
@@ -49,7 +53,18 @@ type ClaimActivationEnv = Readonly<Record<string, string | undefined>>;
 type ClaimCapability =
   | "provider-neutral"
   | "manual-mock-sandbox"
-  | Readonly<{ kind: "admin-sandbox"; env: ClaimActivationEnv }>;
+  | Readonly<{ kind: "admin-sandbox"; env: ClaimActivationEnv }>
+  | Readonly<{
+    kind: "eximbay-canary-system";
+    authority: Readonly<{ attestation: EximbayCanaryAttendedAttestation }>;
+  }>;
+
+export type ClaimEximbayCanarySystemRefundInput = Readonly<{
+  orderId: string;
+  refundAttemptId: string;
+  now: Date;
+  attestation: EximbayCanaryAttendedAttestation;
+}>;
 
 export async function claimRefundAttemptForExecution(
   client: PrismaClient,
@@ -80,6 +95,22 @@ export async function claimRefundAttemptForAdminSandboxExecution(
     ...input,
     actorType: RefundAttemptActorType.ADMIN,
   }, Object.freeze({ kind: "admin-sandbox", env }));
+}
+
+export async function claimRefundAttemptForEximbayCanarySystemExecution(
+  client: PrismaClient,
+  input: ClaimEximbayCanarySystemRefundInput,
+): Promise<ClaimRefundAttemptForExecutionResult> {
+  return runClaim(client, {
+    orderId: input.orderId,
+    refundAttemptId: input.refundAttemptId,
+    now: input.now,
+    actorType: RefundAttemptActorType.SYSTEM,
+    actorUserId: null,
+  }, Object.freeze({
+    kind: "eximbay-canary-system",
+    authority: Object.freeze({ attestation: input.attestation }),
+  }));
 }
 
 async function runClaim(
@@ -113,7 +144,9 @@ async function claimInTransaction(
   const target = aggregate.refundAttempts.find((attempt) => attempt.id === input.refundAttemptId);
   if (!target) return failure("REFUND_ATTEMPT_NOT_FOUND", "Refund attempt was not found for the order.");
 
-  const capabilityFailure = validateClaimCapability(aggregate, target, capability);
+  const capabilityFailure = await validateClaimCapabilityWithCurrentAuthority(
+    tx, aggregate, target, input, capability,
+  );
   if (capabilityFailure) return capabilityFailure;
 
   const artifacts = await resolveRefundExecutionClaimArtifacts(tx, target, input);
@@ -123,6 +156,25 @@ async function claimInTransaction(
   const validationFailure = validateFreshRefundExecutionClaim(aggregate, target);
   if (validationFailure) return validationFailure;
   return persistClaim(tx, aggregate, target, input);
+}
+
+async function validateClaimCapabilityWithCurrentAuthority(
+  tx: ClaimTx,
+  aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
+  input: NormalizedClaimInput,
+  capability: ClaimCapability,
+): Promise<ClaimRefundAttemptForExecutionFailure | null> {
+  if (isEximbayCanaryCapability(capability)
+    && !(await hasExactEximbayCanaryClaimAuthority(
+      tx, aggregate, target, input, capability.authority,
+    ))) {
+    return failure(
+      "CLAIM_CAPABILITY_UNSUPPORTED",
+      "Refund attempt is not an exact fresh synthetic Eximbay SYSTEM canary target.",
+    );
+  }
+  return validateClaimCapability(aggregate, target, capability);
 }
 
 async function lockOrder(tx: ClaimTx, orderId: string): Promise<boolean> {
@@ -166,6 +218,12 @@ function validateClaimCapability(
   if (aggregate.payment.provider === PaymentProvider.EXIMBAY) {
     return validateEximbayClaimCapability(aggregate, target, capability);
   }
+  if (isEximbayCanaryCapability(capability)) {
+    return failure(
+      "CLAIM_CAPABILITY_UNSUPPORTED",
+      "Eximbay canary claim authority requires an Eximbay payment.",
+    );
+  }
   if (capability === "provider-neutral") return null;
   if (aggregate.payment.provider === PaymentProvider.MOCK
     && aggregate.payment.mode === PaymentMode.SANDBOX) {
@@ -182,6 +240,9 @@ function validateEximbayClaimCapability(
   target: RefundExecutionClaimTarget,
   capability: ClaimCapability,
 ): ClaimRefundAttemptForExecutionFailure | null {
+  if (isEximbayCanaryCapability(capability)) {
+    return validateEximbayCanaryClaimCapability(aggregate, target);
+  }
   if (typeof capability === "string" || !isRefundExecutionEximbayClaimEnabled(capability.env)) {
     return failure(
       "CLAIM_CAPABILITY_UNSUPPORTED",
@@ -189,10 +250,7 @@ function validateEximbayClaimCapability(
     );
   }
   if (!isSupportedEximbaySandboxIdentity(aggregate, target)
-    || !(
-      hasApprovedCustomerIntakeProvenance(aggregate, target)
-      || hasCancellationAttemptProvenance(aggregate, target)
-    )) {
+    || !hasEximbayClaimProvenance(aggregate, target)) {
     return failure(
       "CLAIM_CAPABILITY_UNSUPPORTED",
       "Eximbay refund execution claim authority is unsupported.",
@@ -206,6 +264,36 @@ function validateEximbayClaimCapability(
     );
   }
   return null;
+}
+
+function isEximbayCanaryCapability(
+  capability: ClaimCapability,
+): capability is Extract<ClaimCapability, { kind: "eximbay-canary-system" }> {
+  return typeof capability !== "string" && capability.kind === "eximbay-canary-system";
+}
+
+function validateEximbayCanaryClaimCapability(
+  aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget,
+): ClaimRefundAttemptForExecutionFailure | null {
+  const payment = aggregate.payment;
+  const exact = [
+    target.actorType === RefundAttemptActorType.SYSTEM,
+    target.actorUserId === null,
+    target.provider === PaymentProvider.EXIMBAY,
+    target.mode === PaymentMode.SANDBOX,
+    target.currency === "USD",
+    target.amount === payment.amount,
+    payment.provider === PaymentProvider.EXIMBAY,
+    payment.mode === PaymentMode.SANDBOX,
+    payment.currency === "USD",
+    payment.adapterExecutionKind === PaymentAdapterExecutionKind.EXTERNAL,
+    payment.attemptLifecycle === PaymentAttemptLifecycle.FINALIZED,
+  ].every(Boolean);
+  return exact ? null : failure(
+    "CLAIM_CAPABILITY_UNSUPPORTED",
+    "Refund attempt is not an exact Eximbay SYSTEM canary target.",
+  );
 }
 
 function isSupportedEximbaySandboxIdentity(
@@ -360,3 +448,9 @@ export {
   classifyExistingRefundExecutionClaim,
   type ExistingRefundExecutionClaimClassification,
 } from "./claim-evaluation";
+
+function hasEximbayClaimProvenance(aggregate: RefundExecutionClaimAggregate,
+  target: RefundExecutionClaimTarget): boolean {
+  return hasApprovedCustomerIntakeProvenance(aggregate, target)
+    || hasCancellationAttemptProvenance(aggregate, target);
+}

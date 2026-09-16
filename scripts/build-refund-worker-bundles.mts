@@ -38,8 +38,32 @@ const entryPoints = Object.freeze({
   "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
   "prepare-eximbay-refund-canary-admission":
     "scripts/prepare-eximbay-refund-canary-admission.ts",
+  "eximbay-contacted-refund-success-close":
+    "scripts/eximbay-contacted-refund-success-close-once.ts",
+  "eximbay-contacted-refund-evidence":
+    "scripts/eximbay-contacted-refund-evidence-once.ts",
+  "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
+  "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
+  "pl09-targeted-refund-email-dispatch":
+    "scripts/pl09-targeted-refund-email-dispatch.ts",
 });
 const exactContextAssets = Object.freeze([
+  "infra/refund-sandbox/p3e-b2/contracts/eximbay-canonical-deployment-v1.json",
+  "infra/refund-sandbox/p3e-b2/contracts/canonical-migration-inventory-v1.json",
+  "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
+  "infra/refund-sandbox/p3e-b2/contracts/runtime-authority-v1.json",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/main.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/checks.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/locals.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/main.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/providers.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/variables.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canonical-v2/versions.tf",
+
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/locals.tf",
+  "infra/refund-sandbox/p3e-b2/eximbay-canary/variables.tf",
+
   "package.json",
   "package-lock.json",
   "tsconfig.json",
@@ -160,8 +184,9 @@ function bundleOptions(overrides: BuildOptions): BuildOptions {
     platform: "node",
     target: "node22",
     format: "esm",
+    conditions: ["react-server"],
     banner: {
-      js: "import { createRequire as __miraCreateRequire } from 'node:module'; const require = __miraCreateRequire(import.meta.url);",
+      js: "import { createRequire as __miraCreateRequire } from 'node:module'; import { dirname as __miraDirname } from 'node:path'; import { fileURLToPath as __miraFileURLToPath } from 'node:url'; const require = __miraCreateRequire(import.meta.url); const __filename = __miraFileURLToPath(import.meta.url); const __dirname = __miraDirname(__filename);",
     },
     outExtension: { ".js": ".mjs" },
     sourcemap: false,

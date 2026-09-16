@@ -1,7 +1,10 @@
 import { createHash } from "crypto";
 import { PaymentMode, PaymentProvider } from "@prisma/client";
-import { requireEximbayCurrency, type EximbayCurrency } from "@/lib/payment/providers/eximbay/types";
-import { requireExactText } from "@/lib/payment/providers/eximbay/validation";
+import {
+  requireEximbayCurrency,
+  type EximbayCurrency,
+} from "../../../providers/eximbay/types";
+import { requireExactText } from "../../../providers/eximbay/validation";
 
 export const EXIMBAY_REFUND_INQUIRY_CONTRACT_VERSION =
   "refund-provider-eximbay-inquiry/v1";

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../src/lib/database/prisma-pg";
 import { pathToFileURL } from "url";
 import {
   reconcilePaymentCore,
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is required.");
 
-  const adapter = new PrismaPg({ connectionString });
+  const adapter = createPrismaPg({ connectionString });
   const db = new PrismaClient({ adapter });
   try {
     const findings = await reconcilePaymentCore(db, { ...parsed.options, now });

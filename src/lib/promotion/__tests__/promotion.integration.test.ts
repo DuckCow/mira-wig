@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import {
   BirthdayLeapDayObservation,
   CheckoutSessionStatus,
@@ -833,7 +833,7 @@ function withGrantCreateCollision(collision: () => Promise<void>): PrismaClient 
 
 function createNamedPrismaClient(applicationName: string): PrismaClient {
   const connectionString = namedConnectionString(applicationName);
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  return new PrismaClient({ adapter: createPrismaPg({ connectionString }) });
 }
 
 async function createRawClient(applicationName: string): Promise<Client> {

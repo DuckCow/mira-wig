@@ -1,3 +1,4 @@
+import { isRetrieveShapeDiagnostic } from "../retrieve-shape-diagnostic";
 import { PaymentMode, PaymentProvider } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,6 +13,7 @@ import {
   type EximbayRefundPreflightFacts,
 } from "../preflight-contract";
 import {
+  diagnoseEximbayRefundRetrieve,
   createEximbayRefundRetrievePlan,
   executeEximbayRefundRetrieve,
   EXIMBAY_REFUND_RETRIEVE_DEADLINE_MS,
@@ -92,7 +94,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     const result = await executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(response(override)),
     );
-    expect(result).toEqual({ kind: "notAdmitted", code });
+    expect(result).toMatchObject({ kind: "notAdmitted", code });
   });
 
   it.each([
@@ -103,7 +105,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     ["duplicate English-example card field", exactBody({ card_info: { cardno1: "4111", cardno4: "1111" } }).replace('"cardno1":"4111"', '"cardno1":"4111","cardno1":"4111"'), "DUPLICATE_JSON_KEY"],
   ])("rejects %s", async (_label, body, code) => {
     const result = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
-    expect(result).toEqual({ kind: "notAdmitted", code });
+    expect(result).toMatchObject({ kind: "notAdmitted", code });
   });
 
   it("admits exactly the raw-byte bound and rejects an oversized stream", async () => {
@@ -123,7 +125,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     });
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(streamResponse(oversized)),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "BODY_TOO_LARGE" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "BODY_TOO_LARGE" });
     expect(cancelled).toBe(true);
   });
 
@@ -133,7 +135,7 @@ describe("provider-free Eximbay refund retrieve", () => {
     });
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(streamResponse(invalidUtf8)),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "INVALID_UTF8" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "INVALID_UTF8" });
 
     const fragmented = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -144,13 +146,24 @@ describe("provider-free Eximbay refund retrieve", () => {
     });
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.resolve(streamResponse(fragmented)),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "TOO_MANY_RESPONSE_CHUNKS" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "TOO_MANY_RESPONSE_CHUNKS" });
+  });
+
+  it("retains receipt of an HTTP response even when reading its body rejects", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(new Error("private-body-error")); },
+    });
+    const result = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(
+      new Response(body, { status: 200, headers: { "content-type": "application/json" } }),
+    ));
+    expect(result).toEqual({ kind: "notAdmitted", code: "TRANSPORT_FAILURE", failureKind: "EXCEPTION", responseReceived: true, httpStatus: 200 });
+    expect(JSON.stringify(result)).not.toContain("private-body-error");
   });
 
   it("maps transport failure and aborts the actual request signal at deadline", async () => {
     await expect(executeEximbayRefundRetrieve(
       plan(), () => Promise.reject(new Error("synthetic transport failure")),
-    )).resolves.toEqual({ kind: "notAdmitted", code: "TRANSPORT_FAILURE" });
+    )).resolves.toMatchObject({ kind: "notAdmitted", code: "TRANSPORT_FAILURE", failureKind: "EXCEPTION", responseReceived: false, httpStatus: null });
 
     vi.useFakeTimers();
     let observedSignal: AbortSignal | undefined;
@@ -161,7 +174,7 @@ describe("provider-free Eximbay refund retrieve", () => {
       });
     });
     await vi.advanceTimersByTimeAsync(EXIMBAY_REFUND_RETRIEVE_DEADLINE_MS + 1);
-    await expect(pending).resolves.toEqual({ kind: "notAdmitted", code: "TRANSPORT_FAILURE" });
+    await expect(pending).resolves.toMatchObject({ kind: "notAdmitted", code: "TRANSPORT_FAILURE", failureKind: "EXCEPTION", responseReceived: false, httpStatus: null });
     expect(observedSignal?.aborted).toBe(true);
   });
 });
@@ -268,3 +281,182 @@ const REJECTION_CASES: ReadonlyArray<readonly [string, ResponseOverride, string]
   ["unknown root key", { unknown: "value" }, "UNKNOWN_SHAPE"],
   ["unknown payment key", { payment: { unknown: "value" } }, "UNKNOWN_SHAPE"],
 ];
+
+
+describe("observational retrieve diagnostic parity", () => {
+  it.each(REJECTION_CASES)("retains the established fixture result: %s", async (_label, override, code) => {
+    const diagnostic = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(response(override)));
+    const financial = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(response(override)));
+    expect(diagnostic.parserResult).toBe(code);
+    expect(financial).toMatchObject({ kind: "notAdmitted", code });
+  });
+  it.each([
+    [null, "ROOT_NOT_OBJECT"],
+    [{ ...bodyObject(), extra: "private" }, "ROOT_KEY_SET_MISMATCH"],
+    [{ ...bodyObject(), resmsg: "" }, "ROOT_REQUIRED_TEXT_INVALID"],
+    [{ ...bodyObject(), payment: [] }, "PAYMENT_NOT_OBJECT"],
+    [{ ...bodyObject(), card_info: [] }, "OPTIONAL_ROOT_ENVELOPE_INVALID"],
+    [{ ...bodyObject(), other_param: { param1: [] } }, "OPTIONAL_ROOT_ENVELOPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, extra: 1 } }, "PAYMENT_KEY_SET_MISMATCH"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, balance: undefined } }, "PAYMENT_KEY_SET_MISMATCH"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, auth_code: [] } }, "OPTIONAL_PAYMENT_ENVELOPE_INVALID"],
+    [{ ...bodyObject(), mid: "" }, "IDENTITY_SHAPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, transaction_date: "20260101" } }, "TRANSACTION_DATE_SHAPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, balance: "bad" } }, "BALANCE_SHAPE_INVALID"],
+    [{ ...bodyObject(), payment: { ...bodyObject().payment, amount: "bad" } }, "OTHER_EXACT_STRUCTURAL_FAILURE"],
+  ])("reports the actual first predicate %j -> %s", async (value, failure) => {
+    const body = JSON.stringify(value);
+    const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    const financial = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    expect(observation.shape.firstFailure).toBe(failure);
+    expect(financial.kind).toBe("notAdmitted");
+    if (financial.kind === "notAdmitted") expect(observation.parserResult).toBe(financial.code);
+  });
+  it("retains success, value privacy, and the shared plan one-shot ceiling", async () => {
+    const selected = plan();
+    const transport = vi.fn(() => Promise.resolve(response({ card_info: { cardno1: "4111", cardno4: "1111" } })));
+    const observation = await diagnoseEximbayRefundRetrieve(selected, transport);
+    expect(observation.parserResult).toBe("ADMITTED");
+    expect(observation.shape.firstFailure).toBe("UNESTABLISHED");
+    expect(await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(response()))).toEqual(admittedFacts());
+    expect(JSON.stringify(observation)).not.toMatch(/merchant-mid|order-1|transaction-1|4111|1111/);
+    await expect(diagnoseEximbayRefundRetrieve(selected, transport)).rejects.toThrow("EXIMBAY_REFUND_RETRIEVE_PLAN_REUSED");
+    await expect(executeEximbayRefundRetrieve(selected, transport)).rejects.toThrow("EXIMBAY_REFUND_RETRIEVE_PLAN_REUSED");
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it("never emits unknown key names, even when they contain identifiers", async () => {
+    const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(JSON.stringify({
+      ...bodyObject(), "private-customer-id": "private-value",
+    }))));
+    expect(observation.shape.root.extraKeyCount).toBe(1);
+    expect(JSON.stringify(observation)).not.toContain("private");
+  });
+  it.each(["{", '{"rescode":"0000","rescode":"0000"}'])("keeps invalid JSON failure before structural checks", async (body) => {
+    const observation = await diagnoseEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    expect(observation.shape).toMatchObject({ jsonParseSuccess: false, firstFailure: "UNESTABLISHED" });
+  });
+});
+
+
+describe("value-free optional root subpredicates", () => {
+  async function observe(extra: Record<string, unknown>) {
+    const body = JSON.stringify({ ...bodyObject(), ...extra });
+    const transport = vi.fn(() => Promise.resolve(rawResponse(body)));
+    const result = await diagnoseEximbayRefundRetrieve(plan(), transport);
+    const financial = await executeEximbayRefundRetrieve(plan(), () => Promise.resolve(rawResponse(body)));
+    expect(result.parserResult).toBe(financial.kind === "admitted" ? "ADMITTED" : financial.code);
+    expect(isRetrieveShapeDiagnostic(result.shape)).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(1);
+    return result;
+  }
+  it.each([
+    [{ card_number1: "5826", card_number4: "9371" }, "FORMAL", true, true, true],
+    [{ cardno1: "5826", cardno4: "9371" }, "LEGACY", true, true, true],
+    [{ card_number1: "123", card_number4: "9371" }, "FORMAL", false, true, false],
+    [{ cardno1: "5826", cardno4: "abcd" }, "LEGACY", true, false, false],
+    [{ cardno1: "１２３４", cardno4: "9371" }, "LEGACY", false, true, false],
+    [{ cardno1: "5826", cardno4: "9371\n" }, "LEGACY", true, false, false],
+    [{ cardno1: 5826, cardno4: "9371" }, "LEGACY", false, true, false],
+    [{ cardno1: "5826", card_number4: "9371" }, "INVALID", null, null, false],
+    [{ cardno1: "5826", cardno4: "9371", card_number1: "5826", card_number4: "9371" }, "INVALID", null, null, false],
+    [{ cardno1: "5826", cardno4: "9371", private: "value" }, "INVALID", null, null, false],
+    [null, "INVALID", null, null, false],
+    [[], "INVALID", null, null, false],
+    [undefined, "ABSENT", null, null, true],
+  ])("classifies card pair %j", async (card_info, pairKind, first, last, parserValid) => {
+    const result = await observe({ card_info });
+    expect(result.shape.optionalRootDetail?.cardInfo).toEqual({
+      pairKind, firstFourAsciiDigits: first, lastFourAsciiDigits: last, parserValid,
+    });
+    expect(result.parserResult).toBe(parserValid ? "ADMITTED" : "UNKNOWN_SHAPE");
+    expect(JSON.stringify(result)).not.toMatch(/5826|9371|private/);
+  });
+  const cases = [
+    [undefined, "ABSENT", null, true], [null, "NOT_STRING", null, false],
+    [19, "NOT_STRING", null, false], [[], "NOT_STRING", null, false],
+    ["", "EMPTY_OR_WHITESPACE_ONLY", false, true], [" \t ", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    [" ", "EMPTY_OR_WHITESPACE_ONLY", false, true],
+    [" ".repeat(255), "EMPTY_OR_WHITESPACE_ONLY", false, true],
+    [" ".repeat(256), "EMPTY_OR_WHITESPACE_ONLY", true, false],
+    ["\u3000".repeat(85), "EMPTY_OR_WHITESPACE_ONLY", false, true],
+    ["\u3000".repeat(86), "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\n", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\r", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\v", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    ["\f", "EMPTY_OR_WHITESPACE_ONLY", false, false],
+    [" leading", "TRIM_MISMATCH", false, false], ["trailing ", "TRIM_MISMATCH", false, false],
+    ["a\u0000b", "CONTROL_OR_SURROGATE", false, false], ["a\u0085b", "CONTROL_OR_SURROGATE", false, false],
+    ["a\ud800b", "CONTROL_OR_SURROGATE", false, false], ["a\udc00b", "CONTROL_OR_SURROGATE", false, false],
+    ["q", "VALID", false, true], ["q".repeat(255), "VALID", false, true],
+    ["한".repeat(85), "VALID", false, true], ["한".repeat(86), "OVER_255_UTF8_BYTES", false, false],
+    ["😀".repeat(128), "OVER_255_UTF8_BYTES", false, false],
+    ["q".repeat(256), "OVER_255_UTF8_BYTES", true, false],
+    ["😀".repeat(256), "OVER_255_UTF8_BYTES", true, false],
+  ] as const;
+  describe.each(["param1", "param2"] as const)("%s", (key) => {
+    it.each(cases)("classifies case %#", async (value, kind, over, parserValid) => {
+      const result = await observe({ other_param: { [key]: value } });
+      const detail = result.shape.optionalRootDetail?.otherParam;
+      expect(detail).toMatchObject({ [`${key}Class`]: kind, [`${key}TextLengthOver255`]: over, parserValid });
+      expect(result.parserResult).toBe(parserValid ? "ADMITTED" : "UNKNOWN_SHAPE");
+      // The detail contains only enum strings, booleans, and null; never lengths.
+      for (const field of Object.values(detail ?? {})) expect(typeof field).not.toBe("number");
+      if (typeof value === "string" && value.length > 1) expect(JSON.stringify(result)).not.toContain(JSON.stringify(value));
+    });
+  });
+  it.each([null, [], { unknownPrivateKey: "private" }])("rejects malformed other_param %j", async (other_param) => {
+    const result = await observe({ other_param });
+    expect(result.shape.optionalRootDetail?.otherParam.parserValid).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+  it.each([
+    ["absent envelope", undefined], ["both absent", {}],
+    ["param2 absent", { param1: "metadata" }], ["param1 absent", { param2: "metadata" }],
+    ["both empty", { param1: "", param2: "" }],
+    ["both safe whitespace", { param1: "   ", param2: "\u3000" }],
+  ])("admits synthetic formal-card envelope: %s", async (_label, other_param) => {
+    const result = await observe({
+      card_info: { card_number1: "5826", card_number4: "9371" }, other_param,
+      payment: { ...bodyObject().payment, auth_code: "synthetic-auth", payment_method: "P000" },
+    });
+    expect(result.parserResult).toBe("ADMITTED");
+    expect(result.shape.firstFailure).toBe("UNESTABLISHED");
+    expect(result.shape.optionalRootDetail).toMatchObject({
+      cardInfo: { pairKind: "FORMAL", firstFourAsciiDigits: true, lastFourAsciiDigits: true, parserValid: true },
+      otherParam: { parserValid: true },
+    });
+    if (other_param && Object.values(other_param).every((value) => value.trim() === "") && Object.keys(other_param).length === 2) {
+      expect(result.shape.optionalRootDetail?.otherParam).toMatchObject({
+        param1Class: "EMPTY_OR_WHITESPACE_ONLY", param2Class: "EMPTY_OR_WHITESPACE_ONLY",
+        param1TextLengthOver255: false, param2TextLengthOver255: false,
+      });
+    }
+    expect(JSON.stringify(result)).not.toMatch(/5826|9371|synthetic-auth|merchant-mid|order-1|transaction-1|param[12]Length/);
+  });
+  it("observes both invalid envelopes and preserves earlier first failures", async () => {
+    const extra = { card_info: { cardno1: "oops", cardno4: "9371" }, other_param: { param1: " bad", param2: "" } };
+    const result = await observe(extra);
+    expect(result.shape).toMatchObject({ firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID", optionalRootDetail: {
+      cardInfo: { parserValid: false }, otherParam: { parserValid: false, param1Class: "TRIM_MISMATCH", param2Class: "EMPTY_OR_WHITESPACE_ONLY" },
+    } });
+    for (const earlier of [{ resmsg: "" }, { payment: [] }, { unknown: true }]) {
+      const first = await observe({ ...extra, ...earlier });
+      expect(first.shape.firstFailure).not.toBe("OPTIONAL_ROOT_ENVELOPE_INVALID");
+      expect(first.shape.optionalRootDetail).toBeNull();
+    }
+  });
+  it("rejects private/extra detail at every level and inconsistent optional-root failure", async () => {
+    const { shape } = await observe({});
+    const detail = shape.optionalRootDetail;
+    expect(detail).not.toBeNull();
+    expect(isRetrieveShapeDiagnostic({ ...shape, firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID" })).toBe(false);
+    expect(isRetrieveShapeDiagnostic({ ...shape, optionalRootDetail: null, firstFailure: "OPTIONAL_ROOT_ENVELOPE_INVALID" })).toBe(false);
+    for (const optionalRootDetail of [
+      { ...detail, raw: "private" },
+      { ...detail, cardInfo: { ...detail?.cardInfo, digits: "9371" } },
+      { ...detail, otherParam: { ...detail?.otherParam, param1Length: 86 } },
+      { ...detail, otherParam: { ...detail?.otherParam, param1Class: "private" } },
+      { ...detail, otherParam: { ...detail?.otherParam, param1TextLengthOver255: 86 } },
+    ]) expect(isRetrieveShapeDiagnostic({ ...shape, optionalRootDetail })).toBe(false);
+  });
+});

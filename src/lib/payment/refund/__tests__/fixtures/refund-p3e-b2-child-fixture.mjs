@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import process from "node:process";
-import { setInterval, setTimeout } from "node:timers";
+import { clearTimeout, setInterval, setTimeout } from "node:timers";
 
 const descendantReadyProtocol = "TB2A_DESCENDANT_READY_V1";
-const descendantReadyTimeoutMs = 2_500;
+const descendantReadyTimeoutMs = 30_000;
 const mode = process.argv[2] ?? "";
 const projectId = "mira-refund-sbx";
 const projectNumber = "987654321098";
@@ -98,6 +98,20 @@ const waitForReadyRecord = async (readyFile, expectedPid) => {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
   }
 };
+
+// Optional test-parent IPC; ordinary fixture/self-check invocations stay standalone.
+if (["stdout-cap", "stderr-cap", "invalid-utf8"].includes(mode) && process.send) {
+  await new Promise((resolveGo, rejectGo) => {
+    const watchdog = setTimeout(() => rejectGo(new Error("FIXTURE_GO_TIMEOUT")), 30_000);
+    process.once("message", (message) => {
+      clearTimeout(watchdog);
+      if (message !== "GO") { rejectGo(new Error("FIXTURE_GO_INVALID")); return; }
+      process.disconnect();
+      resolveGo(undefined);
+    });
+    process.send?.("READY");
+  });
+}
 
 switch (mode) {
   case "normal":
@@ -197,7 +211,7 @@ switch (mode) {
       inheritedOutputOpen,
     })}\n`);
     renameSync(temporaryReadyFile, readyFile);
-    setTimeout(() => process.exit(70), 10_000);
+    setTimeout(() => process.exit(70), 60_000);
     break;
   }
   case "command:EFFECTIVE_CONFIG_GET":

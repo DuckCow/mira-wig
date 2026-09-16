@@ -373,3 +373,36 @@ function validInput(input: EximbayRefundCanaryTargetSealInput): boolean {
 function nonempty(value: string | null): value is string {
   return typeof value === "string" && value.length > 0;
 }
+
+// Historical v1 bytes: READY/ordinal literals describe the original seal, not current eligibility.
+export type CanaryTargetDigestFacts = Readonly<{
+  commandId: string;
+  refundAttemptId: string;
+  paymentId: string;
+  providerOperationBindingId: string;
+  amount: number;
+  currency: string;
+  idempotencyKey: string;
+  providerOrderId: string | null;
+  providerPaymentKey: string;
+  financialSucceededAt: Date | null;
+  providerOperationFamilyKey: string;
+  operationFamilyFingerprint: string;
+  merchantAccountBindingId: string;
+  credentialGenerationBindingId: string;
+  syntheticProvenanceDigest: string;
+}>;
+
+export function calculateEximbayCanaryTargetDigest(facts: CanaryTargetDigestFacts): string {
+  return createHash("sha256").update(JSON.stringify([
+    "mira-refund-eximbay-sandbox-canary-target/v1",
+    facts.commandId, facts.refundAttemptId, facts.paymentId, facts.providerOperationBindingId,
+    "EXIMBAY", "SANDBOX", facts.amount, facts.currency,
+    facts.idempotencyKey, facts.providerOrderId, facts.providerPaymentKey,
+    facts.financialSucceededAt?.toISOString(),
+    facts.providerOperationFamilyKey, facts.operationFamilyFingerprint,
+    "READY", "PROCESSING", "REFUND_PENDING", "SUCCEEDED", "EXTERNAL", "FINALIZED",
+    0, null, facts.merchantAccountBindingId, facts.credentialGenerationBindingId,
+    facts.syntheticProvenanceDigest, true, 1, false,
+  ]), "utf8").digest("hex");
+}

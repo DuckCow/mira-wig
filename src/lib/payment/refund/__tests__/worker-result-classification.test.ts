@@ -52,6 +52,12 @@ describe("refund execution worker result classification", () => {
     expect(Object.isFrozen(classifyWorkerSuccess(false))).toBe(true);
   });
 
+  it("preserves committed contact dispositions", () => {
+    expect(classifyEximbayContactWorkerResult({ ok: true, state: "PARKED", replayed: false }).kind).toBe("MANUAL");
+    expect(classifyEximbayContactWorkerResult({ ok: true, state: "SUCCEEDED", replayed: false }).kind).toBe("SUCCEEDED");
+    expect(classifyEximbayContactWorkerResult({ ok: false, code: "PERSISTENCE_CONFLICT" }).kind).toBe("CONFLICT");
+  });
+
   it("maps Eximbay financial uncertainty and manual finality conservatively", () => {
     expect(classifyEximbayContactWorkerResult({
       ok: true, state: "WAITING_EVIDENCE", replayed: false,

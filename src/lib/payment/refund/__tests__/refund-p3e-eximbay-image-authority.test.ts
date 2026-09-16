@@ -17,7 +17,7 @@ import {
   type CurrentEximbayImageAuthority,
   type FilesystemInspection,
   type FrozenImageContract,
-} from "../../../../../scripts/verify-refund-worker-image.mjs";
+} from "../../../../../scripts/verify-refund-worker-image-main-v1.mjs";
 
 const A_PATH = join(
   process.cwd(),

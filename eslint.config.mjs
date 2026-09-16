@@ -234,6 +234,7 @@ export default tseslint.config(
 
   // 빌드 산출물 등 무시
   {
-    ignores: [".next/**", "node_modules/**", "dist/**", "next-env.d.ts"],
+    // Repository-root review exports are evidence copies, outside runtime/test inputs.
+    ignores: [".next/**", "node_modules/**", "dist/**", "next-env.d.ts", ".local-review/**"],
   }
 );

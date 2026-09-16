@@ -1,5 +1,5 @@
 import { PrismaClient, WigCategory } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../src/lib/database/prisma-pg";
 import { pathToFileURL } from "node:url";
 import {
   assertDemoSeedReportedDatabaseIdentity,
@@ -219,7 +219,7 @@ export type DemoSeedRuntime = Readonly<{
 const defaultDemoSeedRuntime: DemoSeedRuntime = Object.freeze({
   connect(pgConfig, prismaPgOptions) {
     const prisma = new PrismaClient({
-      adapter: new PrismaPg(pgConfig, prismaPgOptions),
+      adapter: createPrismaPg(pgConfig, prismaPgOptions),
     });
     return Object.freeze({
       async readCurrentIdentity() {

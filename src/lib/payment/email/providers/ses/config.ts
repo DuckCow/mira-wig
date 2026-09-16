@@ -5,11 +5,21 @@ export interface SesTransactionalEmailConfig {
   replyToAddress?: string;
   configurationSetName: string;
   requestTimeoutMs: number;
+  recipientRouting?: SesRecipientRouting;
 }
 
 export interface ValidatedSesTransactionalEmailConfig extends SesTransactionalEmailConfig {
   fromEmailAddress: string;
+  recipientRouting: ValidatedSesRecipientRouting;
 }
+
+export type SesRecipientRouting =
+  | Readonly<{ mode: "PRODUCTION" }>
+  | Readonly<{ mode: "SANDBOX_PRELAUNCH"; safeRecipient?: string }>;
+
+export type ValidatedSesRecipientRouting =
+  | Readonly<{ mode: "PRODUCTION" }>
+  | Readonly<{ mode: "SANDBOX_PRELAUNCH"; safeRecipient: string }>;
 
 export const SES_REQUEST_TIMEOUT_MAX_MS = 10_000;
 
@@ -33,6 +43,7 @@ export function validateSesTransactionalEmailConfig(
   );
   const replyToAddress = optionalAddress(config.replyToAddress);
   const requestTimeoutMs = requireTimeout(config.requestTimeoutMs);
+  const recipientRouting = validateRecipientRouting(config.recipientRouting);
   return Object.freeze({
     region,
     fromAddress,
@@ -41,6 +52,7 @@ export function validateSesTransactionalEmailConfig(
     configurationSetName,
     requestTimeoutMs,
     fromEmailAddress: `${fromDisplayName} <${fromAddress}>`,
+    recipientRouting,
   });
 }
 
@@ -81,6 +93,20 @@ function requireTimeout(value: number): number {
     throw configInvalid();
   }
   return value;
+}
+
+function validateRecipientRouting(
+  routing: SesRecipientRouting | undefined,
+): ValidatedSesRecipientRouting {
+  if (routing === undefined || routing.mode === "PRODUCTION") {
+    return Object.freeze({ mode: "PRODUCTION" });
+  }
+  const safeRecipient = routing.safeRecipient;
+  if (safeRecipient === undefined) throw configInvalid();
+  return Object.freeze({
+    mode: "SANDBOX_PRELAUNCH",
+    safeRecipient: requireExact(safeRecipient, isValidEmailAddress),
+  });
 }
 
 function hasForbiddenControl(value: string): boolean {

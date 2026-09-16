@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../src/lib/database/prisma-pg";
 import {
   OUTBOX_DEFAULT_LIMIT,
   dispatchPending,
@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is required.");
 
-  const adapter = new PrismaPg({ connectionString });
+  const adapter = createPrismaPg({ connectionString });
   const db = new PrismaClient({ adapter });
   const registry: OutboxRegistry = { [VOID_TOPIC]: createVoidHandler(db) };
 

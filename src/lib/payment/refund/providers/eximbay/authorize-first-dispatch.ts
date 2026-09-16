@@ -1,3 +1,4 @@
+import { preflightException, type EximbayPreflightDiagnostic } from "./preflight-diagnostic";
 import { createHash } from "crypto";
 import {
   PaymentMode,
@@ -38,6 +39,7 @@ import {
   createEximbayRefundRetrievePlan,
   executeEximbayRefundRetrieve,
   type EximbayRefundRetrieveTransport,
+  type EximbayRefundRetrieveResult,
 } from "./preflight-retrieve";
 import {
   discoverEximbayPreflightOwnership,
@@ -82,6 +84,7 @@ export type AuthorizeEximbayFirstRefundDispatchResult =
     }>
   | Readonly<{
       ok: false;
+      diagnostic?: EximbayPreflightDiagnostic;
       code: EximbayFirstRefundAuthorizationFailureCode;
       message: string;
     }>;
@@ -133,13 +136,21 @@ export function createEximbayFirstRefundDispatchAuthorizer(
     });
     const retrieved = await executeEximbayRefundRetrieve(plan, dependencies.retrieve);
     if (retrieved.kind !== "admitted") {
-      return failure("PREFLIGHT_NOT_ADMITTED", "Eximbay refund preflight was not admitted.");
+      return Object.freeze({
+        ...failure("PREFLIGHT_NOT_ADMITTED", "Eximbay refund preflight was not admitted."),
+        diagnostic: retrieveDiagnostic(retrieved),
+      });
     }
-    const admitted = await client.$transaction((tx) => admitObservation(
-      tx, phaseOne.authority, normalized.input, config, retrieved.facts,
-    ));
-    if (!admitted.ok) return admitted;
-    return authorizeR1(client, phaseOne.authority, normalized.input, config);
+    let admitted;
+    try {
+      admitted = await client.$transaction((tx) => admitObservation(
+        tx, phaseOne.authority, normalized.input, config, retrieved.facts,
+      ));
+    } catch {
+      throw preflightException("OBSERVATION_TRANSACTION");
+    }
+    if (!admitted.ok) return withDiagnostic(admitted, "OBSERVATION_TRANSACTION");
+    return withDiagnostic(await authorizeR1(client, phaseOne.authority, normalized.input, config), "DISPATCH_AUTHORIZATION");
   };
 }
 
@@ -225,7 +236,10 @@ async function authorizeR1(
       tx, authority, input, config,
     ));
   } catch {
-    return failure("PERSISTENCE_CONFLICT", "Eximbay R1 authorization persistence conflicted.");
+    return Object.freeze({
+      ...failure("PERSISTENCE_CONFLICT", "Eximbay R1 authorization persistence conflicted."),
+      diagnostic: preflightException("DISPATCH_AUTHORIZATION").diagnostic,
+    });
   }
 }
 
@@ -652,3 +666,23 @@ const bindingMismatch = () => failure("BINDING_MISMATCH", "Eximbay account or cr
 const ledgerFailure = () => failure("REFUND_LEDGER_INCONSISTENT", "Refund execution aggregate is inconsistent.");
 const preflightConflict = () => failure("PREFLIGHT_CONFLICT", "Eximbay preflight observation conflicts with durable state.");
 const refundNotLawful = () => failure("REFUND_NOT_LAWFUL", "Eximbay refund amount is not lawful under the admitted observation.");
+
+function withDiagnostic(
+  result: AuthorizeEximbayFirstRefundDispatchResult,
+  stage: "OBSERVATION_TRANSACTION" | "DISPATCH_AUTHORIZATION",
+): AuthorizeEximbayFirstRefundDispatchResult {
+  if (result.ok) return result;
+  if (result.diagnostic) return Object.freeze({ ...result, diagnostic: Object.freeze({
+    ...result.diagnostic, responseReceived: true,
+  }) });
+  return Object.freeze({ ...result, diagnostic: Object.freeze({
+    stage, kind: "REJECTION", code: result.code, responseReceived: true, httpStatus: null,
+  } satisfies EximbayPreflightDiagnostic) });
+}
+
+function retrieveDiagnostic(retrieved: Extract<EximbayRefundRetrieveResult, { kind: "notAdmitted" }>): EximbayPreflightDiagnostic {
+  // A status-less response has no HTTP failure classification safe to publish.
+  const code = retrieved.code === "NON_2XX" && retrieved.httpStatus === null ? null : retrieved.code;
+  return Object.freeze({ stage: "RETRIEVE", kind: retrieved.failureKind, code,
+    responseReceived: retrieved.responseReceived ?? null, httpStatus: retrieved.httpStatus ?? null });
+}

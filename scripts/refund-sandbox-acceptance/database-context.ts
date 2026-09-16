@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../src/lib/database/prisma-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client as PgClient } from "pg";
 import type { H1ArtifactStore } from "./artifact-store";
@@ -30,7 +30,7 @@ export async function withAcceptanceDatabase<T>(
   const connectionString = env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL_REQUIRED");
   const pg = new PgClient({ connectionString });
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  const prisma = new PrismaClient({ adapter: createPrismaPg({ connectionString }) });
   await pg.connect();
   try {
     const verified = await verifyAcceptanceDatabase(prisma, {

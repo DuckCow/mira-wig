@@ -85,6 +85,11 @@ type ContactClaim =
 
 type ContactBoundaryClock = () => Date | Promise<Date>;
 type DatabaseClockClient = Pick<PrismaClient, "$queryRaw">;
+type MarketConsistencyPolicy = "LOCK_CURRENT" | "PREMATERIALIZED_READ_ONLY";
+
+const DEFAULT_MARKET_CONSISTENCY_POLICY: MarketConsistencyPolicy = "LOCK_CURRENT";
+const SYNTHETIC_SALE_MARKET_CONSISTENCY_POLICY: MarketConsistencyPolicy =
+  "PREMATERIALIZED_READ_ONLY";
 
 const EXIMBAY_READY_OBSERVATION_POLL_MS = 50;
 const EXIMBAY_READY_OBSERVATION_MAX_READS =
@@ -133,6 +138,7 @@ interface RuntimeInitiationInput {
   now?: Date;
   contactBoundaryClock?: ContactBoundaryClock;
   eximbayReady?: InitiatePaymentAttemptInput["eximbayReady"];
+  marketConsistencyPolicy: MarketConsistencyPolicy;
 }
 
 export interface InitiatePaymentAttemptResult {
@@ -172,9 +178,17 @@ export function initiatePaymentAttemptWithTransientAuthority(
   return executePaymentAttempt(client, input);
 }
 
+export function initiateSyntheticSalePaymentAttemptWithTransientAuthority(
+  client: PrismaClient,
+  input: InitiatePaymentAttemptInput,
+): Promise<InitiatePaymentAttemptExecution> {
+  return executePaymentAttempt(client, input, SYNTHETIC_SALE_MARKET_CONSISTENCY_POLICY);
+}
+
 async function executePaymentAttempt(
   client: PrismaClient,
   input: InitiatePaymentAttemptInput,
+  marketConsistencyPolicy: MarketConsistencyPolicy = DEFAULT_MARKET_CONSISTENCY_POLICY,
 ): Promise<InitiatePaymentAttemptExecution> {
   let provider: PaymentInitiationProvider;
   try {
@@ -195,6 +209,7 @@ async function executePaymentAttempt(
     now: input.now,
     contactBoundaryClock: input.contactBoundaryClock,
     eximbayReady: input.eximbayReady,
+    marketConsistencyPolicy,
   });
 }
 
@@ -384,7 +399,7 @@ async function authorizeContact(
   const current = await loadBlockingPayment(tx, session.id);
   if (current) return decideForCurrent(tx, current, session, input, now);
 
-  await validateCommerceAtContactBoundary(tx, session);
+  await validateCommerceAtContactBoundary(tx, session, input.marketConsistencyPolicy);
   return { kind: "contact", payment: await createContactAuthorizedPayment(tx, session, input, now) };
 }
 
@@ -402,13 +417,13 @@ async function decideForCurrent(
     );
   }
   if (isCompatibleAttempt(current, input, session)) {
-    return decideCompatible(tx, current, session);
+    return decideCompatible(tx, current, session, input.marketConsistencyPolicy);
   }
   if (!isUncontactedAuthorized(current)) {
     throw blockedAttemptError(current);
   }
 
-  await validateCommerceAtContactBoundary(tx, session);
+  await validateCommerceAtContactBoundary(tx, session, input.marketConsistencyPolicy);
   await supersedeUncontactedAuthorized(tx, current, now);
   return { kind: "contact", payment: await createContactAuthorizedPayment(tx, session, input, now) };
 }
@@ -427,12 +442,13 @@ async function decideCompatible(
   tx: InitiateTx,
   current: InitiatedPayment,
   session: InitiateSession,
+  marketConsistencyPolicy: MarketConsistencyPolicy,
 ): Promise<InitiateDecision> {
   throwIfEximbayOutcomeUnknown(current);
   const persisted = persistedInitiationResult(current);
   if (persisted) return { kind: "reuse", payment: current, initiateResult: persisted };
   if (isUncontactedAuthorized(current)) {
-    await validateCommerceAtContactBoundary(tx, session);
+    await validateCommerceAtContactBoundary(tx, session, marketConsistencyPolicy);
     return { kind: "contact", payment: current };
   }
   if (current.attemptLifecycle === PaymentAttemptLifecycle.CONTACTED) {
@@ -502,9 +518,10 @@ function sessionNotUsable(): PaymentInitiateException {
 async function validateCommerceAtContactBoundary(
   tx: InitiateTx,
   initial: InitiateSession,
+  marketConsistencyPolicy: MarketConsistencyPolicy,
 ): Promise<void> {
   if (initial.lines.length === 0) throw staleTerms("Frozen checkout session has no lines.");
-  const market = await lockCommerceRows(tx, initial);
+  const market = await lockCommerceRows(tx, initial, marketConsistencyPolicy);
   const session = await loadCommerceSession(tx, initial.id);
   if (!session) throw new PaymentInitiateException("SESSION_UNAVAILABLE", "Checkout session is unavailable.");
   if (!market || market.code !== session.marketCode || !market.isActive || market.currency !== session.currency) {
@@ -626,15 +643,21 @@ function staleTerms(message: string): PaymentInitiateException {
 async function lockCommerceRows(
   tx: InitiateTx,
   session: InitiateSession,
+  marketConsistencyPolicy: MarketConsistencyPolicy,
 ): Promise<{ code: string; currency: string; isActive: boolean } | null> {
   const variantIds = sortedUnique(session.lines.map((line) => line.variantId));
   const styleIds = sortedUnique(session.lines.flatMap((line) => [line.wigStyleId, line.variant.wigStyleId]));
-  const markets = await tx.$queryRaw<{ code: string; currency: string; isActive: boolean }[]>(Prisma.sql`
-    SELECT "code", "currency", "isActive"
-    FROM "Market"
-    WHERE "code" = ${session.marketCode}
-    FOR UPDATE
-  `);
+  const marketQuery = Prisma.sql`
+      SELECT "code", "currency", "isActive"
+      FROM "Market"
+      WHERE "code" = ${session.marketCode}
+    `;
+  const markets = marketConsistencyPolicy === "PREMATERIALIZED_READ_ONLY"
+    ? await tx.$queryRaw<{ code: string; currency: string; isActive: boolean }[]>(marketQuery)
+    : await tx.$queryRaw<{ code: string; currency: string; isActive: boolean }[]>(Prisma.sql`
+        ${marketQuery}
+        FOR UPDATE
+      `);
   await tx.$queryRaw(Prisma.sql`
     SELECT "id" FROM "CheckoutSessionLine"
     WHERE "sessionId" = ${session.id}
@@ -750,7 +773,7 @@ async function markContactStarted(
         || await hasSessionSuspensionCycle(tx, payment.checkoutSessionId)) {
         throw remediationRequired();
       }
-      await validateCommerceAtContactBoundary(tx, session);
+      await validateCommerceAtContactBoundary(tx, session, input.marketConsistencyPolicy);
       await assertEximbayPreparedFactsStillCurrent(tx, payment.id, session, input, prepared);
       const contactBoundaryNow = await captureContactBoundaryTime(tx, input.contactBoundaryClock);
       if (!isUsable(session, contactBoundaryNow)) {

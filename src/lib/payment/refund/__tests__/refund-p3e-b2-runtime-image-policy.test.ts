@@ -1,11 +1,12 @@
+import canonicalInventory from "../../../../../infra/refund-sandbox/p3e-b2/contracts/canonical-migration-inventory-v1.json";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import contract from "../../../../../infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json";
 import currentAuthority from
-  "../../../../../infra/refund-sandbox/p3e-b2/eximbay-canary/image-policy-v1.json";
+  "./fixtures/historical-pl-contracts/eximbay-canary/image-policy-v20.json";
 import historicalSourceAuthority from
   "./fixtures/refund-p3e-b2-r2a-historical-source-v1.json";
 import {
@@ -110,7 +111,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     }
 
     const completeInfra = repositoryRelativeFiles(INFRA);
-    expect(completeInfra).toHaveLength(94);
+    // The 21-path R2A scope above is frozen. Other packages have their own later inventories.
+    const committedInfra = execFileSync("git", ["ls-tree", "-r", "--name-only", "HEAD", "--",
+      "infra/refund-sandbox/p3e-b2/"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
+    expect(completeInfra).toEqual(committedInfra);
     expect(completeInfra.filter(
       (path) => path ===
         "infra/refund-sandbox/p3e-b2/contracts/runtime-image-connection-v1.json",
@@ -146,6 +150,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(dockerfile).not.toMatch(/:(?:latest|22|bookworm-slim)(?:\s|$)/u);
   });
 
+  // Each context child has a 30s bound; allow 15s for surrounding work/cleanup.
   it("assembles the exact temporary context twice and rejects repository-root authority", () => {
     const ignore = readFileSync(join(ROOT, ".dockerignore"), "utf8");
     const contextBuilder = readFileSync(
@@ -179,11 +184,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      manifestDigest: currentAuthority.buildContext.manifestSha256,
-      fileCount: currentAuthority.buildContext.fileCount,
-      repositoryGraphInputCount: currentAuthority.buildContext.repositoryGraphInputCount,
-      packagedGraphInputCount: currentAuthority.buildContext.packagedGraphInputCount,
-      entrypointCount: 5,
+      entrypointCount: 10,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -197,6 +198,11 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     ]) {
       expect(observed.paths.some((path) => path.includes(forbidden))).toBe(false);
     }
+    // Prospective source differs from the retained image policy. No promotion identity
+    // is minted here; the unchanged historical policy is tested independently above.
+    expect(observed.manifestDigest).not.toBe(currentAuthority.buildContext.manifestSha256);
+    expect(observed.fileCount).toBe(observed.paths.length);
+    expect(observed.paths).toContain("src/lib/payment/refund/authorization/worker-client.ts");
     expect(ignore.trimEnd().endsWith("**")).toBe(true);
     expect(ignore).not.toMatch(/^!/mu);
     expect(contextBuilder).toContain("mkdtemp(join(tmpdir()");
@@ -205,7 +211,131 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).toContain("context.directory");
     expect(imageVerifier).not.toContain('"-f", DOCKERFILE,\n  "."');
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
+  }, 45_000);
+
+  it("supplies the exact ten bundle entrypoint sources to the Docker build stage", () => {
+    const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const contextBuilder = readFileSync(
+      join(ROOT, "scripts/build-refund-worker-bundles.mts"),
+      "utf8",
+    );
+    expect(contextBuilder).toContain(`const entryPoints = Object.freeze({
+  "refund-execution-worker": "scripts/refund-execution-worker.ts",
+  "refund-sandbox-provider-free-preflight":
+    "scripts/refund-sandbox-provider-free-preflight.ts",
+  "refund-worker-container-entrypoint": "containers/refund-worker/entrypoint.ts",
+  "eximbay-refund-canary": "scripts/eximbay-refund-canary.ts",
+  "prepare-eximbay-refund-canary-admission":
+    "scripts/prepare-eximbay-refund-canary-admission.ts",
+  "eximbay-contacted-refund-success-close":
+    "scripts/eximbay-contacted-refund-success-close-once.ts",
+  "eximbay-contacted-refund-evidence":
+    "scripts/eximbay-contacted-refund-evidence-once.ts",
+  "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
+  "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
+  "pl09-targeted-refund-email-dispatch":
+    "scripts/pl09-targeted-refund-email-dispatch.ts",
+});`);
+    expect(dockerfile).toContain(
+      "COPY --link scripts/refund-execution-worker.ts "
+      + "scripts/refund-sandbox-provider-free-preflight.ts "
+      + "scripts/eximbay-refund-canary.ts scripts/prepare-eximbay-refund-canary-admission.ts "
+      + "scripts/eximbay-contacted-refund-evidence-once.ts "
+      + "scripts/eximbay-contacted-refund-success-close-once.ts "
+      + "scripts/eximbay-contacted-reconciliation.ts "
+      + "scripts/eximbay-refund-reentry.ts "
+      + "scripts/pl09-targeted-refund-email-dispatch.ts ./scripts/",
+    );
+    expect(dockerfile).toContain(
+      "COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/",
+    );
+    expect(dockerfile).not.toMatch(/COPY --link scripts\/(?:\*|\.)/u);
   });
+
+  it("admits the complete canonical repository-source closure before bundling", () => {
+    const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const proof = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "scripts/build-refund-worker-bundles.mts", "--verify-context"],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: {
+          NODE_ENV: "test",
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+        },
+        timeout: 30_000,
+      },
+    );
+    expect(proof.status).toBe(0);
+    expect(proof.stderr).toBe("");
+    const observed: unknown = JSON.parse(proof.stdout);
+    expect(isRecordWithStringArray(observed, "paths")).toBe(true);
+    if (!isRecordWithStringArray(observed, "paths")) return;
+    const requiredSources = observed.paths.filter(isRequiredBuildSource);
+    expect(requiredSources).toEqual(expect.arrayContaining([
+      "scripts/eximbay-contacted-refund-success-close-once.ts",
+      "scripts/pl09-targeted-refund-email-dispatch.ts",
+      "src/lib/payment/refund/providers/eximbay/apply-contacted-success.ts",
+      "src/lib/payment/refund/authorization/worker-client.ts",
+      "src/lib/payment/refund/authorization/contract.ts",
+      "src/lib/payment/refund/authorization/json-body.ts",
+    ]));
+    expect(missingBuildStageSources(dockerfile, requiredSources)).toEqual([]);
+
+    const withoutMarketAdmission = dockerfile.replace(
+      REFUND_WORKER_MARKET_SOURCE_COPY,
+      "",
+    );
+    expect(missingBuildStageSources(
+      withoutMarketAdmission,
+      requiredSources,
+    )).toEqual([
+      "src/lib/market/catalog-presentation.ts",
+      "src/lib/market/locale.ts",
+      "src/lib/market/persisted-money.ts",
+      "src/lib/market/types.ts",
+    ]);
+  }, 45_000);
+
+  // This is a deterministic subprocess/context proof, not an image performance SLO.
+  // The 30s child bound needs an outer watchdog with cleanup headroom.
+  it("rejects repository-context COPY operands outside canonical context", () => {
+    const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const proof = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "scripts/build-refund-worker-bundles.mts", "--verify-context"],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: {
+          NODE_ENV: "test",
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+        },
+        timeout: 30_000,
+      },
+    );
+    expect(proof.status).toBe(0);
+    expect(proof.stderr).toBe("");
+    const observed: unknown = JSON.parse(proof.stdout);
+    expect(isRecordWithStringArray(observed, "paths")).toBe(true);
+    if (!isRecordWithStringArray(observed, "paths")) return;
+
+    expect(nonCanonicalBuildStageSources(dockerfile, observed.paths)).toEqual([]);
+
+    const withStaleAdmission = dockerfile.replace(
+      /RUN (?:CHECKPOINT_DISABLE=1 )?\.\/node_modules\/\.bin\/prisma generate/u,
+      "COPY --link src/lib/stale-refund-input.ts ./src/lib/\n"
+      + "$&",
+    );
+    expect(withStaleAdmission).not.toBe(dockerfile);
+    expect(nonCanonicalBuildStageSources(
+      withStaleAdmission,
+      observed.paths,
+    )).toEqual(["src/lib/stale-refund-input.ts"]);
+  }, 45_000);
 
   it("generates distinct valid collision-resistant proof-image tags", () => {
     const first = createProofImageTag();
@@ -871,7 +1001,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const runtime = syntheticRuntimeInventory();
     const observed = inspectImageNativeInventories(runtime, base);
     expect(observed.reviewedRemovalCount).toBe(1);
-    expect(observed.reviewedRuntimeAdditionCount).toBe(5);
+    expect(observed.reviewedRuntimeAdditionCount).toBe(8);
     expect(observed.reviewedChangedEntryCount).toBe(1);
 
     const restoredBasePath = syntheticRuntimeInventory({
@@ -1205,6 +1335,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
 
   it("checks the pinned proxy executable inside the Docker build", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
+    const verifier = readFileSync(
+      join(ROOT, "scripts/verify-refund-worker-image.mts"),
+      "utf8",
+    );
     const expected =
       "12f2c210ef4a60c4284888edbd34c4c9868a2cba5ce26a665ad875aaf980b6fb";
     expect(dockerfile.match(new RegExp(expected, "gu"))).toHaveLength(1);
@@ -1214,14 +1348,55 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(dockerfile).toContain(
       "COPY --link --from=proxy-verified /verified/cloud-sql-proxy",
     );
+    expect(dockerfile).toContain(
+      "COPY --link --from=proxy /etc/ssl/certs/ca-certificates.crt "
+      + "/etc/ssl/certs/ca-certificates.crt",
+    );
+    expect(dockerfile.match(/ca-certificates\.crt/gu)).toHaveLength(2);
+    expect(dockerfile).not.toMatch(/ENV\s+(?:SSL_CERT_FILE|SSL_CERT_DIR)/u);
+    expect(currentAuthority.systemCaTrust).toEqual({
+      sourceStage: "PINNED_CLOUD_SQL_PROXY_IMAGE",
+      sourcePath: "/etc/ssl/certs/ca-certificates.crt",
+      runtimePath: "/etc/ssl/certs/ca-certificates.crt",
+      runtimeUser: "65532:65532",
+      requiredType: "REGULAR_FILE",
+      requiredNonempty: true,
+      requiredReadable: true,
+      requiredOwner: "0:0",
+      sslCertFileOverride: "NONE",
+      sslCertDirOverride: "NONE",
+    });
+    expect(currentAuthority.nonApplicationAdditionCount).toBe(6);
+    expect(currentAuthority.nonApplicationAdditions.map(({ path }) => path)).toEqual([
+      "/cloudsql",
+      "/etc/ssl",
+      "/etc/ssl/certs",
+      "/etc/ssl/certs/ca-certificates.crt",
+      "/tmp/refund-worker",
+      "/usr/local/bin/cloud-sql-proxy",
+    ]);
+    expect(currentAuthority.nonApplicationAdditions[3]).toMatchObject({
+      path: "/etc/ssl/certs/ca-certificates.crt",
+      type: "REGULAR_FILE",
+      mode: 0o555,
+      uid: 0,
+      gid: 0,
+      sha256: "714d457d580922dbf1d0be8bd35ba236a842b50b0072ae791582a19adef772a5",
+    });
+    expect(verifier).toContain('CA_BUNDLE_PATH = "/etc/ssl/certs/ca-certificates.crt"');
+    expect(verifier).toContain("fs.accessSync(caBundlePath, fs.constants.R_OK)");
+    expect(verifier).toContain("caBundleStat.isFile()");
+    expect(verifier).toContain("caBundle.byteLength");
+    expect(verifier).toContain("process.env.SSL_CERT_FILE ?? null");
+    expect(verifier).toContain("process.env.SSL_CERT_DIR ?? null");
+    expect(verifier).not.toContain(
+      'requireCondition(runtime.nodeCaCertificateCount > 0, "RUNTIME_CA")',
+    );
     expect(dockerfile).not.toContain("--chown=65532:65532");
     expect(dockerfile).not.toMatch(
       /RUN\s+(?:curl|wget)|https?:\/\/[^\s]*cloud-sql-proxy/iu,
     );
-    expect(readFileSync(
-      join(ROOT, "scripts/verify-refund-worker-image.mts"),
-      "utf8",
-    )).toContain("PROXY_CHECKSUM_NEGATIVE_BUILD");
+    expect(verifier).toContain("PROXY_CHECKSUM_NEGATIVE_BUILD");
   });
 
   it("freezes root-owned code and exactly two worker-writable directories", () => {
@@ -1391,16 +1566,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       path: "prisma/migrations/20260829140000_promo_c5_recovery_checkpoint/migration.sql",
       sha256: "152840be2fda354ac75c0c4432461a5196d0a110fd44a6715d47895fc5b9bc71",
     };
-    expect(checkedOutMigrations).toEqual([
-      ...migrationAuthority.map(({ path }) => path),
-      r13bMigration.path,
-      promoC0Migration.path,
-      promoC1Migration.path,
-      refundLineR0Migration.path,
-      orderCancelC0Migration.path,
-      promoC5Migration.path,
-      promoC5CheckpointMigration.path,
-    ]);
+    expect(checkedOutMigrations).toEqual(canonicalInventory.entries.map((entry) => entry.path));
     for (const entry of migrationAuthority) {
       expect(sha256(readFileSync(join(ROOT, entry.path)))).toBe(entry.sha256);
     }
@@ -1421,7 +1587,12 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(migrationRuntimeDigest(historicalMigrations)).toBe(
       historicalSourceAuthority.historicalMigrationDigest,
     );
-    const terraform = repositoryRelativeFiles(INFRA)
+    // The R2A no-runtime-materialization fact belongs to its recorded baseline.
+    // Later runtime packages are validated by their own exact resource/permission contracts.
+    const historicalFiles = execFileSync("git", ["ls-tree", "-r", "--name-only",
+      historicalSourceAuthority.baselineCommit, "--", "infra/refund-sandbox/p3e-b2/"],
+    { cwd: ROOT, encoding: "utf8" }).trim().split("\n");
+    const terraform = historicalFiles
       .filter((path) => !path.startsWith(
         "infra/refund-sandbox/p3e-b2/runtime/",
       ))
@@ -1429,7 +1600,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
         "infra/refund-sandbox/p3e-b2/eximbay-canary/",
       ))
       .filter((path) => path.endsWith(".tf"))
-      .map((path) => readFileSync(join(ROOT, path), "utf8"))
+      .map((path) => execFileSync("git", ["show", `${historicalSourceAuthority.baselineCommit}:${path}`],
+        { cwd: ROOT, encoding: "utf8" }))
       .join("\n");
     expect(terraform).not.toMatch(
       /google_cloud_run_v2_job|google_service_account|google_secret_manager_secret_version/u,
@@ -1497,6 +1669,7 @@ function discoverR2aFiles(): readonly string[] {
 }
 
 function isR2aDiscoveredPath(path: string, name: string): boolean {
+  if (path.includes("/fixtures/") || name === "verify-refund-worker-image-main-v1.mts") return false;
   return path.startsWith("containers/refund-worker/")
     || name.startsWith("verify-refund-worker-")
     || name === "build-refund-worker-bundles.mts"
@@ -1511,6 +1684,68 @@ function repositoryRelativeFiles(root: string): string[] {
   return walkRefundP3eRealFiles(root)
     .map((path) => relative(ROOT, path).split(sep).join("/"))
     .sort();
+}
+
+const REFUND_WORKER_MARKET_SOURCE_COPY =
+  "COPY --link src/lib/market/catalog-presentation.ts src/lib/market/locale.ts "
+  + "src/lib/market/persisted-money.ts src/lib/market/types.ts ./src/lib/market/";
+
+const REQUIRED_BUILD_ENTRYPOINTS = new Set([
+  "scripts/build-refund-worker-bundles.mts",
+  "containers/refund-worker/entrypoint.ts",
+  "scripts/refund-execution-worker.ts",
+  "scripts/refund-sandbox-provider-free-preflight.ts",
+  "scripts/eximbay-refund-canary.ts",
+  "scripts/eximbay-contacted-refund-evidence-once.ts",
+  "scripts/eximbay-contacted-refund-success-close-once.ts",
+  "scripts/eximbay-contacted-reconciliation.ts",
+  "scripts/eximbay-refund-reentry.ts",
+  "scripts/pl09-targeted-refund-email-dispatch.ts",
+]);
+
+function isRequiredBuildSource(path: string): boolean {
+  return path.startsWith("src/lib/") || REQUIRED_BUILD_ENTRYPOINTS.has(path);
+}
+
+function missingBuildStageSources(
+  dockerfile: string,
+  requiredSources: readonly string[],
+): string[] {
+  const operands = repositoryContextCopyOperands(dockerfile);
+  return requiredSources.filter((path) => !operands.some(
+    (operand) => path === operand || path.startsWith(`${operand}/`),
+  ));
+}
+
+function nonCanonicalBuildStageSources(
+  dockerfile: string,
+  canonicalContextPaths: readonly string[],
+): string[] {
+  return repositoryContextCopyOperands(dockerfile).filter(
+    (operand) => !canonicalContextPaths.some(
+      (path) => path === operand || path.startsWith(`${operand}/`),
+    ),
+  );
+}
+
+function repositoryContextCopyOperands(dockerfile: string): string[] {
+  const instructions = dockerfile.replace(/\\\r?\n\s*/gu, " ").split(/\r?\n/gu);
+  const operands: string[] = [];
+  for (const instruction of instructions) {
+    const tokens = instruction.trim().split(/\s+/u);
+    if (tokens[0]?.toUpperCase() !== "COPY") continue;
+    const argumentsOnly = tokens.slice(1);
+    if (argumentsOnly.some((token) => token.startsWith("--from="))) continue;
+    const paths = argumentsOnly.filter((token) => !token.startsWith("--"));
+    if (paths.length < 2 || paths.some((path) => path.startsWith("["))) {
+      throw new Error("REFUND_WORKER_DOCKERFILE_COPY_UNSUPPORTED");
+    }
+    for (const source of paths.slice(0, -1)) {
+      const normalized = source.replace(/^\.\//u, "").replace(/\/$/u, "");
+      operands.push(normalized);
+    }
+  }
+  return operands;
 }
 
 function migrationRuntimeDigest(
@@ -1747,6 +1982,9 @@ function syntheticRuntimeInventory(
     regular("/app/synthetic-bundle.mjs", "5".repeat(64)),
     directory("/cloudsql", 65532, 65532, 0o700),
     directory("/etc"),
+    directory("/etc/ssl"),
+    directory("/etc/ssl/certs"),
+    regular("/etc/ssl/certs/ca-certificates.crt", "8".repeat(64), 0o644),
     directory("/tmp"),
     directory("/tmp/refund-worker", 65532, 65532, 0o700),
     directory("/usr"),

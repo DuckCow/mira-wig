@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import {
   CheckoutSessionStatus,
   CustomerRefundIntakeReasonCode,
@@ -116,7 +116,7 @@ describe("promotion recovery entitlement", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await client.$disconnect();
+    await client?.$disconnect();
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     await admin.end();
   });
@@ -1697,12 +1697,16 @@ async function rollbackQuietly(client: Client): Promise<void> {
 }
 
 async function applyRepositoryMigrations(client: Client): Promise<void> {
+  const { rows: [{ schema }] } = await client.query<{ schema: string }>("SELECT current_schema() AS schema");
+  if (!/^promo_recovery_(?:r4_)?[a-f0-9]+$/u.test(schema)) throw new Error("ISOLATED_RECOVERY_SCHEMA_REQUIRED");
   const root = join(process.cwd(), "prisma/migrations");
   const entries = (await readdir(root, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .sort((left, right) => left.name < right.name ? -1 : 1);
   for (const entry of entries) {
-    const sql = await readFile(join(root, entry.name, "migration.sql"), "utf8");
+    // Scope explicit production schema references to this disposable test schema.
+    const sql = (await readFile(join(root, entry.name, "migration.sql"), "utf8"))
+      .replaceAll("public.", `"${schema}".`);
     const enumSafeSql = sql.includes("ALTER TYPE") && sql.includes("ADD VALUE")
       ? `BEGIN;\n${sql.replace(
           /ALTER TYPE[^;]+ADD VALUE[^;]+;/gu,
@@ -1715,7 +1719,7 @@ async function applyRepositoryMigrations(client: Client): Promise<void> {
 
 function isolatedPrismaClient(connectionString: string, schema: string): PrismaClient {
   return new PrismaClient({
-    adapter: new PrismaPg(
+    adapter: createPrismaPg(
       { connectionString, options: `-c timezone=UTC -c search_path=${schema}` },
       { schema },
     ),

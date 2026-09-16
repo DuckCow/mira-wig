@@ -67,6 +67,56 @@ describe("AWS SES v2 transactional email adapter", () => {
     await expect(client.config.maxAttempts()).resolves.toBe(1);
   });
 
+  it("routes sandbox/prelaunch delivery only to the configured safe recipient", async () => {
+    const commands: SendEmailCommand[] = [];
+    const port = createSesTransactionalEmailPort({
+      ...validConfig(),
+      recipientRouting: {
+        mode: "SANDBOX_PRELAUNCH",
+        safeRecipient: "authorized@example.test",
+      },
+    }, () => ({
+      send: (command) => {
+        commands.push(command);
+        return Promise.resolve(successOutput());
+      },
+    }));
+
+    await port.send(validInput());
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.input.Destination).toEqual({
+      ToAddresses: ["authorized@example.test"],
+    });
+    expect(JSON.stringify(commands[0]?.input.Destination)).not.toContain(RECIPIENT);
+  });
+
+  it("preserves the projected customer recipient in production routing", async () => {
+    const commands: SendEmailCommand[] = [];
+    const port = createSesTransactionalEmailPort({
+      ...validConfig(),
+      recipientRouting: { mode: "PRODUCTION" },
+    }, () => ({
+      send: (command) => {
+        commands.push(command);
+        return Promise.resolve(successOutput());
+      },
+    }));
+
+    await port.send(validInput());
+
+    expect(commands[0]?.input.Destination).toEqual({ ToAddresses: [RECIPIENT] });
+  });
+
+  it("rejects a missing sandbox recipient before constructing or invoking SES", () => {
+    const factory = vi.fn();
+    expect(() => createSesTransactionalEmailPort({
+      ...validConfig(),
+      recipientRouting: { mode: "SANDBOX_PRELAUNCH" },
+    }, factory)).toThrow("SES_CONFIGURATION_INVALID");
+    expect(factory).not.toHaveBeenCalled();
+  });
+
   it("injects a fake client without credentials or network and passes one AbortSignal", async () => {
     const configs: Readonly<{ region: string; maxAttempts: 1 }>[] = [];
     const signals: AbortSignal[] = [];

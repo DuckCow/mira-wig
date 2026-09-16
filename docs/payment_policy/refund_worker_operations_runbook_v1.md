@@ -1,5 +1,25 @@
 # Refund worker operations runbook v1
 
+## Incident command retirement — 2026-09-16
+
+`MIRA-REFUND-INCIDENT-CLEANUP-CANONICAL-RECOVERY-01` removes the standalone
+`eximbay-retrieve-shape-diagnostic-once` command from the current worker,
+its CLI and bundle, and the unused database seal-reader
+`verifyExactConsumedEximbayRefundReentrySeal`. Neither is an available
+operator recovery procedure. There is no replacement command or alias.
+
+The value-free retrieve receipt validator remains available for offline
+historical verification. Provider preflight parsing and its diagnostic types
+remain unchanged. The frozen `EXIMBAY_REFUND_REENTRY_TARGET` identity also
+remains unchanged because uncontacted recovery and proof-bound contacted
+success still depend on it. Frozen image/evidence contracts describe their
+original artifacts; they do not require reinstalling the retired command in
+a new worker build.
+
+The authenticated re-entry runner, contacted evidence/closure owners, and
+existing runtime/credential orchestration remain installed. This retirement
+does not authorize running them, applying Terraform, or activating a worker.
+
 P3E-B1 leaves all operations commands provider-free and outside the production distributed-
 admission lock. `OVERLAP_SKIPPED` means no provider-capable work began; operators must not treat it
 as `CYCLE_COMPLETE`, provider success, a retry request, or authority to execute another canary.

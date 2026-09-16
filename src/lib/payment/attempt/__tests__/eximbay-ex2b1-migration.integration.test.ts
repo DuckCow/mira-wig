@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Client } from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requireOwnedRefundTestCluster } from "../../refund/__tests__/retained-refund-test-history";
 
 const MIGRATION_DIRECTORY = "20260811120000_eximbay_ex2b1_provider_order_identity";
 const MIGRATION_PATH = join(process.cwd(), "prisma/migrations", MIGRATION_DIRECTORY, "migration.sql");
@@ -123,25 +124,40 @@ describe("EX2B1 repository migration history", () => {
     await admin.end();
   });
 
-  it("deploys the complete repository history into an empty PostgreSQL schema", async () => {
-    const schema = trackSchema(schemas, "ex2b1_full");
-    await deployRepositoryMigrations(schema);
-
-    await expect(columnExistsInSchema(admin, schema, "Payment", "providerOrderId"))
-      .resolves.toBe(true);
-    const applied = await admin.query<{ count: number }>(`
-      SELECT COUNT(*)::integer AS "count"
-      FROM ${quoteIdentifier(schema)}."_prisma_migrations"
-      WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL
-    `);
-    expect(applied.rows[0]?.count).toBe(47);
+  it("deploys the complete repository history into an empty PostgreSQL database", async () => {
+    await requireOwnedRefundTestCluster();
+    const name = `ex2b1_full_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(requireSafeTestDatabaseUrl());
+    url.pathname = `/${name}`;
+    url.searchParams.set("schema", "public");
+    // Preserve the installed security functions' fixed public namespace while
+    // still running every repository migration against an empty database.
+    await admin.query(`CREATE DATABASE ${quoteIdentifier(name)}`);
+    const candidate = new Client({ connectionString: url.toString() });
+    try {
+      await candidate.connect();
+      await deployRepositoryMigrations(url.toString());
+      await expect(columnExistsInSchema(candidate, "public", "Payment", "providerOrderId"))
+        .resolves.toBe(true);
+      const applied = await candidate.query<{ migration_name: string }>(`
+        SELECT "migration_name" FROM public."_prisma_migrations"
+        WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL
+        ORDER BY "migration_name"
+      `);
+      const expected = (await readdir(join(process.cwd(), "prisma/migrations")))
+        .filter((entry) => /^\d{14}_/u.test(entry)).sort();
+      expect(applied.rows.map((row) => row.migration_name)).toEqual(expected);
+    } finally {
+      await candidate.end();
+      await admin.query(`DROP DATABASE ${quoteIdentifier(name)}`);
+    }
   });
 
   it("fails on a real prior-migration schema with a historical EXIMBAY row before partial installation", async () => {
     const schema = trackSchema(schemas, "ex2b1_prior");
     const temporaryRoot = await createPreviousMigrationProject();
     temporaryRoots.push(temporaryRoot);
-    await deployRepositoryMigrations(schema, temporaryRoot);
+    await deployRepositoryMigrations(databaseUrlForSchema(schema), temporaryRoot);
     const priorClient = new Client({ connectionString: databaseUrlForSchema(schema) });
     await priorClient.connect();
     await priorClient.query(`SET search_path TO ${quoteIdentifier(schema)}`);
@@ -221,7 +237,7 @@ async function createPreviousMigrationProject(): Promise<string> {
   return root;
 }
 
-async function deployRepositoryMigrations(schema: string, cwd = process.cwd()): Promise<void> {
+async function deployRepositoryMigrations(databaseUrl: string, cwd = process.cwd()): Promise<void> {
   await execFileAsync(process.execPath, [
     join(process.cwd(), "node_modules/prisma/build/index.js"),
     "migrate",
@@ -230,7 +246,7 @@ async function deployRepositoryMigrations(schema: string, cwd = process.cwd()): 
     join(cwd, "prisma.config.ts"),
   ], {
     cwd,
-    env: { ...process.env, DATABASE_URL: databaseUrlForSchema(schema) },
+    env: { ...process.env, DATABASE_URL: databaseUrl },
   });
 }
 

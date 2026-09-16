@@ -1,0 +1,187 @@
+import { GoogleAuth, OAuth2Client } from "google-auth-library";
+import { record, uuid, RefundAuthorizationError } from "./contract";
+import { sameJson, templateForGrant, type RefundReentryRelease } from "./release";
+
+export type RuntimeIdentityPort = Readonly<{
+  verifyIdToken(token: string, audience: string): Promise<unknown>;
+  getExecution(name: string): Promise<unknown>;
+}>;
+
+export type RefundExecutionVerificationFailureStage =
+  | "TOKEN_VERIFICATION"
+  | "EXECUTION_LOOKUP"
+  | "EXECUTION_VERIFICATION";
+
+// This preserves the public failure code while carrying only an allowlisted
+// diagnostic stage to the in-process HTTP boundary.
+export class RefundExecutionVerificationError extends RefundAuthorizationError {
+  constructor(readonly stage: RefundExecutionVerificationFailureStage) {
+    super("EXECUTION_UNVERIFIED");
+    this.name = "RefundExecutionVerificationError";
+  }
+}
+
+// The production seam uses signed Google identity and the immutable control-plane
+// Execution resource. Body/env strings are only locators. No network occurs on import.
+export function createGoogleRuntimeIdentity(): RuntimeIdentityPort {
+  return {
+    async verifyIdToken(token, audience) {
+      const ticket = await new OAuth2Client().verifyIdToken({ idToken: token, audience });
+      return ticket.getPayload();
+    },
+    async getExecution(name) {
+      const client = await new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] }).getClient();
+      const response = await client.request<unknown>({
+        url: `https://run.googleapis.com/v2/${name}`, method: "GET", timeout: 10_000, retry: false,
+      });
+      return response.data;
+    },
+  };
+}
+
+export const googleRuntimeIdentity = createGoogleRuntimeIdentity();
+
+// Private constructor prevents ordinary callers from supplying an actor/image string
+// as a verified context. Tests replace only the two actual external identity seams.
+export class VerifiedRefundExecution {
+  private constructor(
+    readonly principalId: string, readonly executionId: string, readonly executionUid: string,
+    readonly releasePolicyDigest: string, readonly grantId: string,
+  ) { Object.freeze(this); }
+
+  static async verify(
+    token: string, executionName: string, grantId: string, release: RefundReentryRelease,
+    port: RuntimeIdentityPort = googleRuntimeIdentity,
+  ): Promise<VerifiedRefundExecution> {
+    if (!executionName.startsWith(`${release.jobName}/executions/`)
+      || !/\/executions\/[a-z0-9-]+$/u.test(executionName) || executionName.length > 255) {
+      throw new RefundExecutionVerificationError("EXECUTION_VERIFICATION");
+    }
+    const identity = await verificationStage("TOKEN_VERIFICATION", () => port.verifyIdToken(token, release.audience));
+    await verificationStage("TOKEN_VERIFICATION", () => requireIdentity(identity, release));
+    const execution = await verificationStage("EXECUTION_LOOKUP", () => port.getExecution(executionName));
+    const verifiedExecution = await verificationStage("EXECUTION_VERIFICATION", () => verifiedExecutionValue(execution, executionName, grantId, release));
+    return new VerifiedRefundExecution(release.serviceAccountSubject, executionName, verifiedExecution.uid, release.digest, grantId);
+  }
+}
+
+async function verificationStage<T>(
+  stage: RefundExecutionVerificationFailureStage,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    // SDK errors can contain request credentials. Expose only a bounded stage.
+    throw new RefundExecutionVerificationError(stage);
+  }
+}
+
+function requireIdentity(identity: unknown, release: RefundReentryRelease): void {
+  if (!record(identity)) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+  const valid = [
+    identity.sub === release.serviceAccountSubject, identity.email === release.serviceAccountEmail,
+    identity.email_verified === true, identity.aud === release.audience,
+    identity.iss === "https://accounts.google.com" || identity.iss === "accounts.google.com",
+    typeof identity.exp === "number" && identity.exp > Date.now() / 1000,
+  ].every(Boolean);
+  if (!valid) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+}
+
+function requireExecution(value: unknown, name: string, grantId: string, release: RefundReentryRelease): asserts value is Record<string, unknown> & { uid: string } {
+  if (!record(value) || !uuid(value.uid)) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+  const valid = [value.name === name, value.taskCount === 1, value.parallelism === 1,
+    value.completionTime === undefined, value.deleteTime === undefined,
+    sameExecutionTemplate(value.template, executionTemplateForGrant(release, grantId))].every(Boolean);
+  if (!valid) throw new RefundAuthorizationError("EXECUTION_UNVERIFIED");
+}
+
+function verifiedExecutionValue(value: unknown, name: string, grantId: string, release: RefundReentryRelease): Record<string, unknown> & { uid: string } {
+  requireExecution(value, name, grantId, release);
+  return value;
+}
+
+// Cloud Run permits an Execution's env entries to be returned in a different order
+// from the reviewed TaskTemplate. Array position is not an env identity; every other
+// TaskTemplate array (for example args) remains compared by sameJson in this boundary.
+function sameExecutionTemplate(actual: unknown, expected: unknown): boolean {
+  if (!record(actual) || !record(expected) || !Array.isArray(actual.containers) || !Array.isArray(expected.containers)
+    || actual.containers.length !== expected.containers.length) return false;
+  const { containers: actualContainers, ...actualRest } = actual;
+  const { containers: expectedContainers, ...expectedRest } = expected;
+  return sameJson(actualRest, expectedRest)
+    && actualContainers.every((container, index) => sameExecutionContainer(container, expectedContainers[index]));
+}
+
+function sameExecutionContainer(actual: unknown, expected: unknown): boolean {
+  if (!record(actual) || !record(expected)) return false;
+  const { env: actualEnv, ...actualRest } = actual;
+  const { env: expectedEnv, ...expectedRest } = expected;
+  return sameJson(actualRest, expectedRest) && sameEnvironment(actualEnv, expectedEnv);
+}
+
+type EnvironmentValue = Readonly<{ kind: "literal"; value: string } | { kind: "secret"; secret: string; version: string }>;
+
+function sameEnvironment(actual: unknown, expected: unknown): boolean {
+  const actualEntries = environmentEntries(actual);
+  const expectedEntries = environmentEntries(expected);
+  if (!actualEntries || !expectedEntries || actualEntries.size !== expectedEntries.size) return false;
+  return [...actualEntries].every(([name, value]) => sameJson(value, expectedEntries.get(name)));
+}
+
+function environmentEntries(value: unknown): Map<string, EnvironmentValue> | null {
+  if (!Array.isArray(value)) return null;
+  const entries = new Map<string, EnvironmentValue>();
+  for (const entry of value) {
+    const parsed = parseEnvironmentEntry(entry);
+    if (!parsed || entries.has(parsed.name)) return null;
+    entries.set(parsed.name, parsed.value);
+  }
+  return entries;
+}
+
+function parseEnvironmentEntry(value: unknown): Readonly<{ name: string; value: EnvironmentValue }> | null {
+  const name = environmentName(value);
+  if (!name || !record(value)) return null;
+  return Object.hasOwn(value, "value") ? literalEnvironmentEntry(value, name) : secretEnvironmentEntry(value, name);
+}
+
+function environmentName(value: unknown): string | null {
+  if (!record(value) || typeof value.name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value.name)) return null;
+  return value.name;
+}
+
+function literalEnvironmentEntry(value: Record<string, unknown>, name: string): Readonly<{ name: string; value: EnvironmentValue }> | null {
+  if (!exactKeys(value, ["name", "value"]) || typeof value.value !== "string") return null;
+  return { name, value: { kind: "literal", value: value.value } };
+}
+
+function secretEnvironmentEntry(value: Record<string, unknown>, name: string): Readonly<{ name: string; value: EnvironmentValue }> | null {
+  const selector = environmentSecretSelector(value);
+  if (!selector) return null;
+  const { secret, version } = selector;
+  if (typeof secret !== "string" || typeof version !== "string" || !validSecretSelector(secret, version)) return null;
+  return { name, value: { kind: "secret", secret, version } };
+}
+
+function environmentSecretSelector(value: Record<string, unknown>): Record<string, unknown> | null {
+  if (!exactKeys(value, ["name", "valueSource"]) || !record(value.valueSource) || !exactKeys(value.valueSource, ["secretKeyRef"])) return null;
+  const selector = value.valueSource.secretKeyRef;
+  return record(selector) && exactKeys(selector, ["secret", "version"]) ? selector : null;
+}
+
+function validSecretSelector(secret: string, version: string): boolean {
+  return /^[A-Za-z0-9_-]+$/u.test(secret) && /^(?:[1-9]\d*|latest)$/u.test(version);
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function executionTemplateForGrant(release: RefundReentryRelease, grantId: string): unknown {
+  const template = templateForGrant(release, grantId);
+  if (!record(template)) throw new RefundAuthorizationError("CONFIG_INVALID");
+  const { vpcAccess: _vpcAccess, ...executionTemplate } = template;
+  return executionTemplate;
+}

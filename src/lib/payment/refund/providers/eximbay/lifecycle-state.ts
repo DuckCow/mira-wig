@@ -244,7 +244,7 @@ function loadEvidence(tx: EximbayLifecycleTx, commandId: string) {
   });
 }
 
-async function captureDatabaseTime(tx: EximbayLifecycleTx): Promise<Date> {
+export async function captureDatabaseTime(tx: EximbayLifecycleTx): Promise<Date> {
   const rows = await tx.$queryRaw<{ capturedAt: Date }[]>(Prisma.sql`
     SELECT date_trunc('milliseconds', clock_timestamp()) AS "capturedAt"
   `);

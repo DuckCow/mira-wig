@@ -1029,13 +1029,24 @@ model RefundExecutionCommand {
   events                       RefundExecutionCommandEvent[]
   dispatchAttempts             RefundExecutionDispatchAttempt[]
   eximbaySandboxCanaryApproval EximbayRefundSandboxCanaryApproval?
+  executionAuthorizations RefundExecutionAuthorization[]
 
+  @@unique([id, refundAttemptId], map: "RefundCommand_authorization_target_key")
   @@index([status, availableAt, createdAt])
   @@index([status, leaseUntil])
 }
 
 /// Durable, one-use human authority for one exact Eximbay SANDBOX canary command.
 model EximbayRefundSandboxCanaryApproval {
+  approvalAuthorityDigestV2 String? @db.VarChar(64)
+  custodyArtifactSha256 String? @db.VarChar(64)
+  syntheticProvenanceDigest String? @db.VarChar(64)
+  noCustomerPiiAttested Boolean?
+  merchantAccountBindingId String? @db.VarChar(64)
+  credentialGenerationBindingId String? @db.VarChar(64)
+  jobContractVersion String? @db.VarChar(64)
+  custodyContractVersion String? @db.VarChar(64)
+  targetContractVersion String? @db.VarChar(64)
   id                             String          @id @default(cuid())
   formatVersion                  String          @db.VarChar(64)
   provider                       PaymentProvider
@@ -1071,6 +1082,7 @@ model RefundExecutionCommandEvent {
   createdAt       DateTime                        @default(now()) @db.Timestamp(3)
 
   command RefundExecutionCommand @relation(fields: [commandId], references: [id], onDelete: Restrict)
+  consumedAuthorization RefundExecutionAuthorization?
 
   @@unique([commandId, leaseGeneration, eventType], map: "RefundExecutionCommandEvent_commandId_leaseGeneration_eventType")
   @@index([commandId, occurredAt])
@@ -1137,6 +1149,40 @@ model RefundExecutionProviderOperationBinding {
   refundAttempt                RefundAttempt                                @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict, map: "RefundProviderBinding_refundAttempt_fkey")
   eligibilityProof             RefundExecutionProviderEligibilityProof?
   eximbayPreflightObservations RefundExecutionEximbayPreflightObservation[]
+  executionAuthorizations RefundExecutionAuthorization[]
+
+  @@unique([id, refundAttemptId], map: "RefundBinding_authorization_target_key")
+}
+
+/// Execution permission only. Financial intent and provider contact remain in their existing ledgers.
+/// Partial uniqueness, lifecycle immutability and deferred transition coupling are owned by migration M.
+model RefundExecutionAuthorization {
+  id                         String @id @default(cuid())
+  issuanceRequestId          String @unique @db.Uuid
+  commandId                  String
+  refundAttemptId            String
+  providerOperationBindingId String
+  targetBindingDigest        String @db.VarChar(64)
+  expectedPredecessorGeneration Int
+  operationClass             String @db.VarChar(64)
+  releasePolicyDigest        String @db.VarChar(64)
+  issuedByUserId             String @db.VarChar(255)
+  issuedAt                   DateTime @db.Timestamp(3)
+  expiresAt                  DateTime @db.Timestamp(3)
+  revokedAt                  DateTime? @db.Timestamp(3)
+  revokedByUserId            String? @db.VarChar(255)
+  consumedAt                 DateTime? @db.Timestamp(3)
+  consumedByPrincipalId      String? @db.VarChar(255)
+  consumedExecutionId        String? @unique @db.VarChar(255)
+  consumedExecutionUid       String? @unique @db.Uuid
+  consumedLeaseEventId       String? @unique
+
+  command RefundExecutionCommand @relation(fields: [commandId, refundAttemptId], references: [id, refundAttemptId], onDelete: Restrict, onUpdate: Restrict, map: "RefundAuthorization_command_fkey")
+  binding RefundExecutionProviderOperationBinding @relation(fields: [providerOperationBindingId, refundAttemptId], references: [id, refundAttemptId], onDelete: Restrict, onUpdate: Restrict, map: "RefundAuthorization_binding_fkey")
+  consumedLeaseEvent RefundExecutionCommandEvent? @relation(fields: [consumedLeaseEventId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "RefundAuthorization_event_fkey")
+
+  @@index([commandId, issuedAt, id], map: "RefundAuthorization_command_history_idx")
+  @@index([providerOperationBindingId], map: "RefundAuthorization_binding_idx")
 }
 
 /// Immutable Eximbay payment state admitted before the first physical cancel

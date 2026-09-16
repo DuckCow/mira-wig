@@ -1,10 +1,10 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { consumeEximbayRefundCanaryApproval } from "./consume-eximbay-refund-canary-approval";
+import { createPrismaPg } from "../../database/prisma-pg";
+import { consumeEximbayRefundCanaryApproval } from "./consume-eximbay-refund-canary-approval-v2";
 import {
   parseEximbayRefundCanaryEnvironment,
   type EximbayRefundCanaryEnvironment,
-} from "./eximbay-refund-canary-environment";
+} from "./eximbay-refund-canary-environment-v2";
 import { readExactEximbayRefundCanarySecret } from "./eximbay-refund-canary-secret-reader";
 import { selectExactEximbayRefundCanaryCandidate } from "./eximbay-refund-canary-exact-selector";
 import { createEximbayRefundPreflightConfig } from "./providers/eximbay/preflight-contract";
@@ -46,9 +46,6 @@ export type EximbayRefundCanaryDependencies = Readonly<{
   disconnectDatabase: (database: PrismaClient) => Promise<void>;
   readSecret: typeof readExactEximbayRefundCanarySecret;
   fetch: EximbayRefundRestFetch;
-  sleep: (milliseconds: number) => Promise<void>;
-  now: () => number;
-  timeoutMs: number;
   runAdmission: (
     env: RuntimeEnv,
     operation: () => Promise<EximbayRefundCanaryResult>,
@@ -59,14 +56,11 @@ export const defaultEximbayRefundCanaryDependencies: EximbayRefundCanaryDependen
   Object.freeze({
     createDatabase: (env) => {
       if (!env.DATABASE_URL) throw new Error("DATABASE_URL_REQUIRED");
-      return new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
+      return new PrismaClient({ adapter: createPrismaPg({ connectionString: env.DATABASE_URL }) });
     },
     disconnectDatabase: (database) => database.$disconnect(),
     readSecret: readExactEximbayRefundCanarySecret,
     fetch: globalThis.fetch,
-    sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-    now: () => performance.now(),
-    timeoutMs: 120_000,
     runAdmission: (env, operation) => runWithRefundProviderContactAdmission(env, operation),
   });
 
@@ -120,7 +114,7 @@ async function runAdmitted(
     } catch {
       return result(false, "CREDENTIAL_UNAVAILABLE");
     }
-    return executeExactTarget(database, consumed.commandId, authority, env, transport, dependencies);
+    return executeExactTarget(database, consumed.commandId, authority, env, transport);
   });
   if (admitted.outcome === "BUSY") return result(false, "OVERLAP_SKIPPED");
   if (admitted.outcome === "ADMISSION_UNAVAILABLE") return result(false, "NO_PROVIDER_CONTACT");
@@ -135,13 +129,8 @@ async function executeExactTarget(
   authority: EximbayRefundCanaryEnvironment,
   env: RuntimeEnv,
   transport: EximbayRefundRestFetch,
-  dependencies: EximbayRefundCanaryDependencies,
 ): Promise<EximbayRefundCanaryResult> {
-  const counts: ContactCounts = { preflightRetrieveCount: 0, reconciliationLookupCount: 0, cancellationCount: 0 };
-  const count = (key: keyof ContactCounts): EximbayRefundRestFetch => async (...args) => {
-    counts[key] += 1;
-    return transport(...args);
-  };
+  const { counts, retrieve, cancellation, lookup } = createSingleShotEximbayCanaryTransport(transport);
   const config = createEximbayRefundPreflightConfig({
     mode: "SANDBOX",
     mid: authority.mid,
@@ -153,21 +142,39 @@ async function executeExactTarget(
     cancellation: unreachableTossCancellation,
     eximbay: {
       config,
-      retrieve: count("preflightRetrieveCount"),
-      lookup: count("reconciliationLookupCount"),
-      cancellation: count("cancellationCount"),
+      retrieve,
+      lookup,
+      cancellation,
     },
   });
-  const deadline = dependencies.now() + dependencies.timeoutMs;
-  while (dependencies.now() < deadline) {
-    const iteration = await runExactTargetIteration(
-      database, commandId, authority, env, route, counts,
-    );
-    if (iteration) return iteration;
-    await dependencies.sleep(250);
-  }
-  return possible(counts.cancellationCount > 0 || counts.reconciliationLookupCount > 0
-    ? "CANARY_TIMEOUT" : contactCode(counts), counts);
+  // One READY dispatch only. A temporary/unknown result is terminal for this approval.
+  return runExactTargetIteration(database, commandId, authority, env, route, counts);
+}
+
+// Cap at the transport boundary before contact, including rejection/throw/concurrency.
+// The shared worker's recovery capability is deliberately unavailable to this canary.
+export function createSingleShotEximbayCanaryTransport(transport: EximbayRefundRestFetch) {
+  const counts: ContactCounts = {
+    preflightRetrieveCount: 0, reconciliationLookupCount: 0, cancellationCount: 0,
+  };
+  const retrieve: EximbayRefundRestFetch = async (...args) => {
+    if (counts.preflightRetrieveCount !== 0 || counts.cancellationCount !== 0) {
+      throw new Error("EXIMBAY_CANARY_RETRIEVE_LIMIT");
+    }
+    counts.preflightRetrieveCount += 1;
+    return transport(...args);
+  };
+  const cancellation: EximbayRefundRestFetch = async (...args) => {
+    if (counts.preflightRetrieveCount !== 1 || counts.cancellationCount !== 0) {
+      throw new Error("EXIMBAY_CANARY_CANCEL_LIMIT");
+    }
+    counts.cancellationCount += 1;
+    return transport(...args);
+  };
+  const lookup: EximbayRefundRestFetch = () => Promise.reject(
+    new Error("EXIMBAY_CANARY_RECOVERY_FORBIDDEN"),
+  );
+  return Object.freeze({ counts, retrieve, cancellation, lookup });
 }
 
 async function runExactTargetIteration(
@@ -177,10 +184,11 @@ async function runExactTargetIteration(
   env: RuntimeEnv,
   route: ReturnType<typeof createRefundExecutionWorkerRouter>,
   counts: ContactCounts,
-): Promise<EximbayRefundCanaryResult | null> {
+): Promise<EximbayRefundCanaryResult> {
   try {
     const candidate = await selectExactEximbayRefundCanaryCandidate(database, commandId);
     if (!candidate) return exactTargetTerminalResult(database, commandId, counts);
+    if (candidate.candidateClass !== "READY") return possible(contactCode(counts), counts);
     const outcome = await route(database, candidate, authority.consumedExecutionId, env);
     return canaryRouteResult(outcome, counts);
   } catch {
@@ -192,27 +200,25 @@ async function exactTargetTerminalResult(
   database: PrismaClient,
   commandId: string,
   counts: ContactCounts,
-): Promise<EximbayRefundCanaryResult | null> {
+): Promise<EximbayRefundCanaryResult> {
   const state = await database.refundExecutionCommand.findUnique({
     where: { id: commandId }, select: { status: true },
   });
   if (state?.status === "DONE") return withCounts(true, "KNOWN_SUCCESS", counts);
-  return state?.status === "PARKED" ? possible("MANUAL_REVIEW", counts) : null;
+  return possible(state?.status === "PARKED" ? "MANUAL_REVIEW" : contactCode(counts), counts);
 }
 
 function canaryRouteResult(
   outcome: RefundExecutionWorkerRouteOutcome,
   counts: ContactCounts,
-): EximbayRefundCanaryResult | null {
+): EximbayRefundCanaryResult {
   if (["SUCCEEDED", "REPLAYED"].includes(outcome.kind)) {
     return withCounts(true, "KNOWN_SUCCESS", counts);
   }
   if (["MANUAL", "INCONSISTENT"].includes(outcome.kind)) {
     return possible("MANUAL_REVIEW", counts);
   }
-  return ["CONFIG_INVALID", "FAILED", "CONFLICT"].includes(outcome.kind)
-    ? possible(contactCode(counts), counts)
-    : null;
+  return possible(contactCode(counts), counts);
 }
 
 const unreachableTossLookup: TossRefundLookupPort = () => Promise.reject(

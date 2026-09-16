@@ -21,39 +21,54 @@ const RECONCILE = join(
 );
 
 describe("Eximbay refund preflight dormancy", () => {
-  it("is reachable only through the approved dormant production worker path", () => {
+  it("is reachable only through reviewed worker, canary and re-entry paths", () => {
     const files = productionSourceFiles();
-    expect(reverseReachableFiles(AUTHORIZE, files).map(repositoryPath)).toEqual([
+    expect(reverseReachableFiles(AUTHORIZE, files).map(repositoryPath).sort()).toEqual([
       "src/lib/payment/refund/providers/eximbay/authorize-first-dispatch.ts",
       "src/lib/payment/refund/worker-result-classification.ts",
       "src/lib/payment/refund/worker-router.ts",
       "src/lib/payment/refund/run-eximbay-refund-canary-once.ts",
+      "src/lib/payment/refund/run-eximbay-refund-canary-once-main-v1.ts",
+      "src/lib/payment/refund/run-eximbay-refund-canary-once-pl-v1.ts",
       "src/lib/payment/refund/run-refund-execution-worker-cycle.ts",
       "scripts/eximbay-refund-canary.ts",
       "src/lib/payment/refund/run-refund-execution-worker-host.ts",
       "scripts/refund-execution-worker.ts",
       "src/lib/payment/refund/worker-host-process.ts",
-    ]);
-    expect(reverseReachableFiles(CONTACT, files).map(repositoryPath)).toEqual([
+      "src/lib/payment/refund/run-eximbay-refund-reentry-once.ts",
+      "scripts/eximbay-refund-reentry.ts",
+      "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+    ].sort());
+    expect(reverseReachableFiles(CONTACT, files).map(repositoryPath).sort()).toEqual([
       "src/lib/payment/refund/providers/eximbay/execute-contact.ts",
       "src/lib/payment/refund/worker-router.ts",
       "src/lib/payment/refund/run-eximbay-refund-canary-once.ts",
+      "src/lib/payment/refund/run-eximbay-refund-canary-once-main-v1.ts",
+      "src/lib/payment/refund/run-eximbay-refund-canary-once-pl-v1.ts",
       "src/lib/payment/refund/run-refund-execution-worker-cycle.ts",
       "scripts/eximbay-refund-canary.ts",
       "src/lib/payment/refund/run-refund-execution-worker-host.ts",
       "scripts/refund-execution-worker.ts",
       "src/lib/payment/refund/worker-host-process.ts",
-    ]);
-    expect(reverseReachableFiles(RECONCILE, files).map(repositoryPath)).toEqual([
+      "src/lib/payment/refund/run-eximbay-refund-reentry-once.ts",
+      "scripts/eximbay-refund-reentry.ts",
+      "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+    ].sort());
+    expect(reverseReachableFiles(RECONCILE, files).map(repositoryPath).sort()).toEqual([
       "src/lib/payment/refund/providers/eximbay/reconcile-refund.ts",
       "src/lib/payment/refund/worker-router.ts",
       "src/lib/payment/refund/run-eximbay-refund-canary-once.ts",
+      "src/lib/payment/refund/run-eximbay-refund-canary-once-main-v1.ts",
+      "src/lib/payment/refund/run-eximbay-refund-canary-once-pl-v1.ts",
       "src/lib/payment/refund/run-refund-execution-worker-cycle.ts",
       "scripts/eximbay-refund-canary.ts",
       "src/lib/payment/refund/run-refund-execution-worker-host.ts",
       "scripts/refund-execution-worker.ts",
       "src/lib/payment/refund/worker-host-process.ts",
-    ]);
+      "src/lib/payment/refund/run-eximbay-refund-reentry-once.ts",
+      "scripts/eximbay-refund-reentry.ts",
+      "src/lib/payment/refund/refund-worker-container-supervisor.ts",
+    ].sort());
   });
 
   it("does not add cancel, refund-id lookup, credential, or global fetch capability", () => {

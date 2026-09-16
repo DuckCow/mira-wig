@@ -113,6 +113,10 @@ function processFixture() {
       createDatabase,
       disconnectDatabase: () => Promise.resolve(),
       checkDatabaseConnectivity: () => Promise.resolve(),
+      readDatabaseIdentity: () => Promise.resolve(Object.freeze({
+        currentUser: "mira_refund_preflight",
+        currentDatabase: "refund_sandbox",
+      })),
       readPostgresqlMajor: () => Promise.resolve(18),
       loadRepositoryMigrations: () => Promise.resolve(Object.freeze([])),
       readMigrationLedger: () => Promise.resolve(Object.freeze({ exists: true, records: Object.freeze([]) })),
@@ -147,6 +151,8 @@ function successResult() {
     cloudProvisioningVerifiedByRuntime: false,
     checks: {
       database: "READY",
+      databaseUser: "mira_refund_preflight",
+      databaseName: "refund_sandbox",
       postgresqlMajor: 18,
       migrations: "READY",
       worker: "DISABLED_READY",

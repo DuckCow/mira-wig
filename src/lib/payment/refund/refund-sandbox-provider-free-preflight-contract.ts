@@ -25,6 +25,8 @@ type ProviderFreeSafetyState = Readonly<{
 
 export type RefundSandboxProviderFreePreflightChecks = Readonly<{
   database: "READY";
+  databaseUser: "mira_refund_preflight";
+  databaseName: "refund_sandbox";
   postgresqlMajor: 18;
   migrations: "READY";
   worker: "DISABLED_READY";
@@ -61,11 +63,13 @@ const RESULT_KEYS = Object.freeze([
   "cloudProvisioningVerifiedByRuntime",
 ] as const);
 const CHECK_KEYS = Object.freeze([
-  "database", "postgresqlMajor", "migrations", "worker", "health", "manualReview",
+  "database", "databaseUser", "databaseName", "postgresqlMajor", "migrations", "worker", "health", "manualReview",
   "reconciliation", "credential", "distributedAdmission",
 ] as const);
 const SUCCESS_CHECKS: RefundSandboxProviderFreePreflightChecks = Object.freeze({
   database: "READY",
+  databaseUser: "mira_refund_preflight",
+  databaseName: "refund_sandbox",
   postgresqlMajor: 18,
   migrations: "READY",
   worker: "DISABLED_READY",

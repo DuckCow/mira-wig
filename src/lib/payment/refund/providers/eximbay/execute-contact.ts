@@ -52,7 +52,7 @@ export type ExecuteEximbayRefundContactInput = Readonly<{
 }>;
 
 export type ExecuteEximbayRefundContactResult =
-  | Readonly<{ ok: true; state: "SUCCEEDED" | "WAITING_EVIDENCE"; replayed: boolean }>
+  | Readonly<{ ok: true; state: "SUCCEEDED" | "WAITING_EVIDENCE" | "PARKED"; replayed: boolean }>
   | Readonly<{ ok: false; code: string; message: string }>;
 
 export type EximbayRefundContactDependencies = Readonly<{
@@ -232,9 +232,10 @@ async function persistSuccess(
       authorizingLeaseGeneration: permit.authority.dispatch.leaseGeneration,
     },
   );
-  return persisted.ok
-    ? Object.freeze({ ok: true, state: "SUCCEEDED", replayed: false })
-    : ledgerFailure();
+  if (!persisted.ok) return ledgerFailure();
+  const disposition = plan.commandStatus === RefundExecutionCommandStatus.DONE
+    && plan.attemptStatus === RefundAttemptStatus.SUCCEEDED ? "SUCCEEDED" : "PARKED";
+  return Object.freeze({ ok: true, state: disposition, replayed: false });
 }
 
 async function persistUnknown(

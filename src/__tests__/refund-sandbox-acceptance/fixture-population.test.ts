@@ -506,6 +506,7 @@ describe("append-only fixture population authority", () => {
     }
   });
 
+  // Real durable fixture construction is not a five-second performance contract.
   it("rejects populated authority when the exact target approval entry is absent", async () => {
     const root = await temporaryRoot();
     const store = await createValidPopulation(root);
@@ -514,7 +515,7 @@ describe("append-only fixture population authority", () => {
     await expect(readEffectiveFixtureAuthority(
       store.runDirectory, TARGET, authorityDependencies(emptyRegistry),
     )).rejects.toThrow("FIXTURE_POPULATION_APPROVAL_REQUIRED");
-  });
+  }, 30_000);
 
   const authorityTamperCases: readonly [
     string,
@@ -1449,17 +1450,26 @@ describe("protected files and direct run-lock ownership", () => {
     const lockPath = join(root, "run.lock");
     const script = [
       'import {acquireRunMutationLock} from "./scripts/refund-sandbox-acceptance/exclusive-run-lock.ts";',
-      'try{const lock=await acquireRunMutationLock(process.argv[1],process.argv[2],"database");',
-      'process.stdout.write("won");await new Promise(resolve=>setTimeout(resolve,150));await lock.release();}',
-      'catch{process.stdout.write("lost");}',
+      'import {access,writeFile} from "node:fs/promises";',
+      'const wait=async p=>{const end=Date.now()+20000;for(;;){try{await access(p);return;}catch(e){if(e.code!=="ENOENT")throw e;}if(Date.now()>end)throw Error("BARRIER_TIMEOUT");await new Promise(r=>setTimeout(r,5));}};',
+      'const [lockPath,runId,root,id]=process.argv.slice(1);',
+      'await writeFile(root+"/ready-"+id,"");await wait(root+"/start");',
+      'let lock;try{lock=await acquireRunMutationLock(lockPath,runId,"database");}',
+      'catch(e){if(e.message!=="RUN_MUTATION_LOCK_UNAVAILABLE"||e.cause?.code!=="EEXIST")throw e;await writeFile(root+"/contended","");process.stdout.write("lost");}',
+      'if(lock){try{await wait(root+"/contended");await lock.assertHeld();process.stdout.write("won");}finally{await lock.release();}}',
     ].join("");
-    const [first, second] = await Promise.all([
-      childOutput(["--import", "tsx", "-e", script, lockPath, TARGET]),
-      childOutput(["--import", "tsx", "-e", script, lockPath, TARGET]),
+    const children = Promise.all([
+      childOutput(["--import", "tsx", "-e", script, lockPath, TARGET, root, "A"]),
+      childOutput(["--import", "tsx", "-e", script, lockPath, TARGET, root, "B"]),
     ]);
+    // Observe child failure immediately, including while waiting for readiness.
+    const failures = children.then(() => { throw new Error("CHILD_EXITED_BEFORE_START"); });
+    await Promise.race([waitForLockContenders(root), failures]);
+    await writeFile(join(root, "start"), "");
+    const [first, second] = await children;
     expect([first, second].sort()).toEqual(["lost", "won"]);
     expect(await pathExists(lockPath)).toBe(false);
-  });
+  }, 30_000);
 
   it("releases the file lock only across provider contact and reacquires before completion", async () => {
     const events: string[] = [];
@@ -2051,6 +2061,14 @@ function ordinaryCliOutput(
       resolvePromise(Object.freeze({ exitCode, stdout, stderr }));
     });
   });
+}
+
+async function waitForLockContenders(root: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  while (!(await pathExists(join(root, "ready-A"))) || !(await pathExists(join(root, "ready-B")))) {
+    if (Date.now() >= deadline) throw new Error("CONTENDER_READY_TIMEOUT");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function childOutput(args: readonly string[]): Promise<string> {

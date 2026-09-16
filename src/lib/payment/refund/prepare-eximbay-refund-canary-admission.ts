@@ -7,7 +7,7 @@ import {
   Prisma,
   PrismaClient,
 } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { createPrismaPg } from "../../database/prisma-pg";
 import {
   EXIMBAY_LIVE_API_KEY,
   EXIMBAY_SANDBOX_API_KEY,
@@ -76,7 +76,7 @@ EximbayRefundCanaryPreparationDependencies = Object.freeze({
   readArtifact: readExactArtifact,
   loadMigrationInventory: loadRefundWorkerMigrationInventory,
   createDatabase: (connectionString) => new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: createPrismaPg({ connectionString }),
   }),
   disconnectDatabase: (database) => database.$disconnect(),
 });

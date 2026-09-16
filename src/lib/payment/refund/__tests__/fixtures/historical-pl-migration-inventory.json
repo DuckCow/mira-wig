@@ -1,0 +1,216 @@
+{
+  "entries": [
+    {
+      "name": "20260609111830_init",
+      "path": "prisma/migrations/20260609111830_init/migration.sql",
+      "sha256": "eee998e678bcb54b0687f1fba0ff6bf37836684834c1ed0fe95f3e37a76d72a7"
+    },
+    {
+      "name": "20260611115741_add_wig_category_enum_and_sort_order",
+      "path": "prisma/migrations/20260611115741_add_wig_category_enum_and_sort_order/migration.sql",
+      "sha256": "8de8f52b8ecc7581e3f787fedf3f0cee557c7b5b1e15bd22c08ffed0ba2c6cfd"
+    },
+    {
+      "name": "20260613110936_internationalize_order_shipping_address",
+      "path": "prisma/migrations/20260613110936_internationalize_order_shipping_address/migration.sql",
+      "sha256": "171e75df7e58e65af7ee9f6804e9082fff2b570ef3dafe199e7fb78a24822f0c"
+    },
+    {
+      "name": "20260613180806_add_market",
+      "path": "prisma/migrations/20260613180806_add_market/migration.sql",
+      "sha256": "d79a13c96cbec7b30c5ab40e06ea3f02bab3e824c7ef6e8858d14c5eeb84d8ed"
+    },
+    {
+      "name": "20260613184301_add_order_market_and_pending_payment",
+      "path": "prisma/migrations/20260613184301_add_order_market_and_pending_payment/migration.sql",
+      "sha256": "83e44788527e116f18afa6023a6f0c5ecdcb41d3b76c1f9a6360d61ed827208e"
+    },
+    {
+      "name": "20260614103019_add_payment",
+      "path": "prisma/migrations/20260614103019_add_payment/migration.sql",
+      "sha256": "b34e71685fe3cac46cff4b97f2d232082855adecf2c699fd55adc90d3f5ce7b2"
+    },
+    {
+      "name": "20260615091002_add_fitting",
+      "path": "prisma/migrations/20260615091002_add_fitting/migration.sql",
+      "sha256": "d1226f6a0a9e39dbe15f9c0968126f177c90fa7508453a8fbc121accf00fc92b"
+    },
+    {
+      "name": "20260615092407_remove_tryon",
+      "path": "prisma/migrations/20260615092407_remove_tryon/migration.sql",
+      "sha256": "bd136e316754bf9fe9af57b6b20f070955c444cfdfcd2cf3178d799f3e7542f4"
+    },
+    {
+      "name": "20260624030522_add_payment_adjustments",
+      "path": "prisma/migrations/20260624030522_add_payment_adjustments/migration.sql",
+      "sha256": "2dfe4618e7809ad8c05429a5d86adb57a836f6227f7bc6175ddff2686b505f46"
+    },
+    {
+      "name": "20260624044648_add_payment_webhook_events",
+      "path": "prisma/migrations/20260624044648_add_payment_webhook_events/migration.sql",
+      "sha256": "17568e9d0739b9ac7985c32b49a84fb6997cf1b32a8d15fe54c4776ab48ffac0"
+    },
+    {
+      "name": "20260705204105_cutover_drop_legacy_payment_order",
+      "path": "prisma/migrations/20260705204105_cutover_drop_legacy_payment_order/migration.sql",
+      "sha256": "679e856dfdc6ded78fce4e68e3cdbfb9ebfab43e6fd95fe8584d4ffd0cc81071"
+    },
+    {
+      "name": "20260705214229_a2_payment_core_v0",
+      "path": "prisma/migrations/20260705214229_a2_payment_core_v0/migration.sql",
+      "sha256": "83b5de4d79f19f66312d40fd4759f38bc5a9f18af0b0a5cf254cd7be9d6a6e1d"
+    },
+    {
+      "name": "20260705221004_a2_addendum_outbox_updated_at",
+      "path": "prisma/migrations/20260705221004_a2_addendum_outbox_updated_at/migration.sql",
+      "sha256": "d4fa4ade6b60a9717cae7861041a9bdd560306b4fd0f7b917c255a9d9a6fe34d"
+    },
+    {
+      "name": "20260706130000_c2_i1_webhook_ingress_contract",
+      "path": "prisma/migrations/20260706130000_c2_i1_webhook_ingress_contract/migration.sql",
+      "sha256": "97ca66530855b483bc3eb0a2a115e47312c7ee9b1c97c6a1df8653f43771b935"
+    },
+    {
+      "name": "20260707090000_d1b_provider_ref",
+      "path": "prisma/migrations/20260707090000_d1b_provider_ref/migration.sql",
+      "sha256": "e5aa3f4c29914c9aa03ac0c01b6f4c3c0539802365991f1a009662d90d778b66"
+    },
+    {
+      "name": "20260707110000_d1b_confirm_idempotency_key",
+      "path": "prisma/migrations/20260707110000_d1b_confirm_idempotency_key/migration.sql",
+      "sha256": "eebd956d6b7f7654f15aae4821c4ba77d5f8c5178df43b3abdfdf11541176a27"
+    },
+    {
+      "name": "20260707130000_add_payment_mode",
+      "path": "prisma/migrations/20260707130000_add_payment_mode/migration.sql",
+      "sha256": "3b73d0014d792becc861ba46b128fec0002b030e995506bc767d6ab17766fce7"
+    },
+    {
+      "name": "20260708100000_d1d_payment_event_verified_provenance",
+      "path": "prisma/migrations/20260708100000_d1d_payment_event_verified_provenance/migration.sql",
+      "sha256": "52f9690862262d180e88ad5a5229893a272e10a9e9129d3b39101444980a2501"
+    },
+    {
+      "name": "20260709183224_add_refund_attempt_ledger",
+      "path": "prisma/migrations/20260709183224_add_refund_attempt_ledger/migration.sql",
+      "sha256": "abdac37d714bf3a8aa2fe2612ae16feb9624f0e7a1e861702819369cab0b911f"
+    },
+    {
+      "name": "20260710005308_add_refund_attempt_transition_audit",
+      "path": "prisma/migrations/20260710005308_add_refund_attempt_transition_audit/migration.sql",
+      "sha256": "2b17f1c8ef1640388a3e9bdfdbbe38ff4aa61751829f70357d313e8b460e9c70"
+    },
+    {
+      "name": "20260710011000_expand_order_status_for_refunds",
+      "path": "prisma/migrations/20260710011000_expand_order_status_for_refunds/migration.sql",
+      "sha256": "546e4eb20223512210f4893fe8d96559241101749e3593111381a1d0af1d31d4"
+    },
+    {
+      "name": "20260711023956_add_refund_execution_command_evidence",
+      "path": "prisma/migrations/20260711023956_add_refund_execution_command_evidence/migration.sql",
+      "sha256": "fd9c116f1e3e82f2513c2bb23dfbd25372fb72db224f2af240a622a097d37706"
+    },
+    {
+      "name": "20260714111840_add_customer_refund_intake",
+      "path": "prisma/migrations/20260714111840_add_customer_refund_intake/migration.sql",
+      "sha256": "a8113361bb21185b0ba7d3faa8753e2355563049c0e4e5921ad6854f2d29d1bd"
+    },
+    {
+      "name": "20260716090000_e2a_refund_execution_lease_fence",
+      "path": "prisma/migrations/20260716090000_e2a_refund_execution_lease_fence/migration.sql",
+      "sha256": "dc6aa8a0c42d61211855bacf5439236027bdc25c5c940e1fb9e364fbf5b212d7"
+    },
+    {
+      "name": "20260716160000_e2b1_refund_execution_command_events",
+      "path": "prisma/migrations/20260716160000_e2b1_refund_execution_command_events/migration.sql",
+      "sha256": "0e38aa15ff48729f57dc288bb16e26fe4d7b34d9eb9acd717a395dcd83c2c370"
+    },
+    {
+      "name": "20260716190000_e3a_refund_dispatch_authorization",
+      "path": "prisma/migrations/20260716190000_e3a_refund_dispatch_authorization/migration.sql",
+      "sha256": "bc5dd51022ba3a23a90e1a410a9c3d723e32b5ebf0211ae0251c220f3cb8acc2"
+    },
+    {
+      "name": "20260717100000_e3b1a_toss_refund_binding_contracts",
+      "path": "prisma/migrations/20260717100000_e3b1a_toss_refund_binding_contracts/migration.sql",
+      "sha256": "528bcb0ea30b65b1e195ff96a67e1d04e0ba3e5cd3cbf863cf1004a481606019"
+    },
+    {
+      "name": "20260717150000_e3b2a_toss_contact_proof_contracts",
+      "path": "prisma/migrations/20260717150000_e3b2a_toss_contact_proof_contracts/migration.sql",
+      "sha256": "697842bbff24c7fa995f9793aa59cc3a3aaa5f8ed2ea18cd92ddb89b05e5c3c5"
+    },
+    {
+      "name": "20260717220000_e3c_a3_recovery_provenance",
+      "path": "prisma/migrations/20260717220000_e3c_a3_recovery_provenance/migration.sql",
+      "sha256": "070df6b79e76d6b6b28dee6c5da611c374c8c330887ae6250a52f95b67e793c6"
+    },
+    {
+      "name": "20260731120000_add_manual_item_relations",
+      "path": "prisma/migrations/20260731120000_add_manual_item_relations/migration.sql",
+      "sha256": "64eb89f2ecc944f91a8d6678624c5939f9d65584cab08c37ac439b1506e4a529"
+    },
+    {
+      "name": "20260801120000_c0_commerce_integrity_foundation",
+      "path": "prisma/migrations/20260801120000_c0_commerce_integrity_foundation/migration.sql",
+      "sha256": "76aced83959b5bdfb09628121a0e6b2d7901680c19c50ff1e474f28593178373"
+    },
+    {
+      "name": "20260803100000_eximbay_ex1_provider_identity",
+      "path": "prisma/migrations/20260803100000_eximbay_ex1_provider_identity/migration.sql",
+      "sha256": "4696897b68f391af8dd12edc46cdcf3c67886e65268cee653f2c3c59a4693999"
+    },
+    {
+      "name": "20260811120000_eximbay_ex2b1_provider_order_identity",
+      "path": "prisma/migrations/20260811120000_eximbay_ex2b1_provider_order_identity/migration.sql",
+      "sha256": "90c7767da3ddef345fc1f942ca5a8263b97cc38e385c9850f5bb40d9ee3ca8a5"
+    },
+    {
+      "name": "20260819090000_checkout_cart_provenance",
+      "path": "prisma/migrations/20260819090000_checkout_cart_provenance/migration.sql",
+      "sha256": "f9fd5193305bc43212d04946f64521223f5ec3da4fba18d488e2d872404facf5"
+    },
+    {
+      "name": "20260820120000_refund_identity_regimes",
+      "path": "prisma/migrations/20260820120000_refund_identity_regimes/migration.sql",
+      "sha256": "73036f4466ff8da3ccad48a4c23205b30979a6d3d1591bd919a6a984d9f8953a"
+    },
+    {
+      "name": "20260820150000_eximbay_refund_preflight_observation",
+      "path": "prisma/migrations/20260820150000_eximbay_refund_preflight_observation/migration.sql",
+      "sha256": "5ddf625b2642b43f81b1d293ae29920665859406498b3de3732033576b78e979"
+    },
+    {
+      "name": "20260823090000_persist_payment_adapter_execution_identity",
+      "path": "prisma/migrations/20260823090000_persist_payment_adapter_execution_identity/migration.sql",
+      "sha256": "8d19c8d9150a3167291539f7b2c5ededc312b2d2292f513a555328549f7aebcc"
+    },
+    {
+      "name": "20260825090000_add_wig_style_localized_content",
+      "path": "prisma/migrations/20260825090000_add_wig_style_localized_content/migration.sql",
+      "sha256": "b5dc1a0e3806de0215a5392865b1ffa0e50c41e4ddc6df9a3ddc4793b1965e40"
+    },
+    {
+      "name": "20260825120000_eximbay_checkout_recovery",
+      "path": "prisma/migrations/20260825120000_eximbay_checkout_recovery/migration.sql",
+      "sha256": "8b20f21de489a3eac7a455d96fb89202d1229087eb73760df7cbfc54ef880d0d"
+    },
+    {
+      "name": "20260825130000_eximbay_refund_sandbox_canary_approval",
+      "path": "prisma/migrations/20260825130000_eximbay_refund_sandbox_canary_approval/migration.sql",
+      "sha256": "a2803a9012f4067baea6ab2b65752bff80be02c6412dbd9a60af3d226fa371f6"
+    },
+    {
+      "name": "20260827090000_add_checkout_communication_locale",
+      "path": "prisma/migrations/20260827090000_add_checkout_communication_locale/migration.sql",
+      "sha256": "e95285c27440152611e654852a204ed6e126a0cb6a223774432098db0a8e60bb"
+    },
+    {
+      "name": "20260909090000_refund_execution_authorization",
+      "path": "prisma/migrations/20260909090000_refund_execution_authorization/migration.sql",
+      "sha256": "f7b628e27e9f84faf6c56f263c713468e736a551d510138fe7a16471eaaf2ee1"
+    }
+  ],
+  "migrationCount": 42,
+  "migrationDigest": "7eea189bc4bfe165ab699113952c22493895692a2377fcdfc00e7ba956abb370"
+}
