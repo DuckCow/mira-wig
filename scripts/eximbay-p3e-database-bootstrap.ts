@@ -105,7 +105,7 @@ export const REFUND_READINESS_READBACK_ROLE_GRANT_ARTIFACT = Object.freeze({
     repositoryRoot,
     "containers/refund-db-bootstrap/refund-readiness-readback/database-role-grants.sql",
   ),
-  sha256: "774c9ebeb47bc539a56f2d30ff9b03e491499f104895c8c93f239882422f034a",
+  sha256: "4ce61daf8439b3b5cf6e4a1da649acb2bb65115dd0bec9170b7de66afa29ab87",
 } satisfies EximbayP3eBootstrapArtifact);
 
 export const REFUND_READINESS_READBACK_ROLE_REVOKE_ARTIFACT = Object.freeze({
@@ -116,7 +116,7 @@ export const REFUND_READINESS_READBACK_ROLE_REVOKE_ARTIFACT = Object.freeze({
     repositoryRoot,
     "containers/refund-db-bootstrap/refund-readiness-readback/database-role-revoke.sql",
   ),
-  sha256: "5cd51d1045fcb03a19af4a170c779275d638d443224ce3c2ed2f933f36d81d84",
+  sha256: "ac37292a4f8d854d78038f532a163953c7f967e018717255bec70f3041dd03ac",
 } satisfies EximbayP3eBootstrapArtifact);
 
 type RuntimeRole = "mira_refund_preflight" | "mira_refund_canary";
@@ -982,7 +982,9 @@ export const REFUND_READINESS_READBACK_SELECT_COLUMNS = new Set([
   "RefundAttemptTransition.actorType", "RefundAttemptTransition.actorUserId",
   "RefundAttemptTransition.reason",
   "RefundAttemptTransition.operationKey", "RefundAttemptTransition.createdAt",
-  "PaymentOutbox.id", "PaymentOutbox.dedupKey",
+  "PaymentOutbox.id", "PaymentOutbox.topic", "PaymentOutbox.payload",
+  "PaymentOutbox.status", "PaymentOutbox.attempts", "PaymentOutbox.dedupKey",
+  "PaymentOutbox.processedAt",
 ]);
 
 export async function verifyExactRefundReadinessReadbackEffectivePrivileges(

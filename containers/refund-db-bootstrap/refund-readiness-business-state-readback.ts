@@ -62,6 +62,8 @@ const MAX_ROWS = 64;
 const REFUND_REENTRY_OPERATION = "EXIMBAY_SANDBOX_BOUND_ORDINAL_ZERO_REENTRY";
 const REFUND_EMAIL_DEDUP_KEY =
   `customer-refund-succeeded:v1:${REFUND_READINESS_FIXED_TARGET.refundAttemptId}`;
+const REFUND_EMAIL_TOPIC = "customer.refund-succeeded.email.v1";
+const REFUND_EMAIL_TEMPLATE = "refund-succeeded-v1";
 const SHA256 = /^[0-9a-f]{64}$/u;
 
 export const REFUND_READINESS_SQL = Object.freeze({
@@ -186,9 +188,10 @@ export const REFUND_READINESS_SQL = Object.freeze({
     LIMIT 65
   `,
   outbox: `
-    SELECT "id", "dedupKey"
+    SELECT "id", "topic", "payload", "status", "attempts", "dedupKey", "processedAt"
     FROM "PaymentOutbox"
-    WHERE "dedupKey" = $1
+    WHERE "topic" = $1
+      AND "payload" = jsonb_build_object('refundAttemptId', $2::text)
     LIMIT 65
   `,
   commit: "COMMIT",
@@ -285,6 +288,19 @@ export type RefundReadinessBusinessStateReadbackResult = Readonly<{
     preflightObservationCount: number;
     providerContactState: "PROVEN_NONE" | "PROVEN_CONTACTED" | "AMBIGUOUS";
   }>;
+  refundSuccessEmailIntent: Readonly<{
+    intentCount: number;
+    duplicateIntentCount: number;
+    topic: string | null;
+    template: typeof REFUND_EMAIL_TEMPLATE;
+    topicMatches: boolean;
+    dedupKeyMatches: boolean;
+    locale: string | null;
+    deliveryState: string | null;
+    attemptCount: number | null;
+    terminalMarker: boolean;
+    sentMarker: boolean;
+  }>;
   successfulRefundTotal: Readonly<{
     capturedAmountMinor: number | null;
     totalSuccessfulRefundMinor: number | null;
@@ -348,7 +364,10 @@ async function collectRefundReadiness(
     contactProofs: bounded(await query(REFUND_READINESS_SQL.contactProofs, [target.commandId])),
     evidence: bounded(await query(REFUND_READINESS_SQL.evidence, [target.commandId])),
     transitions: bounded(await query(REFUND_READINESS_SQL.transitions, [target.refundAttemptId])),
-    outbox: bounded(await query(REFUND_READINESS_SQL.outbox, [REFUND_EMAIL_DEDUP_KEY])),
+    outbox: bounded(await query(REFUND_READINESS_SQL.outbox, [
+      REFUND_EMAIL_TOPIC,
+      target.refundAttemptId,
+    ])),
     truncated: false,
   });
   const truncated = [
@@ -442,6 +461,7 @@ function adjudicate(state: ParsedState): RefundReadinessBusinessStateReadbackRes
       preflightObservationCount: state.preflightObservations.length,
       providerContactState,
     }),
+    refundSuccessEmailIntent: refundSuccessEmailIntentOutput(state),
     successfulRefundTotal: refundTotal,
     exactTargetAlreadyRefunded: alreadyRefunded,
     duplicateRefundRisk: duplicateRisk,
@@ -455,6 +475,27 @@ function adjudicate(state: ParsedState): RefundReadinessBusinessStateReadbackRes
     readyForOneShotLiveRefundAuthorityDecision: ready,
     providerEffects: 0,
     durableWrites: 0,
+  });
+}
+
+function refundSuccessEmailIntentOutput(state: ParsedState) {
+  const rows = state.outbox.slice(0, MAX_ROWS);
+  const row = rows[0];
+  const deliveryState = typeof row?.status === "string" ? row.status : null;
+  return Object.freeze({
+    intentCount: rows.length,
+    duplicateIntentCount: Math.max(0, rows.length - 1),
+    topic: typeof row?.topic === "string" ? row.topic : null,
+    template: REFUND_EMAIL_TEMPLATE,
+    topicMatches: row?.topic === REFUND_EMAIL_TOPIC,
+    dedupKeyMatches: row?.dedupKey === REFUND_EMAIL_DEDUP_KEY,
+    locale: typeof state.session?.communicationLocale === "string"
+      ? state.session.communicationLocale
+      : null,
+    deliveryState,
+    attemptCount: integerOrNull(row?.attempts),
+    terminalMarker: deliveryState === "FAILED",
+    sentMarker: deliveryState === "DONE" && row?.processedAt instanceof Date,
   });
 }
 

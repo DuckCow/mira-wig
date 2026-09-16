@@ -63,7 +63,7 @@ REVOKE SELECT ("id", "refundAttemptId", "fromStatus", "toStatus", "orderStatusBe
   "orderStatusAfter", "actorType", "actorUserId", "reason", "operationKey", "createdAt")
   ON TABLE "RefundAttemptTransition"
   FROM "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam";
-REVOKE SELECT ("id", "dedupKey")
+REVOKE SELECT ("id", "topic", "payload", "status", "attempts", "dedupKey", "processedAt")
   ON TABLE "PaymentOutbox" FROM "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam";
 
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public

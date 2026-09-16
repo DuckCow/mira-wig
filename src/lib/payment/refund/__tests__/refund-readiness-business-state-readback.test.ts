@@ -124,6 +124,57 @@ describe("fixed Eximbay refund-readiness business-state readback", () => {
     expect(calls.at(-1)?.sql).toBe(REFUND_READINESS_SQL.commit);
   });
 
+  it("exposes exact refund-email metadata without payload or recipient PII", async () => {
+    const fixture = readyFixture();
+    const privateRecipient = "customer-private@example.test";
+    const privateBody = "private rendered email body";
+    const result = await readRefundReadinessBusinessState(queryFixture({
+      ...fixture,
+      outbox: [
+        Object.freeze({
+          id: "outbox-primary",
+          topic: "customer.refund-succeeded.email.v1",
+          payload: {
+            refundAttemptId: TARGET.refundAttemptId,
+            email: privateRecipient,
+            body: privateBody,
+          },
+          status: "DONE",
+          attempts: 1,
+          dedupKey: `customer-refund-succeeded:v1:${TARGET.refundAttemptId}`,
+          processedAt: SNAPSHOT,
+        }),
+        Object.freeze({
+          id: "outbox-duplicate",
+          topic: "customer.refund-succeeded.email.v1",
+          payload: { refundAttemptId: TARGET.refundAttemptId },
+          status: "PENDING",
+          attempts: 0,
+          dedupKey: "unexpected-duplicate-key",
+          processedAt: null,
+        }),
+      ],
+    }).query);
+
+    expect(result.refundSuccessEmailIntent).toEqual({
+      intentCount: 2,
+      duplicateIntentCount: 1,
+      topic: "customer.refund-succeeded.email.v1",
+      template: "refund-succeeded-v1",
+      topicMatches: true,
+      dedupKeyMatches: true,
+      locale: "en",
+      deliveryState: "DONE",
+      attemptCount: 1,
+      terminalMarker: false,
+      sentMarker: true,
+    });
+    const output = JSON.stringify(result);
+    expect(output).not.toContain(privateRecipient);
+    expect(output).not.toContain(privateBody);
+    expect(output).not.toContain("payload");
+  });
+
   it("preserves revoked historical releases while bounding one expired-slot replacement", async () => {
     const fixture = readyFixture();
     const expired = fixture.authorizations[0];

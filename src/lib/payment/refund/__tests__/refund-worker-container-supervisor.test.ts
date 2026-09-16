@@ -13,6 +13,7 @@ import { main as reconciliationProcessMain } from
 import {
   PROXY_READINESS_POLL_INTERVAL_MS,
   PROXY_READINESS_TIMEOUT_MS,
+  REFUND_WORKER_CONTAINER_COMMANDS,
   defaultRefundWorkerContainerSupervisorDependencies,
   runRefundWorkerContainerSupervisor,
   type RefundWorkerContainerSupervisorDependencies,
@@ -102,6 +103,23 @@ describe("refund worker container supervisor", () => {
       proxyReadinessTimeoutMs: 120_000,
       proxyReadinessPollIntervalMs: 250,
     });
+  });
+
+  it("adds only the exact PL-09 command to the existing command mappings", () => {
+    expect(REFUND_WORKER_CONTAINER_COMMANDS).toEqual([
+      "eximbay-contacted-refund-success-close-once",
+      "eximbay-contacted-refund-evidence-once",
+      "eximbay-retrieve-shape-diagnostic-once",
+      "worker-check",
+      "worker-health",
+      "worker-once",
+      "sandbox-preflight",
+      "image-self-check",
+      "eximbay-canary-once",
+      "eximbay-contacted-reconciliation-once",
+      "eximbay-refund-reentry-once",
+      "pl09-targeted-refund-email-dispatch",
+    ]);
   });
 
   it.each<readonly string[]>([
@@ -199,6 +217,48 @@ describe("refund worker container supervisor", () => {
     expect(harness.sleepCalls).toEqual([]);
     expect(harness.stdout).toEqual(['{"ok":true,"code":"FEATURE_DISABLED"}\n']);
     expect(harness.stderr).toEqual([]);
+  });
+
+  it("maps only the exact PL-09 targeted email command to its fixed child bundle", async () => {
+    const proxy = runningChild({ closeOnTerm: 0 });
+    const line = '{"outcome":"sent","intentCount":1}\n';
+    const child = completedChild(0, line, "");
+    const harness = supervisorHarness([proxy, child], { readiness: true });
+
+    const exit = await runRefundWorkerContainerSupervisor(
+      ["pl09-targeted-refund-email-dispatch"],
+      {
+        REFUND_CLOUD_SQL_INSTANCE_CONNECTION_NAME: INSTANCE,
+        DATABASE_URL,
+        TRANSACTIONAL_EMAIL_RECIPIENT_MODE: "SANDBOX_PRELAUNCH",
+        TRANSACTIONAL_EMAIL_SANDBOX_RECIPIENT: "controlled@example.test",
+      },
+      harness.output,
+      harness.dependencies,
+    );
+
+    expect(exit).toBe(0);
+    expect(harness.spawnCalls).toHaveLength(2);
+    expect(harness.spawnCalls[1]).toMatchObject({
+      executable: process.execPath,
+      args: ["/test/pl09-targeted-refund-email-dispatch.mjs"],
+    });
+    expect(harness.stdout).toEqual([line]);
+    expect(harness.stderr).toEqual([]);
+  });
+
+  it("rejects a PL-09 command with extra arguments or without the database binding", async () => {
+    for (const args of [["pl09-targeted-refund-email-dispatch", "extra"],
+      ["pl09-targeted-refund-email-dispatch"]]) {
+      const harness = supervisorHarness();
+      expect(await runRefundWorkerContainerSupervisor(
+        args,
+        {},
+        harness.output,
+        harness.dependencies,
+      )).toBe(args.length === 1 ? 78 : 64);
+      expect(harness.spawnCalls).toEqual([]);
+    }
   });
 
   it("preserves malformed activation classification without proxy admission", async () => {
@@ -1771,6 +1831,8 @@ function supervisorHarness(
     eximbayContactedReconciliationBundle: "/test/eximbay-contacted-reconciliation.mjs",
     eximbayContactedRefundEvidenceBundle: "/test/eximbay-contacted-refund-evidence.mjs",
     eximbayRefundReentryBundle: "/test/eximbay-refund-reentry.mjs",
+    pl09TargetedRefundEmailDispatchBundle:
+      "/test/pl09-targeted-refund-email-dispatch.mjs",
     spawn: (executable, args) => {
       spawnCalls.push(Object.freeze({
         executable,

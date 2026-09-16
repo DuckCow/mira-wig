@@ -71,6 +71,9 @@ const EXIMBAY_REFUND_REENTRY_BUNDLE = fileURLToPath(
   new URL("./eximbay-refund-reentry.mjs", import.meta.url),
 );
 const RETRIEVE_DIAGNOSTIC_BUNDLE = fileURLToPath(new URL("./eximbay-retrieve-shape-diagnostic.mjs", import.meta.url));
+const PL09_TARGETED_REFUND_EMAIL_DISPATCH_BUNDLE = fileURLToPath(
+  new URL("./pl09-targeted-refund-email-dispatch.mjs", import.meta.url),
+);
 const PROXY_EXECUTABLE = "/usr/local/bin/cloud-sql-proxy";
 const SYSTEMIC_FAILURE_LINE = '{"ok":false,"code":"SYSTEMIC_FAILURE"}\n';
 const DATABASE_UNAVAILABLE_LINE = '{"ok":false,"code":"DATABASE_UNAVAILABLE"}\n';
@@ -89,6 +92,7 @@ export const REFUND_WORKER_CONTAINER_COMMANDS = Object.freeze([
   "eximbay-canary-once",
   "eximbay-contacted-reconciliation-once",
   "eximbay-refund-reentry-once",
+  "pl09-targeted-refund-email-dispatch",
 ] as const);
 
 export type RefundWorkerContainerCommand = typeof REFUND_WORKER_CONTAINER_COMMANDS[number];
@@ -133,6 +137,7 @@ export type RefundWorkerContainerSupervisorDependencies = Readonly<{
   eximbayContactedRefundEvidenceBundle: string;
   eximbayContactedReconciliationBundle: string;
   eximbayRefundReentryBundle: string;
+  pl09TargetedRefundEmailDispatchBundle: string;
   inspectSelf: () => Promise<RefundWorkerImageSelfCheck>;
 }>;
 
@@ -148,6 +153,7 @@ export type RefundWorkerImageSelfCheck = Readonly<{
   eximbayCanaryBundlePresent: true;
   eximbayContactedReconciliationBundlePresent: true;
   eximbayRefundReentryBundlePresent: true;
+  pl09TargetedRefundEmailDispatchBundlePresent: true;
   migrationCount: number;
   migrationDigest: string;
   nonRoot: true;
@@ -173,6 +179,8 @@ RefundWorkerContainerSupervisorDependencies = Object.freeze({
   eximbayContactedRefundEvidenceBundle: EXIMBAY_CONTACTED_REFUND_EVIDENCE_BUNDLE,
   eximbayContactedReconciliationBundle: EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE,
   eximbayRefundReentryBundle: EXIMBAY_REFUND_REENTRY_BUNDLE,
+  pl09TargetedRefundEmailDispatchBundle:
+    PL09_TARGETED_REFUND_EMAIL_DISPATCH_BUNDLE,
   inspectSelf: inspectRefundWorkerImage,
 });
 
@@ -222,10 +230,36 @@ function directCommand(
   if (command === "eximbay-contacted-reconciliation-once") {
     return runEximbayContactedReconciliationOnce(env, output, dependencies);
   }
+  const specialized = specializedDirectCommand(command, env, output, dependencies);
+  if (specialized) return specialized;
+  return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+}
+
+function specializedDirectCommand(
+  command: RefundWorkerContainerCommand,
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> | null {
   if (command === "eximbay-refund-reentry-once") {
     return runEximbayRefundReentryOnce(env, output, dependencies);
   }
-  return command === "worker-once" ? runWorkerOnce(env, output, dependencies) : null;
+  return command === "pl09-targeted-refund-email-dispatch"
+    ? runPl09TargetedRefundEmailDispatch(env, output, dependencies)
+    : null;
+}
+
+async function runPl09TargetedRefundEmailDispatch(
+  env: RuntimeEnvironment,
+  output: Readonly<{ stdout: OutputWriter; stderr: OutputWriter }>,
+  dependencies: RefundWorkerContainerSupervisorDependencies,
+): Promise<number> {
+  const binding = validateDatabaseBinding(env);
+  if (!binding) return writeStatic(output.stderr, CONFIG_INVALID_LINE, 78);
+  return runWithProxy(binding, Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([dependencies.pl09TargetedRefundEmailDispatchBundle]),
+  }), env, output, dependencies);
 }
 
 async function runEximbayContactedRefundEvidenceOnce(
@@ -2399,6 +2433,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     access(EXIMBAY_CONTACTED_RECONCILIATION_BUNDLE, fsConstants.R_OK),
     access(EXIMBAY_REFUND_REENTRY_BUNDLE, fsConstants.R_OK),
     access(RETRIEVE_DIAGNOSTIC_BUNDLE, fsConstants.R_OK),
+    access(PL09_TARGETED_REFUND_EMAIL_DISPATCH_BUNDLE, fsConstants.R_OK),
   ]);
   const version = spawnSync(PROXY_EXECUTABLE, ["--version"], {
     encoding: "utf8",
@@ -2422,6 +2457,7 @@ async function inspectRefundWorkerImage(): Promise<RefundWorkerImageSelfCheck> {
     eximbayCanaryBundlePresent: true,
     eximbayContactedReconciliationBundlePresent: true,
     eximbayRefundReentryBundlePresent: true,
+    pl09TargetedRefundEmailDispatchBundlePresent: true,
     migrationCount: migrationProof.migrationCount,
     migrationDigest: migrationProof.migrationDigest,
     nonRoot: true,

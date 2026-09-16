@@ -183,7 +183,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(observed).toMatchObject({
       ok: true,
-      entrypointCount: 9,
+      entrypointCount: 10,
       temporaryContextsRemoved: true,
     });
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
@@ -209,7 +209,7 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     expect(reproducibility).not.toContain('"-f", "containers/refund-worker/Dockerfile",\n    "."');
   }, 45_000);
 
-  it("supplies the exact nine bundle entrypoint sources to the Docker build stage", () => {
+  it("supplies the exact ten bundle entrypoint sources to the Docker build stage", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     const contextBuilder = readFileSync(
       join(ROOT, "scripts/build-refund-worker-bundles.mts"),
@@ -228,6 +228,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
   "eximbay-contacted-reconciliation": "scripts/eximbay-contacted-reconciliation.ts",
   "eximbay-refund-reentry": "scripts/eximbay-refund-reentry.ts",
   "eximbay-retrieve-shape-diagnostic": "scripts/eximbay-retrieve-shape-diagnostic.ts",
+  "pl09-targeted-refund-email-dispatch":
+    "scripts/pl09-targeted-refund-email-dispatch.ts",
 });`);
     expect(dockerfile).toContain(
       "COPY --link scripts/refund-execution-worker.ts "
@@ -236,7 +238,8 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       + "scripts/eximbay-contacted-refund-evidence-once.ts "
       + "scripts/eximbay-contacted-refund-success-close-once.ts "
       + "scripts/eximbay-contacted-reconciliation.ts "
-      + "scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts ./scripts/",
+      + "scripts/eximbay-refund-reentry.ts scripts/eximbay-retrieve-shape-diagnostic.ts "
+      + "scripts/pl09-targeted-refund-email-dispatch.ts ./scripts/",
     );
     expect(dockerfile).toContain(
       "COPY --link containers/refund-worker/entrypoint.ts ./containers/refund-worker/",
@@ -265,21 +268,10 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
     const observed: unknown = JSON.parse(proof.stdout);
     expect(isRecordWithStringArray(observed, "paths")).toBe(true);
     if (!isRecordWithStringArray(observed, "paths")) return;
-    const requiredSources = observed.paths.filter((path) => (
-      path.startsWith("src/lib/")
-      || path === "scripts/build-refund-worker-bundles.mts"
-      || path === "containers/refund-worker/entrypoint.ts"
-      || path === "scripts/refund-execution-worker.ts"
-      || path === "scripts/refund-sandbox-provider-free-preflight.ts"
-      || path === "scripts/eximbay-refund-canary.ts"
-      || ["scripts/eximbay-contacted-refund-evidence-once.ts",
-        "scripts/eximbay-contacted-refund-success-close-once.ts"].includes(path)
-      || path === "scripts/eximbay-contacted-reconciliation.ts"
-      || path === "scripts/eximbay-refund-reentry.ts"
-      || path === "scripts/eximbay-retrieve-shape-diagnostic.ts"
-    ));
+    const requiredSources = observed.paths.filter(isRequiredBuildSource);
     expect(requiredSources).toEqual(expect.arrayContaining([
       "scripts/eximbay-contacted-refund-success-close-once.ts",
+      "scripts/pl09-targeted-refund-email-dispatch.ts",
       "src/lib/payment/refund/providers/eximbay/apply-contacted-success.ts",
       "src/lib/payment/refund/authorization/worker-client.ts",
       "src/lib/payment/refund/authorization/contract.ts",
@@ -295,7 +287,9 @@ describe("P3E-B2-R2A runtime image and private socket policy", () => {
       withoutMarketAdmission,
       requiredSources,
     )).toEqual([
+      "src/lib/market/catalog-presentation.ts",
       "src/lib/market/locale.ts",
+      "src/lib/market/persisted-money.ts",
       "src/lib/market/types.ts",
     ]);
   }, 45_000);
@@ -1655,7 +1649,26 @@ function repositoryRelativeFiles(root: string): string[] {
 }
 
 const REFUND_WORKER_MARKET_SOURCE_COPY =
-  "COPY --link src/lib/market/locale.ts src/lib/market/types.ts ./src/lib/market/";
+  "COPY --link src/lib/market/catalog-presentation.ts src/lib/market/locale.ts "
+  + "src/lib/market/persisted-money.ts src/lib/market/types.ts ./src/lib/market/";
+
+const REQUIRED_BUILD_ENTRYPOINTS = new Set([
+  "scripts/build-refund-worker-bundles.mts",
+  "containers/refund-worker/entrypoint.ts",
+  "scripts/refund-execution-worker.ts",
+  "scripts/refund-sandbox-provider-free-preflight.ts",
+  "scripts/eximbay-refund-canary.ts",
+  "scripts/eximbay-contacted-refund-evidence-once.ts",
+  "scripts/eximbay-contacted-refund-success-close-once.ts",
+  "scripts/eximbay-contacted-reconciliation.ts",
+  "scripts/eximbay-refund-reentry.ts",
+  "scripts/eximbay-retrieve-shape-diagnostic.ts",
+  "scripts/pl09-targeted-refund-email-dispatch.ts",
+]);
+
+function isRequiredBuildSource(path: string): boolean {
+  return path.startsWith("src/lib/") || REQUIRED_BUILD_ENTRYPOINTS.has(path);
+}
 
 function missingBuildStageSources(
   dockerfile: string,

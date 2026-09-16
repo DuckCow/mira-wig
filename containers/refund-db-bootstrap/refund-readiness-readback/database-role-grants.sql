@@ -123,6 +123,6 @@ GRANT SELECT (
   TO "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam";
 
 GRANT SELECT (
-  "id", "dedupKey"
+  "id", "topic", "payload", "status", "attempts", "dedupKey", "processedAt"
 ) ON TABLE "PaymentOutbox"
   TO "mira-p3e-sbx-readback@mira-refund-sandbox-0001.iam";
