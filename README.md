@@ -1,126 +1,45 @@
 # Mira
 
-가발 상품 탐색과 주문을 연결하는 커머스 플랫폼 팀 프로젝트입니다. Next.js 기반 고객·관리자 화면과 함께 상품, 주문, 결제, 환불, 파일 저장을 다루는 서버 기능을 개발하고 있습니다.
+Mira는 가발의 스타일과 색상, 길이를 골라 주문하는 쇼핑몰로, 팀 프로젝트로 개발했습니다. 한국·미국·일본 고객이 같은 주문 화면에서 각 시장에 맞는 결제 수단을 쓸 수 있도록 기획했습니다. 기본 샌드박스 설정에서는 모의 결제 응답을 사용합니다.
 
-**팀 프로젝트 · 주요 담당: 서비스 기획 및 백엔드 개발**
+## 결제 결과 화면
 
-아래 기능과 구조는 팀 저장소 전체를 설명합니다. 프런트엔드와 모든 모듈을 단독 구현했다는 의미는 아닙니다.
+서버는 결제 시작 시점의 상품, 수량, 금액을 체크아웃 세션에 기록합니다. 고객이 결제창에서 돌아오면 결과 화면은 서버에서 주문 상태를 조회하고, 주문이 확정된 뒤 상세 페이지 링크를 표시합니다.
 
-## 먼저 살펴볼 코드
+![테스트 상태로 렌더링한 Mira 결제 결과 화면. 왼쪽은 확인 중, 오른쪽은 주문 생성 확인 후입니다.](docs/payment-states.png)
 
-| 주제 | 구현과 확인 경로 |
+테스트 데이터로 표시한 주문 확인 중 화면(왼쪽)과 완료 화면(오른쪽)입니다. [체크아웃 세션 생성](src/lib/payment/session/create.ts) · [결제 결과 화면](src/app/(shop)/checkout/return/[checkoutSessionId]/PaymentReturnStatus.tsx)
+
+## 전체 아키텍처
+
+![Mira 전체 아키텍처. 웹 앱의 Docker 이미지 안에 Next.js·TypeScript·Prisma를 표시했습니다. 서버는 Prisma로 PostgreSQL에 접근하고 결제 조건에 따라 토스페이먼츠, PayPal, Eximbay를 선택합니다. 관리자 웹은 S3에 사진을 올리고 별도 Docker 워커는 환불 작업을 처리하도록 구성됩니다.](docs/system-architecture.png)
+
+고객 화면과 관리자 화면은 하나의 Next.js 앱에 있습니다. 상품 사진을 등록할 때 서버는 서명 URL을 발급하고, 관리자 브라우저는 그 주소로 사진을 S3에 직접 업로드합니다. 서버는 Prisma로 PostgreSQL에 주문과 결제 상태를 저장합니다. [DB 연결](src/lib/db.ts) · [사진 업로드 URL 발급](src/app/actions/admin/catalog.ts)
+
+환불 워커는 별도 Docker 이미지로 빌드합니다. 샌드박스 통합 브랜치에서는 웹 앱 이미지도 빌드해 Google Artifact Registry에 등록하고 검증했습니다. [환불 워커 구성](containers/refund-worker/README.md) · [웹 앱 이미지 검증 기록](https://github.com/DuckCow/mira-wig/blob/1b95c78d24e3b081c359a9242d327553e0512bb8/containers/mira-application/artifact-v1.json)
+
+## 결제 요청과 결과 통지
+
+서버는 국가, 통화, 결제 수단을 기준으로 결제사를 선택합니다. 국내 원화 카드는 토스페이먼츠, 미국 달러 카드는 Eximbay, 미국과 일본의 PayPal 지갑 결제는 PayPal로 연결하도록 구성했습니다. [결제 연동 설정](src/lib/payment/providers/factory.ts) · [결제사 선택 규칙](src/lib/payment/providers/routing.ts) · [PayPal 웹훅](src/app/api/payments/paypal/webhook/route.ts) · [Eximbay 상태 통지](src/app/api/payments/eximbay/status/route.ts)
+
+![Mira의 성공 콜백 접수, 별도 토스 승인 어댑터, 확인된 결제로 주문을 확정하는 트랜잭션](docs/order-flow.svg)
+
+토스 성공 콜백에서는 주문번호와 금액을 대조한 뒤 처음 접수한 정상 요청에 HTTP 202를 반환합니다. 결제 승인은 별도 어댑터가 담당합니다. 샌드박스 웹훅 검증을 활성화한 경우에는 통지에 포함된 결제 키로 토스에 결제 상태를 조회합니다. [성공 콜백](src/app/api/payments/toss/success/route.ts) · [승인 어댑터](src/lib/payment/providers/toss/adapter.ts) · [웹훅 검증 설정](src/lib/payment/webhook/pipeline.ts)
+
+## 주문 확정과 중복 주문 방지
+
+서버는 체크아웃 세션을 잠근 뒤 같은 결제로 생성한 주문이 있는지 확인합니다. 기존 주문이 있으면 해당 주문 ID를 반환합니다. 새 주문은 재고 상품의 수량 차감, 장바구니 갱신과 함께 한 트랜잭션에서 확정합니다. 주문 테이블에는 세션 ID와 결제 ID에 각각 고유 제약을 두었습니다. [주문 확정 트랜잭션](src/lib/payment/complete/transaction.ts) · [데이터 모델](prisma/schema.prisma)
+
+![체크아웃 세션에는 여러 결제 시도와 최대 한 건의 주문이 연결되며, 주문에는 확정된 결제 ID가 기록됩니다.](docs/checkout-data.svg)
+
+결제 도중 장바구니에 더 담은 상품은 주문이 끝난 뒤에도 남아야 합니다. 이를 위해 세션에 장바구니 항목과 구매 수량을 기록하고, 주문을 확정할 때 결제를 시작한 수량만 차감합니다. [세션 생성](src/lib/payment/session/create.ts)
+
+Vitest 통합 테스트로 주문 확정 후 DB에 남은 값을 확인했습니다.
+
+| 테스트 조건 | 확인한 결과 |
 | --- | --- |
-| 결제 결과에서 주문 확정까지 | [완료 진입점](src/lib/payment/complete/index.ts) · [트랜잭션](src/lib/payment/complete/transaction.ts) · [통합 테스트](src/lib/payment/complete/__tests__/complete.integration.test.ts) |
-| 결제 수단 선택과 운영 모드 | [공급자 라우팅](src/lib/payment/providers/routing.ts) · [SANDBOX/LIVE 설정](src/lib/payment/mode.ts) |
-| 환불 작업의 동시 실행 제어 | [실행 lease 획득](src/lib/payment/refund/acquire-lease.ts) · [통합 테스트](src/lib/payment/refund/__tests__/acquire-lease.integration.test.ts) |
-| 후속 작업 기록과 중복 처리 | [Outbox 기록](src/lib/payment/outbox/enqueue.ts) · [통합 테스트](src/lib/payment/outbox/__tests__/outbox.integration.test.ts) |
-| 주문 데이터와 스키마 | [주문 스냅샷](src/lib/order/snapshot.ts) · [Prisma 스키마](prisma/schema.prisma) · [마이그레이션](prisma/migrations) |
+| 같은 결제 정보로 주문 확정 함수를 동시에 두 번 호출 | 주문 1건만 생성됩니다. 뒤이어 처리된 호출은 같은 주문 ID를 반환합니다. |
+| 1개를 결제하는 동안 같은 상품 2개를 장바구니에 추가 | 결제한 1개만 차감되고 추가한 2개는 남습니다. |
+| 결제 시작 시 1개였던 재고가 주문 확정 직전에 소진 | 주문은 생성되지 않고 장바구니 항목은 남습니다. 후속 처리 작업 1건이 기록됩니다. |
 
-## 기술 구성
-
-| 영역 | 구성 |
-| --- | --- |
-| 웹·서버 | Next.js 16, React 19, TypeScript, Node.js 24 |
-| 데이터 | PostgreSQL 18 기준 CI, Prisma 7 |
-| 인증 | NextAuth, Prisma Adapter |
-| 파일 저장 | 공급자 추상화, AWS S3 SDK, 로컬 개발용 mock |
-| 결제 | 공급자별 어댑터, SANDBOX/LIVE 구분, 활성화 조건 |
-| 검증 | Vitest, TypeScript 검사, ESLint, GitHub Actions |
-
-정확한 의존성은 [package.json](package.json)과 [package-lock.json](package-lock.json), Node 버전은 [.nvmrc](.nvmrc)를 따릅니다.
-
-## 시스템 구조
-
-```mermaid
-flowchart LR
-    Customer["고객 화면"] --> Server["Next.js 서버 기능"]
-    Admin["관리자 화면"] --> Server
-    Server --> Catalog["상품·주문"]
-    Server --> Payment["결제·환불"]
-    Catalog --> DB["Prisma / PostgreSQL"]
-    Payment --> DB
-    Payment --> Adapters["결제 공급자 어댑터"]
-    Server --> Storage["스토리지 공급자"]
-    Payment --> Outbox["Outbox"]
-```
-
-어댑터 구현, 테스트, 외부 서비스 활성화는 각각 구분합니다. 저장소에 결제 코드가 있다는 사실만으로 실결제 운영이나 매출 실적을 의미하지 않습니다.
-
-## 백엔드 구현 포인트
-
-### 1. 결제 확인과 주문 확정의 일관성
-
-[결제 완료 흐름](src/lib/payment/complete/index.ts)은 결제 사실 기록과 주문 확정 처리를 연결합니다. [완료 트랜잭션](src/lib/payment/complete/transaction.ts)은 체크아웃 세션을 잠그고 현재 결제·금액·통화·주문 항목을 확인한 뒤 주문 생성, 재고 반영, 세션 완료, 후속 알림 의도 기록을 수행합니다.
-
-동일 결제로 이미 완료된 세션은 기존 완료 결과를 반환하는 분기가 있습니다. 관련 실패·재진입 조건은 [통합 테스트](src/lib/payment/complete/__tests__/complete.integration.test.ts)에서 살펴볼 수 있습니다.
-
-### 2. 환불 실행 권한과 동시성
-
-[환불 lease 획득](src/lib/payment/refund/acquire-lease.ts)은 주문·환불 시도·실행 명령을 잠그고 현재 상태를 확인한 뒤 세대 번호와 토큰 해시, 만료 시각을 기록합니다. 조건부 갱신과 이벤트 기록을 같은 트랜잭션에서 처리합니다.
-
-lease 획득 자체가 외부 환불 호출은 아닙니다. 실행 권한, 작업 선택, 공급자 호출, 결과 반영은 별도 단계와 활성화 조건을 갖습니다.
-
-### 3. 트랜잭션 안에서 후속 작업 기록
-
-주문 완료 시 알림 의도를 기록하고, [Outbox](src/lib/payment/outbox/enqueue.ts)에 중복 키를 둔 작업을 저장하는 구조입니다. 주문 상태 변경과 후속 작업 기록의 관계, 중복 요청 처리를 코드와 [테스트](src/lib/payment/outbox/__tests__/outbox.integration.test.ts)로 확인할 수 있습니다.
-
-### 4. 결제 공급자와 운영 환경 분리
-
-[라우팅 설정](src/lib/payment/providers/routing.ts)은 마켓·결제 방법·통화·모드에 따라 공급자를 선택합니다. 현재 LIVE 허용 목록은 비어 있고 EXIMBAY는 SANDBOX 범위로 정의되어 있습니다. SANDBOX 설정만으로 모든 외부 호출이 켜지는 것은 아니며 공급자별 자격 증명과 활성화 조건이 따로 있습니다.
-
-## 로컬 개발
-
-### 사전 준비
-
-- Node.js 24와 npm
-- 개발 전용 PostgreSQL 18 데이터베이스
-- [.env.example](.env.example)을 바탕으로 한 로컬 `.env`
-- 테스트를 실행할 경우 개발 DB와 구분된 테스트 DB 및 [.env.test.example](.env.test.example)을 바탕으로 한 `.env.test`
-
-`DATABASE_URL`은 로컬 개발 DB를 가리키도록 설정하고 `NEXTAUTH_SECRET`을 생성합니다. `NEXTAUTH_URL`의 로컬 기본값은 `http://localhost:3000`입니다. 초기 확인은 예시의 `AI_PROVIDER=mock`, `STORAGE_PROVIDER=mock`과 비활성화된 외부 연동 설정을 사용합니다.
-
-### 설치와 실행
-
-저장소 루트에서 실행합니다. 아래 마이그레이션 명령은 지정된 DB에 스키마를 반영하므로 먼저 `DATABASE_URL`의 대상을 확인합니다.
-
-```bash
-npm ci
-npx prisma generate
-npx prisma migrate deploy
-npm run dev
-```
-
-브라우저에서 `http://localhost:3000`에 접속합니다. 빈 개발 DB에서는 상품과 계정 데이터가 없으므로 모든 사용자 흐름을 바로 시연할 수 있는 것은 아닙니다.
-
-기본 실행 절차에는 seed를 포함하지 않습니다. 현재 [seed](prisma/seed.ts)는 데모 데이터 교체를 위한 별도 확인 조건이 있는 작업입니다. 관리자 권한, 상품 데이터, 결제·환불 기능 활성화도 해당 기능의 설정과 운영 절차를 따릅니다.
-
-## 검증
-
-```bash
-npm run typecheck
-npm run lint
-```
-
-전체 검증은 `npm run verify`이며 TypeScript 검사, lint, Vitest를 순서대로 수행합니다. DB 테스트 전에 테스트 전용 데이터베이스에 마이그레이션을 적용해야 합니다.
-
-```bash
-# .env.test의 DATABASE_URL이 테스트 전용 DB인지 먼저 확인
-node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy
-# 기존 셸의 DB 값을 제거하고 .env.test를 사용하는 전체 검증 (macOS/Linux)
-env -u DATABASE_URL npm run verify
-```
-
-[테스트 초기화 코드](src/__tests__/setup.ts)는 이미 설정된 `DATABASE_URL`을 우선 사용하므로 개발·운영 DB 값이 남아 있지 않은지 확인해야 합니다.
-
-[Vitest 설정](vitest.config.ts)은 DB 테스트를 직렬로 실행합니다. [CI](.github/workflows/ci.yml)는 별도 PostgreSQL 18 클러스터에 마이그레이션을 적용하고 전체 검증을 실행하도록 구성되어 있습니다.
-
-## 기능 상태와 문서
-
-- 상품·주문·결제·환불은 구현과 테스트를 읽을 수 있는 영역입니다. 현재 배포·사용 가능 여부는 기능별 설정 및 최신 운영 기록을 확인해야 합니다.
-- 피팅·스토리지는 공급자 추상화와 mock 경로가 있습니다. mock 결과를 실제 AI 피팅 정확도나 외부 저장 성공으로 해석하지 않습니다.
-- Render Lab은 내부 렌더링 실험 영역입니다. 커머스·제조 기능의 완성을 의미하지 않습니다.
-- 이 문서 정리 과정에서 앱 시연, 실결제, 전체 테스트 통과 또는 성능 수치를 새로 검증하지 않았습니다.
-
-더 자세한 맥락은 [제품 문서](docs/product/README.md), [상품 탐색 문서](docs/discovery/README.md), [기술 문서](docs/engineering/README.md), [운영 문서](docs/operations/README.md)에서 확인할 수 있습니다.
-
-문서 정리: 2026-11-13. 실제 개발 이력은 기존 커밋과 PR에 보존합니다.
+[주문 확정 테스트 50개 통과 기록](https://github.com/DuckCow/mira-wig/actions/runs/43392270238) · [테스트 코드](src/lib/payment/complete/__tests__/complete.integration.test.ts)

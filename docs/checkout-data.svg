@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="195" viewBox="0 0 820 195" role="img" aria-labelledby="title">
+<title id="title">체크아웃 세션과 결제 시도, 주문의 관계</title>
+<rect width="820" height="195" rx="10" fill="#f4f7f9"/>
+<g fill="none" stroke="#718897" stroke-width="2">
+<path d="M199 98H309V53H462M309 98V142H462"/>
+</g>
+<g fill="#fff" stroke="#c0ced7">
+<rect x="18" y="59" width="180" height="78" rx="8"/><rect x="463" y="16" width="336" height="73" rx="8"/><rect x="463" y="105" width="336" height="73" rx="8"/>
+</g>
+<g font-family="system-ui, -apple-system, Apple SD Gothic Neo, sans-serif" fill="#20303b">
+<g font-size="17" font-weight="600"><text x="32" y="90">CheckoutSession</text><text x="481" y="45">Payment</text><text x="481" y="134">Order</text></g>
+<g font-size="15"><text x="32" y="115">결제 시작 시점의 주문 정보</text><text x="481" y="69">시도별 결제 상태와 소속 세션</text><text x="481" y="158">세션 ID와 확정된 결제 ID는 각각 고유</text><text x="329" y="42">결제 시도 0..N건</text><text x="329" y="131">주문 0..1건</text></g>
+</g></svg>
